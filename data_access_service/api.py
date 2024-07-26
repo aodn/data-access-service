@@ -10,7 +10,7 @@ def _extract_depth(data: dict):
     depth = data.get('DEPTH')
 
     if depth is not None:
-        return Depth(depth.get('valid_min'), depth.get('valid_max'), depth.get('unit'))
+        return Depth(depth.get('valid_min'), depth.get('valid_max'), depth.get('units'))
     else:
         return None
 
@@ -41,9 +41,9 @@ class API:
             uuid = data.get('dataset_metadata').get('metadata_uuid')
 
             if uuid is not None and uuid != '':
-                log.info("Adding uuid " + uuid)
+                log.info("Adding uuid " + uuid + " name " + key)
                 self._raw[uuid] = data
-                self._cached[uuid] = Descriptor(uuid=uuid, depth=_extract_depth(data))
+                self._cached[uuid] = Descriptor(uuid=uuid, key=key, depth=_extract_depth(data))
             else:
                 log.error('Data not found for dataset ' + key)
 
@@ -60,5 +60,23 @@ class API:
 
         if value is not None:
             return value
+        else:
+            return None
+
+    def get_dataset_data(self,
+                         uuid: str,
+                         date_start=None,
+                         date_end=None,
+                         lat_min=None,
+                         lat_max=None,
+                         lon_min=None,
+                         lon_max=None,
+                         scalar_filter=None,
+                         ):
+        md: Descriptor = self._cached.get(uuid)
+
+        if md is not None:
+            ds: ParquetDataQuery.Dataset = self._instance.get_dataset(md.key)
+            return ds.get_data(date_start, date_end, lat_min, lat_max, lon_min, lon_max, scalar_filter)
         else:
             return None

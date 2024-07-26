@@ -9,11 +9,13 @@ class Depth:
     unit: str
 
 
-@dataclass(init=True)
+@dataclass
 class Descriptor:
     uuid: str
+    key: str
     depth: Depth = None
 
-    def __init__(self, uuid: str, depth: Depth = None):
+    def __init__(self, uuid: str, key: str = None, depth: Depth = None):
         self.uuid = uuid
+        self.key = key
         self.depth = depth
