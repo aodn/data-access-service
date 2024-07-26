@@ -199,7 +199,7 @@ zarr = ">=2.18.2"
 type = "git"
 url = "https://github.com/aodn/aodn_cloud_optimised.git"
 reference = "features/5513-improve-speed"
-resolved_reference = "f109410a32c4b5881eb583155bb860a5c00c1e1a"
+resolved_reference = "fa0feb8a5f3de85000b53090af8006b8f2410f74"
 
 [[package]]
 name = "asciitree"
