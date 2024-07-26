@@ -1,34 +1,15 @@
-import logging
+import dataclasses
 from flask import Blueprint
-from aodn_cloud_optimised import ParquetDataQuery
+from . import app
 
 restapi = Blueprint('restapi', __name__)
-logger = logging.getLogger(__name__)
-
-
-class API:
-    def __init__(self):
-        logger.info("Init parquet data query instance")
-
-        self.instance = ParquetDataQuery.GetAodn()
-        self.metadata = self.instance.get_metadata()
-
-        # We need to create the mapping
-        self.create_uuid_dataset_map()
-
-        logger.info("Done init")
-
-    # Do not use cache, so that we can refresh it again
-    def create_uuid_dataset_map(self):
-        catalog = self.metadata.metadata_catalog_uncached()
-
-    def get_meta_data(self):
-        return "hi"
-
-
-api = API()
 
 
 @restapi.route('/metadata/<string:uuid>', methods=['GET'])
-def get_metadata(uuid):
-    return api.get_meta_data()
+def get_mapped_metadata(uuid):
+    return dataclasses.asdict(app.api.get_mapped_meta_data(uuid))
+
+
+@restapi.route('/metadata/<string:uuid>/raw', methods=['GET'])
+def get_mapped_metadata(uuid):
+    return app.api.get_raw_meta_data(uuid)

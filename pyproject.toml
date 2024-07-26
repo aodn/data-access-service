@@ -16,6 +16,7 @@ jsonify = "^0.5"
 aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", branch = "main" }
 fuzzywuzzy = "^0.18.0"
 logging = "^0.4.9.6"
+xmltodict = "^0.13.0"
 
 [build-system]
 requires = ["poetry-core"]
