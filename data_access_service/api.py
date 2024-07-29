@@ -1,4 +1,10 @@
+from datetime import timedelta, datetime
+from typing import Optional
+
+import pandas as pd
 from aodn_cloud_optimised import ParquetDataQuery
+from pyarrow import Table
+
 from .descriptor import Depth, Descriptor
 import logging
 
@@ -43,7 +49,7 @@ class API:
             if uuid is not None and uuid != '':
                 log.info("Adding uuid " + uuid + " name " + key)
                 self._raw[uuid] = data
-                self._cached[uuid] = Descriptor(uuid=uuid, key=key, depth=_extract_depth(data))
+                self._cached[uuid] = Descriptor(uuid=uuid, dname=key, depth=_extract_depth(data))
             else:
                 log.error('Data not found for dataset ' + key)
 
@@ -72,11 +78,16 @@ class API:
                          lon_min=None,
                          lon_max=None,
                          scalar_filter=None,
-                         ):
+                         ) -> Optional[pd.DataFrame]:
         md: Descriptor = self._cached.get(uuid)
 
         if md is not None:
-            ds: ParquetDataQuery.Dataset = self._instance.get_dataset(md.key)
+            ds: ParquetDataQuery.Dataset = self._instance.get_dataset(md.dname)
+
+            # Default get 10 days of data
+            if date_start is None:
+                date_start = (datetime.now() - timedelta(days=10))
+
             return ds.get_data(date_start, date_end, lat_min, lat_max, lon_min, lon_max, scalar_filter)
         else:
             return None
