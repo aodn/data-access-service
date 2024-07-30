@@ -1,11 +1,12 @@
-from datetime import timedelta, datetime
-from typing import Optional
-
+import gzip
 import pandas as pd
-from aodn_cloud_optimised import ParquetDataQuery
-
-from .descriptor import Depth, Descriptor
 import logging
+
+from datetime import timedelta, datetime
+from io import BytesIO
+from typing import Optional
+from aodn_cloud_optimised import ParquetDataQuery
+from .descriptor import Depth, Descriptor
 
 log = logging.getLogger(__name__)
 
@@ -18,6 +19,13 @@ def _extract_depth(data: dict):
         return Depth(depth.get('valid_min'), depth.get('valid_max'), depth.get('units'))
     else:
         return None
+
+
+def gzip_compress(data):
+    buf = BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode='wb') as f:
+        f.write(data.encode('utf-8'))
+    return buf.getvalue()
 
 
 class API:
