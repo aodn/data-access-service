@@ -86,6 +86,7 @@ def _response_json(filtered: DataFrame, compress: bool):
     return response
 
 
+# TODO: Need to use the metadata to assign correct type to netcdf, right now field type is wrong
 def _response_netcdf(filtered: DataFrame):
 
     # Convert the DataFrame to an xarray Dataset
