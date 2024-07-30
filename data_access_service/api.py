@@ -3,7 +3,6 @@ from typing import Optional
 
 import pandas as pd
 from aodn_cloud_optimised import ParquetDataQuery
-from pyarrow import Table
 
 from .descriptor import Depth, Descriptor
 import logging
