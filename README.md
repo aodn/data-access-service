@@ -17,3 +17,8 @@ Use poetry for dependency management, you can edit the file pyproject.toml for n
 
 There is one library that reference another github repo of aodn. It is written by PO to access
 cloud optimized data. Please do not access s3 directly and should via this library.
+
+Right now the version is always main branch which is not idea, we should be able to use tag version
+```commandline
+aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", branch = "main" }
+```

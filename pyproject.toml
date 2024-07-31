@@ -6,18 +6,24 @@ authors = ["utas-raymondng <manfai.ng@utas.edu.au>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.10.14"
-python-levenshtein = "~0.25.1"
+dask = {extras = ["dataframe"], version = "2024.7.1"}
 flask = "^3.0.3"
-gunicorn = "^22.0.0"
+fuzzywuzzy = "^0.18.0"
+gunicorn = "22.0.0"
+gevent = "24.2.1"
 jsonify = "^0.5"
+matplotlib = "3.9.1"
+pandas = "2.2.2"
+pyarrow = "16.0.0"
+python = "3.10.14"
+python-levenshtein = "~0.25.1"
+logging = "^0.4.9.6"
+requests = "2.32.3"
+watchdog = "^4.0.1"
+xmltodict = "^0.13.0"
 
 # Dependency from a GitHub repository
 aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", branch = "main" }
-fuzzywuzzy = "^0.18.0"
-logging = "^0.4.9.6"
-xmltodict = "^0.13.0"
-watchdog = "^4.0.1"
 
 [build-system]
 requires = ["poetry-core"]
