@@ -34,3 +34,11 @@ aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git
 > 2. edge
 > 3. staging
 > 4. prod
+
+### Endpoints
+
+| Description        | Endpoints                          | Param                                                                          | Environment                                                                   |
+|--------------------|----------------------------------------|--------------------------------------------------------------------------------|-------------------------------------------------------------------------------|
+| Formatted metadata | /api/v1/das/metadata/{uuid}  | none                                                                           | ALL                                                                           | 
+| Raw metadata       | /api/v1/das/metadata/{uuid}/raw | none                                                                           | ALL                                                                      | 
+| Subsetting         | /api/v1/das/data/{uuid} | start_date=2023-12-25T14:30:00 end_date=2024-02-25T14:30:00 start_depth=-0.06 | ALL |  
