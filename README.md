@@ -23,10 +23,13 @@ Right now the version is always main branch which is not idea, we should be able
 aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", branch = "main" }
 ```
 
-## Run the app
+## Run the app with Docker
 
-1. You can use startServer.sh to run the app, this will create a docker image and run the image for you
-2. You can also run via python run.py, it is better you start it with a good IDE like Pycham
+Use startServer.sh to run the app, this will create a docker image and run the image for you
+
+## Run the app for development
+
+Run via python run.py, it is better you start it with a good IDE like Pycham
 
 ### Profile
 > You can use the following profile, set an environment variable call PROFILE
