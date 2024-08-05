@@ -6,6 +6,8 @@
 
 Simply run `./startServer.sh` to run the app, this will create a docker image and run the image for you.
 
+Host will be `http://localhost:8000`.
+
 ## Run the app for development
 
 ### Requirements
@@ -61,6 +63,8 @@ aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git
     ```
 
 3. **Run the app:**
+
+   Host will be `http://localhost:5000`.
 
     ```bash
     $ data-access-service
