@@ -3,16 +3,16 @@ from enum import Enum
 
 
 class EnvType(Enum):
-    DEV = 'dev'
-    EDGE = 'edge'
-    STAGING = 'staging'
-    PRODUCTION = 'prod'
+    DEV = "dev"
+    EDGE = "edge"
+    STAGING = "staging"
+    PRODUCTION = "prod"
 
 
 class Config:
     DEBUG = True
     LOGLEVEL = logging.DEBUG
-    BASE_URL = '/api/v1/das'
+    BASE_URL = "/api/v1/das"
 
 
 class DevConfig(Config):
