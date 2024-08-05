@@ -6,25 +6,25 @@ from datetime import timedelta, datetime
 from io import BytesIO
 from typing import Optional
 from aodn_cloud_optimised import ParquetDataQuery
-from .descriptor import Depth, Descriptor
+from data_access_service.core.descriptor import Depth, Descriptor
 
 log = logging.getLogger(__name__)
 
 
 def _extract_depth(data: dict):
     # We need to extract depth info
-    depth = data.get('DEPTH')
+    depth = data.get("DEPTH")
 
     if depth is not None:
-        return Depth(depth.get('valid_min'), depth.get('valid_max'), depth.get('units'))
+        return Depth(depth.get("valid_min"), depth.get("valid_max"), depth.get("units"))
     else:
         return None
 
 
 def gzip_compress(data):
     buf = BytesIO()
-    with gzip.GzipFile(fileobj=buf, mode='wb') as f:
-        f.write(data.encode('utf-8'))
+    with gzip.GzipFile(fileobj=buf, mode="wb") as f:
+        f.write(data.encode("utf-8"))
     return buf.getvalue()
 
 
@@ -51,14 +51,16 @@ class API:
 
         for key in catalog:
             data = catalog.get(key)
-            uuid = data.get('dataset_metadata').get('metadata_uuid')
+            uuid = data.get("dataset_metadata").get("metadata_uuid")
 
-            if uuid is not None and uuid != '':
+            if uuid is not None and uuid != "":
                 log.info("Adding uuid " + uuid + " name " + key)
                 self._raw[uuid] = data
-                self._cached[uuid] = Descriptor(uuid=uuid, dname=key, depth=_extract_depth(data))
+                self._cached[uuid] = Descriptor(
+                    uuid=uuid, dname=key, depth=_extract_depth(data)
+                )
             else:
-                log.error('Data not found for dataset ' + key)
+                log.error("Data not found for dataset " + key)
 
     def get_mapped_meta_data(self, uuid: str):
         value = self._cached.get(uuid)
@@ -76,16 +78,17 @@ class API:
         else:
             return None
 
-    def get_dataset_data(self,
-                         uuid: str,
-                         date_start=None,
-                         date_end=None,
-                         lat_min=None,
-                         lat_max=None,
-                         lon_min=None,
-                         lon_max=None,
-                         scalar_filter=None,
-                         ) -> Optional[pd.DataFrame]:
+    def get_dataset_data(
+        self,
+        uuid: str,
+        date_start=None,
+        date_end=None,
+        lat_min=None,
+        lat_max=None,
+        lon_min=None,
+        lon_max=None,
+        scalar_filter=None,
+    ) -> Optional[pd.DataFrame]:
         md: Descriptor = self._cached.get(uuid)
 
         if md is not None:
@@ -93,8 +96,10 @@ class API:
 
             # Default get 10 days of data
             if date_start is None:
-                date_start = (datetime.now() - timedelta(days=10))
+                date_start = datetime.now() - timedelta(days=10)
 
-            return ds.get_data(date_start, date_end, lat_min, lat_max, lon_min, lon_max, scalar_filter)
+            return ds.get_data(
+                date_start, date_end, lat_min, lat_max, lon_min, lon_max, scalar_filter
+            )
         else:
             return None

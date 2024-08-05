@@ -18,11 +18,11 @@ from http import HTTPStatus
 
 from pandas import DataFrame
 
-from . import app
-from .api import gzip_compress
-from .error import ErrorResponse
+from data_access_service import app
+from data_access_service.core.api import gzip_compress
+from data_access_service.core.error import ErrorResponse
 
-restapi = Blueprint('restapi', __name__)
+restapi = Blueprint("restapi", __name__)
 log = logging.getLogger(__name__)
 
 RECORD_PER_PARTITION: Optional[int] = 1000
@@ -43,8 +43,12 @@ def convert_non_numeric_to_str(df):
 def _generate_json(dask, compress: bool = False):
     for partition in dask.to_delayed():
         partition_df = convert_non_numeric_to_str(partition.compute())
-        for record in partition_df.to_dict(orient='records'):
-            yield gzip_compress(json.dumps(record) + '\n') if compress else json.dumps(record) + '\n'
+        for record in partition_df.to_dict(orient="records"):
+            yield (
+                gzip_compress(json.dumps(record) + "\n")
+                if compress
+                else json.dumps(record) + "\n"
+            )
 
 
 def _verify_datatime_param(name: str, req_date: str) -> datetime:
@@ -55,9 +59,11 @@ def _verify_datatime_param(name: str, req_date: str) -> datetime:
             _date = parser.isoparse(req_date)
 
     except (ValueError, TypeError) as e:
-        error_message = ErrorResponse(status_code=HTTPStatus.BAD_REQUEST,
-                                      details=f'Incorrect format [{name}]',
-                                      parameters=f'{name}={req_date}')
+        error_message = ErrorResponse(
+            status_code=HTTPStatus.BAD_REQUEST,
+            details=f"Incorrect format [{name}]",
+            parameters=f"{name}={req_date}",
+        )
 
         abort(HTTPStatus.BAD_REQUEST, error_message)
 
@@ -66,9 +72,11 @@ def _verify_datatime_param(name: str, req_date: str) -> datetime:
 
 def _verify_depth_param(name: str, req_value: numpy.double) -> numpy.double | None:
     if req_value is not None and req_value > 0.0:
-        error_message = ErrorResponse(status_code=HTTPStatus.BAD_REQUEST,
-                                      details=f'Depth cannot greater than zero',
-                                      parameters=f'{name}={req_value}')
+        error_message = ErrorResponse(
+            status_code=HTTPStatus.BAD_REQUEST,
+            details=f"Depth cannot greater than zero",
+            parameters=f"{name}={req_value}",
+        )
 
         abort(HTTPStatus.BAD_REQUEST, error_message)
     else:
@@ -76,12 +84,14 @@ def _verify_depth_param(name: str, req_value: numpy.double) -> numpy.double | No
 
 
 def _response_json(filtered: DataFrame, compress: bool):
-    ddf: dask.dataframe.DataFrame = dd.from_pandas(filtered, npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1)
+    ddf: dask.dataframe.DataFrame = dd.from_pandas(
+        filtered, npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1
+    )
     if compress:
-        response = Response(_generate_json(ddf, True), mimetype='application/json')
-        response.headers['Content-Encoding'] = 'gzip'
+        response = Response(_generate_json(ddf, True), mimetype="application/json")
+        response.headers["Content-Encoding"] = "gzip"
     else:
-        response = Response(_generate_json(ddf), mimetype='application/json')
+        response = Response(_generate_json(ddf), mimetype="application/json")
 
     return response
 
@@ -93,16 +103,21 @@ def _response_netcdf(filtered: DataFrame):
     ds = xr.Dataset.from_dataframe(filtered)
 
     # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.nc') as tmp_file:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".nc") as tmp_file:
         tmp_file_name = tmp_file.name
         ds.to_netcdf(tmp_file_name)
 
     # Send the file as a response to the client
-    response = send_file(tmp_file_name, as_attachment=True, download_name='output.nc', mimetype='application/x-netcdf')
+    response = send_file(
+        tmp_file_name,
+        as_attachment=True,
+        download_name="output.nc",
+        mimetype="application/x-netcdf",
+    )
 
     # Clean up the temporary file after sending the response
     def _remove_file_if_exists(file_path):
-        """ Helper function to remove file if it exists """
+        """Helper function to remove file if it exists"""
         try:
             if os.path.exists(file_path):
                 os.remove(file_path)
@@ -114,51 +129,58 @@ def _response_netcdf(filtered: DataFrame):
     return response
 
 
-@restapi.route('/metadata/<string:uuid>', methods=['GET'])
+@restapi.route("/metadata/<string:uuid>", methods=["GET"])
 def get_mapped_metadata(uuid):
     return dataclasses.asdict(app.api.get_mapped_meta_data(uuid))
 
 
-@restapi.route('/metadata/<string:uuid>/raw', methods=['GET'])
+@restapi.route("/metadata/<string:uuid>/raw", methods=["GET"])
 def get_raw_metadata(uuid):
     return app.api.get_raw_meta_data(uuid)
 
 
-@restapi.route('/data/<string:uuid>', methods=['GET'])
+@restapi.route("/data/<string:uuid>", methods=["GET"])
 def get_data(uuid):
-    start_date = _verify_datatime_param('start_date', request.args.get('start_date', default=None, type=str))
-    end_date = _verify_datatime_param('end_date', request.args.get('end_date', default=None, type=str))
-
-    result: Optional[pd.DataFrame] = app.api.get_dataset_data(
-        uuid=uuid,
-        date_start=start_date,
-        date_end=end_date
+    start_date = _verify_datatime_param(
+        "start_date", request.args.get("start_date", default=None, type=str)
+    )
+    end_date = _verify_datatime_param(
+        "end_date", request.args.get("end_date", default=None, type=str)
     )
 
-    start_depth = _verify_depth_param('start_depth', request.args.get('start_depth', default=None, type=numpy.double))
-    end_depth = _verify_depth_param('end_depth', request.args.get('end_depth', default=None, type=numpy.double))
+    result: Optional[pd.DataFrame] = app.api.get_dataset_data(
+        uuid=uuid, date_start=start_date, date_end=end_date
+    )
+
+    start_depth = _verify_depth_param(
+        "start_depth", request.args.get("start_depth", default=None, type=numpy.double)
+    )
+    end_depth = _verify_depth_param(
+        "end_depth", request.args.get("end_depth", default=None, type=numpy.double)
+    )
 
     # The cloud optimized format is fast to lookup if there is an index, some field isn't part of the
     # index and therefore will not gain to filter by those field, indexed fields are site_code, timestamp, polygon
 
     # Depth is below sea level zero, so logic slightly diff
     if start_depth is not None and end_depth is not None:
-        filtered = result[(result['DEPTH'] <= start_depth) & (result['DEPTH'] >= end_depth)]
+        filtered = result[
+            (result["DEPTH"] <= start_depth) & (result["DEPTH"] >= end_depth)
+        ]
     elif start_depth is not None:
-        filtered = result[(result['DEPTH'] <= start_depth)]
+        filtered = result[(result["DEPTH"] <= start_depth)]
     elif end_depth is not None:
-        filtered = result[result['DEPTH'] >= end_depth]
+        filtered = result[result["DEPTH"] >= end_depth]
     else:
         filtered = result
 
-    log.info('Record number return %s for query', len(filtered.index))
+    log.info("Record number return %s for query", len(filtered.index))
 
-    f = request.args.get('format', default='json', type=str)
-    if f == 'json':
+    f = request.args.get("format", default="json", type=str)
+    if f == "json":
         # Depends on whether receiver support gzip encoding
-        compress = 'gzip' in request.headers.get('Accept-Encoding', '')
+        compress = "gzip" in request.headers.get("Accept-Encoding", "")
         return _response_json(filtered, compress)
 
-    elif f == 'netcdf':
+    elif f == "netcdf":
         return _response_netcdf(filtered)
-

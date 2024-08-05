@@ -11,11 +11,13 @@ class ErrorResponse:
     details: Optional[str]
     parameters: Optional[str]
 
-    def __init__(self,
-                 status_code: HTTPStatus = HTTPStatus.OK,
-                 timestamp: datetime = datetime.now(),
-                 details: str = None,
-                 parameters: str = None):
+    def __init__(
+        self,
+        status_code: HTTPStatus = HTTPStatus.OK,
+        timestamp: datetime = datetime.now(),
+        details: str = None,
+        parameters: str = None,
+    ):
 
         self.status_code = status_code
         self.timestamp = timestamp

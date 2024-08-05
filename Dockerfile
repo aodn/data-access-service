@@ -1,14 +1,6 @@
 # Use the official Python base image
 FROM python:3.10-slim
 
-# Install Poetry
-RUN apt update
-RUN yes | apt install pipx
-RUN pipx ensurepath
-RUN pipx install poetry
-
-# Add Poetry to PATH
-ENV PATH="/root/.local/bin:$PATH"
 ENV GUNICORN_WORKERS_NUM=4
 ENV GUNICORN_TIMEOUT=3600
 
@@ -19,19 +11,19 @@ WORKDIR /app
 COPY pyproject.toml poetry.lock ./
 
 # For Docker build to understand the possible env
-RUN poetry env use python3.10
-
-# Install the dependencies
-RUN poetry lock
-RUN poetry install --no-dev --no-interaction --no-ansi
-
-# Copy the rest of the application code into the container
-ADD data_access_service ./data_access_service
-COPY config.py .
-COPY run.py .
+RUN apt update && \
+    apt -y upgrade && \
+    pip3 install --upgrade pip && \
+    pip3 install poetry && \
+    poetry config virtualenvs.create false && \
+    poetry lock && \
+    poetry install
 
 # Expose the port the app runs on
 EXPOSE 8000
+
+# Copy the rest of the application code into the container
+COPY . /app
 
 # Run the Flask app using Poetry
 CMD exec poetry run gunicorn \
@@ -39,4 +31,4 @@ CMD exec poetry run gunicorn \
     --worker-class gevent \
     --timeout $GUNICORN_TIMEOUT \
     --workers $GUNICORN_WORKERS_NUM \
-    run:app
+    data_access_service.run:app
