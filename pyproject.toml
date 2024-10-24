@@ -27,7 +27,7 @@ black = "^24.8.0"
 cryptography = "<43.0.0"
 
 # Dependency from a GitHub repository
-aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", branch = "main" }
+aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", tag = "v0.1.22" }
 
 [build-system]
 requires = ["poetry-core"]
