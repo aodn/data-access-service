@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    container_name: data-access-service
+    environment:
+      GUNICORN_TIMEOUT: 3600
+      GUNICORN_WORKERS_NUM: 4
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    entrypoint: ./entrypoint.sh
