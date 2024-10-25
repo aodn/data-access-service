@@ -16,11 +16,12 @@ from data_access_service.core.routes import router as api_router
 
 # Load environment variables from .env file
 load_dotenv()
+log = logging.getLogger(__name__)
 
 
 def get_config():
     profile = Profile(os.getenv("PROFILE", Profile.DEV))
-    logging.info(f"Environment profile is {profile}")
+    log.info(f"Environment profile is {profile}")
     if profile == Profile.DEV:
         return DevProfile
     elif profile == Profile.EDGE:
@@ -35,11 +36,11 @@ def get_config():
 config = get_config()
 # Apply the config to the FastAPI app
 app = FastAPI(debug=config.DEBUG)
-logging.basicConfig(
-    level=config.LOGLEVEL,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+# logging.basicConfig(
+#     level=config.LOGLEVEL,
+#     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+#     datefmt="%Y-%m-%d %H:%M:%S",
+# )
 
 
 app.include_router(api_router)
