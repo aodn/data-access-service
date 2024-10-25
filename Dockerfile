@@ -1,9 +1,6 @@
 # Use the official Python base image
 FROM python:3.10-slim
 
-ENV GUNICORN_WORKERS_NUM=4
-ENV GUNICORN_TIMEOUT=3600
-
 # Set the working directory in the container
 WORKDIR /app
 
@@ -24,11 +21,3 @@ EXPOSE 8000
 
 # Copy the rest of the application code into the container
 COPY . /app
-
-# Run the Flask app using Poetry
-CMD exec poetry run gunicorn \
-    --bind 0.0.0.0:8000 \
-    --worker-class gevent \
-    --timeout $GUNICORN_TIMEOUT \
-    --workers $GUNICORN_WORKERS_NUM \
-    data_access_service.run:app

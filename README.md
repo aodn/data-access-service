@@ -77,18 +77,32 @@ aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git
 
 ### Code formatting
 
-1. **Using Black for Python formatter: https://github.com/psf/black**
+The command below is for manual checks; checks are also executed when you run `git commit`.
 
-    ```bash
-    $ black .
-    ```
-      
-### Profile
-> You can use the following profile, set an environment variable call PROFILE
+The configurations for pre-commit hooks are defined in `.pre-commit-config.yaml`.
+
+```shell
+pre-commit run --all-files
+```
+
+## Environment variables
+
+In the root directory of the project, create a `.env` file.
+
+### Profiles
+
+You can use one of the following profiles, set an environment variable call `PROFILE` in `.env`
+
 > 1. dev (default)
 > 2. edge
 > 3. staging
 > 4. prod
+
+E.g
+
+```shell
+PROFILE=edge
+```
 
 ### Endpoints
 
