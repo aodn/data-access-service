@@ -85,13 +85,24 @@ The configurations for pre-commit hooks are defined in `.pre-commit-config.yaml`
 pre-commit run --all-files
 ```
 
-      
-### Profile
-> You can use the following profile, set an environment variable call PROFILE
+## Environment variables
+
+In the root directory of the project, create a `.env` file.
+
+### Profiles
+
+You can use one of the following profiles, set an environment variable call `PROFILE` in `.env`
+
 > 1. dev (default)
 > 2. edge
 > 3. staging
 > 4. prod
+
+E.g
+
+```shell
+PROFILE=edge
+```
 
 ### Endpoints
 
