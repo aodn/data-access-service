@@ -40,15 +40,50 @@ def convert_non_numeric_to_str(df):
 
 
 # Function to generate JSON lines from Dask DataFrame
-def _generate_json(dask, compress: bool = False):
+def _generate_json_array(dask, compress: bool = False):
+    record_list = []
     for partition in dask.to_delayed():
         partition_df = convert_non_numeric_to_str(partition.compute())
         for record in partition_df.to_dict(orient="records"):
-            yield (
-                gzip_compress(json.dumps(record) + "\n")
-                if compress
-                else json.dumps(record) + "\n"
-            )
+            record_list.append(record)
+
+    json_array = json.dumps(record_list)
+
+    if compress:
+        return gzip_compress(json_array)
+    else:
+        return json_array
+
+def _generate_partial_json_array(dask, compress:bool = False):
+    record_list = []
+    for partition in dask.to_delayed():
+        partition_df = convert_non_numeric_to_str(partition.compute())
+        for record in partition_df.to_dict(orient="records"):
+            filtered_record = {
+                "time": _reformat_date(record["TIME"]),
+
+                "longitude": _round_5_decimal(record["LONGITUDE"]),
+                "latitude": _round_5_decimal(record["LATITUDE"]),
+                "depth": _round_5_decimal(record["NOMINAL_DEPTH"])
+            }
+            record_list.append(filtered_record)
+
+    json_array = json.dumps(record_list)
+
+    if compress:
+        return gzip_compress(json_array)
+    else:
+        return json_array
+
+# currently only want year, month and date.
+def _reformat_date(date):
+    parsed_date = parser.isoparse(date)
+    formatted_date = parsed_date.strftime("%Y-%m-%d")
+    return formatted_date
+
+def _round_5_decimal(value: float) -> float:
+    # as they are only used for the frontend map display, so we don't need to have too many decimals
+    return round(value, 5)
 
 
 def _verify_datatime_param(name: str, req_date: str) -> datetime:
@@ -82,16 +117,32 @@ def _verify_depth_param(name: str, req_value: numpy.double) -> numpy.double | No
     else:
         return req_value
 
+def _verify_to_index_flag_param(flag: str) -> bool:
+    if (flag is not None) and (flag.lower() == "true"):
+        return True
+    else:
+        return False
+
 
 def _response_json(filtered: DataFrame, compress: bool):
     ddf: dask.dataframe.DataFrame = dd.from_pandas(
         filtered, npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1
     )
+    response = Response(_generate_json_array(ddf, compress), mimetype="application/json")
+
     if compress:
-        response = Response(_generate_json(ddf, True), mimetype="application/json")
         response.headers["Content-Encoding"] = "gzip"
-    else:
-        response = Response(_generate_json(ddf), mimetype="application/json")
+
+    return response
+
+def _response_partial_json(filtered: DataFrame, compress: bool):
+    ddf: dask.dataframe.DataFrame = dd.from_pandas(
+        filtered, npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1
+    )
+    response = Response(_generate_partial_json_array(ddf, compress), mimetype="application/json")
+
+    if compress:
+        response.headers["Content-Encoding"] = "gzip"
 
     return response
 
@@ -138,9 +189,20 @@ def get_mapped_metadata(uuid):
 def get_raw_metadata(uuid):
     return app.api.get_raw_meta_data(uuid)
 
+@restapi.route("data/<string:uuid>/has_data", methods=["GET"])
+def data_check(uuid):
+    start_date=_verify_datatime_param(
+        "start_date", request.args.get("start_date", default=None, type=str)
+    )
+    end_date=_verify_datatime_param(
+        "end_date", request.args.get("end_date", default=None, type=str)
+    )
+    has_data =  str(app.api.has_data(uuid, start_date, end_date)).lower()
+    return Response(has_data, mimetype="application/json")
 
 @restapi.route("/data/<string:uuid>", methods=["GET"])
 def get_data(uuid):
+    log.info("Request details: %s", json.dumps(request.args.to_dict(), indent=2))
     start_date = _verify_datatime_param(
         "start_date", request.args.get("start_date", default=None, type=str)
     )
@@ -158,6 +220,8 @@ def get_data(uuid):
     end_depth = _verify_depth_param(
         "end_depth", request.args.get("end_depth", default=None, type=numpy.double)
     )
+
+    is_to_index = _verify_to_index_flag_param(request.args.get("is_to_index", default=None, type=str))
 
     # The cloud optimized format is fast to lookup if there is an index, some field isn't part of the
     # index and therefore will not gain to filter by those field, indexed fields are site_code, timestamp, polygon
@@ -180,7 +244,9 @@ def get_data(uuid):
     if f == "json":
         # Depends on whether receiver support gzip encoding
         compress = "gzip" in request.headers.get("Accept-Encoding", "")
-        return _response_json(filtered, compress)
-
+        if is_to_index:
+            return _response_partial_json(filtered, compress)
+        else:
+            return _response_json(filtered, compress)
     elif f == "netcdf":
         return _response_netcdf(filtered)
