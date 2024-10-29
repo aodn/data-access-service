@@ -126,7 +126,6 @@ def _verify_to_index_flag_param(flag: str) -> bool:
     else:
         return False
 
-
 def _response_json(filtered: DataFrame, compress: bool):
     ddf: dask.dataframe.DataFrame = dd.from_pandas(
         filtered, npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1

@@ -65,7 +65,6 @@ class API:
     def get_mapped_meta_data(self, uuid: str):
         value = self._cached.get(uuid)
 
-
         if value is not None:
             return value
         else:
