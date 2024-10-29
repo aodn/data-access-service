@@ -59,13 +59,16 @@ def _generate_partial_json_array(dask, compress:bool = False):
     for partition in dask.to_delayed():
         partition_df = convert_non_numeric_to_str(partition.compute())
         for record in partition_df.to_dict(orient="records"):
-            filtered_record = {
-                "time": _reformat_date(record["TIME"]),
-
-                "longitude": _round_5_decimal(record["LONGITUDE"]),
-                "latitude": _round_5_decimal(record["LATITUDE"]),
-                "depth": _round_5_decimal(record["NOMINAL_DEPTH"])
-            }
+            filtered_record = {}
+            #  may need to add more field here
+            if "TIME" in record:
+                filtered_record["time"] = _reformat_date(record["TIME"])
+            if "LONGITUDE" in record:
+                filtered_record["longitude"] = _round_5_decimal(record["LONGITUDE"])
+            if "LATITUDE" in record:
+                filtered_record["latitude"] = _round_5_decimal(record["LATITUDE"])
+            if "DEPTH" in record:
+                filtered_record["depth"] = _round_5_decimal(record["DEPTH"])
             record_list.append(filtered_record)
 
     json_array = json.dumps(record_list)
