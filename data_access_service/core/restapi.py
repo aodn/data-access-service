@@ -191,16 +191,12 @@ def get_mapped_metadata(uuid):
 def get_raw_metadata(uuid):
     return app.api.get_raw_meta_data(uuid)
 
-@restapi.route("data/<string:uuid>/has_data", methods=["GET"])
-def data_check(uuid):
-    start_date=_verify_datatime_param(
-        "start_date", request.args.get("start_date", default=None, type=str)
-    )
-    end_date=_verify_datatime_param(
-        "end_date", request.args.get("end_date", default=None, type=str)
-    )
-    has_data =  str(app.api.has_data(uuid, start_date, end_date)).lower()
-    return Response(has_data, mimetype="application/json")
+@restapi.route("data/<string:uuid>/temporal_extent", methods=["GET"])
+def get_temporal_extent(uuid):
+    a = app.api.get_temporal_extent(uuid)
+    start_date = a[0].strftime("%Y-%m-%d")
+    end_date = a[1].strftime("%Y-%m-%d")
+    return Response(json.dumps({"start_date": start_date, "end_date": end_date}), mimetype="application/json")
 
 @restapi.route("/data/<string:uuid>", methods=["GET"])
 def get_data(uuid):
