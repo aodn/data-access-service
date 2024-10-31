@@ -193,9 +193,9 @@ def get_raw_metadata(uuid):
 
 @restapi.route("data/<string:uuid>/temporal_extent", methods=["GET"])
 def get_temporal_extent(uuid):
-    a = app.api.get_temporal_extent(uuid)
-    start_date = a[0].strftime("%Y-%m-%d")
-    end_date = a[1].strftime("%Y-%m-%d")
+    dates = app.api.get_temporal_extent(uuid)
+    start_date = dates[0].strftime("%Y-%m-%d")
+    end_date = dates[1].strftime("%Y-%m-%d")
     return Response(json.dumps({"start_date": start_date, "end_date": end_date}), mimetype="application/json")
 
 @restapi.route("/data/<string:uuid>", methods=["GET"])
