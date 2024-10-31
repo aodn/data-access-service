@@ -6,6 +6,7 @@ from datetime import timedelta, datetime
 from io import BytesIO
 from typing import Optional
 from aodn_cloud_optimised import ParquetDataQuery
+
 from data_access_service.core.descriptor import Depth, Descriptor
 
 log = logging.getLogger(__name__)
@@ -122,3 +123,11 @@ class API:
             )
         else:
             return None
+
+    def get_temporal_extent(self, uuid:str):
+        md: Descriptor = self._cached.get(uuid)
+        if md is not None:
+            ds: ParquetDataQuery.Dataset = self._instance.get_dataset(md.dname)
+            return ds.get_temporal_extent()
+
+        return None
