@@ -20,6 +20,7 @@ from pandas import DataFrame
 
 from data_access_service import app
 from data_access_service.core.api import gzip_compress
+from data_access_service.core.constants import COORDINATE_PRECISION, DEPTH_PRECISION
 from data_access_service.core.error import ErrorResponse
 
 restapi = Blueprint("restapi", __name__)
@@ -63,12 +64,18 @@ def _generate_partial_json_array(dask, compress:bool = False):
             #  may need to add more field here
             if "TIME" in record:
                 filtered_record["time"] = _reformat_date(record["TIME"])
-            if "LONGITUDE" in record:
-                filtered_record["longitude"] = _round_5_decimal(record["LONGITUDE"])
-            if "LATITUDE" in record:
-                filtered_record["latitude"] = _round_5_decimal(record["LATITUDE"])
-            if "DEPTH" in record:
-                filtered_record["depth"] = _round_5_decimal(record["DEPTH"])
+
+            #     round(value, 5)
+
+            if "LONGITUDE" in record and not pd.isna(record["LONGITUDE"]):
+                filtered_record["longitude"] = round(record["LONGITUDE"], COORDINATE_PRECISION)
+
+            if "LATITUDE" in record and not pd.isna(record["LATITUDE"]):
+                filtered_record["latitude"] = round(record["LATITUDE"], COORDINATE_PRECISION)
+
+            if "DEPTH" in record and not pd.isna(record["DEPTH"]):
+                filtered_record["depth"] = round(record["DEPTH"], DEPTH_PRECISION)
+
             record_list.append(filtered_record)
 
     json_array = json.dumps(record_list)
@@ -83,11 +90,6 @@ def _reformat_date(date):
     parsed_date = parser.isoparse(date)
     formatted_date = parsed_date.strftime("%Y-%m-%d")
     return formatted_date
-
-def _round_5_decimal(value: float) -> float:
-    # as they are only used for the frontend map display, so we don't need to have too many decimals
-    return round(value, 5)
-
 
 def _verify_datatime_param(name: str, req_date: str) -> datetime:
     _date = None
@@ -196,6 +198,7 @@ def get_temporal_extent(uuid):
     dates = app.api.get_temporal_extent(uuid)
     start_date = dates[0].strftime("%Y-%m-%d")
     end_date = dates[1].strftime("%Y-%m-%d")
+    log.info("Temporal extent for dataset %s is %s to %s", uuid, start_date, end_date)
     return Response(json.dumps({"start_date": start_date, "end_date": end_date}), mimetype="application/json")
 
 @restapi.route("/data/<string:uuid>", methods=["GET"])
