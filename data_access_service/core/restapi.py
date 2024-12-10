@@ -256,7 +256,7 @@ def get_data(uuid):
     if start_depth is not None and end_depth is not None:
         filtered = result[
             (result["DEPTH"] <= start_depth) & (result["DEPTH"] >= end_depth)
-            ]
+        ]
     elif start_depth is not None:
         filtered = result[(result["DEPTH"] <= start_depth)]
     elif end_depth is not None:
