@@ -192,14 +192,9 @@ def _response_netcdf(filtered: DataFrame):
     return response
 
 
-class HealthCheckResponse(BaseModel):
-    status: str
-
-
 @restapi.route("/health", methods=["GET"])
-async def health_check() -> HealthCheckResponse:
-    response = HealthCheckResponse(status="healthy")
-    return response
+def health_check() -> Response:
+    return Response("healthy", mimetype="application/json")
 
 
 @restapi.route("/metadata/<string:uuid>", methods=["GET"])
