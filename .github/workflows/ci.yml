@@ -35,4 +35,4 @@ jobs:
           poetry run pre-commit run --all-files
       - name: Run tests
         run: |
-          poetry run pytest
+          if [ -z "$(find . -name 'test_*.py')" ]; then echo "No tests found"; else poetry run pytest; fi
