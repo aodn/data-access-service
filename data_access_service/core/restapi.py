@@ -88,7 +88,7 @@ def _generate_partial_json_array(dask, compress:bool = False):
 # currently only want year, month and date.
 def _reformat_date(date):
     parsed_date = parser.isoparse(date)
-    formatted_date = parsed_date.strftime("%Y-%m-%d")
+    formatted_date = parsed_date.strftime("%Y-%m")
     return formatted_date
 
 def _verify_datatime_param(name: str, req_date: str) -> datetime:
