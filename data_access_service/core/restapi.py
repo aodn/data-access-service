@@ -5,7 +5,6 @@ import logging
 import os
 import tempfile
 
-from pydantic import BaseModel
 import dask.dataframe
 import xarray as xr
 import numpy
