@@ -5,6 +5,7 @@ import logging
 import os
 import tempfile
 
+from pydantic import BaseModel
 import dask.dataframe
 import xarray as xr
 import numpy
@@ -161,7 +162,6 @@ def _response_partial_json(filtered: DataFrame, compress: bool):
 
 # TODO: Need to use the metadata to assign correct type to netcdf, right now field type is wrong
 def _response_netcdf(filtered: DataFrame):
-
     # Convert the DataFrame to an xarray Dataset
     ds = xr.Dataset.from_dataframe(filtered)
 
@@ -189,6 +189,16 @@ def _response_netcdf(filtered: DataFrame):
 
     response.call_on_close(lambda: _remove_file_if_exists(tmp_file_name))
 
+    return response
+
+
+class HealthCheckResponse(BaseModel):
+    status: str
+
+
+@restapi.route("/health", methods=["GET"])
+async def health_check() -> HealthCheckResponse:
+    response = HealthCheckResponse(status="healthy")
     return response
 
 
@@ -246,7 +256,7 @@ def get_data(uuid):
     if start_depth is not None and end_depth is not None:
         filtered = result[
             (result["DEPTH"] <= start_depth) & (result["DEPTH"] >= end_depth)
-        ]
+            ]
     elif start_depth is not None:
         filtered = result[(result["DEPTH"] <= start_depth)]
     elif end_depth is not None:
