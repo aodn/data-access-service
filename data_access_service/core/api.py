@@ -94,7 +94,8 @@ class API:
                     start_date, period_end, None, None, None, None, None
                 ).empty:
                     return True
-                else: start_date = period_end + timedelta(days=1)
+                else:
+                    start_date = period_end + timedelta(days=1)
         return False
 
     def get_dataset_data(
