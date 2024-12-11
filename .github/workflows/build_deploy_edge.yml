@@ -15,7 +15,7 @@ permissions:
 jobs:
   build_push:
     runs-on: ubuntu-latest
-    environment: edge # temp: should be reverted to central
+    environment: central
     outputs:
       digest: ${{ steps.build_and_push.outputs.digest }}
     steps:
