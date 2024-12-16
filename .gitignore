@@ -77,3 +77,4 @@ dmypy.json
 cython_debug/
 .idea
 *.iml
+node_modules/

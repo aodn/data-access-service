@@ -54,7 +54,8 @@ def _generate_json_array(dask, compress: bool = False):
     else:
         return json_array
 
-def _generate_partial_json_array(dask, compress:bool = False):
+
+def _generate_partial_json_array(dask, compress: bool = False):
     record_list = []
     for partition in dask.to_delayed():
         partition_df = convert_non_numeric_to_str(partition.compute())
@@ -78,11 +79,13 @@ def _generate_partial_json_array(dask, compress:bool = False):
     else:
         return json_array
 
+
 # currently only want year, month and date.
 def _reformat_date(date):
     parsed_date = parser.isoparse(date)
     formatted_date = parsed_date.strftime("%Y-%m-%d")
     return formatted_date
+
 
 def _round_5_decimal(value: float) -> float:
     # as they are only used for the frontend map display, so we don't need to have too many decimals
@@ -120,28 +123,35 @@ def _verify_depth_param(name: str, req_value: numpy.double) -> numpy.double | No
     else:
         return req_value
 
+
 def _verify_to_index_flag_param(flag: str) -> bool:
     if (flag is not None) and (flag.lower() == "true"):
         return True
     else:
         return False
 
+
 def _response_json(filtered: DataFrame, compress: bool):
     ddf: dask.dataframe.DataFrame = dd.from_pandas(
         filtered, npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1
     )
-    response = Response(_generate_json_array(ddf, compress), mimetype="application/json")
+    response = Response(
+        _generate_json_array(ddf, compress), mimetype="application/json"
+    )
 
     if compress:
         response.headers["Content-Encoding"] = "gzip"
 
     return response
 
+
 def _response_partial_json(filtered: DataFrame, compress: bool):
     ddf: dask.dataframe.DataFrame = dd.from_pandas(
         filtered, npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1
     )
-    response = Response(_generate_partial_json_array(ddf, compress), mimetype="application/json")
+    response = Response(
+        _generate_partial_json_array(ddf, compress), mimetype="application/json"
+    )
 
     if compress:
         response.headers["Content-Encoding"] = "gzip"
@@ -151,7 +161,6 @@ def _response_partial_json(filtered: DataFrame, compress: bool):
 
 # TODO: Need to use the metadata to assign correct type to netcdf, right now field type is wrong
 def _response_netcdf(filtered: DataFrame):
-
     # Convert the DataFrame to an xarray Dataset
     ds = xr.Dataset.from_dataframe(filtered)
 
@@ -182,6 +191,11 @@ def _response_netcdf(filtered: DataFrame):
     return response
 
 
+@restapi.route("/health", methods=["GET"])
+def health_check() -> Response:
+    return Response("healthy", mimetype="application/json")
+
+
 @restapi.route("/metadata/<string:uuid>", methods=["GET"])
 def get_mapped_metadata(uuid):
     return dataclasses.asdict(app.api.get_mapped_meta_data(uuid))
@@ -191,16 +205,18 @@ def get_mapped_metadata(uuid):
 def get_raw_metadata(uuid):
     return app.api.get_raw_meta_data(uuid)
 
+
 @restapi.route("data/<string:uuid>/has_data", methods=["GET"])
 def data_check(uuid):
-    start_date=_verify_datatime_param(
+    start_date = _verify_datatime_param(
         "start_date", request.args.get("start_date", default=None, type=str)
     )
-    end_date=_verify_datatime_param(
+    end_date = _verify_datatime_param(
         "end_date", request.args.get("end_date", default=None, type=str)
     )
-    has_data =  str(app.api.has_data(uuid, start_date, end_date)).lower()
+    has_data = str(app.api.has_data(uuid, start_date, end_date)).lower()
     return Response(has_data, mimetype="application/json")
+
 
 @restapi.route("/data/<string:uuid>", methods=["GET"])
 def get_data(uuid):
@@ -223,7 +239,9 @@ def get_data(uuid):
         "end_depth", request.args.get("end_depth", default=None, type=numpy.double)
     )
 
-    is_to_index = _verify_to_index_flag_param(request.args.get("is_to_index", default=None, type=str))
+    is_to_index = _verify_to_index_flag_param(
+        request.args.get("is_to_index", default=None, type=str)
+    )
 
     # The cloud optimized format is fast to lookup if there is an index, some field isn't part of the
     # index and therefore will not gain to filter by those field, indexed fields are site_code, timestamp, polygon

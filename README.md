@@ -85,6 +85,18 @@ The configurations for pre-commit hooks are defined in `.pre-commit-config.yaml`
 pre-commit run --all-files
 ```
 
+### Versioning
+
+This project uses **semantic versioning** with automated releases managed by `semantic-release`.
+
+Every code change with commits following [Conventional Commits](https://github.com/conventional-changelog/commitlint/tree/master/%40commitlint/config-conventional) will trigger a version update and create a GitHub release.
+
+**Commit Guidelines**
+
+- `feat:` For new features
+- `fix:` For bug fixes
+- `BREAKING CHANGE:` For any breaking changes
+
 ## Environment variables
 
 In the root directory of the project, create a `.env` file.
@@ -108,6 +120,6 @@ PROFILE=edge
 
 | Description        | Endpoints                          | Param                                                                                          | Environment                                                                   |
 |--------------------|----------------------------------------|------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------|
-| Formatted metadata | /api/v1/das/metadata/{uuid}  | none                                                                                           | ALL                                                                           | 
-| Raw metadata       | /api/v1/das/metadata/{uuid}/raw | none                                                                                           | ALL                                                                      | 
+| Formatted metadata | /api/v1/das/metadata/{uuid}  | none                                                                                           | ALL                                                                           |
+| Raw metadata       | /api/v1/das/metadata/{uuid}/raw | none                                                                                           | ALL                                                                      |
 | Subsetting         | /api/v1/das/data/{uuid} | start_date=2023-12-25T14:30:00 end_date=2024-02-25T14:30:00 start_depth=-0.06 f=netcdf or json | ALL |
