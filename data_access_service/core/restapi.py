@@ -26,7 +26,8 @@ restapi = Blueprint("restapi", __name__)
 log = logging.getLogger(__name__)
 
 RECORD_PER_PARTITION: Optional[int] = 1000
-
+DATE_FORMAT = "%Y-%m-%d %H:%M:%S%z"
+MIN_DATE = "1970-01-01T00:00:00Z"
 
 # Make all non-numeric and str field to str so that json do not throw serializable error
 def convert_non_numeric_to_str(df):
@@ -206,25 +207,31 @@ def get_raw_metadata(uuid):
 
 
 @restapi.route("/data/<string:uuid>/has_data", methods=["GET"])
-def data_check(uuid):
+def has_data(uuid):
     start_date = _verify_datatime_param(
-        "start_date", request.args.get("start_date", default="1970-01-01")
+        "start_date", request.args.get("start_date", default=MIN_DATE)
     )
     end_date = _verify_datatime_param(
-        "end_date", request.args.get("end_date", default=datetime.datetime.now().strftime("%Y-%m-%d"))
+        "end_date", request.args.get(
+            "end_date",
+            default=datetime.datetime.now(datetime.timezone.utc).strftime(DATE_FORMAT)
+        )
     )
-    has_data = str(app.api.has_data(uuid, start_date, end_date)).lower()
-    return Response(has_data, mimetype="application/json")
+    result = str(app.api.has_data(uuid, start_date, end_date)).lower()
+    return Response(result, mimetype="application/json")
 
 
 @restapi.route("/data/<string:uuid>", methods=["GET"])
 def get_data(uuid):
     log.info("Request details: %s", json.dumps(request.args.to_dict(), indent=2))
     start_date = _verify_datatime_param(
-        "start_date", request.args.get("start_date", default="1970-01-01")
+        "start_date", request.args.get("start_date", default=MIN_DATE)
     )
     end_date = _verify_datatime_param(
-        "end_date", request.args.get("end_date", default=datetime.datetime.now().strftime("%Y-%m-%d"))
+        "end_date", request.args.get(
+            "end_date",
+            default=datetime.datetime.now(datetime.timezone.utc).strftime(DATE_FORMAT)
+        )
     )
     result: Optional[pd.DataFrame] = app.api.get_dataset_data(
         uuid=uuid, date_start=start_date, date_end=end_date
