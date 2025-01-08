@@ -238,27 +238,27 @@ def get_data(uuid):
     )
 
     start_depth = _verify_depth_param(
-        "start_depth", numpy.double(request.args.get("start_depth", default=0.0))
+        "start_depth", numpy.double(request.args.get("start_depth", default=-1.0))
     )
     end_depth = _verify_depth_param(
-        "end_depth", numpy.double(request.args.get("end_depth", default=1.0))
+        "end_depth", numpy.double(request.args.get("end_depth", default=-1.0))
     )
 
     is_to_index = _verify_to_index_flag_param(
-        request.args.get("is_to_index", default=None, type=str)
+        request.args.get("is_to_index", default=None)
     )
 
     # The cloud optimized format is fast to lookup if there is an index, some field isn't part of the
     # index and therefore will not gain to filter by those field, indexed fields are site_code, timestamp, polygon
 
     # Depth is below sea level zero, so logic slightly diff
-    if start_depth is not None and end_depth is not None:
+    if start_depth > 0 and end_depth > 0:
         filtered = result[
             (result["DEPTH"] <= start_depth) & (result["DEPTH"] >= end_depth)
         ]
-    elif start_depth is not None:
+    elif start_depth > 0:
         filtered = result[(result["DEPTH"] <= start_depth)]
-    elif end_depth is not None:
+    elif end_depth > 0:
         filtered = result[result["DEPTH"] >= end_depth]
     else:
         filtered = result

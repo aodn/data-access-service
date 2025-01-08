@@ -2,7 +2,7 @@ import gzip
 import pandas as pd
 import logging
 
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from io import BytesIO
 from typing import Optional
 from aodn_cloud_optimised import DataQuery
@@ -106,7 +106,17 @@ class API:
 
             # Default get 10 days of data
             if date_start is None:
-                date_start = datetime.now() - timedelta(days=10)
+                date_start = datetime.now(timezone.utc) - timedelta(days=10)
+
+            # The get_data call the pyarrow and compare only works with non timezone datetime
+            # now make sure the timezone is correctly convert to utc then remove it.
+            # As get_date datetime are all utc, but the pyarrow do not support compare of datetime vs
+            # datetime with timezone.
+            if date_start.tzinfo is not None:
+                date_start = date_start.astimezone(timezone.utc).replace(tzinfo=None)
+
+            if date_end.tzinfo is not None:
+                date_end = date_end.astimezone(timezone.utc).replace(tzinfo=None)
 
             return ds.get_data(
                 date_start, date_end, lat_min, lat_max, lon_min, lon_max, scalar_filter
