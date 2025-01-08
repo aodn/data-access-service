@@ -130,7 +130,6 @@ def _verify_to_index_flag_param(flag: str) -> bool:
     else:
         return False
 
-
 def _response_json(filtered: DataFrame, compress: bool):
     ddf: dask.dataframe.DataFrame = dd.from_pandas(
         filtered, npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1
@@ -206,13 +205,13 @@ def get_raw_metadata(uuid):
     return app.api.get_raw_meta_data(uuid)
 
 
-@restapi.route("data/<string:uuid>/has_data", methods=["GET"])
+@restapi.route("/data/<string:uuid>/has_data", methods=["GET"])
 def data_check(uuid):
     start_date = _verify_datatime_param(
-        "start_date", request.args.get("start_date", default=None, type=str)
+        "start_date", request.args.get("start_date", default="1970-01-01")
     )
     end_date = _verify_datatime_param(
-        "end_date", request.args.get("end_date", default=None, type=str)
+        "end_date", request.args.get("end_date", default=datetime.datetime.now().strftime("%Y-%m-%d"))
     )
     has_data = str(app.api.has_data(uuid, start_date, end_date)).lower()
     return Response(has_data, mimetype="application/json")
@@ -222,21 +221,20 @@ def data_check(uuid):
 def get_data(uuid):
     log.info("Request details: %s", json.dumps(request.args.to_dict(), indent=2))
     start_date = _verify_datatime_param(
-        "start_date", request.args.get("start_date", default=None, type=str)
+        "start_date", request.args.get("start_date", default="1970-01-01")
     )
     end_date = _verify_datatime_param(
-        "end_date", request.args.get("end_date", default=None, type=str)
+        "end_date", request.args.get("end_date", default=datetime.datetime.now().strftime("%Y-%m-%d"))
     )
-
     result: Optional[pd.DataFrame] = app.api.get_dataset_data(
         uuid=uuid, date_start=start_date, date_end=end_date
     )
 
     start_depth = _verify_depth_param(
-        "start_depth", request.args.get("start_depth", default=None, type=numpy.double)
+        "start_depth", numpy.double(request.args.get("start_depth", default=0.0))
     )
     end_depth = _verify_depth_param(
-        "end_depth", request.args.get("end_depth", default=None, type=numpy.double)
+        "end_depth", numpy.double(request.args.get("end_depth", default=1.0))
     )
 
     is_to_index = _verify_to_index_flag_param(

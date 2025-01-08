@@ -5,7 +5,7 @@ import logging
 from datetime import timedelta, datetime
 from io import BytesIO
 from typing import Optional
-from aodn_cloud_optimised import ParquetDataQuery
+from aodn_cloud_optimised import DataQuery
 from data_access_service.core.descriptor import Depth, Descriptor
 
 log = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ class API:
 
         # UUID to metadata mapper and init it, a scheduler need to
         # updated it as times go
-        self._instance = ParquetDataQuery.GetAodn()
+        self._instance = DataQuery.GetAodn()
         self._metadata = self._instance.get_metadata()
         self._create_uuid_dataset_map()
 
