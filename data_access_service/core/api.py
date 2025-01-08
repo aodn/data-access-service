@@ -88,6 +88,14 @@ class API:
             return start_date <= te[0] and te[1] <= end_date
         return False
 
+    def get_temporal_extent(self, uuid: str) -> (datetime, datetime):
+        md: Descriptor = self._cached.get(uuid)
+        if md is not None:
+            ds: DataQuery.Dataset = self._instance.get_dataset(md.dname)
+            return ds.get_temporal_extent()
+        else:
+            return ()
+
     def get_dataset_data(
         self,
         uuid: str,

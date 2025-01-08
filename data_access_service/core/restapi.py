@@ -220,6 +220,15 @@ def has_data(uuid):
     result = str(app.api.has_data(uuid, start_date, end_date)).lower()
     return Response(result, mimetype="application/json")
 
+@restapi.route("/data/<string:uuid>/temporal_extent", methods=["GET"])
+def get_temporal_extent(uuid):
+    temp: (datetime, datetime) = app.api.get_temporal_extent(uuid)
+    result = {
+        "start": temp[0].strftime(DATE_FORMAT),
+        "end": temp[1].strftime(DATE_FORMAT)
+    }
+    return Response(json.dumps(result), mimetype="application/json")
+
 
 @restapi.route("/data/<string:uuid>", methods=["GET"])
 def get_data(uuid):
