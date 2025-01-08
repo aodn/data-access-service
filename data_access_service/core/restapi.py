@@ -224,8 +224,8 @@ def has_data(uuid):
 def get_temporal_extent(uuid):
     temp: (datetime, datetime) = app.api.get_temporal_extent(uuid)
     result = [{
-        "start": temp[0].strftime(DATE_FORMAT),
-        "end": temp[1].strftime(DATE_FORMAT)
+        "start_date": temp[0].strftime(DATE_FORMAT),
+        "end_date": temp[1].strftime(DATE_FORMAT)
     }]
     return Response(json.dumps(result), mimetype="application/json")
 
