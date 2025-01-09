@@ -26,7 +26,7 @@ restapi = Blueprint("restapi", __name__)
 log = logging.getLogger(__name__)
 
 RECORD_PER_PARTITION: Optional[int] = 1000
-DATE_FORMAT = "%Y-%m-%d %H:%M:%S%z"
+DATE_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 MIN_DATE = "1970-01-01T00:00:00Z"
 
 # Make all non-numeric and str field to str so that json do not throw serializable error
