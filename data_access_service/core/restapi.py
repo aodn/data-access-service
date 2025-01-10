@@ -29,6 +29,7 @@ RECORD_PER_PARTITION: Optional[int] = 1000
 DATE_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 MIN_DATE = "1970-01-01T00:00:00Z"
 
+
 # Make all non-numeric and str field to str so that json do not throw serializable error
 def convert_non_numeric_to_str(df):
     def convert_value(value):
@@ -131,6 +132,7 @@ def _verify_to_index_flag_param(flag: str) -> bool:
     else:
         return False
 
+
 def _response_json(filtered: DataFrame, compress: bool):
     ddf: dask.dataframe.DataFrame = dd.from_pandas(
         filtered, npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1
@@ -212,21 +214,25 @@ def has_data(uuid):
         "start_date", request.args.get("start_date", default=MIN_DATE)
     )
     end_date = _verify_datatime_param(
-        "end_date", request.args.get(
+        "end_date",
+        request.args.get(
             "end_date",
-            default=datetime.datetime.now(datetime.timezone.utc).strftime(DATE_FORMAT)
-        )
+            default=datetime.datetime.now(datetime.timezone.utc).strftime(DATE_FORMAT),
+        ),
     )
     result = str(app.api.has_data(uuid, start_date, end_date)).lower()
     return Response(result, mimetype="application/json")
 
+
 @restapi.route("/data/<string:uuid>/temporal_extent", methods=["GET"])
 def get_temporal_extent(uuid):
     temp: (datetime, datetime) = app.api.get_temporal_extent(uuid)
-    result = [{
-        "start_date": temp[0].strftime(DATE_FORMAT),
-        "end_date": temp[1].strftime(DATE_FORMAT)
-    }]
+    result = [
+        {
+            "start_date": temp[0].strftime(DATE_FORMAT),
+            "end_date": temp[1].strftime(DATE_FORMAT),
+        }
+    ]
     return Response(json.dumps(result), mimetype="application/json")
 
 
@@ -237,10 +243,11 @@ def get_data(uuid):
         "start_date", request.args.get("start_date", default=MIN_DATE)
     )
     end_date = _verify_datatime_param(
-        "end_date", request.args.get(
+        "end_date",
+        request.args.get(
             "end_date",
-            default=datetime.datetime.now(datetime.timezone.utc).strftime(DATE_FORMAT)
-        )
+            default=datetime.datetime.now(datetime.timezone.utc).strftime(DATE_FORMAT),
+        ),
     )
     result: Optional[pd.DataFrame] = app.api.get_dataset_data(
         uuid=uuid, date_start=start_date, date_end=end_date

@@ -77,9 +77,11 @@ class API:
             return value
         else:
             return None
+
     """
     Given a time range, we find if this uuid temporal cover the whole range
     """
+
     def has_data(self, uuid: str, start_date: datetime, end_date: datetime):
         md: Descriptor = self._cached.get(uuid)
         if md is not None:
