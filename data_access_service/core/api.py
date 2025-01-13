@@ -137,7 +137,7 @@ class API:
                 lon_min,
                 lon_max,
                 scalar_filter,
-                columns
+                columns,
             )
         else:
             return None
