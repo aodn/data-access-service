@@ -108,6 +108,7 @@ class API:
         lon_min=None,
         lon_max=None,
         scalar_filter=None,
+        columns=None,
     ) -> Optional[pd.DataFrame]:
         md: Descriptor = self._cached.get(uuid)
 
@@ -129,7 +130,14 @@ class API:
                 date_end = date_end.astimezone(timezone.utc).replace(tzinfo=None)
 
             return ds.get_data(
-                date_start, date_end, lat_min, lat_max, lon_min, lon_max, scalar_filter
+                date_start,
+                date_end,
+                lat_min,
+                lat_max,
+                lon_min,
+                lon_max,
+                scalar_filter,
+                columns
             )
         else:
             return None

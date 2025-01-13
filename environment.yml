@@ -6,4 +6,4 @@ dependencies:
   - python=3.10.14
   - pip<24.1
   - pip:
-      - poetry
+      - poetry==1.8.4

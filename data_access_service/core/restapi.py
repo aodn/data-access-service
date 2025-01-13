@@ -249,8 +249,13 @@ def get_data(uuid):
             default=datetime.datetime.now(datetime.timezone.utc).strftime(DATE_FORMAT),
         ),
     )
+    columns=request.args.getlist("columns") or None
+
     result: Optional[pd.DataFrame] = app.api.get_dataset_data(
-        uuid=uuid, date_start=start_date, date_end=end_date
+        uuid=uuid,
+        date_start=start_date,
+        date_end=end_date,
+        columns=columns
     )
 
     start_depth = _verify_depth_param(
