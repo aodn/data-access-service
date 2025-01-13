@@ -26,6 +26,8 @@ restapi = Blueprint("restapi", __name__)
 log = logging.getLogger(__name__)
 
 RECORD_PER_PARTITION: Optional[int] = 1000
+DATE_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
+MIN_DATE = "1970-01-01T00:00:00Z"
 
 
 # Make all non-numeric and str field to str so that json do not throw serializable error
@@ -206,54 +208,73 @@ def get_raw_metadata(uuid):
     return app.api.get_raw_meta_data(uuid)
 
 
-@restapi.route("data/<string:uuid>/has_data", methods=["GET"])
-def data_check(uuid):
+@restapi.route("/data/<string:uuid>/has_data", methods=["GET"])
+def has_data(uuid):
     start_date = _verify_datatime_param(
-        "start_date", request.args.get("start_date", default=None, type=str)
+        "start_date", request.args.get("start_date", default=MIN_DATE)
     )
     end_date = _verify_datatime_param(
-        "end_date", request.args.get("end_date", default=None, type=str)
+        "end_date",
+        request.args.get(
+            "end_date",
+            default=datetime.datetime.now(datetime.timezone.utc).strftime(DATE_FORMAT),
+        ),
     )
-    has_data = str(app.api.has_data(uuid, start_date, end_date)).lower()
-    return Response(has_data, mimetype="application/json")
+    result = str(app.api.has_data(uuid, start_date, end_date)).lower()
+    return Response(result, mimetype="application/json")
+
+
+@restapi.route("/data/<string:uuid>/temporal_extent", methods=["GET"])
+def get_temporal_extent(uuid):
+    temp: (datetime, datetime) = app.api.get_temporal_extent(uuid)
+    result = [
+        {
+            "start_date": temp[0].strftime(DATE_FORMAT),
+            "end_date": temp[1].strftime(DATE_FORMAT),
+        }
+    ]
+    return Response(json.dumps(result), mimetype="application/json")
 
 
 @restapi.route("/data/<string:uuid>", methods=["GET"])
 def get_data(uuid):
     log.info("Request details: %s", json.dumps(request.args.to_dict(), indent=2))
     start_date = _verify_datatime_param(
-        "start_date", request.args.get("start_date", default=None, type=str)
+        "start_date", request.args.get("start_date", default=MIN_DATE)
     )
     end_date = _verify_datatime_param(
-        "end_date", request.args.get("end_date", default=None, type=str)
+        "end_date",
+        request.args.get(
+            "end_date",
+            default=datetime.datetime.now(datetime.timezone.utc).strftime(DATE_FORMAT),
+        ),
     )
-
     result: Optional[pd.DataFrame] = app.api.get_dataset_data(
         uuid=uuid, date_start=start_date, date_end=end_date
     )
 
     start_depth = _verify_depth_param(
-        "start_depth", request.args.get("start_depth", default=None, type=numpy.double)
+        "start_depth", numpy.double(request.args.get("start_depth", default=-1.0))
     )
     end_depth = _verify_depth_param(
-        "end_depth", request.args.get("end_depth", default=None, type=numpy.double)
+        "end_depth", numpy.double(request.args.get("end_depth", default=-1.0))
     )
 
     is_to_index = _verify_to_index_flag_param(
-        request.args.get("is_to_index", default=None, type=str)
+        request.args.get("is_to_index", default=None)
     )
 
     # The cloud optimized format is fast to lookup if there is an index, some field isn't part of the
     # index and therefore will not gain to filter by those field, indexed fields are site_code, timestamp, polygon
 
     # Depth is below sea level zero, so logic slightly diff
-    if start_depth is not None and end_depth is not None:
+    if start_depth > 0 and end_depth > 0:
         filtered = result[
             (result["DEPTH"] <= start_depth) & (result["DEPTH"] >= end_depth)
         ]
-    elif start_depth is not None:
+    elif start_depth > 0:
         filtered = result[(result["DEPTH"] <= start_depth)]
-    elif end_depth is not None:
+    elif end_depth > 0:
         filtered = result[result["DEPTH"] >= end_depth]
     else:
         filtered = result
