@@ -238,7 +238,7 @@ def get_temporal_extent(uuid):
 
 @restapi.route("/data/<string:uuid>", methods=["GET"])
 def get_data(uuid):
-    log.info("Request details: %s", json.dumps(request.args.to_dict(), indent=2))
+    log.info("Request details: %s", json.dumps(request.args.to_dict(flat=False), indent=2))
     start_date = _verify_datatime_param(
         "start_date", request.args.get("start_date", default=MIN_DATE)
     )
