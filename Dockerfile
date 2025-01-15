@@ -13,7 +13,7 @@ RUN apt update && \
     pip3 install poetry && \
     poetry config virtualenvs.create false && \
     poetry lock && \
-    poetry install
+    poetry install --no-root
 
 
 COPY . /app
