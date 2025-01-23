@@ -4,7 +4,9 @@ from data_access_service import API
 from data_access_service.config.config import load_config
 
 
-def generate_csv_data_file(uuid, start_date, end_date, min_lat, max_lat, min_lon, max_lon):
+def generate_csv_data_file(
+    uuid, start_date, end_date, min_lat, max_lat, min_lon, max_lon
+):
 
     config = load_config()
 
@@ -23,7 +25,6 @@ def generate_csv_data_file(uuid, start_date, end_date, min_lat, max_lat, min_lon
         min_lon = "debug-min-lon"
     if max_lon is None:
         max_lon = "debug-max-lon"
-
 
     if None in [uuid, start_date, end_date]:
         raise ValueError("One or more required arguments are None")
@@ -58,6 +59,7 @@ def generate_csv_data_file(uuid, start_date, end_date, min_lat, max_lat, min_lon
         print("The file was not found")
 
     return "aaa"
+
 
 def another_function():
     return "bbb"
