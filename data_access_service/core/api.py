@@ -118,6 +118,13 @@ class API:
             # Default get 10 days of data
             if date_start is None:
                 date_start = datetime.now(timezone.utc) - timedelta(days=10)
+            else:
+                date_start = pd.to_datetime(date_start)
+
+            if date_end is None:
+                date_end = datetime.now(timezone.utc)
+            else:
+                date_end = pd.to_datetime(date_end)
 
             # The get_data call the pyarrow and compare only works with non timezone datetime
             # now make sure the timezone is correctly convert to utc then remove it.
