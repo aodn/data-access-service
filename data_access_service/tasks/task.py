@@ -5,6 +5,7 @@ from data_access_service.core.AWSClient import AWSClient
 
 log = logging.getLogger(__name__)
 
+
 def process_csv_data_file(
     uuid, start_date, end_date, min_lat, max_lat, min_lon, max_lon
 ):
@@ -31,7 +32,9 @@ def process_csv_data_file(
 
     log.info("start " + uuid)
 
-    csv_file_path = _generate_csv_file(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid)
+    csv_file_path = _generate_csv_file(
+        end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid
+    )
 
     s3_path = f"{uuid}/{csv_file_path}"
 
@@ -39,10 +42,11 @@ def process_csv_data_file(
     aws.upload_data_file_to_s3(csv_file_path, s3_path)
 
 
-
 def _generate_csv_file(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid):
 
-    data_frame = _query_data(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid)
+    data_frame = _query_data(
+        end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid
+    )
 
     csv_file_path = f"lat:{min_lat}~{max_lat}_lon:{min_lon}~{max_lon}_date:{start_date}~{end_date}.csv"
     data_frame.to_csv(csv_file_path, index=False)
@@ -67,4 +71,3 @@ def _query_data(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid):
     if data_frame is None or data_frame.empty:
         raise ValueError("No data found for the given parameters")
     return data_frame
-

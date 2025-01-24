@@ -14,12 +14,14 @@ from data_access_service.core.api import API
 
 app = Flask(__name__)
 
+
 def init_log(log_level: str):
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+
 
 def create_app():
     # Load configuration

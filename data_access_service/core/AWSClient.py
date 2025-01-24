@@ -4,6 +4,7 @@ from data_access_service.config.config import load_config
 
 log = logging.getLogger(__name__)
 
+
 class AWSClient:
     def __init__(self):
         log.info("Init AWS class")
