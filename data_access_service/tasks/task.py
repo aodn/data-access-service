@@ -1,6 +1,6 @@
 import logging
 
-from data_access_service import API
+from data_access_service import API, init_log
 from data_access_service.core.AWSClient import AWSClient
 
 log = logging.getLogger(__name__)
@@ -8,6 +8,7 @@ log = logging.getLogger(__name__)
 def process_csv_data_file(
     uuid, start_date, end_date, min_lat, max_lat, min_lon, max_lon
 ):
+    init_log(logging.DEBUG)
 
     # for debug usage. just keep it for several days
     if uuid is None:

@@ -1,11 +1,12 @@
 import boto3
-
+import logging
 from data_access_service.config.config import load_config
 
+log = logging.getLogger(__name__)
 
 class AWSClient:
     def __init__(self):
-        print("Init AWS class")
+        log.info("Init AWS class")
         self.s3 = boto3.client("s3")
         self.config = load_config()
 
@@ -14,7 +15,7 @@ class AWSClient:
 
         try:
             self.s3.upload_file(file_path, bucket_name, s3_path)
-            print(f"File uploaded to s3://{bucket_name}/{s3_path}")
+            log.info(f"File uploaded to s3://{bucket_name}/{s3_path}")
         except Exception as e:
-            print(f"Error uploading file to s3://{bucket_name}/{s3_path}: {e}")
+            log.info(f"Error uploading file to s3://{bucket_name}/{s3_path}: {e}")
             raise e
