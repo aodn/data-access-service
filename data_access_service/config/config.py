@@ -35,7 +35,7 @@ class ProdConfig(Config):
     LOGLEVEL = logging.INFO
 
 
-def load_config(file_path="config.yaml"):
+def load_config(file_path="data_access_service/config/config.yaml"):
     with open(file_path, "r") as file:
         config = yaml.safe_load(file)
     return config

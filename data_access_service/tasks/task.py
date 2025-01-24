@@ -1,14 +1,13 @@
-import boto3
+import logging
 
 from data_access_service import API
-from data_access_service.config.config import load_config
+from data_access_service.core.AWSClient import AWSClient
 
+log = logging.getLogger(__name__)
 
-def generate_csv_data_file(
+def process_csv_data_file(
     uuid, start_date, end_date, min_lat, max_lat, min_lon, max_lon
 ):
-
-    config = load_config()
 
     # for debug usage. just keep it for several days
     if uuid is None:
@@ -29,7 +28,29 @@ def generate_csv_data_file(
     if None in [uuid, start_date, end_date]:
         raise ValueError("One or more required arguments are None")
 
-    print("start " + uuid)
+    log.info("start " + uuid)
+
+    csv_file_path = _generate_csv_file(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid)
+
+    s3_path = f"{uuid}/{csv_file_path}"
+
+    aws = AWSClient()
+    aws.upload_data_file_to_s3(csv_file_path, s3_path)
+
+    return "succeeded"
+
+
+def _generate_csv_file(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid):
+
+    data_frame = _query_data(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid)
+
+    csv_file_path = f"lat:{min_lat}~{max_lat}_lon:{min_lon}~{max_lon}_date:{start_date}~{end_date}.csv"
+    data_frame.to_csv(csv_file_path, index=False)
+
+    return csv_file_path
+
+
+def _query_data(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid):
 
     api = API()
 
@@ -45,21 +66,5 @@ def generate_csv_data_file(
 
     if data_frame is None or data_frame.empty:
         raise ValueError("No data found for the given parameters")
+    return data_frame
 
-    csv_file_path = f"lat:{min_lat}~{max_lat}_lon:{min_lon}~{max_lon}_date:{start_date}~{end_date}.csv"
-    data_frame.to_csv(csv_file_path, index=False)
-
-    s3 = boto3.client("s3")
-    bucket_name = config["aws"]["s3"]["bucket_name"]["csv"]
-    s3_path = f"{uuid}/{csv_file_path}"
-    try:
-        s3.upload_file(csv_file_path, bucket_name, s3_path)
-        print(f"File uploaded to s3://{bucket_name}/{s3_path}")
-    except FileNotFoundError:
-        print("The file was not found")
-
-    return "aaa"
-
-
-def another_function():
-    return "bbb"
