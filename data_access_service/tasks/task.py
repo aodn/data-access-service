@@ -17,13 +17,13 @@ def process_csv_data_file(
     if end_date is None:
         end_date = "debug-end-date"
     if min_lat is None:
-        min_lat = "debug-min-lat"
+        min_lat = "-90"
     if max_lat is None:
-        max_lat = "debug-max-lat"
+        max_lat = "90"
     if min_lon is None:
-        min_lon = "debug-min-lon"
+        min_lon = "-180"
     if max_lon is None:
-        max_lon = "debug-max-lon"
+        max_lon = "180"
 
     if None in [uuid, start_date, end_date]:
         raise ValueError("One or more required arguments are None")
@@ -37,7 +37,6 @@ def process_csv_data_file(
     aws = AWSClient()
     aws.upload_data_file_to_s3(csv_file_path, s3_path)
 
-    return "succeeded"
 
 
 def _generate_csv_file(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid):
