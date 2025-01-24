@@ -11,7 +11,7 @@ import numpy
 import pandas as pd
 
 from typing import Optional
-from dask.dataframe import dd
+from dask.dataframe import DataFrame as dd
 from flask import Blueprint, request, abort, Response, send_file
 from dateutil import parser
 from http import HTTPStatus

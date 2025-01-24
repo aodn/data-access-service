@@ -6,6 +6,7 @@ authors = ["utas-raymondng <manfai.ng@utas.edu.au>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
+boto3 = "^1.28.0"
 pre-commit = "^3.8.0"
 flask = "^3.0.3"
 dask = {extras = ["dataframe"], version = ">=2024.9.1"}

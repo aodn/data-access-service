@@ -15,6 +15,14 @@ from data_access_service.core.api import API
 app = Flask(__name__)
 
 
+def init_log(log_level: str):
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+
 def create_app():
     # Load configuration
     profile = EnvType(os.getenv("PROFILE", EnvType.DEV))
@@ -28,11 +36,7 @@ def create_app():
     else:
         app.config.from_object(DevConfig)
 
-    logging.basicConfig(
-        level=app.config["LOGLEVEL"],
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    init_log(app.config["LOGLEVEL"])
 
     logging.info(f"Environment profile is {profile}")
 
