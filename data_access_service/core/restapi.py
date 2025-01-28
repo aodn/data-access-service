@@ -210,7 +210,11 @@ def get_raw_metadata(uuid: str):
 
 @restapi.route("/data/<string:uuid>/notebook_url", methods=["GET"])
 def get_notebook_url(uuid: str):
-    return app.api.get_notebook_from(uuid)
+    i = app.api.get_notebook_from(uuid)
+    if isinstance(i, ValueError):
+        abort(404)
+    else:
+        return i
 
 
 @restapi.route("/data/<string:uuid>/has_data", methods=["GET"])
