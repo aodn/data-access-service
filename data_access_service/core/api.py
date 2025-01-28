@@ -6,6 +6,7 @@ from datetime import timedelta, datetime, timezone
 from io import BytesIO
 from typing import Optional
 from aodn_cloud_optimised import DataQuery
+from aodn_cloud_optimised.lib.config import get_notebook_url
 from data_access_service.core.descriptor import Depth, Descriptor
 
 log = logging.getLogger(__name__)
@@ -101,8 +102,8 @@ class API:
     def get_dataset_data(
         self,
         uuid: str,
-        date_start=None,
-        date_end=None,
+        date_start: datetime = None,
+        date_end: datetime = None,
         lat_min=None,
         lat_max=None,
         lon_min=None,
@@ -148,3 +149,6 @@ class API:
             )
         else:
             return None
+
+    def get_notebook_from(self, uuid: str) -> str:
+        return get_notebook_url(uuid)
