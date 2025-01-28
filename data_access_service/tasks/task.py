@@ -30,7 +30,14 @@ def process_csv_data_file(
     if None in [uuid, start_date, end_date]:
         raise ValueError("One or more required arguments are None")
 
+    aws = AWSClient()
     log.info("start " + uuid)
+
+    recipient = "huaizhi.dai@utas.edu.au"
+    subject = "start " + uuid
+    content = "already start processing" + uuid + ". Please wait for the result. After the process is done, you will receive another email."
+
+    aws.send_email(recipient, subject, content)
 
     csv_file_path = _generate_csv_file(
         end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid
@@ -38,8 +45,8 @@ def process_csv_data_file(
 
     s3_path = f"{uuid}/{csv_file_path}"
 
-    aws = AWSClient()
     aws.upload_data_file_to_s3(csv_file_path, s3_path)
+    aws.send_email(recipient, "finish " + uuid, "The result is ready. You can download it")
 
 
 def _generate_csv_file(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid):

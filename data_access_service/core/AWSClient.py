@@ -9,6 +9,7 @@ class AWSClient:
     def __init__(self):
         log.info("Init AWS class")
         self.s3 = boto3.client("s3")
+        self.ses = boto3.client("ses")
         self.config = load_config()
 
     def upload_data_file_to_s3(self, file_path, s3_path):
@@ -19,4 +20,29 @@ class AWSClient:
             log.info(f"File uploaded to s3://{bucket_name}/{s3_path}")
         except Exception as e:
             log.info(f"Error uploading file to s3://{bucket_name}/{s3_path}: {e}")
+            raise e
+
+    def send_email(self, recipient, subject, body_text):
+        sender = self.config["aws"]["ses"]["sender_email"]
+
+        try:
+            response = self.ses.send_email(
+                Source=sender,
+                Destination={
+                    'ToAddresses': [recipient]
+                },
+                Message={
+                    'Subject': {
+                        'Data': subject
+                    },
+                    'Body': {
+                        'Text': {
+                            'Data': body_text
+                        }
+                    }
+                }
+            )
+            log.info(f"Email sent to {recipient} with message ID: {response['MessageId']}")
+        except Exception as e:
+            log.info(f"Error sending email to {recipient}: {e}")
             raise e
