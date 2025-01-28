@@ -207,9 +207,11 @@ def get_mapped_metadata(uuid):
 def get_raw_metadata(uuid: str):
     return app.api.get_raw_meta_data(uuid)
 
+
 @restapi.route("/data/<string:uuid>/notebook_url", methods=["GET"])
 def get_notebook_url(uuid: str):
     return app.api.get_notebook_from(uuid)
+
 
 @restapi.route("/data/<string:uuid>/has_data", methods=["GET"])
 def has_data(uuid):

@@ -102,8 +102,8 @@ class API:
     def get_dataset_data(
         self,
         uuid: str,
-        date_start: datetime=None,
-        date_end: datetime=None,
+        date_start: datetime = None,
+        date_end: datetime = None,
         lat_min=None,
         lat_max=None,
         lon_min=None,
