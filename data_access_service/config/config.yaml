@@ -3,3 +3,6 @@ aws:
     bucket_name:
       #      csv: data-file-csv
       csv: havier-example-bucket
+
+  ses:
+    sender_email: huaizhi.dai@utas.edu.au
