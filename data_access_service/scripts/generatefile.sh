@@ -4,7 +4,7 @@ poetry install
 
 poetry run python -c "
 import os
-from data_access_service.tasks.task import process_csv_data_file
+from data_access_service.tasks.generate_csv_file import process_csv_data_file
 
 uuid = os.getenv('UUID')
 start_time = os.getenv('START_DATE')

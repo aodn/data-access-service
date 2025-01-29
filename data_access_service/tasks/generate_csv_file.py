@@ -2,6 +2,8 @@ import logging
 
 from data_access_service import API, init_log
 from data_access_service.core.AWSClient import AWSClient
+from data_access_service.tasks.email_generator import generate_started_email_subject, generate_started_email_content, \
+    generate_completed_email_subject, generate_completed_email_content
 
 log = logging.getLogger(__name__)
 
@@ -33,11 +35,21 @@ def process_csv_data_file(
     aws = AWSClient()
     log.info("start " + uuid)
 
-    recipient = "huaizhi.dai@utas.edu.au"
-    subject = "start " + uuid
-    content = "already start processing" + uuid + ". Please wait for the result. After the process is done, you will receive another email."
+    # generate a condition list including all existing conditions
+    conditions = [
+        ("start date", start_date),
+        ("end date", end_date),
+        ("min latitude", min_lat),
+        ("max latitude", max_lat),
+        ("min longitude", min_lon),
+        ("max longitude", max_lon),
+    ]
 
-    aws.send_email(recipient, subject, content)
+    recipient = "huaizhi.dai@utas.edu.au"
+    startingSubject = generate_started_email_subject(uuid)
+    startingContent = generate_started_email_content(uuid, conditions)
+
+    aws.send_email(recipient, startingSubject, startingContent)
 
     csv_file_path = _generate_csv_file(
         end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid
@@ -46,7 +58,9 @@ def process_csv_data_file(
     s3_path = f"{uuid}/{csv_file_path}"
 
     object_url = aws.upload_data_file_to_s3(csv_file_path, s3_path)
-    aws.send_email(recipient, "finish " + uuid, "The result is ready. You can download it. The download link is: " + object_url)
+    finishingSubject = generate_completed_email_subject(uuid)
+    finishingContent = generate_completed_email_content(uuid, conditions, object_url)
+    aws.send_email(recipient, finishingSubject, finishingContent)
 
 
 def _generate_csv_file(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid):
