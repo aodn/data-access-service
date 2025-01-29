@@ -45,8 +45,8 @@ def process_csv_data_file(
 
     s3_path = f"{uuid}/{csv_file_path}"
 
-    aws.upload_data_file_to_s3(csv_file_path, s3_path)
-    aws.send_email(recipient, "finish " + uuid, "The result is ready. You can download it")
+    object_url = aws.upload_data_file_to_s3(csv_file_path, s3_path)
+    aws.send_email(recipient, "finish " + uuid, "The result is ready. You can download it. The download link is: " + object_url)
 
 
 def _generate_csv_file(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid):
