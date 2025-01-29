@@ -53,7 +53,14 @@ class TestGenerateCSVFile(unittest.TestCase):
 
         # Call the function to test
         process_csv_data_file(
-            "12345", "2023-01-01", "2023-01-31", "-90", "90", "-180", "180", "example@aodn.org.au"
+            "12345",
+            "2023-01-01",
+            "2023-01-31",
+            "-90",
+            "90",
+            "-180",
+            "180",
+            "example@aodn.org.au",
         )
 
         # Assertions
