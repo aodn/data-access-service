@@ -13,7 +13,7 @@ log = logging.getLogger(__name__)
 
 
 def process_csv_data_file(
-    uuid, start_date, end_date, min_lat, max_lat, min_lon, max_lon
+    uuid, start_date, end_date, min_lat, max_lat, min_lon, max_lon, recipient
 ):
     init_log(logging.DEBUG)
 
@@ -49,7 +49,6 @@ def process_csv_data_file(
         ("max longitude", max_lon),
     ]
 
-    recipient = "huaizhi.dai@utas.edu.au"
     startingSubject = generate_started_email_subject(uuid)
     startingContent = generate_started_email_content(uuid, conditions)
 
