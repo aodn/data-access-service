@@ -2,12 +2,18 @@ import logging
 
 from data_access_service import API, init_log
 from data_access_service.core.AWSClient import AWSClient
+from data_access_service.tasks.email_generator import (
+    generate_started_email_subject,
+    generate_started_email_content,
+    generate_completed_email_subject,
+    generate_completed_email_content,
+)
 
 log = logging.getLogger(__name__)
 
 
 def process_csv_data_file(
-    uuid, start_date, end_date, min_lat, max_lat, min_lon, max_lon
+    uuid, start_date, end_date, min_lat, max_lat, min_lon, max_lon, recipient
 ):
     init_log(logging.DEBUG)
 
@@ -30,7 +36,23 @@ def process_csv_data_file(
     if None in [uuid, start_date, end_date]:
         raise ValueError("One or more required arguments are None")
 
+    aws = AWSClient()
     log.info("start " + uuid)
+
+    # generate a condition list including all existing conditions
+    conditions = [
+        ("start date", start_date),
+        ("end date", end_date),
+        ("min latitude", min_lat),
+        ("max latitude", max_lat),
+        ("min longitude", min_lon),
+        ("max longitude", max_lon),
+    ]
+
+    startingSubject = generate_started_email_subject(uuid)
+    startingContent = generate_started_email_content(uuid, conditions)
+
+    aws.send_email(recipient, startingSubject, startingContent)
 
     csv_file_path = _generate_csv_file(
         end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid
@@ -38,8 +60,10 @@ def process_csv_data_file(
 
     s3_path = f"{uuid}/{csv_file_path}"
 
-    aws = AWSClient()
-    aws.upload_data_file_to_s3(csv_file_path, s3_path)
+    object_url = aws.upload_data_file_to_s3(csv_file_path, s3_path)
+    finishingSubject = generate_completed_email_subject(uuid)
+    finishingContent = generate_completed_email_content(uuid, conditions, object_url)
+    aws.send_email(recipient, finishingSubject, finishingContent)
 
 
 def _generate_csv_file(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid):

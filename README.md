@@ -133,3 +133,17 @@ PROFILE=edge
 | Formatted metadata | /api/v1/das/metadata/{uuid}  | none                                                                                                                                                                                        | ALL                                                                                                                                                   |
 | Raw metadata       | /api/v1/das/metadata/{uuid}/raw | none                                                                                                                                                                                        | ALL                                                                                                                                                   |
 | Subsetting         | /api/v1/das/data/{uuid} | start_date=2023-12-25T14:30:00, end_date=2024-02-25T14:30:00, start_depth=-0.06, f=netcdf or json, columns=TIME&columns=DEPTH&columns=LONGITUDE&columns=LATITUDE (array of column return), is_to_index=true | ALL |
+
+
+### Running Tests
+
+To run the tests for the project:
+```shell
+poetry run python -m unittest discover
+```
+This will discover and run all the test cases in your project.
+
+If you have "ModuleNotFoundError" or similar issues, you may need to install dependencies before running the tests:
+```shell
+poetry install
+```
