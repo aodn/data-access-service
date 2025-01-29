@@ -3,6 +3,5 @@ aws:
     bucket_name:
       #      csv: data-file-csv
       csv: havier-example-bucket
-
   ses:
     sender_email: no.reply@aodn.org.au

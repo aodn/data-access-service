@@ -16,7 +16,6 @@ class AWSClient:
         bucket_name = self.config["aws"]["s3"]["bucket_name"]["csv"]
         region = self.s3.meta.region_name
 
-
         try:
             self.s3.upload_file(file_path, bucket_name, s3_path)
             log.info(f"File uploaded to s3://{bucket_name}/{s3_path}")
@@ -32,21 +31,15 @@ class AWSClient:
         try:
             response = self.ses.send_email(
                 Source=sender,
-                Destination={
-                    'ToAddresses': [recipient]
-                },
+                Destination={"ToAddresses": [recipient]},
                 Message={
-                    'Subject': {
-                        'Data': subject
-                    },
-                    'Body': {
-                        'Text': {
-                            'Data': body_text
-                        }
-                    }
-                }
+                    "Subject": {"Data": subject},
+                    "Body": {"Text": {"Data": body_text}},
+                },
             )
-            log.info(f"Email sent to {recipient} with message ID: {response['MessageId']}")
+            log.info(
+                f"Email sent to {recipient} with message ID: {response['MessageId']}"
+            )
         except Exception as e:
             log.info(f"Error sending email to {recipient}: {e}")
             raise e

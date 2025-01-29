@@ -2,8 +2,12 @@ import logging
 
 from data_access_service import API, init_log
 from data_access_service.core.AWSClient import AWSClient
-from data_access_service.tasks.email_generator import generate_started_email_subject, generate_started_email_content, \
-    generate_completed_email_subject, generate_completed_email_content
+from data_access_service.tasks.email_generator import (
+    generate_started_email_subject,
+    generate_started_email_content,
+    generate_completed_email_subject,
+    generate_completed_email_content,
+)
 
 log = logging.getLogger(__name__)
 
