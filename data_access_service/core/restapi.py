@@ -9,9 +9,9 @@ import dask.dataframe
 import xarray as xr
 import numpy
 import pandas as pd
+import dask.dataframe as dd
 
 from typing import Optional
-from dask.dataframe import DataFrame as dd
 from flask import Blueprint, request, abort, Response, send_file
 from dateutil import parser
 from http import HTTPStatus
