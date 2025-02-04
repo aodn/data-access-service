@@ -198,9 +198,13 @@ def health_check() -> Response:
     return Response("healthy", mimetype="application/json")
 
 
+@restapi.route("/metadata", methods=["GET"])
 @restapi.route("/metadata/<string:uuid>", methods=["GET"])
-def get_mapped_metadata(uuid):
-    return dataclasses.asdict(app.api.get_mapped_meta_data(uuid))
+def get_mapped_metadata(uuid=None):
+    if uuid is not None:
+        return dataclasses.asdict(app.api.get_mapped_meta_data(uuid))
+    else:
+        return list(app.api.get_mapped_meta_data(None))
 
 
 @restapi.route("/metadata/<string:uuid>/raw", methods=["GET"])
