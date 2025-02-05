@@ -4,11 +4,12 @@ from data_access_service import API
 
 import unittest
 import json
+import os
 
 
 class TestApi(unittest.TestCase):
     # Use this canned data as the metadata map
-    with open("./canned/catalog_uncached.json", "r") as file:
+    with open(os.getcwd() + "/tests/canned/catalog_uncached.json", "r") as file:
 
         @patch.object(
             DataQuery.Metadata,
