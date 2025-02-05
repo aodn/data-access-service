@@ -93,5 +93,5 @@ def _query_data(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid):
     )
 
     if data_frame is None or data_frame.empty:
-        raise ValueError("No data found for the given parameters")
+        raise ValueError(f"One or more required arguments are None: uuid={uuid}, start_date={start_date}, end_date={end_date}, min_lat={min_lat}, max_lat={max_lat}, min_lon={min_lon}, max_lon={max_lon}")
     return data_frame
