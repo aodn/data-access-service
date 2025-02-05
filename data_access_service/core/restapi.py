@@ -9,9 +9,9 @@ import dask.dataframe
 import xarray as xr
 import numpy
 import pandas as pd
+import dask.dataframe as dd
 
 from typing import Optional
-from dask.dataframe import DataFrame as dd
 from flask import Blueprint, request, abort, Response, send_file
 from dateutil import parser
 from http import HTTPStatus
@@ -198,14 +198,27 @@ def health_check() -> Response:
     return Response("healthy", mimetype="application/json")
 
 
+@restapi.route("/metadata", methods=["GET"])
 @restapi.route("/metadata/<string:uuid>", methods=["GET"])
-def get_mapped_metadata(uuid):
-    return dataclasses.asdict(app.api.get_mapped_meta_data(uuid))
+def get_mapped_metadata(uuid=None):
+    if uuid is not None:
+        return dataclasses.asdict(app.api.get_mapped_meta_data(uuid))
+    else:
+        return list(app.api.get_mapped_meta_data(None))
 
 
 @restapi.route("/metadata/<string:uuid>/raw", methods=["GET"])
-def get_raw_metadata(uuid):
+def get_raw_metadata(uuid: str):
     return app.api.get_raw_meta_data(uuid)
+
+
+@restapi.route("/data/<string:uuid>/notebook_url", methods=["GET"])
+def get_notebook_url(uuid: str):
+    i = app.api.get_notebook_from(uuid)
+    if isinstance(i, ValueError):
+        abort(404)
+    else:
+        return i
 
 
 @restapi.route("/data/<string:uuid>/has_data", methods=["GET"])
