@@ -109,7 +109,11 @@ class API:
         output = list()
         for column in columns:
             # You want TIME field but not in there, try map to something else
-            if column.casefold() == "TIME".casefold() and ("TIME" not in meta or "time" not in meta) and "timestamp" in meta:
+            if (
+                column.casefold() == "TIME".casefold()
+                and ("TIME" not in meta or "time" not in meta)
+                and "timestamp" in meta
+            ):
                 output.append("timestamp")
             else:
                 output.append(column)
@@ -126,7 +130,7 @@ class API:
         lon_min=None,
         lon_max=None,
         scalar_filter=None,
-        columns: list[str] =None,
+        columns: list[str] = None,
     ) -> Optional[pd.DataFrame]:
         md: Descriptor = self._cached.get(uuid)
 
