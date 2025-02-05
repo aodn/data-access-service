@@ -4,16 +4,31 @@ poetry install
 
 poetry run python -c "
 import os
+import boto3
+import json
 from data_access_service.tasks.generate_csv_file import process_csv_data_file
 
-uuid = os.getenv('UUID')
-start_time = os.getenv('START_DATE')
-end_time = os.getenv('END_DATE')
-min_lat = os.getenv('MIN_LAT')
-max_lat = os.getenv('MAX_LAT')
-min_lon = os.getenv('MIN_LON')
-max_lon = os.getenv('MAX_LON')
-recipient = os.getenv('RECIPIENT')
+# Initialize a boto3 client for AWS Batch
+client = boto3.client('batch')
 
-process_csv_data_file(uuid, start_time, end_time, min_lat, max_lat, min_lon, max_lon, recipient)
+# Get the job ID from the environment variable
+job_id = os.getenv('AWS_BATCH_JOB_ID')
+
+# Retrieve the job details
+response = client.describe_jobs(jobs=[job_id])
+job = response['jobs'][0]
+
+# Extract parameters from the job details
+parameters = job['parameters']
+
+# Parse the complex object from the parameters
+inputs = json.loads(parameters['inputs'])
+
+uuid = inputs['uuid']
+start_date = inputs['start_date']
+end_date = inputs['end_date']
+multi_polygon = inputs['multi_polygon']
+recipient = inputs['recipient']
+
+process_csv_data_file2(uuid, start_date, end_date, multi_polygon, recipient)
 "
