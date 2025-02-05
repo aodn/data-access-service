@@ -17,8 +17,13 @@ from data_access_service.tasks.email_generator import (
 
 log = logging.getLogger(__name__)
 
+
 def process_csv_data_file2(
-        uuid: str, start_date: str, end_date:str, multi_polygon: MultiPolygon, recipient: str
+    uuid: str,
+    start_date: str,
+    end_date: str,
+    multi_polygon: MultiPolygon,
+    recipient: str,
 ):
     init_log(logging.DEBUG)
     # log all params for testing
@@ -51,8 +56,6 @@ def process_csv_data_file2(
     #     if not is_rectangle(polygon):
     #         raise ValueError("Only rectangles are supported for current version")
     #     min_lon, min_lat, max_lon, max_lat = polygon.bounds
-
-
 
 
 def process_csv_data_file(
@@ -123,7 +126,10 @@ def _generate_csv_file(end_date, max_lat, max_lon, min_lat, min_lon, start_date,
 
     return csv_file_path
 
-def _generate_csv_file2(start_date: datetime, end_date:datetime, multi_polygon:MultiPolygon, uuid:str):
+
+def _generate_csv_file2(
+    start_date: datetime, end_date: datetime, multi_polygon: MultiPolygon, uuid: str
+):
 
     api = API()
     data_frame = None
@@ -131,7 +137,9 @@ def _generate_csv_file2(start_date: datetime, end_date:datetime, multi_polygon:M
     # TODO: currently, assume polygons are all rectangles. when cloud-optimized library is upgraded,
     #  we can change to use the polygon coordinates directly
     for polygon in multi_polygon.geoms:
-        log.info(f"Processing polygon with {len(polygon.exterior.coords)} exterior coordinates")
+        log.info(
+            f"Processing polygon with {len(polygon.exterior.coords)} exterior coordinates"
+        )
         if not is_rectangle(polygon):
             raise ValueError("Only rectangles are supported for current version")
         min_lon, min_lat, max_lon, max_lat = polygon.bounds
@@ -145,8 +153,6 @@ def _generate_csv_file2(start_date: datetime, end_date:datetime, multi_polygon:M
             lon_max=max_lon,
         )
         data_frame = pd.concat([data_frame, df], ignore_index=True)
-
-
 
 
 def _query_data(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid):
@@ -164,8 +170,11 @@ def _query_data(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid):
     )
 
     if data_frame is None or data_frame.empty:
-        raise ValueError(f"One or more required arguments are None: uuid={uuid}, start_date={start_date}, end_date={end_date}, min_lat={min_lat}, max_lat={max_lat}, min_lon={min_lon}, max_lon={max_lon}")
+        raise ValueError(
+            f"One or more required arguments are None: uuid={uuid}, start_date={start_date}, end_date={end_date}, min_lat={min_lat}, max_lat={max_lat}, min_lon={min_lon}, max_lon={max_lon}"
+        )
     return data_frame
+
 
 # TODO: please remove this function after the cloud-optimized library is upgraded to support non-rectangular polygons
 def is_rectangle(polygon: Polygon) -> bool:
@@ -180,6 +189,7 @@ def is_rectangle(polygon: Polygon) -> bool:
 
     return True
 
+
 # TODO: please remove this function after the cloud-optimized library is upgraded to support non-rectangular polygons
 def is_right_angle(p1, p2, p3) -> bool:
     # Check if the angle between p1-p2 and p2-p3 is 90 degrees
@@ -188,6 +198,7 @@ def is_right_angle(p1, p2, p3) -> bool:
     dot_product = dx1 * dx2 + dy1 * dy2
     return dot_product == 0
 
-def parse_date(date_string: str)-> datetime:
+
+def parse_date(date_string: str) -> datetime:
     parsed_date = parser.parse(date_string)
     return parsed_date.strftime("%Y-%m-%d")
