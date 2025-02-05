@@ -1,4 +1,6 @@
 import gzip
+import json
+
 import pandas as pd
 import logging
 
@@ -74,13 +76,13 @@ class API:
         else:
             return Descriptor(uuid=uuid)
 
-    def get_raw_meta_data(self, uuid: str):
+    def get_raw_meta_data(self, uuid: str) -> dict:
         value = self._raw.get(uuid)
 
         if value is not None:
             return value
         else:
-            return None
+            return dict()
 
     """
     Given a time range, we find if this uuid temporal cover the whole range
@@ -102,6 +104,18 @@ class API:
         else:
             return ()
 
+    def map_column_names(self, uuid: str, columns: list[str]) -> list[str]:
+        meta = self.get_raw_meta_data(uuid)
+        output = list()
+        for column in columns:
+            # You want TIME field but not in there, try map to something else
+            if column.casefold() == "TIME".casefold() and ("TIME" not in meta or "time" not in meta) and "timestamp" in meta:
+                output.append("timestamp")
+            else:
+                output.append(column)
+
+        return output
+
     def get_dataset_data(
         self,
         uuid: str,
@@ -112,7 +126,7 @@ class API:
         lon_min=None,
         lon_max=None,
         scalar_filter=None,
-        columns=None,
+        columns: list[str] =None,
     ) -> Optional[pd.DataFrame]:
         md: Descriptor = self._cached.get(uuid)
 
@@ -148,7 +162,7 @@ class API:
                 lon_min,
                 lon_max,
                 scalar_filter,
-                columns,
+                self.map_column_names(uuid, columns),
             )
         else:
             return None
