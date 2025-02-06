@@ -63,9 +63,16 @@ def _generate_partial_json_array(dask, compress: bool = False):
         partition_df = convert_non_numeric_to_str(partition.compute())
         for record in partition_df.to_dict(orient="records"):
             filtered_record = {}
-            #  may need to add more field here
+            # Time field is special, there is no stand name and appear diff in raw data,
+            # here we unify it and call it time
             if "TIME" in record:
                 filtered_record["time"] = _reformat_date(record["TIME"])
+            elif "JULD" in record:
+                filtered_record["time"] = _reformat_date(record["JULD"])
+            elif "timestamp" in record:
+                filtered_record["time"] = _reformat_date(record["timestamp"])
+
+            #  may need to add more field here
             if "LONGITUDE" in record:
                 filtered_record["longitude"] = _round_5_decimal(record["LONGITUDE"])
             if "LATITUDE" in record:
