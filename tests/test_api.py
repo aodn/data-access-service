@@ -10,7 +10,6 @@ import os
 class TestApi(unittest.TestCase):
     # Use this canned data as the metadata map
     with open(os.getcwd() + "/tests/canned/catalog_uncached.json", "r") as file:
-
         @patch.object(
             DataQuery.Metadata,
             "metadata_catalog_uncached",
@@ -56,6 +55,9 @@ class TestApi(unittest.TestCase):
                 col, ["JULD", "DEPTH", "LATITUDE", "LONGITUDE"], "TIME mapped"
             )
 
+    def test_generate_partial_json_array(self):
+        # TODO: Need test this
+        pass
 
 if __name__ == "__main__":
     unittest.main()
