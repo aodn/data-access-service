@@ -58,7 +58,7 @@ class API:
                 log.info("Adding uuid " + uuid + " name " + key)
                 self._raw[uuid] = data
                 self._cached[uuid] = Descriptor(
-                    uuid=uuid,dname=key, depth=_extract_depth(data)
+                    uuid=uuid, dname=key, depth=_extract_depth(data)
                 )
             else:
                 log.error("Data not found for dataset " + key)
@@ -102,7 +102,9 @@ class API:
         else:
             return ()
 
-    def map_column_names(self, uuid: str, columns: list[str] | None) -> list[str] | None:
+    def map_column_names(
+        self, uuid: str, columns: list[str] | None
+    ) -> list[str] | None:
 
         if columns is None:
             return columns
@@ -111,9 +113,8 @@ class API:
         output = list()
         for column in columns:
             # You want TIME field but not in there, try map to something else
-            if (
-                column.casefold() == "TIME".casefold()
-                and ("TIME" not in meta or "time" not in meta)
+            if column.casefold() == "TIME".casefold() and (
+                "TIME" not in meta or "time" not in meta
             ):
                 if "JULD" in meta:
                     output.append("JULD")
