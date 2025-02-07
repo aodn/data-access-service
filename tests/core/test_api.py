@@ -1,15 +1,18 @@
-from unittest.mock import patch
-from aodn_cloud_optimised import DataQuery
-from data_access_service import API
-
-import unittest
 import json
-import os
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from aodn_cloud_optimised import DataQuery
+
+from data_access_service import API
 
 
 class TestApi(unittest.TestCase):
     # Use this canned data as the metadata map
-    with open(os.getcwd() + "/tests/canned/catalog_uncached.json", "r") as file:
+    with open(
+        Path(__file__).resolve().parent.parent / "canned/catalog_uncached.json", "r"
+    ) as file:
 
         @patch.object(
             DataQuery.Metadata,

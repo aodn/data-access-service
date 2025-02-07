@@ -1,6 +1,6 @@
 # test_email_generator.py
 import unittest
-from data_access_service.tasks.email_generator import (
+from data_access_service.utils.email_generator import (
     generate_started_email_subject,
     generate_completed_email_subject,
     generate_started_email_content,
