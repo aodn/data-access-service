@@ -56,6 +56,10 @@ class TestApi(unittest.TestCase):
                 col, ["JULD", "DEPTH", "LATITUDE", "LONGITUDE"], "TIME mapped"
             )
 
+    def test_generate_partial_json_array(self):
+        # TODO: Need test this
+        pass
+
 
 if __name__ == "__main__":
     unittest.main()

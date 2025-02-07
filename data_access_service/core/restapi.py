@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+from datetime import timezone
 import json
 import logging
 import os
@@ -57,9 +58,9 @@ def _generate_json_array(dask, compress: bool = False):
         return json_array
 
 
-def _generate_partial_json_array(dask, compress: bool = False):
+def _generate_partial_json_array(d: dask.dataframe.DataFrame, compress: bool = False):
     record_list = []
-    for partition in dask.to_delayed():
+    for partition in d.to_delayed():
         partition_df = convert_non_numeric_to_str(partition.compute())
         for record in partition_df.to_dict(orient="records"):
             filtered_record = {}
@@ -70,7 +71,11 @@ def _generate_partial_json_array(dask, compress: bool = False):
             elif "JULD" in record:
                 filtered_record["time"] = _reformat_date(record["JULD"])
             elif "timestamp" in record:
-                filtered_record["time"] = _reformat_date(record["timestamp"])
+                filtered_record["time"] = _reformat_date(
+                    datetime.datetime.fromtimestamp(
+                        record["timestamp"], tz=timezone.utc
+                    ).strftime(DATE_FORMAT)
+                )
 
             #  may need to add more field here
             if "LONGITUDE" in record:
@@ -90,7 +95,7 @@ def _generate_partial_json_array(dask, compress: bool = False):
 
 
 # currently only want year, month and date.
-def _reformat_date(date):
+def _reformat_date(date: str):
     parsed_date = parser.isoparse(date)
     formatted_date = parsed_date.strftime("%Y-%m-%d")
     return formatted_date
