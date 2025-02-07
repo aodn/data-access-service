@@ -37,7 +37,7 @@ def process_csv_data_file(
     conditions = [
         ("start date", start_date),
         ("end date", end_date),
-        ("polygon", multi_polygon)
+        ("polygon", multi_polygon),
     ]
 
     startingSubject = generate_started_email_subject(uuid)
@@ -47,13 +47,17 @@ def process_csv_data_file(
 
     try:
         # generate csv file and upload to s3
-        csv_file_path = _generate_csv_file(start_date, end_date, multi_polygon_dict, uuid)
+        csv_file_path = _generate_csv_file(
+            start_date, end_date, multi_polygon_dict, uuid
+        )
         s3_path = f"{uuid}/{csv_file_path}"
         object_url = aws.upload_data_file_to_s3(csv_file_path, s3_path)
 
         # send email to recipient
         finishingSubject = generate_completed_email_subject(uuid)
-        finishingContent = generate_completed_email_content(uuid, conditions, object_url)
+        finishingContent = generate_completed_email_content(
+            uuid, conditions, object_url
+        )
         aws.send_email(recipient, finishingSubject, finishingContent)
 
     except TypeError as e:
@@ -65,6 +69,7 @@ def process_csv_data_file(
     except Exception as e:
         log.error(f"Error: {e}")
         aws.send_email(recipient, "Error", "An error occurred.")
+
 
 def _generate_csv_file(
     start_date: datetime, end_date: datetime, multi_polygon: dict, uuid: str
@@ -102,7 +107,6 @@ def _generate_csv_file(
         if df is not None and not df.empty:
             data_frame = pd.concat([data_frame, df], ignore_index=True)
 
-
     if data_frame is None or data_frame.empty:
         raise ValueError(
             f" No data found for uuid={uuid}, start_date={start_date}, end_date={end_date}, multi_polygon={multi_polygon}"
@@ -134,6 +138,7 @@ def _query_data(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid):
         )
     return data_frame
 
+
 def _get_lat_lon_from_(polygon: List[List[List[float]]]) -> Dict[str, float]:
     coordinates = [coord for ring in polygon for coord in ring]
     lats = [coord[1] for coord in coordinates]
@@ -143,5 +148,5 @@ def _get_lat_lon_from_(polygon: List[List[List[float]]]) -> Dict[str, float]:
         "min_lat": min(lats),
         "max_lat": max(lats),
         "min_lon": min(lons),
-        "max_lon": max(lons)
+        "max_lon": max(lons),
     }
