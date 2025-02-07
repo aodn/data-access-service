@@ -10,7 +10,9 @@ from data_access_service import API
 
 class TestApi(unittest.TestCase):
     # Use this canned data as the metadata map
-    with open(Path(__file__).resolve().parent.parent / "canned/catalog_uncached.json", "r") as file:
+    with open(
+        Path(__file__).resolve().parent.parent / "canned/catalog_uncached.json", "r"
+    ) as file:
 
         @patch.object(
             DataQuery.Metadata,
