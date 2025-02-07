@@ -72,7 +72,9 @@ def _generate_partial_json_array(d: dask.dataframe.DataFrame, compress: bool = F
                 filtered_record["time"] = _reformat_date(record["JULD"])
             elif "timestamp" in record:
                 filtered_record["time"] = _reformat_date(
-                    datetime.datetime.fromtimestamp(record["timestamp"], tz=timezone.utc).strftime(DATE_FORMAT)
+                    datetime.datetime.fromtimestamp(
+                        record["timestamp"], tz=timezone.utc
+                    ).strftime(DATE_FORMAT)
                 )
 
             #  may need to add more field here
