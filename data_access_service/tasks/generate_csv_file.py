@@ -25,18 +25,8 @@ def process_csv_data_file(
     recipient: str,
 ):
     init_log(logging.DEBUG)
-    # log all params for testing
-    log.info(f"uuid: {uuid}")
-    log.info(f"start_date: {start_date}")
-    log.info(f"end_date: {end_date}")
-    log.info(f"multi_polygon: {multi_polygon}")
-    log.info(f"recipient: {recipient}")
-
-    print("multi_polygon_str: ", multi_polygon)
 
     multi_polygon_dict = json.loads(multi_polygon)
-
-    print("multi_polygon_dict: ", multi_polygon_dict)
 
     if None in [uuid, start_date, end_date, json.loads(multi_polygon), recipient]:
         raise ValueError("One or more required arguments are None")
