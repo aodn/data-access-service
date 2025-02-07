@@ -103,19 +103,24 @@ class API:
         else:
             return ()
 
-    def map_column_names(self, uuid: str, columns: list[str]) -> list[str] | None:
+    def map_column_names(
+        self, uuid: str, columns: list[str] | None
+    ) -> list[str] | None:
+
         if columns is None:
             return columns
+
         meta = self.get_raw_meta_data(uuid)
         output = list()
         for column in columns:
             # You want TIME field but not in there, try map to something else
-            if (
-                column.casefold() == "TIME".casefold()
-                and ("TIME" not in meta or "time" not in meta)
-                and "timestamp" in meta
+            if column.casefold() == "TIME".casefold() and (
+                "TIME" not in meta or "time" not in meta
             ):
-                output.append("timestamp")
+                if "JULD" in meta:
+                    output.append("JULD")
+                elif "timestamp" in meta:
+                    output.append("timestamp")
             else:
                 output.append(column)
 

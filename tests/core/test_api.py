@@ -32,7 +32,6 @@ class TestApi(unittest.TestCase):
                 "541d4f15-122a-443d-ab4e-2b5feb08d6a0",
                 ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             )
-
             self.assertListEqual(
                 col, ["timestamp", "DEPTH", "LATITUDE", "LONGITUDE"], "TIME mapped"
             )
@@ -42,12 +41,24 @@ class TestApi(unittest.TestCase):
                 "af5d0ff9-bb9c-4b7c-a63c-854a630b6984",
                 ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             )
-
             self.assertListEqual(
                 col,
                 ["timestamp", "DEPTH", "LATITUDE", "LONGITUDE"],
                 "TIME no need to map",
             )
+
+            # This uuid have JULD but no time and timestamp, so map it to JULD
+            col = api.map_column_names(
+                "95d6314c-cfc7-40ae-b439-85f14541db71",
+                ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
+            )
+            self.assertListEqual(
+                col, ["JULD", "DEPTH", "LATITUDE", "LONGITUDE"], "TIME mapped"
+            )
+
+    def test_generate_partial_json_array(self):
+        # TODO: Need test this
+        pass
 
 
 if __name__ == "__main__":
