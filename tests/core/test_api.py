@@ -9,7 +9,7 @@ import os
 
 class TestApi(unittest.TestCase):
     # Use this canned data as the metadata map
-    with open(os.getcwd() + "/tests/canned/catalog_uncached.json", "r") as file:
+    with open(os.path.dirname(os.getcwd()) + "/canned/catalog_uncached.json", "r") as file:
 
         @patch.object(
             DataQuery.Metadata,
