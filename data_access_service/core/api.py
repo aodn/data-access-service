@@ -1,5 +1,4 @@
 import gzip
-import json
 
 import pandas as pd
 import logging
@@ -104,7 +103,9 @@ class API:
         else:
             return ()
 
-    def map_column_names(self, uuid: str, columns: list[str]) -> list[str]:
+    def map_column_names(self, uuid: str, columns: list[str]) -> list[str] | None:
+        if columns is None:
+            return columns
         meta = self.get_raw_meta_data(uuid)
         output = list()
         for column in columns:
