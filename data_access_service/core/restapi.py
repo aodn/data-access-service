@@ -21,6 +21,10 @@ from pandas import DataFrame
 
 from data_access_service import app
 from data_access_service.core.api import gzip_compress
+from data_access_service.core.constants import (
+    COORDINATE_INDEX_PRECISION,
+    DEPTH_INDEX_PRECISION,
+)
 from data_access_service.core.error import ErrorResponse
 
 restapi = Blueprint("restapi", __name__)
@@ -79,11 +83,15 @@ def _generate_partial_json_array(d: dask.dataframe.DataFrame, compress: bool = F
 
             #  may need to add more field here
             if "LONGITUDE" in record:
-                filtered_record["longitude"] = _round_5_decimal(record["LONGITUDE"])
+                filtered_record["longitude"] = round(
+                    record["LONGITUDE"], COORDINATE_INDEX_PRECISION
+                )
             if "LATITUDE" in record:
-                filtered_record["latitude"] = _round_5_decimal(record["LATITUDE"])
+                filtered_record["latitude"] = round(
+                    record["LATITUDE"], COORDINATE_INDEX_PRECISION
+                )
             if "DEPTH" in record:
-                filtered_record["depth"] = _round_5_decimal(record["DEPTH"])
+                filtered_record["depth"] = round(record["DEPTH"], DEPTH_INDEX_PRECISION)
             record_list.append(filtered_record)
 
     json_array = json.dumps(record_list)
