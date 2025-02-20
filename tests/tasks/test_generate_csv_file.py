@@ -10,8 +10,6 @@ class TestProcessCSVDataFile(unittest.TestCase):
 
     @patch("data_access_service.tasks.generate_csv_file.AWSClient")
     @patch("data_access_service.tasks.generate_csv_file.init_log")
-    @patch("data_access_service.tasks.generate_csv_file.generate_started_email_subject")
-    @patch("data_access_service.tasks.generate_csv_file.generate_started_email_content")
     @patch(
         "data_access_service.tasks.generate_csv_file.generate_completed_email_subject"
     )
@@ -24,8 +22,6 @@ class TestProcessCSVDataFile(unittest.TestCase):
         mock_generate_csv_file,
         mock_generate_completed_email_content,
         mock_generate_completed_email_subject,
-        mock_generate_started_email_content,
-        mock_generate_started_email_subject,
         mock_init_log,
         mock_AWSClient,
     ):
@@ -47,13 +43,6 @@ class TestProcessCSVDataFile(unittest.TestCase):
 
         # Assert
         mock_init_log.assert_called_once_with(logging.DEBUG)
-        mock_generate_started_email_subject.assert_called_once_with(uuid)
-        mock_generate_started_email_content.assert_called_once()
-        mock_AWSClient_instance.send_email.assert_any_call(
-            recipient,
-            mock_generate_started_email_subject.return_value,
-            mock_generate_started_email_content.return_value,
-        )
         mock_generate_csv_file.assert_called_once_with(
             start_date, end_date, json.loads(multi_polygon), uuid
         )
