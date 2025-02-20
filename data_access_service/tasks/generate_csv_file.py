@@ -8,8 +8,6 @@ import pandas as pd
 from data_access_service import API, init_log
 from data_access_service.core.AWSClient import AWSClient
 from data_access_service.utils.email_generator import (
-    generate_started_email_subject,
-    generate_started_email_content,
     generate_completed_email_subject,
     generate_completed_email_content,
 )
@@ -39,11 +37,6 @@ def process_csv_data_file(
         ("end date", end_date),
         ("polygon", multi_polygon),
     ]
-
-    startingSubject = generate_started_email_subject(uuid)
-    startingContent = generate_started_email_content(uuid, conditions)
-
-    aws.send_email(recipient, startingSubject, startingContent)
 
     try:
         # generate csv file and upload to s3
