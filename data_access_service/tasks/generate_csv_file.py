@@ -40,10 +40,11 @@ def process_csv_data_file(
         ("polygon", multi_polygon),
     ]
 
-    startingSubject = generate_started_email_subject(uuid)
-    startingContent = generate_started_email_content(uuid, conditions)
+#disable the starting email for now and move it to the ogcapi to make it faster
+    # startingSubject = generate_started_email_subject(uuid)
+    # startingContent = generate_started_email_content(uuid, conditions)
 
-    aws.send_email(recipient, startingSubject, startingContent)
+    # aws.send_email(recipient, startingSubject, startingContent)
 
     try:
         # generate csv file and upload to s3
