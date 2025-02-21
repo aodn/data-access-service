@@ -164,16 +164,20 @@ class API:
             if date_end.tzinfo is not None:
                 date_end = date_end.astimezone(timezone.utc).replace(tzinfo=None)
 
-            return ds.get_data(
-                date_start,
-                date_end,
-                lat_min,
-                lat_max,
-                lon_min,
-                lon_max,
-                scalar_filter,
-                self.map_column_names(uuid, columns),
-            )
+            try:
+                return ds.get_data(
+                    date_start,
+                    date_end,
+                    lat_min,
+                    lat_max,
+                    lon_min,
+                    lon_max,
+                    scalar_filter,
+                    self.map_column_names(uuid, columns),
+                )
+            except ValueError as e:
+                log.error(f"Error: {e}")
+                return None
         else:
             return None
 

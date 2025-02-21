@@ -296,6 +296,10 @@ def get_data(uuid):
         lat_min=lat_min, lat_max=lat_max, lon_min=lon_min, lon_max=lon_max
     )
 
+    # if result is None, return empty response
+    if result is None:
+        return Response("[]", mimetype="application/json")
+
     start_depth = _verify_depth_param(
         "start_depth", numpy.double(request.args.get("start_depth", default=-1.0))
     )
