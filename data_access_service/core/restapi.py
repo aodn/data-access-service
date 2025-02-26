@@ -284,16 +284,11 @@ def get_data(uuid):
             default=datetime.datetime.now(datetime.timezone.utc).strftime(DATE_FORMAT),
         ),
     )
-    lat_min = request.args.get("lat_min", default=None)
-    lat_max = request.args.get("lat_max", default=None)
-    lon_min = request.args.get("lon_min", default=None)
-    lon_max = request.args.get("lon_max", default=None)
 
     columns = request.args.getlist("columns") or None
 
     result: Optional[pd.DataFrame] = app.api.get_dataset_data(
-        uuid=uuid, date_start=start_date, date_end=end_date, columns=columns,
-        lat_min=lat_min, lat_max=lat_max, lon_min=lon_min, lon_max=lon_max
+        uuid=uuid, date_start=start_date, date_end=end_date, columns=columns
     )
 
     # if result is None, return empty response
