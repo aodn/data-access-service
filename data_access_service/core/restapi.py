@@ -334,3 +334,9 @@ def get_data(uuid):
             return _response_json(filtered, compress)
     elif f == "netcdf":
         return _response_netcdf(filtered)
+
+def get_memory_usage_percentage():
+    process = psutil.Process(os.getpid())
+    memory_info = process.memory_info()
+    total_memory = psutil.virtual_memory().total
+    return (memory_info.rss / total_memory) * 100
