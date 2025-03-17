@@ -7,6 +7,7 @@ import os
 import tempfile
 
 import dask.dataframe
+import psutil
 import xarray as xr
 import numpy
 import pandas as pd
@@ -272,7 +273,7 @@ def get_temporal_extent(uuid):
 @restapi.route("/data/<string:uuid>", methods=["GET"])
 def get_data(uuid):
     log.info(
-        "Request details: %s", json.dumps(request.args.to_dict(flat=False), indent=2)
+        "Request details: %s", json.dumps(request.args.to_dict(flat=False))
     )
     start_date = _verify_datatime_param(
         "start_date", request.args.get("start_date", default=MIN_DATE)
