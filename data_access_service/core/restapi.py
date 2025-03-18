@@ -324,6 +324,8 @@ def get_data(uuid):
 
     log.info("Record number return %s for query", len(filtered.index))
 
+    log.info("Memory usage: %s", get_memory_usage_percentage())
+
     f = request.args.get("format", default="json", type=str)
     if f == "json":
         # Depends on whether receiver support gzip encoding
@@ -339,4 +341,5 @@ def get_memory_usage_percentage():
     process = psutil.Process(os.getpid())
     memory_info = process.memory_info()
     total_memory = psutil.virtual_memory().total
+    log.info("Total memory: %s", total_memory)
     return (memory_info.rss / total_memory) * 100
