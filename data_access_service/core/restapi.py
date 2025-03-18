@@ -272,9 +272,7 @@ def get_temporal_extent(uuid):
 
 @restapi.route("/data/<string:uuid>", methods=["GET"])
 def get_data(uuid):
-    log.info(
-        "Request details: %s", json.dumps(request.args.to_dict(flat=False))
-    )
+    log.info("Request details: %s", json.dumps(request.args.to_dict(flat=False)))
     start_date = _verify_datatime_param(
         "start_date", request.args.get("start_date", default=MIN_DATE)
     )
@@ -336,6 +334,7 @@ def get_data(uuid):
             return _response_json(filtered, compress)
     elif f == "netcdf":
         return _response_netcdf(filtered)
+
 
 def get_memory_usage_percentage():
     process = psutil.Process(os.getpid())
