@@ -7,6 +7,7 @@ import os
 import tempfile
 
 import dask.dataframe
+import psutil
 import xarray as xr
 import numpy
 import pandas as pd
@@ -271,9 +272,7 @@ def get_temporal_extent(uuid):
 
 @restapi.route("/data/<string:uuid>", methods=["GET"])
 def get_data(uuid):
-    log.info(
-        "Request details: %s", json.dumps(request.args.to_dict(flat=False), indent=2)
-    )
+    log.info("Request details: %s", json.dumps(request.args.to_dict(flat=False)))
     start_date = _verify_datatime_param(
         "start_date", request.args.get("start_date", default=MIN_DATE)
     )
@@ -284,11 +283,16 @@ def get_data(uuid):
             default=datetime.datetime.now(datetime.timezone.utc).strftime(DATE_FORMAT),
         ),
     )
+
     columns = request.args.getlist("columns") or None
 
     result: Optional[pd.DataFrame] = app.api.get_dataset_data(
         uuid=uuid, date_start=start_date, date_end=end_date, columns=columns
     )
+
+    # if result is None, return empty response
+    if result is None:
+        return Response("[]", mimetype="application/json")
 
     start_depth = _verify_depth_param(
         "start_depth", numpy.double(request.args.get("start_depth", default=-1.0))
@@ -318,6 +322,8 @@ def get_data(uuid):
 
     log.info("Record number return %s for query", len(filtered.index))
 
+    log.info("Memory usage: %s", get_memory_usage_percentage())
+
     f = request.args.get("format", default="json", type=str)
     if f == "json":
         # Depends on whether receiver support gzip encoding
@@ -328,3 +334,11 @@ def get_data(uuid):
             return _response_json(filtered, compress)
     elif f == "netcdf":
         return _response_netcdf(filtered)
+
+
+def get_memory_usage_percentage():
+    process = psutil.Process(os.getpid())
+    memory_info = process.memory_info()
+    total_memory = psutil.virtual_memory().total
+    log.info("Total memory: %s", total_memory)
+    return (memory_info.rss / total_memory) * 100
