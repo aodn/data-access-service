@@ -4,7 +4,7 @@ from enum import Enum
 import yaml
 
 
-class EnvType(Enum):
+class Profile(Enum):
     DEV = "dev"
     EDGE = "edge"
     STAGING = "staging"
@@ -17,20 +17,20 @@ class Config:
     BASE_URL = "/api/v1/das"
 
 
-class DevConfig(Config):
+class DevProfile(Config):
     pass
 
 
-class EdgeConfig(Config):
+class EdgeProfile(Config):
     pass
 
 
-class StagingConfig(Config):
+class StagingProfile(Config):
     DEBUG = False
     LOGLEVEL = logging.INFO
 
 
-class ProdConfig(Config):
+class ProdProfile(Config):
     DEBUG = False
     LOGLEVEL = logging.INFO
 

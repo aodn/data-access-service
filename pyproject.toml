@@ -8,7 +8,8 @@ readme = "README.md"
 [tool.poetry.dependencies]
 boto3 = "^1.28.0"
 pre-commit = "^3.8.0"
-flask = "^3.0.3"
+fastapi = "0.115.2"
+uvicorn = "0.30.6"
 dask = {extras = ["dataframe"], version = ">=2024.9.1"}
 python-dotenv = "1.0.1"
 fuzzywuzzy = "^0.18.0"
