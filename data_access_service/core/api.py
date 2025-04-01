@@ -1,11 +1,13 @@
 import gzip
+
 import pandas as pd
 import logging
 
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from io import BytesIO
 from typing import Optional
-from aodn_cloud_optimised import ParquetDataQuery
+from aodn_cloud_optimised import DataQuery
+from aodn_cloud_optimised.lib.config import get_notebook_url
 from data_access_service.core.descriptor import Depth, Descriptor
 
 log = logging.getLogger(__name__)
@@ -37,7 +39,7 @@ class API:
 
         # UUID to metadata mapper and init it, a scheduler need to
         # updated it as times go
-        self._instance = ParquetDataQuery.GetAodn()
+        self._instance = DataQuery.GetAodn()
         self._metadata = self._instance.get_metadata()
         self._create_uuid_dataset_map()
 
@@ -63,63 +65,121 @@ class API:
                 log.error("Data not found for dataset " + key)
 
     def get_mapped_meta_data(self, uuid: str):
-        value = self._cached.get(uuid)
+        if uuid is not None:
+            value = self._cached.get(uuid)
+        else:
+            value = self._cached.values()
 
         if value is not None:
             return value
         else:
             return Descriptor(uuid=uuid)
 
-    def get_raw_meta_data(self, uuid: str):
+    def get_raw_meta_data(self, uuid: str) -> dict:
         value = self._raw.get(uuid)
 
         if value is not None:
             return value
         else:
-            return None
+            return dict()
+
+    """
+    Given a time range, we find if this uuid temporal cover the whole range
+    """
 
     def has_data(self, uuid: str, start_date: datetime, end_date: datetime):
         md: Descriptor = self._cached.get(uuid)
         if md is not None:
-            ds: ParquetDataQuery.Dataset = self._instance.get_dataset(md.dname)
-            while start_date <= end_date:
-
-                # currently use 366 days as a period, to make sure 1 query can cover 1 year
-                period_end = start_date + timedelta(days=366)
-                log.info(f"Checking data for {start_date} to {period_end}")
-                if period_end > end_date:
-                    period_end = end_date
-
-                if not ds.get_data(
-                    start_date, period_end, None, None, None, None, None
-                ).empty:
-                    return True
-                else:
-                    start_date = period_end + timedelta(days=1)
+            ds: DataQuery.Dataset = self._instance.get_dataset(md.dname)
+            te = ds.get_temporal_extent()
+            return start_date <= te[0] and te[1] <= end_date
         return False
+
+    def get_temporal_extent(self, uuid: str) -> (datetime, datetime):
+        md: Descriptor = self._cached.get(uuid)
+        if md is not None:
+            ds: DataQuery.Dataset = self._instance.get_dataset(md.dname)
+            return ds.get_temporal_extent()
+        else:
+            return ()
+
+    def map_column_names(
+        self, uuid: str, columns: list[str] | None
+    ) -> list[str] | None:
+
+        if columns is None:
+            return columns
+
+        meta = self.get_raw_meta_data(uuid)
+        output = list()
+        for column in columns:
+            # You want TIME field but not in there, try map to something else
+            if column.casefold() == "TIME".casefold() and (
+                "TIME" not in meta or "time" not in meta
+            ):
+                if "JULD" in meta:
+                    output.append("JULD")
+                elif "timestamp" in meta:
+                    output.append("timestamp")
+            else:
+                output.append(column)
+
+        return output
 
     def get_dataset_data(
         self,
         uuid: str,
-        date_start=None,
-        date_end=None,
+        date_start: datetime = None,
+        date_end: datetime = None,
         lat_min=None,
         lat_max=None,
         lon_min=None,
         lon_max=None,
         scalar_filter=None,
+        columns: list[str] = None,
     ) -> Optional[pd.DataFrame]:
         md: Descriptor = self._cached.get(uuid)
 
         if md is not None:
-            ds: ParquetDataQuery.Dataset = self._instance.get_dataset(md.dname)
+            ds: DataQuery.Dataset = self._instance.get_dataset(md.dname)
 
             # Default get 10 days of data
             if date_start is None:
-                date_start = datetime.now() - timedelta(days=10)
+                date_start = datetime.now(timezone.utc) - timedelta(days=10)
+            else:
+                date_start = pd.to_datetime(date_start).tz_localize(timezone.utc)
 
-            return ds.get_data(
-                date_start, date_end, lat_min, lat_max, lon_min, lon_max, scalar_filter
-            )
+            if date_end is None:
+                date_end = datetime.now(timezone.utc)
+            else:
+                date_end = pd.to_datetime(date_end).tz_localize(timezone.utc)
+
+            # The get_data call the pyarrow and compare only works with non timezone datetime
+            # now make sure the timezone is correctly convert to utc then remove it.
+            # As get_date datetime are all utc, but the pyarrow do not support compare of datetime vs
+            # datetime with timezone.
+            if date_start.tzinfo is not None:
+                date_start = date_start.astimezone(timezone.utc).replace(tzinfo=None)
+
+            if date_end.tzinfo is not None:
+                date_end = date_end.astimezone(timezone.utc).replace(tzinfo=None)
+
+            try:
+                return ds.get_data(
+                    date_start,
+                    date_end,
+                    lat_min,
+                    lat_max,
+                    lon_min,
+                    lon_max,
+                    scalar_filter,
+                    self.map_column_names(uuid, columns),
+                )
+            except ValueError as e:
+                log.error(f"Error: {e}")
+                return None
         else:
             return None
+
+    def get_notebook_from(self, uuid: str) -> str:
+        return get_notebook_url(uuid)

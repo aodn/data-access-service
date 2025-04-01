@@ -55,11 +55,33 @@ aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git
     ```
 
 2. **Install dependencies using Poetry:**
-
     ```bash
     # after cloning the repo with git clone command
     $ cd data-access-service
     $ poetry install
+    ```
+   ```bash
+   # You should not need to install lib locally, if your python version is correct.
+   # https://arrow.apache.org/install/
+   sudo apt update
+   sudo apt install -y -V ca-certificates lsb-release wget
+   wget https://apache.jfrog.io/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
+   sudo apt install -y -V ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
+   sudo apt update
+   sudo apt install -y -V libarrow-dev # For C++
+   sudo apt install -y -V libarrow-glib-dev # For GLib (C)
+   sudo apt install -y -V libarrow-dataset-dev # For Apache Arrow Dataset C++
+   sudo apt install -y -V libarrow-dataset-glib-dev # For Apache Arrow Dataset GLib (C)
+   sudo apt install -y -V libarrow-acero-dev # For Apache Arrow Acero
+   sudo apt install -y -V libarrow-flight-dev # For Apache Arrow Flight C++
+   sudo apt install -y -V libarrow-flight-glib-dev # For Apache Arrow Flight GLib (C)
+   sudo apt install -y -V libarrow-flight-sql-dev # For Apache Arrow Flight SQL C++
+   sudo apt install -y -V libarrow-flight-sql-glib-dev # For Apache Arrow Flight SQL GLib (C)
+   sudo apt install -y -V libgandiva-dev # For Gandiva C++
+   sudo apt install -y -V libgandiva-glib-dev # For Gandiva GLib (C)
+   sudo apt install -y -V libparquet-dev # For Apache Parquet C++
+   sudo apt install -y -V libparquet-glib-dev # For Apache Parquet GLib (C)
+   sudo apt install -y ninja-build
     ```
 
 3. **Run the app:**
@@ -85,18 +107,6 @@ The configurations for pre-commit hooks are defined in `.pre-commit-config.yaml`
 pre-commit run --all-files
 ```
 
-### Versioning
-
-This project uses **semantic versioning** with automated releases managed by `semantic-release`.
-
-Every code change with commits following [Conventional Commits](https://github.com/conventional-changelog/commitlint/tree/master/%40commitlint/config-conventional) will trigger a version update and create a GitHub release.
-
-**Commit Guidelines**
-
-- `feat:` For new features
-- `fix:` For bug fixes
-- `BREAKING CHANGE:` For any breaking changes
-
 ## Environment variables
 
 In the root directory of the project, create a `.env` file.
@@ -118,8 +128,22 @@ PROFILE=edge
 
 ### Endpoints
 
-| Description        | Endpoints                          | Param                                                                                          | Environment                                                                   |
-|--------------------|----------------------------------------|------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------|
-| Formatted metadata | /api/v1/das/metadata/{uuid}  | none                                                                                           | ALL                                                                           |
-| Raw metadata       | /api/v1/das/metadata/{uuid}/raw | none                                                                                           | ALL                                                                      |
-| Subsetting         | /api/v1/das/data/{uuid} | start_date=2023-12-25T14:30:00 end_date=2024-02-25T14:30:00 start_depth=-0.06 f=netcdf or json | ALL |
+| Description        | Endpoints                          | Param                                                                                                                                                                                       | Environment                                                                                                                                           |
+|--------------------|----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Formatted metadata | /api/v1/das/metadata/{uuid}  | none                                                                                                                                                                                        | ALL                                                                                                                                                   |
+| Raw metadata       | /api/v1/das/metadata/{uuid}/raw | none                                                                                                                                                                                        | ALL                                                                                                                                                   |
+| Subsetting         | /api/v1/das/data/{uuid} | start_date=2023-12-25T14:30:00, end_date=2024-02-25T14:30:00, start_depth=-0.06, f=netcdf or json, columns=TIME&columns=DEPTH&columns=LONGITUDE&columns=LATITUDE (array of column return), is_to_index=true | ALL |
+
+
+### Running Tests
+
+To run the tests for the project:
+```shell
+poetry run python -m unittest discover
+```
+This will discover and run all the test cases in your project.
+
+If you have "ModuleNotFoundError" or similar issues, you may need to install dependencies before running the tests:
+```shell
+poetry install
+```
