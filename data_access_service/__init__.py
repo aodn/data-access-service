@@ -12,6 +12,13 @@ from data_access_service.config.config import (
 )
 from data_access_service.core.api import API
 
+import logging
+
+# Logging config
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 
 

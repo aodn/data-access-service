@@ -85,17 +85,16 @@ aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git
     ```
 
 3. **Run the app:**
+    In project root folder, create a '.env' file, which contains your API key, e.g.:
+    ```
+    API_KEY="your_actual_api_key_here"
+    ```
 
-   Host will be `http://localhost:5000`.
+   Host will be `http://localhost:8000`.
 
     ```bash
-    $ data-access-service
+    $ poetry run uvicorn data_access_service.core.server:app --reload --log-config=log_config.yaml
     ```
-   OR
-
-   ```bash
-   $ poetry run python data_access_service/run.py
-   ```
 
 ### Code formatting
 
