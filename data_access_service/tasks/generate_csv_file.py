@@ -110,6 +110,29 @@ def _generate_csv_file(
 
     return csv_file_path
 
+def _query_data(api, uuid, start_date, end_date, min_lat, max_lat, min_lon, max_lon):
+    df = None
+    try:
+        df = api.get_dataset_data(
+            uuid=uuid,
+            date_start=start_date,
+            date_end=end_date,
+            lat_min=min_lat,
+            lat_max=max_lat,
+            lon_min=min_lon,
+            lon_max=max_lon,
+        )
+    except ValueError as e:
+        log.info("seems like no data for this polygon", e)
+    except Exception as e:
+        log.error(f"Error: {e}")
+
+    if df is not None and not df.empty:
+        return df
+    else:
+        log.info("No data found for the given parameters")
+        return None
+
 def _get_lat_lon_from_(polygon: List[List[List[float]]]) -> Dict[str, float]:
     coordinates = [coord for ring in polygon for coord in ring]
     lats = [coord[1] for coord in coordinates]
