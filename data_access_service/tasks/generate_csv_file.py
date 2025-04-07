@@ -110,28 +110,6 @@ def _generate_csv_file(
 
     return csv_file_path
 
-
-def _query_data(end_date, max_lat, max_lon, min_lat, min_lon, start_date, uuid):
-
-    api = API()
-
-    data_frame = api.get_dataset_data(
-        uuid=uuid,
-        date_start=start_date,
-        date_end=end_date,
-        lat_min=min_lat,
-        lat_max=max_lat,
-        lon_min=min_lon,
-        lon_max=max_lon,
-    )
-
-    if data_frame is None or data_frame.empty:
-        raise ValueError(
-            f"One or more required arguments are None: uuid={uuid}, start_date={start_date}, end_date={end_date}, min_lat={min_lat}, max_lat={max_lat}, min_lon={min_lon}, max_lon={max_lon}"
-        )
-    return data_frame
-
-
 def _get_lat_lon_from_(polygon: List[List[List[float]]]) -> Dict[str, float]:
     coordinates = [coord for ring in polygon for coord in ring]
     lats = [coord[1] for coord in coordinates]
