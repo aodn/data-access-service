@@ -2,7 +2,6 @@ import datetime
 import json
 import logging
 import os
-import shutil
 from typing import List, Dict
 
 from data_access_service import API, init_log
@@ -13,6 +12,7 @@ from data_access_service.utils.email_generator import (
     generate_completed_email_subject,
     generate_completed_email_content,
 )
+from data_access_service.utils.file_utils import zip_the_folder
 
 log = logging.getLogger(__name__)
 
@@ -83,11 +83,16 @@ def trim_date_range(api:API, uuid: str, requested_start_date: datetime, requeste
         raise ValueError(f"Invalid metadata temporal extent: {metadata_temporal_extent}")
 
     metadata_start_date, metadata_end_date = metadata_temporal_extent
+
+    metadata_start_date = metadata_start_date.replace(tzinfo=None)
+    metadata_end_date = metadata_end_date.replace(tzinfo=None)
     if requested_start_date < metadata_start_date:
         requested_start_date = metadata_start_date
     if requested_end_date > metadata_end_date:
         requested_end_date = metadata_end_date
 
+    log.info(f"Original date range: {requested_start_date} to {requested_end_date}")
+    log.info(f"Trimmed date range: {requested_start_date} to {requested_end_date}")
     return requested_start_date, requested_end_date
 
 
@@ -189,8 +194,6 @@ def _get_lat_lon_from_(polygon: List[List[List[float]]]) -> Dict[str, float]:
         "max_lon": max(lons),
     }
 
-def zip_the_folder(folder_path: str, output_zip_path:str):
-    shutil.make_archive(output_zip_path, 'zip', folder_path)
 
 def generate_zip_name(uuid, start_date, end_date):
     start_date_str = start_date.strftime("%Y-%m-%d")

@@ -1,4 +1,5 @@
 import datetime
+import os
 import sys
 from typing import Optional
 
@@ -46,8 +47,12 @@ class DataFileFactory:
         if self.data_frame is None or self.data_frame.empty:
             raise ValueError("No data found to convert to CSV")
 
-        csv_file_path = (f"{folder_name}/date:{self.start_date}~{self.end_date}|"
-                         f"bbox:{self.min_lon},{self.min_lat}, {self.max_lon}, {self.max_lat} .csv")
+        # if this folder does not exist, create it
+        if not os.path.exists(folder_name):
+            os.makedirs(folder_name)
+        csv_file_path = (f"{folder_name}/date_{self.start_date}_{self.end_date}_"
+                         f"bbox_{self.min_lon}_{self.min_lat}_{self.max_lon}_{self.max_lat}.csv")
+
         self.data_frame.to_csv(csv_file_path, index=False)
 
         # clean the data_frame
