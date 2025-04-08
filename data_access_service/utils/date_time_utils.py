@@ -4,7 +4,7 @@ from typing import List
 from dateutil import parser
 from dateutil.relativedelta import relativedelta
 
-from data_access_service.utils.date_range import DateRange
+from data_access_service.models.date_range import DateRange
 
 YEAR_MONTH_DAY = "%Y-%m-%d"
 

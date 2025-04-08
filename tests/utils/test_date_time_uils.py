@@ -2,7 +2,7 @@
 import unittest
 import datetime
 
-from data_access_service.utils.date_range import DateRange
+from data_access_service.models.date_range import DateRange
 from data_access_service.utils.date_time_utils import parse_date, get_final_day_of_, \
     next_month_first_day, get_date_range_array_from_
 
