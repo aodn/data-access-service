@@ -29,23 +29,23 @@ def is_same_year_month(date1: datetime, date2: datetime) -> bool:
 
 def get_date_range_array_from_(start_date: datetime, end_date: datetime) -> List[DateRange]:
     dates = []
-    if is_same_year_month(start_date, end_date):
+    if start_date.year == end_date.year:
         return [DateRange(start_date, end_date)]
 
-    current_year_month = start_date.replace(day=1)
+    current_year_start = start_date.replace(month=1, day=1)
 
-    dates.append(DateRange(start_date, get_final_day_of_(start_date)))
-    current_year_month = next_month_first_day(current_year_month)
+    dates.append(DateRange(start_date, datetime.datetime(start_date.year, 12, 31)))
+    current_year_start = current_year_start.replace(year=current_year_start.year + 1)
 
-    while current_year_month <= end_date:
-        if is_same_year_month(current_year_month, end_date):
-            dates.append(DateRange(current_year_month, end_date))
+    while current_year_start.year <= end_date.year:
+        if current_year_start.year == end_date.year:
+            dates.append(DateRange(current_year_start, end_date))
             break
         else:
-            dates.append(DateRange(current_year_month, get_final_day_of_(current_year_month)))
+            dates.append(DateRange(current_year_start, datetime.datetime(current_year_start.year, 12, 31)))
 
-        # move to the first day of the next month
-        current_year_month = next_month_first_day(current_year_month)
+        # move to the first day of the next year
+        current_year_start = current_year_start.replace(year=current_year_start.year + 1)
 
     return dates
 

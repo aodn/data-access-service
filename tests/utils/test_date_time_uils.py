@@ -50,17 +50,17 @@ class TestDateTimeUtils(unittest.TestCase):
 
     def test_get_date_range_array_from_(self):
         self.assertEqual(
-            get_date_range_array_from_(datetime.datetime(2023, 1, 2), datetime.datetime(2023, 1, 28)),
+            get_date_range_array_from_(datetime.datetime(2022, 1, 2), datetime.datetime(2022, 12, 28)),
             [
-                DateRange(datetime.datetime(2023, 1, 2), datetime.datetime(2023, 1, 28)),
+                DateRange(datetime.datetime(2022, 1, 2), datetime.datetime(2022, 12, 28)),
             ],
         )
 
         self.assertEqual(
-            get_date_range_array_from_(datetime.datetime(2023, 1, 2), datetime.datetime(2023, 2, 25)),
+            get_date_range_array_from_(datetime.datetime(2022, 1, 2), datetime.datetime(2023, 2, 25)),
             [
-                DateRange(datetime.datetime(2023, 1, 2), datetime.datetime(2023, 1, 31)),
-                DateRange(datetime.datetime(2023, 2, 1), datetime.datetime(2023, 2, 25)),
+                DateRange(datetime.datetime(2022, 1, 2), datetime.datetime(2022, 12, 31)),
+                DateRange(datetime.datetime(2023, 1, 1), datetime.datetime(2023, 2, 25)),
             ],
         )
 
