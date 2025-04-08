@@ -1,12 +1,14 @@
 import datetime
 import json
 import logging
+import os
+import shutil
 from typing import List, Dict
-
-import pandas as pd
 
 from data_access_service import API, init_log
 from data_access_service.core.AWSClient import AWSClient
+from data_access_service.models.data_file_factory import DataFileFactory
+from data_access_service.utils.date_time_utils import get_date_range_array_from_
 from data_access_service.utils.email_generator import (
     generate_completed_email_subject,
     generate_completed_email_content,
@@ -14,6 +16,7 @@ from data_access_service.utils.email_generator import (
 
 log = logging.getLogger(__name__)
 
+data_file_folder_path = "data_files"
 
 def process_csv_data_file(
     uuid: str,
@@ -39,12 +42,22 @@ def process_csv_data_file(
     ]
 
     try:
+        start_date = datetime.datetime.strptime(start_date, "%Y-%m-%d")
+        end_date = datetime.datetime.strptime(end_date, "%Y-%m-%d")
+
         # generate csv file and upload to s3
-        csv_file_path = _generate_csv_file(
+        _generate_csv_file(
             start_date, end_date, multi_polygon_dict, uuid
         )
-        s3_path = f"{uuid}/{csv_file_path}"
-        object_url = aws.upload_data_file_to_s3(csv_file_path, s3_path)
+
+
+        data_file_zip_path = generate_zip_name(uuid, start_date, end_date)
+        zip_the_folder(data_file_folder_path, data_file_zip_path)
+
+        # upload the zip file to s3
+        zip_file_path = f"{data_file_zip_path}.zip"
+        s3_path = f"{uuid}/{zip_file_path}"
+        object_url = aws.upload_data_file_to_s3(zip_file_path, s3_path)
 
         # send email to recipient
         finishingSubject = generate_completed_email_subject(uuid)
@@ -69,7 +82,6 @@ def _generate_csv_file(
 ):
 
     api = API()
-    data_frame = None
 
     # TODO: currently, assume polygons are all rectangles. when cloud-optimized library is upgraded,
     #  we can change to use the polygon coordinates directly
@@ -80,38 +92,46 @@ def _generate_csv_file(
         min_lon = lats_lons["min_lon"]
         max_lon = lats_lons["max_lon"]
 
-        df = None
-        try:
-            df = api.get_dataset_data(
-                uuid=uuid,
-                date_start=start_date,
-                date_end=end_date,
-                lat_min=min_lat,
-                lat_max=max_lat,
-                lon_min=min_lon,
-                lon_max=max_lon,
+        dataFactory = DataFileFactory(
+            min_lat=min_lat,
+            max_lat=max_lat,
+            min_lon=min_lon,
+            max_lon=max_lon,
+            log=log,
+        )
+
+        date_ranges = get_date_range_array_from_(start_date, end_date)
+        for date_range in date_ranges:
+            df = _query_data(
+                api,
+                uuid,
+                date_range.start_date,
+                date_range.end_date,
+                min_lat,
+                max_lat,
+                min_lon,
+                max_lon,
             )
-        except ValueError as e:
-            log.info("seems like no data for this polygon", e)
-            continue
-        except Exception as e:
-            log.error(f"Error: {e}")
+            if df is not None and not df.empty:
+                dataFactory.add_data(df, date_range.start_date, date_range.end_date)
+                if dataFactory.is_full():
+                    dataFactory.save_as_csv_in_folder_(data_file_folder_path)
 
-        if df is not None and not df.empty:
-            data_frame = pd.concat([data_frame, df], ignore_index=True)
+        # save the last data frame
+        if dataFactory.data_frame is not None:
+            dataFactory.save_as_csv_in_folder_(data_file_folder_path)
 
-    if data_frame is None or data_frame.empty:
+    if not any(os.scandir(data_file_folder_path)):
         raise ValueError(
             f" No data found for uuid={uuid}, start_date={start_date}, end_date={end_date}, multi_polygon={multi_polygon}"
         )
 
-    csv_file_path = f"date:{start_date}~{end_date}.csv"
-    data_frame.to_csv(csv_file_path, index=False)
 
-    return csv_file_path
 
-def _query_data(api, uuid, start_date, end_date, min_lat, max_lat, min_lon, max_lon):
+def _query_data(api, uuid: str, start_date: datetime, end_date: datetime, min_lat, max_lat, min_lon, max_lon):
     df = None
+    log.info(f"Querying data for uuid={uuid}, start_date={start_date}, end_date={end_date}, ")
+    log.info(f"lat_min={min_lat}, lat_max={max_lat}, lon_min={min_lon}, lon_max={max_lon}")
     try:
         df = api.get_dataset_data(
             uuid=uuid,
@@ -144,3 +164,11 @@ def _get_lat_lon_from_(polygon: List[List[List[float]]]) -> Dict[str, float]:
         "min_lon": min(lons),
         "max_lon": max(lons),
     }
+
+def zip_the_folder(folder_path: str, output_zip_path:str):
+    shutil.make_archive(output_zip_path, 'zip', folder_path)
+
+def generate_zip_name(uuid, start_date, end_date):
+    start_date_str = start_date.strftime("%Y-%m-%d")
+    end_date_str = end_date.strftime("%Y-%m-%d")
+    return f"{uuid}_{start_date_str}_{end_date_str}"

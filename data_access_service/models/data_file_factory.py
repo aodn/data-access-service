@@ -28,7 +28,7 @@ class DataFileFactory:
         self.log = log
 
     def is_full(self):
-        return sys.getsizeof(self) > 1024 * 1024 * 1024  # 1GB
+        return sys.getsizeof(self) > 512 * 1024 * 1024  # 512MB
 
     def add_data(self, data_frame, start_date, end_date):
         if self.data_frame is None:
@@ -42,11 +42,11 @@ class DataFileFactory:
             self.end_date = end_date
 
 
-    def convert_to_csv(self) -> str:
+    def save_as_csv_in_folder_(self, folder_name: str) -> str:
         if self.data_frame is None or self.data_frame.empty:
             raise ValueError("No data found to convert to CSV")
 
-        csv_file_path = (f"date:{self.start_date}~{self.end_date}|"
+        csv_file_path = (f"{folder_name}/date:{self.start_date}~{self.end_date}|"
                          f"bbox:{self.min_lon},{self.min_lat}, {self.max_lon}, {self.max_lat} .csv")
         self.data_frame.to_csv(csv_file_path, index=False)
 
