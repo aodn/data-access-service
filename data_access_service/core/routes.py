@@ -7,6 +7,7 @@ from data_access_service.core.constants import (
     DEPTH_INDEX_PRECISION,
 )
 from data_access_service.core.error import ErrorResponse
+from data_access_service.config.config import Config
 
 import dataclasses
 import logging
@@ -32,7 +33,7 @@ from dateutil import parser
 from http import HTTPStatus
 
 api_instance = API()
-API_PREFIX = "/api/v1/das"
+API_PREFIX = Config.BASE_URL
 router = APIRouter(prefix=API_PREFIX)
 
 RECORD_PER_PARTITION: Optional[int] = 1000
