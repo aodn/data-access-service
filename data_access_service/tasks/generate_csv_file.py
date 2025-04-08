@@ -77,6 +77,22 @@ def process_csv_data_file(
         aws.send_email(recipient, "Error", "An error occurred.")
 
 
+def trim_date_range(api:API, uuid: str, requested_start_date: datetime, requested_end_date: datetime) -> (datetime, datetime):
+    metadata_temporal_extent = api.get_temporal_extent(uuid=uuid)
+    if len(metadata_temporal_extent) != 2:
+        raise ValueError(f"Invalid metadata temporal extent: {metadata_temporal_extent}")
+
+    metadata_start_date, metadata_end_date = metadata_temporal_extent
+    if requested_start_date < metadata_start_date:
+        requested_start_date = metadata_start_date
+    if requested_end_date > metadata_end_date:
+        requested_end_date = metadata_end_date
+
+    return requested_start_date, requested_end_date
+
+
+
+
 def _generate_csv_file(
     start_date: datetime, end_date: datetime, multi_polygon: dict, uuid: str
 ):
@@ -100,7 +116,15 @@ def _generate_csv_file(
             log=log,
         )
 
-        date_ranges = get_date_range_array_from_(start_date, end_date)
+        metadata_temporal_extent = api.get_temporal_extent(uuid=uuid)
+
+        start_date, end_date = trim_date_range(
+            api=api,
+            uuid=uuid, requested_start_date=start_date,
+            requested_end_date=end_date
+        )
+
+        date_ranges = get_date_range_array_from_(start_date=start_date, end_date=end_date)
         for date_range in date_ranges:
             df = _query_data(
                 api,
