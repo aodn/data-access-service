@@ -121,11 +121,10 @@ def _generate_csv_file(
             log=log,
         )
 
-        metadata_temporal_extent = api.get_temporal_extent(uuid=uuid)
-
         start_date, end_date = trim_date_range(
             api=api,
-            uuid=uuid, requested_start_date=start_date,
+            uuid=uuid,
+            requested_start_date=start_date,
             requested_end_date=end_date
         )
 

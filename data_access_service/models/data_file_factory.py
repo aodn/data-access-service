@@ -51,7 +51,8 @@ class DataFileFactory:
         if not os.path.exists(folder_name):
             os.makedirs(folder_name)
         csv_file_path = (f"{folder_name}/date_{self.start_date}_{self.end_date}_"
-                         f"bbox_{self.min_lon}_{self.min_lat}_{self.max_lon}_{self.max_lat}.csv")
+                         f"bbox_{round(self.min_lon, 0)}_{round(self.min_lat, 0)}"
+                         f"_{round(self.max_lon, 0)}_{round(self.max_lat, 0)}.csv")
 
         self.data_frame.to_csv(csv_file_path, index=False)
 
