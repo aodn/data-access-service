@@ -5,6 +5,8 @@ from typing import Optional
 
 import pandas as pd
 
+from data_access_service.utils.date_time_utils import YEAR_MONTH_DAY
+
 
 class DataFileFactory:
 
@@ -29,7 +31,11 @@ class DataFileFactory:
         self.log = log
 
     def is_full(self):
-        return sys.getsizeof(self) > 512 * 1024 * 1024  # 512MB
+        size = sys.getsizeof(self.data_frame)
+        sizeInMb = size / (1024 * 1024)
+        self.log.info(f"DataFrame size: {sizeInMb:.2f} MB")
+        self.log.info(sys.getsizeof(self.data_frame) > 512 * 1024 * 1024)
+        return sys.getsizeof(self.data_frame) > 512 * 1024 * 1024  # 512MB
 
     def add_data(self, data_frame, start_date, end_date):
         if self.data_frame is None:
@@ -50,16 +56,20 @@ class DataFileFactory:
         # if this folder does not exist, create it
         if not os.path.exists(folder_name):
             os.makedirs(folder_name)
-        csv_file_path = (f"{folder_name}/date_{self.start_date}_{self.end_date}_"
-                         f"bbox_{round(self.min_lon, 0)}_{round(self.min_lat, 0)}"
-                         f"_{round(self.max_lon, 0)}_{round(self.max_lat, 0)}.csv")
+        csv_file_path = (f"{folder_name}/date_{self.start_date.strftime(YEAR_MONTH_DAY)}"
+                         f"_{self.end_date.strftime(YEAR_MONTH_DAY)}_"
+                         f"bbox_{int(round(self.min_lon, 0))}_{int(round(self.min_lat, 0))}"
+                         f"_{int(round(self.max_lon, 0))}_{int(round(self.max_lat, 0))}.csv")
 
         self.data_frame.to_csv(csv_file_path, index=False)
 
-        # clean the data_frame
+        # cleanup
         self.data_frame = None
+        self.start_date = None
+        self.end_date = None
         self.log.info(f"Data converted into csv: {csv_file_path}")
         self.log.info(f"conditions: {self.start_date}~{self.end_date}|"
                       f"bbox:{self.min_lon},{self.min_lat}, {self.max_lon}, {self.max_lat}")
+        self.log.info(f"current size of data frame: {sys.getsizeof(self.data_frame)}")
 
         return csv_file_path
