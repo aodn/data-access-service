@@ -27,7 +27,7 @@ def next_month_first_day(date: datetime) -> datetime:
 def is_same_year_month(date1: datetime, date2: datetime) -> bool:
     return date1.year == date2.year and date1.month == date2.month
 
-def get_date_range_array_from_(start_date: datetime, end_date: datetime) -> List[DateRange]:
+def get_yearly_date_range_array_from_(start_date: datetime, end_date: datetime) -> List[DateRange]:
     dates = []
     if start_date.year == end_date.year:
         return [DateRange(start_date, end_date)]
@@ -49,3 +49,24 @@ def get_date_range_array_from_(start_date: datetime, end_date: datetime) -> List
 
     return dates
 
+def get_monthly_date_range_array_from_(start_date: datetime, end_date: datetime) -> List[DateRange]:
+    dates = []
+    if start_date.year == end_date.year and start_date.month == end_date.month:
+        return [DateRange(start_date, end_date)]
+
+    current_month_start = start_date.replace(day=1)
+
+    dates.append(DateRange(start_date, get_final_day_of_(start_date)))
+    current_month_start = next_month_first_day(current_month_start)
+
+    while current_month_start.year < end_date.year or (current_month_start.year == end_date.year and current_month_start.month <= end_date.month):
+        if current_month_start.year == end_date.year and current_month_start.month == end_date.month:
+            dates.append(DateRange(current_month_start, end_date))
+            break
+        else:
+            dates.append(DateRange(current_month_start, get_final_day_of_(current_month_start)))
+
+        # move to the first day of the next month
+        current_month_start = next_month_first_day(current_month_start)
+
+    return dates

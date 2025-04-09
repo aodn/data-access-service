@@ -4,7 +4,7 @@ import datetime
 
 from data_access_service.models.date_range import DateRange
 from data_access_service.utils.date_time_utils import parse_date, get_final_day_of_, \
-    next_month_first_day, get_date_range_array_from_
+    next_month_first_day, get_yearly_date_range_array_from_, get_monthly_date_range_array_from_
 
 
 class TestDateTimeUtils(unittest.TestCase):
@@ -48,19 +48,34 @@ class TestDateTimeUtils(unittest.TestCase):
             datetime.datetime(2024, 1, 1),
         )
 
-    def test_get_date_range_array_from_(self):
+    def test_get_yearly_date_range_array_from_(self):
         self.assertEqual(
-            get_date_range_array_from_(datetime.datetime(2022, 1, 2), datetime.datetime(2022, 12, 28)),
+            get_yearly_date_range_array_from_(datetime.datetime(2022, 1, 2), datetime.datetime(2022, 12, 28)),
             [
                 DateRange(datetime.datetime(2022, 1, 2), datetime.datetime(2022, 12, 28)),
             ],
         )
 
         self.assertEqual(
-            get_date_range_array_from_(datetime.datetime(2022, 1, 2), datetime.datetime(2023, 2, 25)),
+            get_yearly_date_range_array_from_(datetime.datetime(2022, 1, 2), datetime.datetime(2023, 2, 25)),
             [
                 DateRange(datetime.datetime(2022, 1, 2), datetime.datetime(2022, 12, 31)),
                 DateRange(datetime.datetime(2023, 1, 1), datetime.datetime(2023, 2, 25)),
+            ],
+        )
+
+    def test_get_monthly_date_range_array_from_(self):
+        self.assertEqual(
+            get_monthly_date_range_array_from_(datetime.datetime(2022, 1, 2), datetime.datetime(2022, 1, 28)),
+            [
+                DateRange(datetime.datetime(2022, 1, 2), datetime.datetime(2022, 1, 28)),
+            ],
+        )
+        self.assertEqual(
+            get_monthly_date_range_array_from_(datetime.datetime(2022, 1, 2), datetime.datetime(2022, 2, 28)),
+            [
+                DateRange(datetime.datetime(2022, 1, 2), datetime.datetime(2022, 1, 31)),
+                DateRange(datetime.datetime(2022, 2, 1), datetime.datetime(2022, 2, 28)),
             ],
         )
 
