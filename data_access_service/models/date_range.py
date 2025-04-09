@@ -1,7 +1,10 @@
 from datetime import datetime
 
+
 class DateRange:
-    def __init__(self, start_date: datetime, end_date: datetime, date_format: str = "%Y-%m-%d"):
+    def __init__(
+        self, start_date: datetime, end_date: datetime, date_format: str = "%Y-%m-%d"
+    ):
         self.start_date = start_date
         self.end_date = end_date
         self.date_format = date_format

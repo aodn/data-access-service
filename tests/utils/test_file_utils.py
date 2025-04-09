@@ -4,6 +4,7 @@ import tempfile
 import shutil
 from data_access_service.utils.file_utils import zip_the_folder
 
+
 class TestZipTheFolder(unittest.TestCase):
     def setUp(self):
         # Create a temporary directory and files for testing
@@ -32,6 +33,7 @@ class TestZipTheFolder(unittest.TestCase):
             self.assertTrue(os.path.exists(extracted_file))
             with open(extracted_file, "r") as f:
                 self.assertEqual(f.read(), "This is a test file.")
+
 
 if __name__ == "__main__":
     unittest.main()

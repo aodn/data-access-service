@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 
 data_file_folder_path = "data_files"
 
+
 def process_csv_data_file(
     uuid: str,
     start_date: str,
@@ -46,10 +47,7 @@ def process_csv_data_file(
         end_date = datetime.datetime.strptime(end_date, "%Y-%m-%d")
 
         # generate csv file and upload to s3
-        _generate_csv_file(
-            start_date, end_date, multi_polygon_dict, uuid
-        )
-
+        _generate_csv_file(start_date, end_date, multi_polygon_dict, uuid)
 
         data_file_zip_path = generate_zip_name(uuid, start_date, end_date)
         zip_the_folder(data_file_folder_path, data_file_zip_path)
@@ -64,7 +62,7 @@ def process_csv_data_file(
             os.remove(file.path)
         os.rmdir(data_file_folder_path)
 
-        #clean up the zip
+        # clean up the zip
         os.remove(zip_file_path)
 
         # send email to recipient
@@ -85,10 +83,14 @@ def process_csv_data_file(
         aws.send_email(recipient, "Error", "An error occurred.")
 
 
-def trim_date_range(api:API, uuid: str, requested_start_date: datetime, requested_end_date: datetime) -> (datetime, datetime):
+def trim_date_range(
+    api: API, uuid: str, requested_start_date: datetime, requested_end_date: datetime
+) -> (datetime, datetime):
     metadata_temporal_extent = api.get_temporal_extent(uuid=uuid)
     if len(metadata_temporal_extent) != 2:
-        raise ValueError(f"Invalid metadata temporal extent: {metadata_temporal_extent}")
+        raise ValueError(
+            f"Invalid metadata temporal extent: {metadata_temporal_extent}"
+        )
 
     metadata_start_date, metadata_end_date = metadata_temporal_extent
 
@@ -102,8 +104,6 @@ def trim_date_range(api:API, uuid: str, requested_start_date: datetime, requeste
     log.info(f"Original date range: {requested_start_date} to {requested_end_date}")
     log.info(f"Trimmed date range: {requested_start_date} to {requested_end_date}")
     return requested_start_date, requested_end_date
-
-
 
 
 def _generate_csv_file(
@@ -133,11 +133,13 @@ def _generate_csv_file(
             api=api,
             uuid=uuid,
             requested_start_date=start_date,
-            requested_end_date=end_date
+            requested_end_date=end_date,
         )
 
         # date_ranges = get_yearly_date_range_array_from_(start_date=start_date, end_date=end_date)
-        date_ranges = get_monthly_date_range_array_from_(start_date=start_date, end_date=end_date)
+        date_ranges = get_monthly_date_range_array_from_(
+            start_date=start_date, end_date=end_date
+        )
         for date_range in date_ranges:
             df = _query_data(
                 api,
@@ -164,11 +166,23 @@ def _generate_csv_file(
         )
 
 
-
-def _query_data(api, uuid: str, start_date: datetime, end_date: datetime, min_lat, max_lat, min_lon, max_lon):
+def _query_data(
+    api,
+    uuid: str,
+    start_date: datetime,
+    end_date: datetime,
+    min_lat,
+    max_lat,
+    min_lon,
+    max_lon,
+):
     df = None
-    log.info(f"Querying data for uuid={uuid}, start_date={start_date}, end_date={end_date}, ")
-    log.info(f"lat_min={min_lat}, lat_max={max_lat}, lon_min={min_lon}, lon_max={max_lon}")
+    log.info(
+        f"Querying data for uuid={uuid}, start_date={start_date}, end_date={end_date}, "
+    )
+    log.info(
+        f"lat_min={min_lat}, lat_max={max_lat}, lon_min={min_lon}, lon_max={max_lon}"
+    )
     try:
         df = api.get_dataset_data(
             uuid=uuid,
@@ -189,6 +203,7 @@ def _query_data(api, uuid: str, start_date: datetime, end_date: datetime, min_la
     else:
         log.info("No data found for the given parameters")
         return None
+
 
 def _get_lat_lon_from_(polygon: List[List[List[float]]]) -> Dict[str, float]:
     coordinates = [coord for ring in polygon for coord in ring]
