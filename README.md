@@ -93,7 +93,7 @@ aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git
    Host will be `http://localhost:8000`.
 
     ```bash
-    $ poetry run uvicorn data_access_service.core.server:app --reload --log-config=log_config.yaml
+    $ poetry run uvicorn data_access_service.server:app --reload --log-config=log_config.yaml
     ```
 
 ### Code formatting

@@ -14,7 +14,7 @@ import logging
 from typing import Optional, List
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
-from fastapi.responses import JSONResponse, Response, FileResponse
+from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel
 import json
 import dataclasses
@@ -289,7 +289,7 @@ async def get_temporal_extent(uuid: str):
                 "end_date": end_date.strftime(DATE_FORMAT),
             }
         ]
-        return JSONResponse(result)
+        return Response(result, media_type="application/json")
     except ValueError:
         raise HTTPException(status_code=404, detail="Temporal extent not found")
 
