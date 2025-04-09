@@ -18,7 +18,7 @@ def get_final_day_of_(date: datetime) -> datetime:
     last_day_of_month = next_month - datetime.timedelta(days=next_month.day)
     return last_day_of_month
 
-def get_first_day_of (date:datetime) -> datetime:
+def get_first_day_of_(date:datetime) -> datetime:
     return date.replace(day=1)
 
 def next_month_first_day(date: datetime) -> datetime:

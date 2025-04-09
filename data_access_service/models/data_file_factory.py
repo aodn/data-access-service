@@ -34,7 +34,6 @@ class DataFileFactory:
         size = sys.getsizeof(self.data_frame)
         sizeInMb = size / (1024 * 1024)
         self.log.info(f"DataFrame size: {sizeInMb:.2f} MB")
-        self.log.info(sys.getsizeof(self.data_frame) > 512 * 1024 * 1024)
         return sys.getsizeof(self.data_frame) > 512 * 1024 * 1024  # 512MB
 
     def add_data(self, data_frame, start_date, end_date):
