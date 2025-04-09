@@ -7,7 +7,7 @@ from typing import List, Dict
 from data_access_service import API, init_log
 from data_access_service.core.AWSClient import AWSClient
 from data_access_service.models.data_file_factory import DataFileFactory
-from data_access_service.utils.date_time_utils import get_date_range_array_from_
+from data_access_service.utils.date_time_utils import get_monthly_date_range_array_from_
 from data_access_service.utils.email_generator import (
     generate_completed_email_subject,
     generate_completed_email_content,
@@ -58,6 +58,14 @@ def process_csv_data_file(
         zip_file_path = f"{data_file_zip_path}.zip"
         s3_path = f"{uuid}/{zip_file_path}"
         object_url = aws.upload_data_file_to_s3(zip_file_path, s3_path)
+
+        # clean up the folder
+        for file in os.scandir(data_file_folder_path):
+            os.remove(file.path)
+        os.rmdir(data_file_folder_path)
+
+        #clean up the zip
+        os.remove(zip_file_path)
 
         # send email to recipient
         finishingSubject = generate_completed_email_subject(uuid)
@@ -128,7 +136,8 @@ def _generate_csv_file(
             requested_end_date=end_date
         )
 
-        date_ranges = get_date_range_array_from_(start_date=start_date, end_date=end_date)
+        # date_ranges = get_yearly_date_range_array_from_(start_date=start_date, end_date=end_date)
+        date_ranges = get_monthly_date_range_array_from_(start_date=start_date, end_date=end_date)
         for date_range in date_ranges:
             df = _query_data(
                 api,
