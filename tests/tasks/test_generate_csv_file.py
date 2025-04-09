@@ -17,7 +17,9 @@ class TestProcessCSVDataFile(unittest.TestCase):
         "data_access_service.tasks.generate_csv_file.generate_completed_email_content"
     )
     @patch("data_access_service.tasks.generate_csv_file._generate_csv_file")
-    @unittest.skip("Skip because the function already changed significantly. will come back to it later")
+    @unittest.skip(
+        "Skip because the function already changed significantly. will come back to it later"
+    )
     def test_process_csv_data_file_success(
         self,
         mock_generate_csv_file,
