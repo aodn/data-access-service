@@ -1,5 +1,4 @@
 {
-  "containerOrchestrationType": "ECS",
   "containerProperties": {
     "image": "851725428481.dkr.ecr.ap-southeast-2.amazonaws.com/data-access-service:latest",
     "command": [
@@ -7,9 +6,23 @@
     ],
     "jobRoleArn": "arn:aws:iam::704910415367:role/havier-batch-data-download-service",
     "executionRoleArn": "arn:aws:iam::704910415367:role/havier-batch-data-download-service",
-    "volumes": [],
+    "volumes": [
+      {
+        "name": "havier-dataset-subsetting-efs",
+        "efsVolumeConfiguration": {
+          "fileSystemId": "fs-0c6664bc04166fe7e",
+          "rootDirectory": "/",
+          "transitEncryption": "DISABLED"
+        }
+      }
+    ],
     "environment": [],
-    "mountPoints": [],
+    "mountPoints": [
+      {
+        "sourceVolume": "havier-dataset-subsetting-efs",
+        "containerPath": "/mount/efs"
+      }
+    ],
     "ulimits": [],
     "resourceRequirements": [
       {
@@ -23,8 +36,7 @@
     ],
     "secrets": [],
     "networkConfiguration": {
-      "assignPublicIp": "ENABLED",
-      "interfaceConfigurations": []
+      "assignPublicIp": "ENABLED"
     },
     "fargatePlatformConfiguration": {
       "platformVersion": "LATEST"
@@ -37,7 +49,6 @@
       "cpuArchitecture": "X86_64"
     }
   },
-  "jobDefinitionArn": "arn:aws:batch:ap-southeast-2:704910415367:job-definition/generate-csv-data-file:7",
   "jobDefinitionName": "generate-csv-data-file",
   "parameters": {},
   "platformCapabilities": [
@@ -47,8 +58,6 @@
     "attempts": 1,
     "evaluateOnExit": []
   },
-  "revision": 7,
-  "status": "ACTIVE",
   "tags": {},
   "type": "container"
 }
