@@ -16,7 +16,7 @@ from data_access_service.utils.file_utils import zip_the_folder
 
 log = logging.getLogger(__name__)
 
-data_file_folder_path = "data_files"
+efs_mount_point = "/mount/efs"
 
 
 def process_csv_data_file(
@@ -50,7 +50,7 @@ def process_csv_data_file(
         _generate_csv_file(start_date, end_date, multi_polygon_dict, uuid)
 
         data_file_zip_path = generate_zip_name(uuid, start_date, end_date)
-        zip_the_folder(data_file_folder_path, data_file_zip_path)
+        zip_the_folder(efs_mount_point, data_file_zip_path)
 
         # upload the zip file to s3
         zip_file_path = f"{data_file_zip_path}.zip"
@@ -58,9 +58,9 @@ def process_csv_data_file(
         object_url = aws.upload_data_file_to_s3(zip_file_path, s3_path)
 
         # clean up the folder
-        for file in os.scandir(data_file_folder_path):
+        for file in os.scandir(efs_mount_point):
             os.remove(file.path)
-        os.rmdir(data_file_folder_path)
+        os.rmdir(efs_mount_point)
 
         # clean up the zip
         os.remove(zip_file_path)
@@ -154,13 +154,13 @@ def _generate_csv_file(
             if df is not None and not df.empty:
                 dataFactory.add_data(df, date_range.start_date, date_range.end_date)
                 if dataFactory.is_full():
-                    dataFactory.save_as_csv_in_folder_(data_file_folder_path)
+                    dataFactory.save_as_csv_in_folder_(efs_mount_point)
 
         # save the last data frame
         if dataFactory.data_frame is not None:
-            dataFactory.save_as_csv_in_folder_(data_file_folder_path)
+            dataFactory.save_as_csv_in_folder_(efs_mount_point)
 
-    if not any(os.scandir(data_file_folder_path)):
+    if not any(os.scandir(efs_mount_point)):
         raise ValueError(
             f" No data found for uuid={uuid}, start_date={start_date}, end_date={end_date}, multi_polygon={multi_polygon}"
         )
