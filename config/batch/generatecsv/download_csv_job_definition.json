@@ -1,0 +1,54 @@
+{
+  "containerOrchestrationType": "ECS",
+  "containerProperties": {
+    "image": "851725428481.dkr.ecr.ap-southeast-2.amazonaws.com/data-access-service:latest",
+    "command": [
+      "./data_access_service/scripts/generatefile.sh"
+    ],
+    "jobRoleArn": "arn:aws:iam::704910415367:role/havier-batch-data-download-service",
+    "executionRoleArn": "arn:aws:iam::704910415367:role/havier-batch-data-download-service",
+    "volumes": [],
+    "environment": [],
+    "mountPoints": [],
+    "ulimits": [],
+    "resourceRequirements": [
+      {
+        "value": "1.0",
+        "type": "VCPU"
+      },
+      {
+        "value": "8192",
+        "type": "MEMORY"
+      }
+    ],
+    "secrets": [],
+    "networkConfiguration": {
+      "assignPublicIp": "ENABLED",
+      "interfaceConfigurations": []
+    },
+    "fargatePlatformConfiguration": {
+      "platformVersion": "LATEST"
+    },
+    "ephemeralStorage": {
+      "sizeInGiB": 200
+    },
+    "runtimePlatform": {
+      "operatingSystemFamily": "LINUX",
+      "cpuArchitecture": "X86_64"
+    }
+  },
+  "jobDefinitionArn": "arn:aws:batch:ap-southeast-2:704910415367:job-definition/generate-csv-data-file:7",
+  "jobDefinitionName": "generate-csv-data-file",
+  "parameters": {},
+  "platformCapabilities": [
+    "FARGATE"
+  ],
+  "retryStrategy": {
+    "attempts": 1,
+    "evaluateOnExit": []
+  },
+  "revision": 7,
+  "status": "ACTIVE",
+  "tags": {},
+  "type": "container"
+}
