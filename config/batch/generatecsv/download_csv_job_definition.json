@@ -12,7 +12,7 @@
         "efsVolumeConfiguration": {
           "fileSystemId": "fs-0c6664bc04166fe7e",
           "rootDirectory": "/",
-          "transitEncryption": "DISABLED"
+          "transitEncryption": "ENABLED"
         }
       }
     ],
