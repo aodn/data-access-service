@@ -32,7 +32,6 @@ import dask.dataframe as dd
 from dateutil import parser
 from http import HTTPStatus
 
-api_instance = API()
 API_PREFIX = Config.BASE_URL
 router = APIRouter(prefix=API_PREFIX)
 
@@ -229,19 +228,36 @@ def _response_netcdf(filtered: pd.DataFrame):
 
 class HealthCheckResponse(BaseModel):
     status: str
+    status_code: int
+
+
+def get_api_instance(request: Request) -> API:
+    instance = request.app.state.api_instance
+    if not instance.is_ready:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="STARTING"
+        )
+    return instance
 
 
 @router.get("/health", response_model=HealthCheckResponse)
-async def health_check():
+async def health_check(request: Request):
     """
     Health check endpoint.
     """
-    return HealthCheckResponse(status="healthy")
+    api_instance = get_api_instance(request)
+    if api_instance.is_ready:
+        return HealthCheckResponse(status="UP", status_code=HTTPStatus.OK)
+    else:
+        return HealthCheckResponse(
+            status="STARTING", status_code=HTTPStatus.SERVICE_UNAVAILABLE
+        )
 
 
 @router.get("/metadata", dependencies=[Depends(api_key_auth)])
 @router.get("/metadata/{uuid}", dependencies=[Depends(api_key_auth)])
-async def get_mapped_metadata(uuid: Optional[str] = None):
+async def get_mapped_metadata(uuid: Optional[str] = None, request: Request = None):
+    api_instance = get_api_instance(request)
     if uuid is not None:
         return dataclasses.asdict(api_instance.get_mapped_meta_data(uuid))
     else:
@@ -249,12 +265,14 @@ async def get_mapped_metadata(uuid: Optional[str] = None):
 
 
 @router.get("/metadata/{uuid}/raw", dependencies=[Depends(api_key_auth)])
-async def get_raw_metadata(uuid: str):
+async def get_raw_metadata(uuid: str, request: Request):
+    api_instance = get_api_instance(request)
     return api_instance.get_raw_meta_data(uuid)
 
 
 @router.get("/data/{uuid}/notebook_url", dependencies=[Depends(api_key_auth)])
-async def get_notebook_url(uuid: str):
+async def get_notebook_url(uuid: str, request: Request):
+    api_instance = get_api_instance(request)
     i = api_instance.get_notebook_from(uuid)
     if isinstance(i, ValueError):
         raise HTTPException(status_code=404, detail="Notebook URL not found")
@@ -270,6 +288,7 @@ async def has_data(
         DATE_FORMAT
     ),
 ):
+    api_instance = get_api_instance(request)
     logger.info(
         "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
     )
@@ -280,7 +299,8 @@ async def has_data(
 
 
 @router.get("/data/{uuid}/temporal_extent", dependencies=[Depends(api_key_auth)])
-async def get_temporal_extent(uuid: str):
+async def get_temporal_extent(uuid: str, request: Request):
+    api_instance = get_api_instance(request)
     try:
         start_date, end_date = api_instance.get_temporal_extent(uuid)
         result = [
@@ -308,6 +328,7 @@ async def get_data(
     is_to_index: Optional[bool] = Query(default=None),
     f: Optional[str] = Query(default="json"),
 ):
+    api_instance = get_api_instance(request)
     logger.info(
         "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
     )
