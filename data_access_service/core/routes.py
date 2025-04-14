@@ -309,9 +309,7 @@ async def get_temporal_extent(uuid: str, request: Request):
                 "end_date": end_date.strftime(DATE_FORMAT),
             }
         ]
-        return Response(
-            content=json.dumps(result), media_type="application/json"
-        )
+        return Response(content=json.dumps(result), media_type="application/json")
     except ValueError:
         raise HTTPException(status_code=404, detail="Temporal extent not found")
 
