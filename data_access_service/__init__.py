@@ -1,4 +1,5 @@
 import logging
+from data_access_service.core.api import API
 
 
 def init_log(log_level: str):
