@@ -47,7 +47,7 @@ def process_csv_data_file(
         end_date = datetime.datetime.strptime(end_date, "%Y-%m-%d")
 
         # generate csv file and upload to s3
-        _generate_csv_file(start_date, end_date, multi_polygon_dict, uuid)
+        _generate_csv_files(start_date, end_date, multi_polygon_dict, uuid)
 
         data_file_zip_path = generate_zip_name(uuid, start_date, end_date)
         zip_the_folder(efs_mount_point, data_file_zip_path)
@@ -60,7 +60,6 @@ def process_csv_data_file(
         # clean up the folder
         for file in os.scandir(efs_mount_point):
             os.remove(file.path)
-        os.rmdir(efs_mount_point)
 
         # clean up the zip
         os.remove(zip_file_path)
@@ -106,7 +105,7 @@ def trim_date_range(
     return requested_start_date, requested_end_date
 
 
-def _generate_csv_file(
+def _generate_csv_files(
     start_date: datetime, end_date: datetime, multi_polygon: dict, uuid: str
 ):
 
@@ -154,7 +153,11 @@ def _generate_csv_file(
             if df is not None and not df.empty:
                 dataFactory.add_data(df, date_range.start_date, date_range.end_date)
                 if dataFactory.is_full():
-                    dataFactory.save_as_csv_in_folder_(efs_mount_point)
+                    try:
+                        dataFactory.save_as_csv_in_folder_(efs_mount_point)
+                    except Exception as e:
+                        log.error(f"Error saving data: {e}", exc_info=True)
+                        log.error(e)
 
         # save the last data frame
         if dataFactory.data_frame is not None:
