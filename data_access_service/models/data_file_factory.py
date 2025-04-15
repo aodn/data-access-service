@@ -1,7 +1,6 @@
-import stat
-from datetime import datetime
 import os
 import sys
+from datetime import datetime
 from typing import Optional
 
 import pandas as pd
@@ -57,7 +56,13 @@ class DataFileFactory:
         if not os.path.exists(folder_name):
             self.log.info(f"Creating folder: {folder_name}")
             os.makedirs(folder_name)
-        os.chmod(folder_name, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+
+        # TODO: keep the below block for a while. It is useful for debugging. it can be removed if the downloading is stable
+        items = os.listdir(folder_name)
+        print(f"Contents of '{folder_name}':")
+        for item in items:
+            print(item)
+
         csv_file_path = (
             f"{folder_name}/date_{self.start_date.strftime(YEAR_MONTH_DAY)}"
             f"_{self.end_date.strftime(YEAR_MONTH_DAY)}_"
