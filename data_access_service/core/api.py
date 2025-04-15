@@ -33,7 +33,7 @@ def gzip_compress(data):
 class API:
     def __init__(self):
         # the ready flag used to check API status
-        self.is_ready = False
+        self._is_ready = False
         log.info("Init parquet data query instance")
 
         self._raw = dict()
@@ -47,7 +47,11 @@ class API:
 
         log.info("Done init")
         # init finalised, set as ready
-        self.is_ready = True
+        self._is_ready = True
+
+    def get_api_status(self) -> bool:
+        # used for checking if the API instance is ready
+        return self._is_ready
 
     # Do not use cache, so that we can refresh it again
     def _create_uuid_dataset_map(self):

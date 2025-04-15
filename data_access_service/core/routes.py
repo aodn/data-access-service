@@ -242,7 +242,7 @@ async def health_check(request: Request):
     Health check endpoint.
     """
     api_instance = get_api_instance(request)
-    if api_instance.is_ready:
+    if api_instance.get_api_status():
         return HealthCheckResponse(status="UP", status_code=HTTPStatus.OK)
     else:
         return HealthCheckResponse(
