@@ -233,10 +233,6 @@ class HealthCheckResponse(BaseModel):
 
 def get_api_instance(request: Request) -> API:
     instance = request.app.state.api_instance
-    if not instance.is_ready:
-        raise HTTPException(
-            status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="STARTING"
-        )
     return instance
 
 

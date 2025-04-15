@@ -1,7 +1,7 @@
 import json
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from aodn_cloud_optimised import DataQuery
 
@@ -9,6 +9,10 @@ from data_access_service import API
 
 
 class TestApi(unittest.TestCase):
+    # set a middle check point to check the procedure in the API init function
+    def setUp(self):
+        self.middle_check = None
+
     # Use this canned data as the metadata map
     with open(
         Path(__file__).resolve().parent.parent / "canned/catalog_uncached.json", "r"
@@ -62,6 +66,26 @@ class TestApi(unittest.TestCase):
     def test_generate_partial_json_array(self):
         # TODO: Need test this
         pass
+
+    # Test the API is ready after the init process and is not ready when starting and during the init process
+    @patch("data_access_service.core.api.DataQuery.GetAodn")
+    def test_api_init(self, mock_get_aodn):
+        mock_instance = MagicMock()
+        mock_instance.get_metadata.return_value = {}
+        mock_get_aodn.return_value = mock_instance
+
+        # mock the create_uuid_dataset_map function within the init function, so that to check the is_ready flag
+        def mock_create_uuid_dataset_map(api_self):
+            self.middle_check = api_self.is_ready
+
+        with patch.object(
+            API, "_create_uuid_dataset_map", new=mock_create_uuid_dataset_map
+        ):
+            api = API()
+
+        self.assertFalse(self.middle_check)
+
+        self.assertTrue(api.is_ready)
 
 
 if __name__ == "__main__":
