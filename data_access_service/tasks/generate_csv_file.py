@@ -18,8 +18,8 @@ log = logging.getLogger(__name__)
 
 efs_mount_point = "/mount/efs"
 
-
 def process_csv_data_file(
+    job_id: str,
     uuid: str,
     start_date: str,
     end_date: str,
@@ -27,6 +27,7 @@ def process_csv_data_file(
     recipient: str,
 ):
     init_log(logging.DEBUG)
+    data_folder_path = efs_mount_point + job_id +  "/data/"
 
     multi_polygon_dict = json.loads(multi_polygon)
 
@@ -47,10 +48,10 @@ def process_csv_data_file(
         end_date = datetime.datetime.strptime(end_date, "%Y-%m-%d")
 
         # generate csv file and upload to s3
-        _generate_csv_files(start_date, end_date, multi_polygon_dict, uuid)
+        _generate_csv_files(data_folder_path, start_date, end_date, multi_polygon_dict, uuid)
 
         data_file_zip_path = generate_zip_name(uuid, start_date, end_date)
-        zip_the_folder(efs_mount_point, data_file_zip_path)
+        zip_the_folder(data_folder_path, data_file_zip_path)
 
         # upload the zip file to s3
         zip_file_path = f"{data_file_zip_path}.zip"
@@ -58,8 +59,9 @@ def process_csv_data_file(
         object_url = aws.upload_data_file_to_s3(zip_file_path, s3_path)
 
         # clean up the folder
-        for file in os.scandir(efs_mount_point):
+        for file in os.scandir(data_folder_path):
             os.remove(file.path)
+        os.rmdir(data_folder_path)
 
         # clean up the zip
         os.remove(zip_file_path)
@@ -106,7 +108,11 @@ def trim_date_range(
 
 
 def _generate_csv_files(
-    start_date: datetime, end_date: datetime, multi_polygon: dict, uuid: str
+        folder_path: str,
+        start_date: datetime,
+        end_date: datetime,
+        multi_polygon: dict,
+        uuid: str
 ):
 
     api = API()
@@ -154,16 +160,16 @@ def _generate_csv_files(
                 dataFactory.add_data(df, date_range.start_date, date_range.end_date)
                 if dataFactory.is_full():
                     try:
-                        dataFactory.save_as_csv_in_folder_(efs_mount_point)
+                        dataFactory.save_as_csv_in_folder_(folder_path)
                     except Exception as e:
                         log.error(f"Error saving data: {e}", exc_info=True)
                         log.error(e)
 
         # save the last data frame
         if dataFactory.data_frame is not None:
-            dataFactory.save_as_csv_in_folder_(efs_mount_point)
+            dataFactory.save_as_csv_in_folder_(folder_path)
 
-    if not any(os.scandir(efs_mount_point)):
+    if not any(os.scandir(folder_path)):
         raise ValueError(
             f" No data found for uuid={uuid}, start_date={start_date}, end_date={end_date}, multi_polygon={multi_polygon}"
         )

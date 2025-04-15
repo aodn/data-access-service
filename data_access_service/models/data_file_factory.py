@@ -54,7 +54,8 @@ class DataFileFactory:
 
         # if this folder does not exist, create it
         if not os.path.exists(folder_name):
-            raise Exception(f"Folder {folder_name} does not exist. Might be something wrong with the EFS mount point")
+            os.makedirs(folder_name)
+            self.log.info(f"Created folder: {folder_name}")
 
         # TODO: keep the below block for a while. It is useful for debugging. it can be removed if the downloading is stable
         items = os.listdir(folder_name)
