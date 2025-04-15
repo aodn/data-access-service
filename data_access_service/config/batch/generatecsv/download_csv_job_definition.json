@@ -1,6 +1,6 @@
 {
   "containerProperties": {
-    "image": "851725428481.dkr.ecr.ap-southeast-2.amazonaws.com/data-access-service:latest",
+    "image": "704910415367.dkr.ecr.ap-southeast-2.amazonaws.com/havier-test-ecr:latest",
     "command": [
       "./data_access_service/scripts/generatefile.sh"
     ],
@@ -11,8 +11,10 @@
         "name": "havier-dataset-subsetting-efs",
         "efsVolumeConfiguration": {
           "fileSystemId": "fs-0c6664bc04166fe7e",
-          "rootDirectory": "/",
-          "transitEncryption": "ENABLED"
+          "transitEncryption": "ENABLED",
+          "authorizationConfig": {
+            "accessPointId": "fsap-0b8d7d768ffd4c227"
+          }
         }
       }
     ],
