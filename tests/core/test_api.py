@@ -9,6 +9,10 @@ from data_access_service import API
 
 
 class TestApi(unittest.TestCase):
+    # set a middle check point to check the procedure in the API init function
+    def setUp(self):
+        self.middle_check = None
+
     # Use this canned data as the metadata map
     with open(
         Path(__file__).resolve().parent.parent / "canned/catalog_uncached.json", "r"

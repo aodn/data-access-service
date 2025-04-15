@@ -1,8 +1,25 @@
+from data_access_service import init_log
+from data_access_service.core.api import API
+from data_access_service.utils.api_utils import api_key_auth
+from data_access_service.core.api import gzip_compress
+from data_access_service.core.constants import (
+    COORDINATE_INDEX_PRECISION,
+    DEPTH_INDEX_PRECISION,
+)
+from data_access_service.core.error import ErrorResponse
+from data_access_service.config.config import Config
+
+import dataclasses
+import logging
+from typing import Optional, List
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi.responses import Response, FileResponse
+from pydantic import BaseModel
+import json
 import dataclasses
 import datetime
-from datetime import timezone
 import json
-import logging
 import os
 import tempfile
 
@@ -12,28 +29,17 @@ import xarray as xr
 import numpy
 import pandas as pd
 import dask.dataframe as dd
-
-from typing import Optional
-from flask import Blueprint, request, abort, Response, send_file
 from dateutil import parser
 from http import HTTPStatus
 
-from pandas import DataFrame
-
-from data_access_service import app
-from data_access_service.core.api import gzip_compress
-from data_access_service.core.constants import (
-    COORDINATE_INDEX_PRECISION,
-    DEPTH_INDEX_PRECISION,
-)
-from data_access_service.core.error import ErrorResponse
-
-restapi = Blueprint("restapi", __name__)
-log = logging.getLogger(__name__)
+API_PREFIX = Config.BASE_URL
+router = APIRouter(prefix=API_PREFIX)
 
 RECORD_PER_PARTITION: Optional[int] = 1000
 DATE_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 MIN_DATE = "1970-01-01T00:00:00Z"
+
+logger = init_log(logging.DEBUG)
 
 
 # Make all non-numeric and str field to str so that json do not throw serializable error
@@ -121,6 +127,8 @@ def _verify_datatime_param(name: str, req_date: str) -> datetime:
     try:
         if req_date is not None:
             _date = parser.isoparse(req_date)
+            if _date.tzinfo is None:
+                _date = _date.replace(tzinfo=timezone.utc)
 
     except (ValueError, TypeError) as e:
         error_message = ErrorResponse(
@@ -129,7 +137,9 @@ def _verify_datatime_param(name: str, req_date: str) -> datetime:
             parameters=f"{name}={req_date}",
         )
 
-        abort(HTTPStatus.BAD_REQUEST, error_message)
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail=error_message.details
+        )
 
     return _date
 
@@ -142,7 +152,9 @@ def _verify_depth_param(name: str, req_value: numpy.double) -> numpy.double | No
             parameters=f"{name}={req_value}",
         )
 
-        abort(HTTPStatus.BAD_REQUEST, error_message)
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail=error_message.details
+        )
     else:
         return req_value
 
@@ -154,12 +166,12 @@ def _verify_to_index_flag_param(flag: str) -> bool:
         return False
 
 
-def _response_json(filtered: DataFrame, compress: bool):
+def _response_json(filtered: pd.DataFrame, compress: bool):
     ddf: dask.dataframe.DataFrame = dd.from_pandas(
         filtered, npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1
     )
     response = Response(
-        _generate_json_array(ddf, compress), mimetype="application/json"
+        _generate_json_array(ddf, compress), media_type="application/json"
     )
 
     if compress:
@@ -168,12 +180,12 @@ def _response_json(filtered: DataFrame, compress: bool):
     return response
 
 
-def _response_partial_json(filtered: DataFrame, compress: bool):
+def _response_partial_json(filtered: pd.DataFrame, compress: bool):
     ddf: dask.dataframe.DataFrame = dd.from_pandas(
         filtered, npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1
     )
     response = Response(
-        _generate_partial_json_array(ddf, compress), mimetype="application/json"
+        _generate_partial_json_array(ddf, compress), media_type="application/json"
     )
 
     if compress:
@@ -183,7 +195,7 @@ def _response_partial_json(filtered: DataFrame, compress: bool):
 
 
 # TODO: Need to use the metadata to assign correct type to netcdf, right now field type is wrong
-def _response_netcdf(filtered: DataFrame):
+def _response_netcdf(filtered: pd.DataFrame):
     # Convert the DataFrame to an xarray Dataset
     ds = xr.Dataset.from_dataframe(filtered)
 
@@ -193,11 +205,11 @@ def _response_netcdf(filtered: DataFrame):
         ds.to_netcdf(tmp_file_name)
 
     # Send the file as a response to the client
-    response = send_file(
-        tmp_file_name,
+    response = FileResponse(
+        path=tmp_file_name,
+        filename="output.nc",
         as_attachment=True,
-        download_name="output.nc",
-        mimetype="application/x-netcdf",
+        media_type="application/x-netcdf",
     )
 
     # Clean up the temporary file after sending the response
@@ -214,96 +226,123 @@ def _response_netcdf(filtered: DataFrame):
     return response
 
 
-@restapi.route("/health", methods=["GET"])
-def health_check() -> Response:
-    return Response("healthy", mimetype="application/json")
+class HealthCheckResponse(BaseModel):
+    status: str
+    status_code: int
 
 
-@restapi.route("/metadata", methods=["GET"])
-@restapi.route("/metadata/<string:uuid>", methods=["GET"])
-def get_mapped_metadata(uuid=None):
+def get_api_instance(request: Request) -> API:
+    instance = request.app.state.api_instance
+    return instance
+
+
+@router.get("/health", response_model=HealthCheckResponse)
+async def health_check(request: Request):
+    """
+    Health check endpoint.
+    """
+    api_instance = get_api_instance(request)
+    if api_instance.get_api_status():
+        return HealthCheckResponse(status="UP", status_code=HTTPStatus.OK)
+    else:
+        return HealthCheckResponse(
+            status="STARTING", status_code=HTTPStatus.SERVICE_UNAVAILABLE
+        )
+
+
+@router.get("/metadata", dependencies=[Depends(api_key_auth)])
+@router.get("/metadata/{uuid}", dependencies=[Depends(api_key_auth)])
+async def get_mapped_metadata(uuid: Optional[str] = None, request: Request = None):
+    api_instance = get_api_instance(request)
     if uuid is not None:
-        return dataclasses.asdict(app.api.get_mapped_meta_data(uuid))
+        return dataclasses.asdict(api_instance.get_mapped_meta_data(uuid))
     else:
-        return list(app.api.get_mapped_meta_data(None))
+        return list(api_instance.get_mapped_meta_data(None))
 
 
-@restapi.route("/metadata/<string:uuid>/raw", methods=["GET"])
-def get_raw_metadata(uuid: str):
-    return app.api.get_raw_meta_data(uuid)
+@router.get("/metadata/{uuid}/raw", dependencies=[Depends(api_key_auth)])
+async def get_raw_metadata(uuid: str, request: Request):
+    api_instance = get_api_instance(request)
+    return api_instance.get_raw_meta_data(uuid)
 
 
-@restapi.route("/data/<string:uuid>/notebook_url", methods=["GET"])
-def get_notebook_url(uuid: str):
-    i = app.api.get_notebook_from(uuid)
+@router.get("/data/{uuid}/notebook_url", dependencies=[Depends(api_key_auth)])
+async def get_notebook_url(uuid: str, request: Request):
+    api_instance = get_api_instance(request)
+    i = api_instance.get_notebook_from(uuid)
     if isinstance(i, ValueError):
-        abort(404)
-    else:
-        return i
+        raise HTTPException(status_code=404, detail="Notebook URL not found")
+    return i
 
 
-@restapi.route("/data/<string:uuid>/has_data", methods=["GET"])
-def has_data(uuid):
-    start_date = _verify_datatime_param(
-        "start_date", request.args.get("start_date", default=MIN_DATE)
+@router.get("/data/{uuid}/has_data", dependencies=[Depends(api_key_auth)])
+async def has_data(
+    uuid: str,
+    request: Request,
+    start_date: Optional[str] = MIN_DATE,
+    end_date: Optional[str] = datetime.datetime.now(datetime.timezone.utc).strftime(
+        DATE_FORMAT
+    ),
+):
+    api_instance = get_api_instance(request)
+    logger.info(
+        "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
     )
-    end_date = _verify_datatime_param(
-        "end_date",
-        request.args.get(
-            "end_date",
-            default=datetime.datetime.now(datetime.timezone.utc).strftime(DATE_FORMAT),
-        ),
+    start_date = _verify_datatime_param("start_date", start_date)
+    end_date = _verify_datatime_param("end_date", end_date)
+    result = str(api_instance.has_data(uuid, start_date, end_date)).lower()
+    return Response(result, media_type="application/json")
+
+
+@router.get("/data/{uuid}/temporal_extent", dependencies=[Depends(api_key_auth)])
+async def get_temporal_extent(uuid: str, request: Request):
+    api_instance = get_api_instance(request)
+    try:
+        start_date, end_date = api_instance.get_temporal_extent(uuid)
+        result = [
+            {
+                "start_date": start_date.strftime(DATE_FORMAT),
+                "end_date": end_date.strftime(DATE_FORMAT),
+            }
+        ]
+        return Response(content=json.dumps(result), media_type="application/json")
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Temporal extent not found")
+
+
+@router.get("/data/{uuid}", dependencies=[Depends(api_key_auth)])
+async def get_data(
+    uuid: str,
+    request: Request,
+    start_date: Optional[str] = Query(default=MIN_DATE),
+    end_date: Optional[str] = Query(
+        default=datetime.datetime.now(timezone.utc).strftime(DATE_FORMAT)
+    ),
+    columns: Optional[List[str]] = Query(default=None),
+    start_depth: Optional[float] = Query(default=-1.0),
+    end_depth: Optional[float] = Query(default=-1.0),
+    is_to_index: Optional[bool] = Query(default=None),
+    f: Optional[str] = Query(default="json"),
+):
+    api_instance = get_api_instance(request)
+    logger.info(
+        "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
     )
-    result = str(app.api.has_data(uuid, start_date, end_date)).lower()
-    return Response(result, mimetype="application/json")
+    start_date = _verify_datatime_param("start_date", start_date)
+    end_date = _verify_datatime_param("end_date", end_date)
 
-
-@restapi.route("/data/<string:uuid>/temporal_extent", methods=["GET"])
-def get_temporal_extent(uuid):
-    temp: (datetime, datetime) = app.api.get_temporal_extent(uuid)
-    result = [
-        {
-            "start_date": temp[0].strftime(DATE_FORMAT),
-            "end_date": temp[1].strftime(DATE_FORMAT),
-        }
-    ]
-    return Response(json.dumps(result), mimetype="application/json")
-
-
-@restapi.route("/data/<string:uuid>", methods=["GET"])
-def get_data(uuid):
-    log.info("Request details: %s", json.dumps(request.args.to_dict(flat=False)))
-    start_date = _verify_datatime_param(
-        "start_date", request.args.get("start_date", default=MIN_DATE)
-    )
-    end_date = _verify_datatime_param(
-        "end_date",
-        request.args.get(
-            "end_date",
-            default=datetime.datetime.now(datetime.timezone.utc).strftime(DATE_FORMAT),
-        ),
-    )
-
-    columns = request.args.getlist("columns") or None
-
-    result: Optional[pd.DataFrame] = app.api.get_dataset_data(
+    result: Optional[pd.DataFrame] = api_instance.get_dataset_data(
         uuid=uuid, date_start=start_date, date_end=end_date, columns=columns
     )
 
     # if result is None, return empty response
     if result is None:
-        return Response("[]", mimetype="application/json")
+        return Response("[]", media_type="application/json")
 
-    start_depth = _verify_depth_param(
-        "start_depth", numpy.double(request.args.get("start_depth", default=-1.0))
-    )
-    end_depth = _verify_depth_param(
-        "end_depth", numpy.double(request.args.get("end_depth", default=-1.0))
-    )
+    start_depth = _verify_depth_param("start_depth", start_depth)
+    end_depth = _verify_depth_param("end_depth", end_depth)
 
-    is_to_index = _verify_to_index_flag_param(
-        request.args.get("is_to_index", default=None)
-    )
+    is_to_index = _verify_to_index_flag_param(is_to_index)
 
     # The cloud optimized format is fast to lookup if there is an index, some field isn't part of the
     # index and therefore will not gain to filter by those field, indexed fields are site_code, timestamp, polygon
@@ -320,11 +359,10 @@ def get_data(uuid):
     else:
         filtered = result
 
-    log.info("Record number return %s for query", len(filtered.index))
+    logger.info("Record number return %s for query", len(filtered.index))
 
-    log.info("Memory usage: %s", get_memory_usage_percentage())
+    logger.info("Memory usage: %s", get_memory_usage_percentage())
 
-    f = request.args.get("format", default="json", type=str)
     if f == "json":
         # Depends on whether receiver support gzip encoding
         compress = "gzip" in request.headers.get("Accept-Encoding", "")
@@ -340,5 +378,5 @@ def get_memory_usage_percentage():
     process = psutil.Process(os.getpid())
     memory_info = process.memory_info()
     total_memory = psutil.virtual_memory().total
-    log.info("Total memory: %s", total_memory)
+    logger.info("Total memory: %s", total_memory)
     return (memory_info.rss / total_memory) * 100

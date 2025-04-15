@@ -32,6 +32,8 @@ def gzip_compress(data):
 
 class API:
     def __init__(self):
+        # the ready flag used to check API status
+        self._is_ready = False
         log.info("Init parquet data query instance")
 
         self._raw = dict()
@@ -44,6 +46,12 @@ class API:
         self._create_uuid_dataset_map()
 
         log.info("Done init")
+        # init finalised, set as ready
+        self._is_ready = True
+
+    def get_api_status(self) -> bool:
+        # used for checking if the API instance is ready
+        return self._is_ready
 
     # Do not use cache, so that we can refresh it again
     def _create_uuid_dataset_map(self):
@@ -147,12 +155,18 @@ class API:
             if date_start is None:
                 date_start = datetime.now(timezone.utc) - timedelta(days=10)
             else:
-                date_start = pd.to_datetime(date_start).tz_localize(timezone.utc)
+                if date_start.tzinfo is None:
+                    date_start = pd.to_datetime(date_start).tz_localize(timezone.utc)
+                else:
+                    date_start = pd.to_datetime(date_start).tz_convert(timezone.utc)
 
             if date_end is None:
                 date_end = datetime.now(timezone.utc)
             else:
-                date_end = pd.to_datetime(date_end).tz_localize(timezone.utc)
+                if date_end.tzinfo is None:
+                    date_end = pd.to_datetime(date_end).tz_localize(timezone.utc)
+                else:
+                    date_end = pd.to_datetime(date_end).tz_convert(timezone.utc)
 
             # The get_data call the pyarrow and compare only works with non timezone datetime
             # now make sure the timezone is correctly convert to utc then remove it.
