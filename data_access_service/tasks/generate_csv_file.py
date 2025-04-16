@@ -7,7 +7,7 @@ from typing import List, Dict
 from data_access_service import API, init_log
 from data_access_service.core.AWSClient import AWSClient
 from data_access_service.models.data_file_factory import DataFileFactory
-from data_access_service.utils.date_time_utils import get_monthly_date_range_array_from_
+from data_access_service.utils.date_time_utils import get_monthly_date_range_array_from_, parse_date, YEAR_MONTH_DAY
 from data_access_service.utils.email_generator import (
     generate_completed_email_subject,
     generate_completed_email_content,
@@ -16,7 +16,7 @@ from data_access_service.utils.file_utils import zip_the_folder
 
 log = logging.getLogger(__name__)
 
-efs_mount_point = "/mount/efs"
+efs_mount_point = "/mount/efs/"
 
 def process_csv_data_file(
     job_id: str,
@@ -28,6 +28,7 @@ def process_csv_data_file(
 ):
     init_log(logging.DEBUG)
     data_folder_path = efs_mount_point + job_id +  "/data/"
+    # data_folder_path = efs_mount_point
 
     multi_polygon_dict = json.loads(multi_polygon)
 
@@ -44,8 +45,10 @@ def process_csv_data_file(
     ]
 
     try:
-        start_date = datetime.datetime.strptime(start_date, "%Y-%m-%d")
-        end_date = datetime.datetime.strptime(end_date, "%Y-%m-%d")
+        # start_date = datetime.datetime.strptime(start_date, "%Y-%m-%d")
+        # end_date = datetime.datetime.strptime(end_date, "%Y-%m-%d")
+        start_date = parse_date(start_date, YEAR_MONTH_DAY)
+        end_date = parse_date(end_date, YEAR_MONTH_DAY)
 
         # generate csv file and upload to s3
         _generate_csv_files(data_folder_path, start_date, end_date, multi_polygon_dict, uuid)
@@ -53,15 +56,21 @@ def process_csv_data_file(
         data_file_zip_path = generate_zip_name(uuid, start_date, end_date)
         zip_the_folder(data_folder_path, data_file_zip_path)
 
-        # upload the zip file to s3
-        zip_file_path = f"{data_file_zip_path}.zip"
+        log.info(f"Uploading zip file to S3: {data_file_zip_path}.zip")
+        zip_file_path = f"{efs_mount_point + job_id}/{data_file_zip_path}.zip"
         s3_path = f"{uuid}/{zip_file_path}"
         object_url = aws.upload_data_file_to_s3(zip_file_path, s3_path)
 
         # clean up the folder
-        for file in os.scandir(data_folder_path):
-            os.remove(file.path)
-        os.rmdir(data_folder_path)
+        log.info(f"Cleaning up folder: {data_folder_path}")
+        try:
+            for file in os.scandir(data_folder_path):
+                os.remove(file.path)
+                log.info(f"Removed file: {file.path}")
+            os.rmdir(data_folder_path)
+            log.info(f"Removed folder: {data_folder_path}")
+        except Exception as e:
+            log.error(f"Error cleaning up folder: {e}")
 
         # clean up the zip
         os.remove(zip_file_path)
