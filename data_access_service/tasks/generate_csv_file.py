@@ -53,8 +53,6 @@ def process_csv_data_file(
     ]
 
     try:
-        # start_date = datetime.datetime.strptime(start_date, "%Y-%m-%d")
-        # end_date = datetime.datetime.strptime(end_date, "%Y-%m-%d")
         start_date = parse_date(start_date, YEAR_MONTH_DAY)
         end_date = parse_date(end_date, YEAR_MONTH_DAY)
 
