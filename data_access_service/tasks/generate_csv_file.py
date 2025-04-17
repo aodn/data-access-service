@@ -2,6 +2,7 @@ import datetime
 import json
 import logging
 import os
+import shutil
 from typing import List, Dict
 
 from data_access_service import API, init_log
@@ -61,7 +62,7 @@ def process_csv_data_file(
         _generate_csv_files(data_folder_path, start_date, end_date, multi_polygon_dict, uuid)
 
         data_file_zip_path = generate_zip_name(uuid, start_date, end_date)
-        zipped_file_path = zip_the_folder(folder_path=job_root_folder, output_zip_path=data_file_zip_path)
+        zipped_file_path = zip_the_folder(folder_path=job_root_folder, output_zip_path=f"{job_root_folder}/{data_file_zip_path}")
         log.info(f"Zipped file path: {zipped_file_path}")
 
         log.info(f"Uploading zip file to S3: {data_file_zip_path}.zip")
@@ -69,18 +70,13 @@ def process_csv_data_file(
         object_url = aws.upload_data_file_to_s3(zipped_file_path, s3_path)
 
         # clean up the folder
-        log.info(f"Cleaning up folder: {data_folder_path}")
+        log.info(f"Cleaning up folder: {job_root_folder}")
         try:
-            for file in os.scandir(data_folder_path):
-                os.remove(file.path)
-                log.info(f"Removed file: {file.path}")
-            os.rmdir(data_folder_path)
-            log.info(f"Removed folder: {data_folder_path}")
+            shutil.rmtree(job_root_folder)
+            log.info(f"Successfully cleaned up folder: {job_root_folder}")
         except Exception as e:
             log.error(f"Error cleaning up folder: {e}")
 
-        # clean up the zip
-        os.remove(zipped_file_path)
 
         # send email to recipient
         finishingSubject = generate_completed_email_subject(uuid)
