@@ -147,3 +147,19 @@ If you have "ModuleNotFoundError" or similar issues, you may need to install dep
 ```shell
 poetry install
 ```
+
+# Batch jobs
+Another part of this project is to run batch jobs for dataset subsetting. If you want to test the batch job codes locally,
+Please export aws environment variables first (or use profile etc..) (for example, if use edge, please go to aws access portal, and pick AODN-Edge -> AodnAdminAccess)
+
+and also export `AWS_BATCH_JOB_ID` (please go to batch console to copy an existing job id)
+
+After several exporting, make sure your terminal is at the root folder of this project. Then please run:
+```shell
+./data_access_service/scripts/generatefile.sh
+```
+This is also the script of the batch to run.
+
+If you have error like: "mount/efs permission denied", please go to `generate_csv_file.py`, 
+at the top of the file, make sure `efs_mount_point ="" ` is in use and `efs_mount_point = "/mount/efs/"` is commented out.
+This is just a temp solution. We will then use source file to manage these different values in different environments.
