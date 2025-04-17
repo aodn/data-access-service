@@ -38,5 +38,5 @@ print('Multi Polygon:', multi_polygon)
 print('Recipient:', recipient)
 
 
-process_csv_data_file(uuid, start_date, end_date, multi_polygon, recipient)
+process_csv_data_file(job_id, uuid, start_date, end_date, multi_polygon, recipient)
 "
