@@ -16,7 +16,11 @@ from data_access_service.utils.file_utils import zip_the_folder
 
 log = logging.getLogger(__name__)
 
-efs_mount_point = "/mount/efs/"
+
+#  below is for local testing
+efs_mount_point = ""
+
+# efs_mount_point = "/mount/efs/"
 
 def process_csv_data_file(
     job_id: str,
@@ -27,7 +31,10 @@ def process_csv_data_file(
     recipient: str,
 ):
     init_log(logging.DEBUG)
-    data_folder_path = efs_mount_point + job_id +  "/data/"
+
+    # TODO: put these folders for now and will be replaced when start doing RO-Crate   format
+    job_root_folder = efs_mount_point + job_id + "/"
+    data_folder_path = job_root_folder +  "data/"
     # data_folder_path = efs_mount_point
 
     multi_polygon_dict = json.loads(multi_polygon)
@@ -54,12 +61,12 @@ def process_csv_data_file(
         _generate_csv_files(data_folder_path, start_date, end_date, multi_polygon_dict, uuid)
 
         data_file_zip_path = generate_zip_name(uuid, start_date, end_date)
-        zip_the_folder(data_folder_path, data_file_zip_path)
+        zipped_file_path = zip_the_folder(folder_path=job_root_folder, output_zip_path=data_file_zip_path)
+        log.info(f"Zipped file path: {zipped_file_path}")
 
         log.info(f"Uploading zip file to S3: {data_file_zip_path}.zip")
-        zip_file_path = f"{efs_mount_point + job_id}/{data_file_zip_path}.zip"
-        s3_path = f"{uuid}/{zip_file_path}"
-        object_url = aws.upload_data_file_to_s3(zip_file_path, s3_path)
+        s3_path = f"{uuid}/{zipped_file_path}"
+        object_url = aws.upload_data_file_to_s3(zipped_file_path, s3_path)
 
         # clean up the folder
         log.info(f"Cleaning up folder: {data_folder_path}")
@@ -73,7 +80,7 @@ def process_csv_data_file(
             log.error(f"Error cleaning up folder: {e}")
 
         # clean up the zip
-        os.remove(zip_file_path)
+        os.remove(zipped_file_path)
 
         # send email to recipient
         finishingSubject = generate_completed_email_subject(uuid)
