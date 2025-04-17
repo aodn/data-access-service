@@ -57,7 +57,7 @@ def process_csv_data_file(
         end_date = parse_date(end_date, YEAR_MONTH_DAY)
 
         # generate csv file and upload to s3
-        _generate_csv_files(data_folder_path, start_date, end_date, multi_polygon_dict, uuid)
+        generate_csv_files(data_folder_path, start_date, end_date, multi_polygon_dict, uuid)
 
         data_file_zip_path = generate_zip_name(uuid, start_date, end_date)
         zipped_file_path = zip_the_folder(folder_path=job_root_folder, output_zip_path=f"{job_root_folder}/{data_file_zip_path}")
@@ -117,7 +117,7 @@ def trim_date_range(
     return requested_start_date, requested_end_date
 
 
-def _generate_csv_files(
+def generate_csv_files(
         folder_path: str,
         start_date: datetime,
         end_date: datetime,
@@ -130,7 +130,7 @@ def _generate_csv_files(
     # TODO: currently, assume polygons are all rectangles. when cloud-optimized library is upgraded,
     #  we can change to use the polygon coordinates directly
     for polygon in multi_polygon["coordinates"]:
-        lats_lons = _get_lat_lon_from_(polygon)
+        lats_lons = get_lat_lon_from_(polygon)
         min_lat = lats_lons["min_lat"]
         max_lat = lats_lons["max_lat"]
         min_lon = lats_lons["min_lon"]
@@ -156,7 +156,7 @@ def _generate_csv_files(
             start_date=start_date, end_date=end_date
         )
         for date_range in date_ranges:
-            df = _query_data(
+            df = query_data(
                 api,
                 uuid,
                 date_range.start_date,
@@ -185,7 +185,7 @@ def _generate_csv_files(
         )
 
 
-def _query_data(
+def query_data(
     api,
     uuid: str,
     start_date: datetime,
@@ -224,7 +224,7 @@ def _query_data(
         return None
 
 
-def _get_lat_lon_from_(polygon: List[List[List[float]]]) -> Dict[str, float]:
+def get_lat_lon_from_(polygon: List[List[List[float]]]) -> Dict[str, float]:
     coordinates = [coord for ring in polygon for coord in ring]
     lats = [coord[1] for coord in coordinates]
     lons = [coord[0] for coord in coordinates]
