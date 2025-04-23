@@ -52,7 +52,9 @@ class TestDateTimeUtils(unittest.TestCase):
             DateRange(datetime.datetime(2022, 1, 1), datetime.datetime(2022, 12, 31)),
             DateRange(datetime.datetime(2023, 1, 1), datetime.datetime(2023, 3, 31)),
         ]
-        self.assertEqual(get_yearly_date_range_array_from_(start_date, end_date), expected_ranges)
+        self.assertEqual(
+            get_yearly_date_range_array_from_(start_date, end_date), expected_ranges
+        )
 
     def test_get_monthly_date_range_array_from_(self):
         start_date = datetime.datetime(2023, 1, 15)
@@ -62,7 +64,9 @@ class TestDateTimeUtils(unittest.TestCase):
             DateRange(datetime.datetime(2023, 2, 1), datetime.datetime(2023, 2, 28)),
             DateRange(datetime.datetime(2023, 3, 1), datetime.datetime(2023, 3, 10)),
         ]
-        self.assertEqual(get_monthly_date_range_array_from_(start_date, end_date), expected_ranges)
+        self.assertEqual(
+            get_monthly_date_range_array_from_(start_date, end_date), expected_ranges
+        )
 
 
 if __name__ == "__main__":

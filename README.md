@@ -160,6 +160,6 @@ After several exporting, make sure your terminal is at the root folder of this p
 ```
 This is also the script of the batch to run.
 
-If you have error like: "mount/efs permission denied", please go to `generate_csv_file.py`, 
+If you have error like: "mount/efs permission denied", please go to `generate_csv_file.py`,
 at the top of the file, make sure `efs_mount_point ="" ` is in use and `efs_mount_point = "/mount/efs/"` is commented out.
 This is just a temp solution. We will then use source file to manage these different values in different environments.

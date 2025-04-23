@@ -8,20 +8,25 @@ from data_access_service.models.date_range import DateRange
 
 YEAR_MONTH_DAY = "%Y-%m-%d"
 
+
 # parse all common format of date string into given format, such as "%Y-%m-%d"
 def parse_date(date_string: str, format_to_convert: str) -> datetime:
     return parser.parse(date_string, default=datetime.datetime(1, 1, 1))
+
 
 def get_final_day_of_(date: datetime) -> datetime:
     next_month = date.replace(day=28) + datetime.timedelta(days=4)
     last_day_of_month = next_month - datetime.timedelta(days=next_month.day)
     return last_day_of_month
 
+
 def get_first_day_of_(date: datetime) -> datetime:
     return date.replace(day=1)
 
+
 def next_month_first_day(date: datetime) -> datetime:
     return (date + relativedelta(months=1)).replace(day=1)
+
 
 def get_yearly_date_range_array_from_(
     start_date: datetime, end_date: datetime

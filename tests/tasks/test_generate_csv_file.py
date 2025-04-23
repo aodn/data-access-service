@@ -6,7 +6,8 @@ import pytest
 from data_access_service.tasks.generate_csv_file import (
     trim_date_range,
     query_data,
-    generate_zip_name, )
+    generate_zip_name,
+)
 
 
 class TestGenerateCSVFile:

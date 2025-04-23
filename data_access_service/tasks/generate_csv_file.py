@@ -8,7 +8,11 @@ from typing import List, Dict
 from data_access_service import API, init_log
 from data_access_service.core.AWSClient import AWSClient
 from data_access_service.models.data_file_factory import DataFileFactory
-from data_access_service.utils.date_time_utils import get_monthly_date_range_array_from_, parse_date, YEAR_MONTH_DAY
+from data_access_service.utils.date_time_utils import (
+    get_monthly_date_range_array_from_,
+    parse_date,
+    YEAR_MONTH_DAY,
+)
 from data_access_service.utils.email_generator import (
     generate_completed_email_subject,
     generate_completed_email_content,
@@ -23,6 +27,7 @@ log = logging.getLogger(__name__)
 
 efs_mount_point = "/mount/efs/"
 
+
 def process_csv_data_file(
     job_id: str,
     uuid: str,
@@ -35,7 +40,7 @@ def process_csv_data_file(
 
     # TODO: put these folders for now and will be replaced when start doing RO-Crate   format
     job_root_folder = efs_mount_point + job_id + "/"
-    data_folder_path = job_root_folder +  "data/"
+    data_folder_path = job_root_folder + "data/"
     # data_folder_path = efs_mount_point
 
     multi_polygon_dict = json.loads(multi_polygon)
@@ -57,10 +62,15 @@ def process_csv_data_file(
         end_date = parse_date(end_date, YEAR_MONTH_DAY)
 
         # generate csv file and upload to s3
-        generate_csv_files(data_folder_path, start_date, end_date, multi_polygon_dict, uuid)
+        generate_csv_files(
+            data_folder_path, start_date, end_date, multi_polygon_dict, uuid
+        )
 
         data_file_zip_path = generate_zip_name(uuid, start_date, end_date)
-        zipped_file_path = zip_the_folder(folder_path=job_root_folder, output_zip_path=f"{job_root_folder}/{data_file_zip_path}")
+        zipped_file_path = zip_the_folder(
+            folder_path=job_root_folder,
+            output_zip_path=f"{job_root_folder}/{data_file_zip_path}",
+        )
         log.info(f"Zipped file path: {zipped_file_path}")
 
         log.info(f"Uploading zip file to S3: {data_file_zip_path}.zip")
@@ -74,7 +84,6 @@ def process_csv_data_file(
             log.info(f"Successfully cleaned up folder: {job_root_folder}")
         except Exception as e:
             log.error(f"Error cleaning up folder: {e}")
-
 
         # send email to recipient
         finishingSubject = generate_completed_email_subject(uuid)
@@ -119,11 +128,11 @@ def trim_date_range(
 
 
 def generate_csv_files(
-        folder_path: str,
-        start_date: datetime,
-        end_date: datetime,
-        multi_polygon: dict,
-        uuid: str
+    folder_path: str,
+    start_date: datetime,
+    end_date: datetime,
+    multi_polygon: dict,
+    uuid: str,
 ):
 
     api = API()
