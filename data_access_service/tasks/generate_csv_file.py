@@ -19,9 +19,9 @@ log = logging.getLogger(__name__)
 
 
 #  below is for local testing
-efs_mount_point = ""
+# efs_mount_point = ""
 
-# efs_mount_point = "/mount/efs/"
+efs_mount_point = "/mount/efs/"
 
 def process_csv_data_file(
     job_id: str,
@@ -97,6 +97,8 @@ def process_csv_data_file(
 def trim_date_range(
     api: API, uuid: str, requested_start_date: datetime, requested_end_date: datetime
 ) -> (datetime, datetime):
+
+    log.info(f"Original date range: {requested_start_date} to {requested_end_date}")
     metadata_temporal_extent = api.get_temporal_extent(uuid=uuid)
     if len(metadata_temporal_extent) != 2:
         raise ValueError(
@@ -112,7 +114,6 @@ def trim_date_range(
     if requested_end_date > metadata_end_date:
         requested_end_date = metadata_end_date
 
-    log.info(f"Original date range: {requested_start_date} to {requested_end_date}")
     log.info(f"Trimmed date range: {requested_start_date} to {requested_end_date}")
     return requested_start_date, requested_end_date
 
