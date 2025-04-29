@@ -149,17 +149,26 @@ poetry install
 ```
 
 # Batch jobs
-Another part of this project is to run batch jobs for dataset subsetting. If you want to test the batch job codes locally,
+Another part of this project is to run batch jobs for dataset subsetting.
+
+### Local running testing
+- If you want to test the batch job codes locally, (running in your local machine)
 Please export aws environment variables first (or use profile etc..) (for example, if use edge, please go to aws access portal, and pick AODN-Edge -> AodnAdminAccess)
-
-and also export `AWS_BATCH_JOB_ID` (please go to batch console to copy an existing job id)
-
+and also export `AWS_BATCH_JOB_ID` (please go to batch console to copy an existing job id).
 After several exporting, make sure your terminal is at the root folder of this project. Then please run:
 ```shell
 ./data_access_service/scripts/generatefile.sh
 ```
-This is also the script of the batch to run.
 
-If you have error like: "mount/efs permission denied", please go to `generate_csv_file.py`,
+- If you have error like: "mount/efs permission denied" or other errors about the mount/efs folder, please go to `generate_csv_file.py`,
 at the top of the file, make sure `efs_mount_point ="" ` is in use and `efs_mount_point = "/mount/efs/"` is commented out.
 This is just a temp solution. We will then use source file to manage these different values in different environments.
+
+### aws running testing
+- If you want to test the batch job codes in AWS, (running in AWS Batch), please change the `efs_mount_point ="" ` back to `efs_mount_point = "/mount/efs/"` (if you did the change before), and then:
+  1. Build the docker image and push it to ECR (havier-test-ecr). Please do it by following the instructions in the havier-test-ecr repo by clicking button "View push commands" at the top right corner.
+  2. Open the ogc-api project locally
+  3. In class DatasetDownloadEnums of the ogc-api project, go to JobDefinition enum and change the value of GENERATE_CSV_DATA_FILE from "generate-csv-data-file" into "generate-csv-data-file-dev" (add "-dev" at the end of the string).
+  4. run the ogc-api project locally and run the portal project locally (make sure your local portal is pointing to the local ogc-api project).
+  5. Go to localhost:5173, and navigate to an IMOS hosted dataset. On the detail page, select any date range and / or spatial area, and click "Download" button. This will trigger the batch job.
+  6. For dev stage, if you cannot receive the email, please make sure the email address you provided has added into the AWS SES verified email list.
