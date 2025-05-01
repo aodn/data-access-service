@@ -21,4 +21,6 @@ COPY . /app
 RUN chown -R appuser:appuser /app
 USER appuser
 
+COPY log_config.yaml /app/log_config.yaml
+
 EXPOSE 8000
