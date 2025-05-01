@@ -2,7 +2,7 @@ import logging
 from data_access_service.core.api import API
 
 
-def init_log(log_level: str):
+def init_log(log_level: int):
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",

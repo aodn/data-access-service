@@ -72,7 +72,7 @@ class API:
             else:
                 log.error("Data not found for dataset " + key)
 
-    def get_mapped_meta_data(self, uuid: str):
+    def get_mapped_meta_data(self, uuid: str | None):
         if uuid is not None:
             value = self._cached.get(uuid)
         else:

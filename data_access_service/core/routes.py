@@ -9,14 +9,12 @@ from data_access_service.core.constants import (
 from data_access_service.core.error import ErrorResponse
 from data_access_service.config.config import Config
 
-import dataclasses
 import logging
 from typing import Optional, List
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, BackgroundTasks
 from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel
-import json
 import dataclasses
 import datetime
 import json
@@ -40,7 +38,6 @@ DATE_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 MIN_DATE = "1970-01-01T00:00:00Z"
 
 logger = init_log(logging.DEBUG)
-
 
 # Make all non-numeric and str field to str so that json do not throw serializable error
 def convert_non_numeric_to_str(df):
@@ -144,7 +141,7 @@ def _verify_datatime_param(name: str, req_date: str) -> datetime:
     return _date
 
 
-def _verify_depth_param(name: str, req_value: numpy.double) -> numpy.double | None:
+def _verify_depth_param(name: str, req_value: numpy.double | None) -> numpy.double | None:
     if req_value is not None and req_value > 0.0:
         error_message = ErrorResponse(
             status_code=HTTPStatus.BAD_REQUEST,
@@ -159,7 +156,7 @@ def _verify_depth_param(name: str, req_value: numpy.double) -> numpy.double | No
         return req_value
 
 
-def _verify_to_index_flag_param(flag: str) -> bool:
+def _verify_to_index_flag_param(flag: str | None) -> bool:
     if (flag is not None) and (flag.lower() == "true"):
         return True
     else:
@@ -195,7 +192,7 @@ def _response_partial_json(filtered: pd.DataFrame, compress: bool):
 
 
 # TODO: Need to use the metadata to assign correct type to netcdf, right now field type is wrong
-def _response_netcdf(filtered: pd.DataFrame):
+def _response_netcdf(filtered: pd.DataFrame, background_tasks: BackgroundTasks):
     # Convert the DataFrame to an xarray Dataset
     ds = xr.Dataset.from_dataframe(filtered)
 
@@ -208,7 +205,6 @@ def _response_netcdf(filtered: pd.DataFrame):
     response = FileResponse(
         path=tmp_file_name,
         filename="output.nc",
-        as_attachment=True,
         media_type="application/x-netcdf",
     )
 
@@ -221,7 +217,7 @@ def _response_netcdf(filtered: pd.DataFrame):
         except Exception as e:
             print(f"Error removing file {file_path}: {e}")
 
-    response.call_on_close(lambda: _remove_file_if_exists(tmp_file_name))
+    background_tasks.add_task(lambda: _remove_file_if_exists(tmp_file_name))
 
     return response
 
@@ -314,6 +310,7 @@ async def get_temporal_extent(uuid: str, request: Request):
 async def get_data(
     uuid: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     start_date: Optional[str] = Query(default=MIN_DATE),
     end_date: Optional[str] = Query(
         default=datetime.datetime.now(timezone.utc).strftime(DATE_FORMAT)
@@ -360,7 +357,6 @@ async def get_data(
         filtered = result
 
     logger.info("Record number return %s for query", len(filtered.index))
-
     logger.info("Memory usage: %s", get_memory_usage_percentage())
 
     if f == "json":
@@ -371,7 +367,8 @@ async def get_data(
         else:
             return _response_json(filtered, compress)
     elif f == "netcdf":
-        return _response_netcdf(filtered)
+        return _response_netcdf(filtered, background_tasks)
+    return None
 
 
 def get_memory_usage_percentage():

@@ -156,7 +156,7 @@ Please export aws environment variables first (or use profile etc..) (for exampl
 and also export `AWS_BATCH_JOB_ID` (please go to batch console to copy an existing job id).
 After several exporting, make sure your terminal is at the root folder of this project. Then please run:
 ```shell
-./data_access_service/scripts/generatefile.sh
+./data_access_service/entrypoint.py
 ```
 
 - If you have error like: "mount/efs permission denied" or other errors about the mount/efs folder, please go to `generate_csv_file.py`,
