@@ -51,9 +51,9 @@ def convert_non_numeric_to_str(df):
 
 
 # Function to generate JSON lines from Dask DataFrame
-def _generate_json_array(dask, compress: bool = False):
+def _generate_json_array(dask_instance, compress: bool = False):
     record_list = []
-    for partition in dask.to_delayed():
+    for partition in dask_instance.to_delayed():
         partition_df = convert_non_numeric_to_str(partition.compute())
         for record in partition_df.to_dict(orient="records"):
             record_list.append(record)
@@ -218,7 +218,6 @@ def _response_netcdf(filtered: pd.DataFrame, background_tasks: BackgroundTasks):
             print(f"Error removing file {file_path}: {e}")
 
     background_tasks.add_task(lambda: _remove_file_if_exists(tmp_file_name))
-
     return response
 
 

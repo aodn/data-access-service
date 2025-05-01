@@ -2,7 +2,7 @@ import os
 import boto3
 import logging
 from data_access_service import init_log
-from data_access_service.core.batch import subsetting
+from data_access_service.batch import subsetting
 
 logger = init_log(logging.DEBUG)
 
