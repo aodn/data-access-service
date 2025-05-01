@@ -1,6 +1,8 @@
 import boto3
 import logging
-from data_access_service.config.config import load_config
+
+from data_access_service.config.config import Config
+from data_access_service.server import app
 
 log = logging.getLogger(__name__)
 
@@ -10,10 +12,10 @@ class AWSClient:
         log.info("Init AWS class")
         self.s3 = boto3.client("s3")
         self.ses = boto3.client("ses")
-        self.config = load_config()
+        self.config: Config = app.state.config
 
     def upload_data_file_to_s3(self, file_path, s3_path):
-        bucket_name = self.config["aws"]["s3"]["bucket_name"]["csv"]
+        bucket_name = self.config.get_csv_bucket_name()
         region = self.s3.meta.region_name
 
         try:
@@ -26,7 +28,7 @@ class AWSClient:
             raise e
 
     def send_email(self, recipient, subject, body_text):
-        sender = self.config["aws"]["ses"]["sender_email"]
+        sender = self.config.get_sender_email()
 
         try:
             response = self.ses.send_email(

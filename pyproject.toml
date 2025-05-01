@@ -6,37 +6,40 @@ authors = ["utas-raymondng <manfai.ng@utas.edu.au>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
+# Dependency from a GitHub repository, use tag = "v0.1.32" or branch = "xxx"
+aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", tag = "v0.1.34" }
+black = "^24.8.0"
 boto3 = "^1.28.0"
-pre-commit = "^3.8.0"
-fastapi = "0.115.2"
-uvicorn = "0.30.6"
+cartopy = "^0.24.1"
+cryptography = "<44.0.2"
 dask = {extras = ["dataframe"], version = ">=2024.9.1"}
-python-dotenv = "1.0.1"
+fastapi = "0.115.2"
 fuzzywuzzy = "^0.18.0"
-gunicorn = "22.0.0"
+gsw = "^3.6.19"
+gunicorn = "23.0.0"
 gevent = "24.2.1"
 h5py = "3.11.0"
 jsonify = "^0.5"
+logging = "^0.4.9.6"
 matplotlib = "3.10.0"
 pandas = "^2.2.3"
 pyarrow = "17.0.0"
 python = "^3.10.14"
 python-levenshtein = "^0.25.1"
-logging = "^0.4.9.6"
+psutil = "^7.0.0"
+pre-commit = "^3.8.0"
+python-dotenv = "1.0.1"
 requests = "2.32.3"
+seaborn = "^0.13.2"
+uvicorn = "0.30.6"
 watchdog = "^4.0.1"
 xmltodict = "^0.13.0"
-black = "^24.8.0"
-cryptography = "<43.0.0"
-cartopy = "^0.24.1"
-gsw = "^3.6.19"
-seaborn = "^0.13.2"
 windrose = ">=1.9.2"
 
-# Dependency from a GitHub repository, use tag = "v0.1.32" or branch = "xxx"
-aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", tag = "v0.1.34" }
-pytest = "^8.3.4"
-psutil = "^7.0.0"
+[tool.poetry.group.test.dependencies]
+pytest = "^6.0.0"
+pytest-mock = "*"
+testcontainers = "4.8.0"
 
 [build-system]
 requires = ["poetry-core"]

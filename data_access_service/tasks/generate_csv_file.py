@@ -86,11 +86,11 @@ def process_csv_data_file(
             log.error(f"Error cleaning up folder: {e}")
 
         # send email to recipient
-        finishingSubject = generate_completed_email_subject(uuid)
-        finishingContent = generate_completed_email_content(
+        finishing_subject = generate_completed_email_subject(uuid)
+        finishing_content = generate_completed_email_content(
             uuid, conditions, object_url
         )
-        aws.send_email(recipient, finishingSubject, finishingContent)
+        aws.send_email(recipient, finishing_subject, finishing_content)
 
     except TypeError as e:
         log.error(f"Error: {e}")
