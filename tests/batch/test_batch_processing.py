@@ -167,3 +167,5 @@ def test_subsetting(localstack, aws_clients, setup_resources, mock_boto3_client)
             assert False, "Expect nothing found and SSOTokenLoadError throw due to send_emaill not mock"
         except SSOTokenLoadError:
             pass
+        finally:
+            delete_object_in_s3(s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT)
