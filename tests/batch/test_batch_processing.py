@@ -7,7 +7,7 @@ import os
 from aodn_cloud_optimised.lib import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import Metadata
 from botocore import UNSIGNED
-from botocore.exceptions import SSOTokenLoadError
+from botocore.exceptions import ClientError
 from testcontainers.localstack import LocalStackContainer
 from data_access_service.batch.subsetting import execute, ParamField
 from data_access_service.config.config import EnvType, Config, TestConfig
@@ -90,7 +90,7 @@ def mock_boto3_client(monkeypatch, localstack):
     original_client = boto3.client
 
     def wrapped_client(*args, **kwargs):
-        if args and args[0] == "s3":
+        if args and args[0] in ["s3", "ses"]:
             kwargs["endpoint_url"] = localstack.get_url()
             kwargs["region_name"] = REGION
             kwargs["config"] = BotoConfig(
@@ -190,8 +190,8 @@ def test_subsetting(localstack, aws_clients, setup_resources, mock_boto3_client)
             execute("job_id", params)
             assert (
                 False
-            ), "Expect nothing found and SSOTokenLoadError throw due to send_emaill not mock"
-        except SSOTokenLoadError:
+            ), "Should not arrive here"
+        except ClientError as e:
             pass
         finally:
             delete_object_in_s3(s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT)
