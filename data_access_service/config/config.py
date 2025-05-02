@@ -6,6 +6,7 @@ import boto3
 import os
 from enum import Enum
 
+
 class EnvType(Enum):
     DEV = "dev"
     TESTING = "testing"
@@ -56,10 +57,19 @@ class Config:
         return self.s3
 
     def get_csv_bucket_name(self):
-        return self.config["aws"]["s3"]["bucket_name"]["csv"] if self.config is not None else None
+        return (
+            self.config["aws"]["s3"]["bucket_name"]["csv"]
+            if self.config is not None
+            else None
+        )
 
     def get_sender_email(self):
-        return self.config["aws"]["ses"]["sender_email"] if self.config is not None else None
+        return (
+            self.config["aws"]["ses"]["sender_email"]
+            if self.config is not None
+            else None
+        )
+
 
 class TestConfig(Config):
     def __init__(self):
@@ -68,6 +78,7 @@ class TestConfig(Config):
 
     def set_s3_client(self, s3_client):
         self.s3 = s3_client
+
 
 class DevConfig(Config):
     def __init__(self):
@@ -87,7 +98,9 @@ class StagingConfig(Config):
 
     def __init__(self):
         super().__init__()
-        self.config = Config.load_config("data_access_service/config/config-staging.yaml")
+        self.config = Config.load_config(
+            "data_access_service/config/config-staging.yaml"
+        )
 
 
 class ProdConfig(Config):
@@ -97,4 +110,3 @@ class ProdConfig(Config):
     def __init__(self):
         super().__init__()
         self.config = Config.load_config("data_access_service/config/config-prod.yaml")
-

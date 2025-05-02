@@ -25,6 +25,7 @@ from data_access_service.utils.file_utils import zip_the_folder
 
 efs_mount_point = "/mount/efs/"
 
+
 def process_csv_data_file(
     job_id: str,
     uuid: str,

@@ -1,6 +1,7 @@
 # src/job_processor.py
 import boto3
 
+
 class JobProcessor:
     def __init__(self, endpoint_url, access_key, secret_key, queue_url):
         self.queue_url = queue_url
@@ -9,22 +10,20 @@ class JobProcessor:
             endpoint_url=endpoint_url,
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
-            region_name="us-east-1"
+            region_name="us-east-1",
         )
         self.sqs_client = boto3.client(
             "sqs",
             endpoint_url=endpoint_url,
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
-            region_name="us-east-1"
+            region_name="us-east-1",
         )
 
     def process_job(self):
         # Poll SQS for a job message
         response = self.sqs_client.receive_message(
-            QueueUrl=self.queue_url,
-            MaxNumberOfMessages=1,
-            WaitTimeSeconds=10
+            QueueUrl=self.queue_url, MaxNumberOfMessages=1, WaitTimeSeconds=10
         )
         messages = response.get("Messages", [])
         if not messages:
@@ -44,13 +43,10 @@ class JobProcessor:
 
         # Write output to S3
         self.s3_client.put_object(
-            Bucket=output_bucket,
-            Key=output_key,
-            Body=output_content.encode("utf-8")
+            Bucket=output_bucket, Key=output_key, Body=output_content.encode("utf-8")
         )
 
         # Delete message from SQS (job completed)
         self.sqs_client.delete_message(
-            QueueUrl=self.queue_url,
-            ReceiptHandle=message["ReceiptHandle"]
+            QueueUrl=self.queue_url, ReceiptHandle=message["ReceiptHandle"]
         )

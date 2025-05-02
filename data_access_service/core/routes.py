@@ -38,6 +38,7 @@ MIN_DATE = "1970-01-01T00:00:00Z"
 
 logger = init_log(Config.get_config())
 
+
 # Make all non-numeric and str field to str so that json do not throw serializable error
 def convert_non_numeric_to_str(df):
     def convert_value(value):
@@ -140,7 +141,9 @@ def _verify_datatime_param(name: str, req_date: str) -> datetime:
     return _date
 
 
-def _verify_depth_param(name: str, req_value: numpy.double | None) -> numpy.double | None:
+def _verify_depth_param(
+    name: str, req_value: numpy.double | None
+) -> numpy.double | None:
     if req_value is not None and req_value > 0.0:
         error_message = ErrorResponse(
             status_code=HTTPStatus.BAD_REQUEST,
