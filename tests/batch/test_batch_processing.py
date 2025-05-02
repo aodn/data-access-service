@@ -151,14 +151,16 @@ def test_mock_list_object_v2(setup_resources, mock_boto3_client):
     assert len(folders) == 1
     assert folders[0] == "animal_acoustic_tracking_delayed_qc.parquet/"
 
-    aodn = DataQuery.GetAodn()
-    metadata: Metadata = aodn.get_metadata()
+    try:
+        aodn = DataQuery.GetAodn()
+        metadata: Metadata = aodn.get_metadata()
 
-    delete_object_in_s3(s3, DataQuery.BUCKET_OPTIMISED_DEFAULT)
-    assert (
-        metadata.metadata_catalog().get("animal_acoustic_tracking_delayed_qc")
-        is not None
-    )
+        assert (
+            metadata.metadata_catalog().get("animal_acoustic_tracking_delayed_qc")
+            is not None
+        )
+    finally:
+        delete_object_in_s3(s3, DataQuery.BUCKET_OPTIMISED_DEFAULT)
 
 
 # mock_boto3_client is need to trigger mock set
@@ -176,7 +178,6 @@ def test_subsetting(localstack, aws_clients, setup_resources, mock_boto3_client)
     with patch("aodn_cloud_optimised.lib.DataQuery.ENDPOINT_URL", localstack.get_url()):
         # Simulate AWS Batch job by running the executor directly
         # Prepare the needed argument
-        config = Config.get_config()
         params = {
             ParamField.UUID.value: "541d4f15-122a-443d-ab4e-2b5feb08d6a0",
             ParamField.START_DATE.value: "2022-10-10",

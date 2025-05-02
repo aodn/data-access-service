@@ -1,12 +1,10 @@
 import datetime
 import json
-import logging
 import os
 import shutil
 from typing import List, Dict
 
 from data_access_service import API, init_log, Config
-from data_access_service.config.config import EnvType
 from data_access_service.core.AWSClient import AWSClient
 from data_access_service.models.data_file_factory import DataFileFactory
 from data_access_service.utils.date_time_utils import (
@@ -38,7 +36,7 @@ def process_csv_data_file(
 
     # TODO: put these folders for now and will be replaced when start doing RO-Crate   format
     job_root_folder = efs_mount_point + job_id + "/"
-    data_folder_path = job_root_folder + "/tmp"
+    data_folder_path = job_root_folder + "tmp/"
     # data_folder_path = efs_mount_point
 
     multi_polygon_dict = json.loads(multi_polygon)
