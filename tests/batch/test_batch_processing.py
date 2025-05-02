@@ -188,9 +188,7 @@ def test_subsetting(localstack, aws_clients, setup_resources, mock_boto3_client)
 
         try:
             execute("job_id", params)
-            assert (
-                False
-            ), "Should not arrive here"
+            assert False, "Should not arrive here"
         except ClientError as e:
             pass
         finally:
