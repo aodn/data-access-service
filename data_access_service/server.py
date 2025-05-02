@@ -20,8 +20,10 @@ app = FastAPI(lifespan=lifespan, title="Data Access Service")
 
 if __name__ == "__main__":
     log_config_path = str(Path(__file__).parent.parent / "log_config.yaml")
-    uvicorn.run("data_access_service.server:app",
-                host="0.0.0.0",
-                port=8000,
-                reload=True,
-                log_config=log_config_path)
+    uvicorn.run(
+        "data_access_service.server:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_config=log_config_path,
+    )
