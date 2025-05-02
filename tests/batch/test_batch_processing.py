@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 import boto3
@@ -8,7 +8,6 @@ from aodn_cloud_optimised.lib import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import Metadata
 from botocore import UNSIGNED
 from botocore.exceptions import SSOTokenLoadError
-from exceptiongroup import catch
 from testcontainers.localstack import LocalStackContainer
 from data_access_service.batch.subsetting import execute, ParamField
 from data_access_service.config.config import EnvType, Config, TestConfig
