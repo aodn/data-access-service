@@ -132,7 +132,7 @@ def generate_csv_files(
     multi_polygon: dict,
     uuid: str,
 ):
-
+    log = init_log(Config.get_config())
     api = API()
 
     # TODO: currently, assume polygons are all rectangles. when cloud-optimized library is upgraded,
@@ -203,13 +203,16 @@ def query_data(
     min_lon,
     max_lon,
 ):
-    df = None
+    log = init_log(Config.get_config())
+
     log.info(
         f"Querying data for uuid={uuid}, start_date={start_date}, end_date={end_date}, "
     )
     log.info(
         f"lat_min={min_lat}, lat_max={max_lat}, lon_min={min_lon}, lon_max={max_lon}"
     )
+
+    df = None
     try:
         df = api.get_dataset_data(
             uuid=uuid,

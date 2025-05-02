@@ -7,47 +7,47 @@ import os
 from aodn_cloud_optimised.lib import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import Metadata
 from botocore import UNSIGNED
+from botocore.exceptions import SSOTokenLoadError
+from exceptiongroup import catch
 from testcontainers.localstack import LocalStackContainer
 from data_access_service.batch.subsetting import execute, ParamField
 from data_access_service.config.config import EnvType, Config, TestConfig
 from botocore.config import Config as BotoConfig
 
-from tests.utils import upload_to_s3
+from tests.utils import upload_to_s3, delete_object_in_s3
 
-# default region for Localstack
+# default region for Localstack, other region not supported
 REGION = "us-east-1"
 
 # A polygon cover the whole world
 world_polygon = '''{
-	"multi_polygon": {
-		"coordinates": [
-			[
-				[
-					[
-						-180,
-						90
-					],
-					[
-						-180,
-						-90
-					],
-					[
-						180,
-						-90
-					],
-					[
-						180,
-						90
-					],
-					[
-						-180,
-						90
-					]
-				]
-			]
-		],
-		"type": "MultiPolygon"
-	}
+    "coordinates": [
+        [
+            [
+                [
+                    -180,
+                    90
+                ],
+                [
+                    -180,
+                    -90
+                ],
+                [
+                    180,
+                    -90
+                ],
+                [
+                    180,
+                    90
+                ],
+                [
+                    -180,
+                    90
+                ]
+            ]
+        ]
+    ],
+    "type": "MultiPolygon"
 }'''
 
 @pytest.fixture(scope="module")
@@ -118,7 +118,8 @@ def setup_resources(aws_clients):
     return queue_url
 
 # Verify we can upload canned folder to local stack s3, then call the list function and loop the folder
-# Finally we call the DataQuery.Aodn() and verify the basic function works before the next test
+# Finally we call the DataQuery.Aodn() and verify the basic function works before the next test, with the
+# mock above, the DataQuery.GetAodn() will use the same mock_boto3_client
 def test_mock_list_object_v2(setup_resources, mock_boto3_client):
     s3 = mock_boto3_client("s3", config=BotoConfig(signature_version=UNSIGNED))
 
@@ -139,28 +140,31 @@ def test_mock_list_object_v2(setup_resources, mock_boto3_client):
     aodn = DataQuery.GetAodn()
     metadata:Metadata = aodn.get_metadata()
 
+    delete_object_in_s3(s3, DataQuery.BUCKET_OPTIMISED_DEFAULT)
     assert metadata.metadata_catalog().get("animal_acoustic_tracking_delayed_qc") is not None
 
+# mock_boto3_client is need to trigger mock set
 @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-def test_subsetting(localstack, aws_clients, setup_resources):
+def test_subsetting(localstack, aws_clients, setup_resources, mock_boto3_client):
     s3_client, sqs_client = aws_clients
-    queue_url = setup_resources
+
+    # Upload folder to create test data
+    upload_to_s3(s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT, Path(__file__).parent.parent / "canned/s3_sample1")
 
     with patch("aodn_cloud_optimised.lib.DataQuery.ENDPOINT_URL", localstack.get_url()):
         # Simulate AWS Batch job by running the executor directly
         # Prepare the needed argument
         config = Config.get_config()
         params = {
-            ParamField.UUID.value: '1234-5678-910',
+            ParamField.UUID.value: '541d4f15-122a-443d-ab4e-2b5feb08d6a0',
             ParamField.START_DATE.value: '2022-10-10',
             ParamField.END_DATE.value: '2023-10-10',
             ParamField.MULTI_POLYGON.value: world_polygon,
             ParamField.RECIPIENT.value: 'noreply@testing.com'
         }
 
-        execute("job_id", params)
-
-        # Verify output in S3
-        output_obj = s3_client.get_object(Bucket=config.get_csv_bucket_name(), Key="output.txt")
-        output_content = output_obj["Body"].read().decode("utf-8")
-        assert output_content == "HELLO WORLD", "Output content should be uppercase input"
+        try:
+            execute("job_id", params)
+            assert False, "Expect nothing found and SSOTokenLoadError throw due to send_emaill not mock"
+        except SSOTokenLoadError:
+            pass

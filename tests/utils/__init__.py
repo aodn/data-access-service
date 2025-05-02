@@ -15,3 +15,13 @@ def upload_to_s3(s3_client, bucket_name, sub_folder):
                 s3_key
             )
             print(f"Uploaded {local_path} to s3://{bucket_name}/{s3_key}")
+
+def delete_object_in_s3(s3_client, bucket_name):
+    response = s3_client.list_objects_v2(Bucket=bucket_name)
+    if 'Contents' in response:
+        objects = [{'Key': obj['Key']} for obj in response['Contents']]
+        s3_client.delete_objects(
+            Bucket=bucket_name,
+            Delete={'Objects': objects}
+        )
+        print(f"Deleted {len(objects)} objects from s3://{bucket_name}")
