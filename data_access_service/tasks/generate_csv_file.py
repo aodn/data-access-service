@@ -5,7 +5,8 @@ import os
 import shutil
 from typing import List, Dict
 
-from data_access_service import API, init_log
+from data_access_service import API, init_log, Config
+from data_access_service.config.config import EnvType
 from data_access_service.core.AWSClient import AWSClient
 from data_access_service.models.data_file_factory import DataFileFactory
 from data_access_service.utils.date_time_utils import (
@@ -19,14 +20,10 @@ from data_access_service.utils.email_generator import (
 )
 from data_access_service.utils.file_utils import zip_the_folder
 
-log = logging.getLogger(__name__)
-
-
 #  below is for local testing
 # efs_mount_point = ""
 
 efs_mount_point = "/mount/efs/"
-
 
 def process_csv_data_file(
     job_id: str,
@@ -36,11 +33,11 @@ def process_csv_data_file(
     multi_polygon: str,
     recipient: str,
 ):
-    init_log(logging.DEBUG)
+    log = init_log(Config.get_config())
 
     # TODO: put these folders for now and will be replaced when start doing RO-Crate   format
     job_root_folder = efs_mount_point + job_id + "/"
-    data_folder_path = job_root_folder + "data/"
+    data_folder_path = job_root_folder + "/tmp"
     # data_folder_path = efs_mount_point
 
     multi_polygon_dict = json.loads(multi_polygon)
@@ -106,6 +103,7 @@ def process_csv_data_file(
 def trim_date_range(
     api: API, uuid: str, requested_start_date: datetime, requested_end_date: datetime
 ) -> (datetime, datetime):
+    log = init_log(Config.get_config())
 
     log.info(f"Original date range: {requested_start_date} to {requested_end_date}")
     metadata_temporal_extent = api.get_temporal_extent(uuid=uuid)
@@ -146,7 +144,7 @@ def generate_csv_files(
         min_lon = lats_lons["min_lon"]
         max_lon = lats_lons["max_lon"]
 
-        dataFactory = DataFileFactory(
+        data_factory = DataFileFactory(
             min_lat=min_lat,
             max_lat=max_lat,
             min_lon=min_lon,
@@ -177,17 +175,17 @@ def generate_csv_files(
                 max_lon,
             )
             if df is not None and not df.empty:
-                dataFactory.add_data(df, date_range.start_date, date_range.end_date)
-                if dataFactory.is_full():
+                data_factory.add_data(df, date_range.start_date, date_range.end_date)
+                if data_factory.is_full():
                     try:
-                        dataFactory.save_as_csv_in_folder_(folder_path)
+                        data_factory.save_as_csv_in_folder_(folder_path)
                     except Exception as e:
                         log.error(f"Error saving data: {e}", exc_info=True)
                         log.error(e)
 
         # save the last data frame
-        if dataFactory.data_frame is not None:
-            dataFactory.save_as_csv_in_folder_(folder_path)
+        if data_factory.data_frame is not None:
+            data_factory.save_as_csv_in_folder_(folder_path)
 
     if not any(os.scandir(folder_path)):
         raise ValueError(

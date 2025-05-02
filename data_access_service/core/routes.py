@@ -30,14 +30,13 @@ import dask.dataframe as dd
 from dateutil import parser
 from http import HTTPStatus
 
-API_PREFIX = Config.BASE_URL
-router = APIRouter(prefix=API_PREFIX)
+router = APIRouter(prefix=Config.BASE_URL)
 
 RECORD_PER_PARTITION: Optional[int] = 1000
 DATE_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 MIN_DATE = "1970-01-01T00:00:00Z"
 
-logger = init_log(logging.DEBUG)
+logger = init_log(Config.get_config())
 
 # Make all non-numeric and str field to str so that json do not throw serializable error
 def convert_non_numeric_to_str(df):
@@ -263,8 +262,7 @@ async def get_raw_metadata(uuid: str, request: Request):
 
 @router.get("/data/{uuid}/notebook_url", dependencies=[Depends(api_key_auth)])
 async def get_notebook_url(uuid: str, request: Request):
-    api_instance = get_api_instance(request)
-    i = api_instance.get_notebook_from(uuid)
+    i = API.get_notebook_from(uuid)
     if isinstance(i, ValueError):
         raise HTTPException(status_code=404, detail="Notebook URL not found")
     return i

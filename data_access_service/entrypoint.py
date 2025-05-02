@@ -1,10 +1,10 @@
 import os
 import boto3
 import logging
-from data_access_service import init_log
+from data_access_service import init_log, Config
 from data_access_service.batch import subsetting
 
-logger = init_log(logging.DEBUG)
+logger = init_log(Config.get_config())
 
 # Initialize a boto3 client for AWS Batch
 client = boto3.client('batch')

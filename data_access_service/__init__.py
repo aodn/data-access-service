@@ -1,10 +1,12 @@
 import logging
+
+from data_access_service.config.config import Config
 from data_access_service.core.api import API
 
 
-def init_log(log_level: int):
+def init_log(config: Config):
     logging.basicConfig(
-        level=log_level,
+        level=config.LOGLEVEL,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )

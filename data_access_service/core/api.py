@@ -195,5 +195,6 @@ class API:
         else:
             return None
 
-    def get_notebook_from(self, uuid: str) -> str:
+    @staticmethod
+    def get_notebook_from(uuid: str) -> str:
         return get_notebook_url(uuid)
