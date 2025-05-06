@@ -1,4 +1,3 @@
-
 import json
 import os
 import shutil
@@ -133,7 +132,9 @@ def generate_csv_files(
                     max_lon,
                 )
                 if df is not None and not df.empty:
-                    data_factory.add_data(df, date_range["start_date"], date_range["end_date"])
+                    data_factory.add_data(
+                        df, date_range["start_date"], date_range["end_date"]
+                    )
                     if data_factory.is_full():
                         try:
                             data_factory.save_as_csv_in_folder_(folder_path)

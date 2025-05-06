@@ -12,8 +12,14 @@ YEAR_MONTH_DAY = "%Y-%m-%d"
 
 
 # parse all common format of date string into given format, such as "%Y-%m-%d"
-def parse_date(date_string: str, time_value = time(00, 00, 00), format_to_convert: str= YEAR_MONTH_DAY) -> datetime:
-    return datetime.combine(datetime.strptime(date_string, format_to_convert), time_value)
+def parse_date(
+    date_string: str,
+    time_value=time(00, 00, 00),
+    format_to_convert: str = YEAR_MONTH_DAY,
+) -> datetime:
+    return datetime.combine(
+        datetime.strptime(date_string, format_to_convert), time_value
+    )
 
 
 def get_final_day_of_(date: datetime) -> datetime:
@@ -30,39 +36,47 @@ def next_month_first_day(date: datetime) -> datetime:
     return (date + relativedelta(months=1)).replace(day=1)
 
 
-def get_monthly_date_range_array_from_(start_date: datetime, end_date: datetime) -> list[dict]:
+def get_monthly_date_range_array_from_(
+    start_date: datetime, end_date: datetime
+) -> list[dict]:
     """
-        Split a date range into monthly intervals, returning start and end dates per month.
+    Split a date range into monthly intervals, returning start and end dates per month.
 
-        Args:
-            start_date (datetime): Start date of the range.
-            end_date (datetime): End date of the range.
+    Args:
+        start_date (datetime): Start date of the range.
+        end_date (datetime): End date of the range.
 
-        Returns:
-            list[dict]: List of dictionaries with 'start_date' and 'end_date' (as strings in 'YYYY-MM-DD').
-        """
+    Returns:
+        list[dict]: List of dictionaries with 'start_date' and 'end_date' (as strings in 'YYYY-MM-DD').
+    """
     # Check if start_date > end_date
     if start_date > end_date:
         raise ValueError("start_date should not greater then end_date")
 
     # Generate date range
-    date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+    date_range = pd.date_range(start=start_date, end=end_date, freq="D")
 
     # Group by year and month, get start and end dates
-    df = pd.DataFrame(date_range, columns=['date'])
-    monthly_groups = df.groupby([df['date'].dt.year, df['date'].dt.month])
+    df = pd.DataFrame(date_range, columns=["date"])
+    monthly_groups = df.groupby([df["date"].dt.year, df["date"].dt.month])
 
     # Create result list
     return [
         {
-            'start_date': group['date'].min().to_pydatetime(),
-            'end_date': datetime.combine(group['date'].max().to_pydatetime(), time(23,59,59))
+            "start_date": group["date"].min().to_pydatetime(),
+            "end_date": datetime.combine(
+                group["date"].max().to_pydatetime(), time(23, 59, 59)
+            ),
         }
         for _, group in monthly_groups
     ]
 
+
 def trim_date_range(
-    api: BaseAPI, uuid: str, requested_start_date: datetime, requested_end_date: datetime
+    api: BaseAPI,
+    uuid: str,
+    requested_start_date: datetime,
+    requested_end_date: datetime,
 ) -> (datetime | None, datetime | None):
     log = init_log(Config.get_config())
 
@@ -79,22 +93,33 @@ def trim_date_range(
     metadata_end_date = metadata_end_date.replace(tzinfo=None)
 
     if requested_start_date.tzinfo is not None:
-        requested_start_date = requested_start_date.astimezone(pytz.UTC).replace(tzinfo=None)
+        requested_start_date = requested_start_date.astimezone(pytz.UTC).replace(
+            tzinfo=None
+        )
 
     if requested_end_date.tzinfo is not None:
-        requested_end_date = requested_end_date.astimezone(pytz.UTC).replace(tzinfo=None)
+        requested_end_date = requested_end_date.astimezone(pytz.UTC).replace(
+            tzinfo=None
+        )
 
     # Check if start and end date have overlap with the metadata time range
-    if (metadata_start_date <= requested_start_date <= metadata_end_date) or (metadata_start_date <= requested_end_date <= metadata_end_date):
+    if (metadata_start_date <= requested_start_date <= metadata_end_date) or (
+        metadata_start_date <= requested_end_date <= metadata_end_date
+    ):
         # Either start or end is within range of metadata_start or metadata_end
         if requested_start_date < metadata_start_date:
             requested_start_date = metadata_start_date
         if metadata_end_date < requested_end_date:
-            requested_end_date = datetime.combine(metadata_end_date, requested_end_date.time())
+            requested_end_date = datetime.combine(
+                metadata_end_date, requested_end_date.time()
+            )
 
         log.info(f"Trimmed date range: {requested_start_date} to {requested_end_date}")
         return requested_start_date, requested_end_date
-    elif requested_start_date <= metadata_start_date and metadata_end_date <= requested_end_date:
+    elif (
+        requested_start_date <= metadata_start_date
+        and metadata_end_date <= requested_end_date
+    ):
         # Request cover all the metadata range, so use metadata range due to smaller range
         return metadata_start_date, metadata_end_date
     else:

@@ -15,7 +15,9 @@ class AWSClient:
         self.s3 = self.config.get_s3_client()
         self.ses = boto3.client("ses")
 
-    def zip_directory_to_s3(self, directory_path: str, s3_bucket: str, s3_key: str) -> str:
+    def zip_directory_to_s3(
+        self, directory_path: str, s3_bucket: str, s3_key: str
+    ) -> str:
         """
         Zip a directory and upload it as a stream to S3 without saving to disk.
 
@@ -40,7 +42,7 @@ class AWSClient:
         buffer = io.BytesIO()
 
         # Create a ZIP file in memory
-        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
             # Walk the directory
             for root, _, files in os.walk(directory_path):
                 for file in files:

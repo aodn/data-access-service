@@ -180,7 +180,9 @@ def test_subsetting(localstack, aws_clients, setup_resources, mock_boto3_client)
     )
 
     with patch.object(AWSClient, "send_email") as mock_send_email:
-        with patch("aodn_cloud_optimised.lib.DataQuery.ENDPOINT_URL", localstack.get_url()):
+        with patch(
+            "aodn_cloud_optimised.lib.DataQuery.ENDPOINT_URL", localstack.get_url()
+        ):
             try:
                 # Simulate AWS Batch job by running the executor directly
                 # Prepare the needed argument
@@ -192,7 +194,11 @@ def test_subsetting(localstack, aws_clients, setup_resources, mock_boto3_client)
                     ParamField.RECIPIENT.value: "noreply@testing.com",
                 }
                 execute("job_id", params)
-                mock_send_email.assert_called_once_with("noreply@testing.com", "Error", "No data found for selected conditions")
+                mock_send_email.assert_called_once_with(
+                    "noreply@testing.com",
+                    "Error",
+                    "No data found for selected conditions",
+                )
 
                 # Now try a valid time range
                 params = {
@@ -208,8 +214,14 @@ def test_subsetting(localstack, aws_clients, setup_resources, mock_boto3_client)
 
                 assert call_args is not None, "send_email was not called"
                 assert call_args[0][0] == "noreply@testing.com", "Email matches"
-                assert call_args[0][1] == "finish processing data file whose uuid is: af5d0ff9-bb9c-4b7c-a63c-854a630b6984", "Subject match"
-                assert "You can download it. The download link is: s3://test-bucket/job_id.zip" in call_args[0][2], "Correct s3 path"
+                assert (
+                    call_args[0][1]
+                    == "finish processing data file whose uuid is: af5d0ff9-bb9c-4b7c-a63c-854a630b6984"
+                ), "Subject match"
+                assert (
+                    "You can download it. The download link is: s3://test-bucket/job_id.zip"
+                    in call_args[0][2]
+                ), "Correct s3 path"
 
             finally:
                 delete_object_in_s3(s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT)
