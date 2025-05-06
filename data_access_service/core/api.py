@@ -30,7 +30,12 @@ def gzip_compress(data):
     return buf.getvalue()
 
 
-class API:
+class BaseAPI:
+    def get_temporal_extent(self, uuid: str) -> (datetime, datetime):
+        pass
+
+
+class API(BaseAPI):
     def __init__(self):
         # the ready flag used to check API status
         self._is_ready = False

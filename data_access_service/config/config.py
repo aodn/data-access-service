@@ -4,6 +4,7 @@ from pathlib import Path
 import yaml
 import boto3
 import os
+import tempfile
 from enum import Enum
 
 
@@ -52,6 +53,10 @@ class Config:
 
             case _:
                 return DevConfig()
+
+    @staticmethod
+    def get_temp_folder(job_id: str) -> str:
+        return tempfile.mkdtemp(prefix=job_id)
 
     def get_s3_client(self):
         return self.s3

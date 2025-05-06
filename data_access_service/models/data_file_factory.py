@@ -31,11 +31,11 @@ class DataFileFactory:
 
     def is_full(self):
         size = sys.getsizeof(self.data_frame)
-        sizeInMb = size / (1024 * 1024)
-        self.log.info(f"DataFrame size: {sizeInMb:.2f} MB")
+        size_in_mb = size / (1024 * 1024)
+        self.log.info(f"DataFrame size: {size_in_mb:.2f} MB")
         return sys.getsizeof(self.data_frame) > 512 * 1024 * 1024  # 512MB
 
-    def add_data(self, data_frame, start_date, end_date):
+    def add_data(self, data_frame, start_date: datetime, end_date: datetime):
         if self.data_frame is None:
             self.data_frame = data_frame
         else:
