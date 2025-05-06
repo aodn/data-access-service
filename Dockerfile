@@ -10,8 +10,8 @@ COPY data_access_service ./data_access_service
 RUN apt update && \
     apt -y upgrade && \
     pip3 install --upgrade pip && \
-    pip3 install poetry==1.8.5 && \
-    pip3 install virtualenv==20.30.0 && \
+    pip3 install virtualenv==20.28.1 && \
+    pip3 install poetry==2.0.1 && \
     poetry config virtualenvs.create false && \
     poetry lock && \
     poetry install --no-root
