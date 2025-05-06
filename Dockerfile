@@ -13,7 +13,6 @@ RUN apt update && \
     pip3 install virtualenv==20.28.1 && \
     pip3 install poetry==2.0.1 && \
     poetry config virtualenvs.create false && \
-    poetry lock && \
     poetry install --no-root
 
 
