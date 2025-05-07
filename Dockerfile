@@ -3,7 +3,7 @@ FROM python:3.10-slim
 WORKDIR /app
 RUN useradd -l -m -s /bin/bash appuser
 
-COPY pyproject.toml poetry.lock README.md /app/
+COPY pyproject.toml poetry.lock README.md entry_point.py /app/
 COPY data_access_service /app/data_access_service
 
 # For Docker build to understand the possible env
