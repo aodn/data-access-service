@@ -30,7 +30,12 @@ def gzip_compress(data):
     return buf.getvalue()
 
 
-class API:
+class BaseAPI:
+    def get_temporal_extent(self, uuid: str) -> (datetime, datetime):
+        pass
+
+
+class API(BaseAPI):
     def __init__(self):
         # the ready flag used to check API status
         self._is_ready = False
@@ -72,7 +77,7 @@ class API:
             else:
                 log.error("Data not found for dataset " + key)
 
-    def get_mapped_meta_data(self, uuid: str):
+    def get_mapped_meta_data(self, uuid: str | None):
         if uuid is not None:
             value = self._cached.get(uuid)
         else:
@@ -195,5 +200,6 @@ class API:
         else:
             return None
 
-    def get_notebook_from(self, uuid: str) -> str:
+    @staticmethod
+    def get_notebook_from(uuid: str) -> str:
         return get_notebook_url(uuid)

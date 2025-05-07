@@ -2,7 +2,8 @@
   "containerProperties": {
     "image": "704910415367.dkr.ecr.ap-southeast-2.amazonaws.com/havier-test-ecr:latest",
     "command": [
-      "./data_access_service/scripts/generatefile.sh"
+      "python",
+      "entry_point.py"
     ],
     "jobRoleArn": "arn:aws:iam::704910415367:role/havier-batch-data-download-service",
     "executionRoleArn": "arn:aws:iam::704910415367:role/havier-batch-data-download-service",

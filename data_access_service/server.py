@@ -1,32 +1,29 @@
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+import uvicorn
 from fastapi import FastAPI
 from data_access_service.core.api import API
 from data_access_service.core.routes import router as api_router
-from data_access_service.config.config import (
-    EnvType,
-    DevConfig,
-    StagingConfig,
-    EdgeConfig,
-    ProdConfig,
-)
-
-import os
 
 
-def create_app() -> FastAPI:
-    app = FastAPI()
-    profile = EnvType(os.getenv("PROFILE", EnvType.DEV))
-    if profile == EnvType.PRODUCTION:
-        app.state.config = ProdConfig()
-    elif profile == EnvType.EDGE:
-        app.state.config = EdgeConfig()
-    elif profile == EnvType.STAGING:
-        app.state.config = StagingConfig()
-    else:
-        app.state.config = DevConfig()
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    application.state.api_instance = API()  # type: ignore
+    application.include_router(api_router)
 
-    app.state.api_instance = API()
-    app.include_router(api_router)
-    return app
+    yield
 
 
-app = create_app()
+app = FastAPI(lifespan=lifespan, title="Data Access Service")
+
+
+if __name__ == "__main__":
+    log_config_path = str(Path(__file__).parent.parent / "log_config.yaml")
+    uvicorn.run(
+        "data_access_service.server:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_config=log_config_path,
+    )

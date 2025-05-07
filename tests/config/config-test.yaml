@@ -1,0 +1,6 @@
+aws:
+  s3:
+    bucket_name:
+      csv: test-bucket
+  ses:
+    sender_email: no.reply@aodn.org.au

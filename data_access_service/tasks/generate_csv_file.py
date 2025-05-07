@@ -1,29 +1,21 @@
-import datetime
 import json
-import logging
 import os
 import shutil
 from typing import List, Dict
 
-from data_access_service import API, init_log
+from datetime import datetime, time
+from data_access_service import API, init_log, Config
 from data_access_service.core.AWSClient import AWSClient
 from data_access_service.models.data_file_factory import DataFileFactory
 from data_access_service.utils.date_time_utils import (
     get_monthly_date_range_array_from_,
+    trim_date_range,
     parse_date,
-    YEAR_MONTH_DAY,
 )
 from data_access_service.utils.email_generator import (
     generate_completed_email_subject,
     generate_completed_email_content,
 )
-from data_access_service.utils.file_utils import zip_the_folder
-
-log = logging.getLogger(__name__)
-
-
-#  below is for local testing
-# efs_mount_point = ""
 
 efs_mount_point = "/mount/efs/"
 
@@ -36,13 +28,10 @@ def process_csv_data_file(
     multi_polygon: str,
     recipient: str,
 ):
-    init_log(logging.DEBUG)
+    config: Config = Config.get_config()
+    log = init_log(config)
 
-    # TODO: put these folders for now and will be replaced when start doing RO-Crate   format
-    job_root_folder = efs_mount_point + job_id + "/"
-    data_folder_path = job_root_folder + "data/"
-    # data_folder_path = efs_mount_point
-
+    tmp_data_folder_path = config.get_temp_folder(job_id)
     multi_polygon_dict = json.loads(multi_polygon)
 
     if None in [uuid, start_date, end_date, json.loads(multi_polygon), recipient]:
@@ -58,39 +47,27 @@ def process_csv_data_file(
     ]
 
     try:
-        start_date = parse_date(start_date, YEAR_MONTH_DAY)
-        end_date = parse_date(end_date, YEAR_MONTH_DAY)
+        start_date = parse_date(start_date)
+        end_date = parse_date(end_date, time(23, 59, 59))
 
         # generate csv file and upload to s3
         generate_csv_files(
-            data_folder_path, start_date, end_date, multi_polygon_dict, uuid
+            tmp_data_folder_path, start_date, end_date, multi_polygon_dict, uuid
         )
 
         data_file_zip_path = generate_zip_name(uuid, start_date, end_date)
-        zipped_file_path = zip_the_folder(
-            folder_path=job_root_folder,
-            output_zip_path=f"{job_root_folder}/{data_file_zip_path}",
+        object_url = aws.zip_directory_to_s3(
+            tmp_data_folder_path,
+            config.get_csv_bucket_name(),
+            job_id + ".zip",
         )
-        log.info(f"Zipped file path: {zipped_file_path}")
-
-        log.info(f"Uploading zip file to S3: {data_file_zip_path}.zip")
-        s3_path = f"{uuid}/{zipped_file_path}"
-        object_url = aws.upload_data_file_to_s3(zipped_file_path, s3_path)
-
-        # clean up the folder
-        log.info(f"Cleaning up folder: {job_root_folder}")
-        try:
-            shutil.rmtree(job_root_folder)
-            log.info(f"Successfully cleaned up folder: {job_root_folder}")
-        except Exception as e:
-            log.error(f"Error cleaning up folder: {e}")
 
         # send email to recipient
-        finishingSubject = generate_completed_email_subject(uuid)
-        finishingContent = generate_completed_email_content(
+        finishing_subject = generate_completed_email_subject(uuid)
+        finishing_content = generate_completed_email_content(
             uuid, conditions, object_url
         )
-        aws.send_email(recipient, finishingSubject, finishingContent)
+        aws.send_email(recipient, finishing_subject, finishing_content)
 
     except TypeError as e:
         log.error(f"Error: {e}")
@@ -101,30 +78,8 @@ def process_csv_data_file(
     except Exception as e:
         log.error(f"Error: {e}")
         aws.send_email(recipient, "Error", "An error occurred.")
-
-
-def trim_date_range(
-    api: API, uuid: str, requested_start_date: datetime, requested_end_date: datetime
-) -> (datetime, datetime):
-
-    log.info(f"Original date range: {requested_start_date} to {requested_end_date}")
-    metadata_temporal_extent = api.get_temporal_extent(uuid=uuid)
-    if len(metadata_temporal_extent) != 2:
-        raise ValueError(
-            f"Invalid metadata temporal extent: {metadata_temporal_extent}"
-        )
-
-    metadata_start_date, metadata_end_date = metadata_temporal_extent
-
-    metadata_start_date = metadata_start_date.replace(tzinfo=None)
-    metadata_end_date = metadata_end_date.replace(tzinfo=None)
-    if requested_start_date < metadata_start_date:
-        requested_start_date = metadata_start_date
-    if requested_end_date > metadata_end_date:
-        requested_end_date = metadata_end_date
-
-    log.info(f"Trimmed date range: {requested_start_date} to {requested_end_date}")
-    return requested_start_date, requested_end_date
+    finally:
+        shutil.rmtree(tmp_data_folder_path)
 
 
 def generate_csv_files(
@@ -134,7 +89,7 @@ def generate_csv_files(
     multi_polygon: dict,
     uuid: str,
 ):
-
+    log = init_log(Config.get_config())
     api = API()
 
     # TODO: currently, assume polygons are all rectangles. when cloud-optimized library is upgraded,
@@ -146,7 +101,7 @@ def generate_csv_files(
         min_lon = lats_lons["min_lon"]
         max_lon = lats_lons["max_lon"]
 
-        dataFactory = DataFileFactory(
+        data_factory = DataFileFactory(
             min_lat=min_lat,
             max_lat=max_lat,
             min_lon=min_lon,
@@ -161,33 +116,35 @@ def generate_csv_files(
             requested_end_date=end_date,
         )
 
-        # date_ranges = get_yearly_date_range_array_from_(start_date=start_date, end_date=end_date)
-        date_ranges = get_monthly_date_range_array_from_(
-            start_date=start_date, end_date=end_date
-        )
-        for date_range in date_ranges:
-            df = query_data(
-                api,
-                uuid,
-                date_range.start_date,
-                date_range.end_date,
-                min_lat,
-                max_lat,
-                min_lon,
-                max_lon,
+        if start_date is not None and end_date is not None:
+            date_ranges = get_monthly_date_range_array_from_(
+                start_date=start_date, end_date=end_date
             )
-            if df is not None and not df.empty:
-                dataFactory.add_data(df, date_range.start_date, date_range.end_date)
-                if dataFactory.is_full():
-                    try:
-                        dataFactory.save_as_csv_in_folder_(folder_path)
-                    except Exception as e:
-                        log.error(f"Error saving data: {e}", exc_info=True)
-                        log.error(e)
+            for date_range in date_ranges:
+                df = query_data(
+                    api,
+                    uuid,
+                    date_range["start_date"],
+                    date_range["end_date"],
+                    min_lat,
+                    max_lat,
+                    min_lon,
+                    max_lon,
+                )
+                if df is not None and not df.empty:
+                    data_factory.add_data(
+                        df, date_range["start_date"], date_range["end_date"]
+                    )
+                    if data_factory.is_full():
+                        try:
+                            data_factory.save_as_csv_in_folder_(folder_path)
+                        except Exception as e:
+                            log.error(f"Error saving data: {e}", exc_info=True)
+                            log.error(e)
 
-        # save the last data frame
-        if dataFactory.data_frame is not None:
-            dataFactory.save_as_csv_in_folder_(folder_path)
+            # save the last data frame
+            if data_factory.data_frame is not None:
+                data_factory.save_as_csv_in_folder_(folder_path)
 
     if not any(os.scandir(folder_path)):
         raise ValueError(
@@ -205,13 +162,16 @@ def query_data(
     min_lon,
     max_lon,
 ):
-    df = None
+    log = init_log(Config.get_config())
+
     log.info(
         f"Querying data for uuid={uuid}, start_date={start_date}, end_date={end_date}, "
     )
     log.info(
         f"lat_min={min_lat}, lat_max={max_lat}, lon_min={min_lon}, lon_max={max_lon}"
     )
+
+    df = None
     try:
         df = api.get_dataset_data(
             uuid=uuid,

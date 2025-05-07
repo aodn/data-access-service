@@ -9,14 +9,12 @@ from data_access_service.core.constants import (
 from data_access_service.core.error import ErrorResponse
 from data_access_service.config.config import Config
 
-import dataclasses
 import logging
 from typing import Optional, List
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, BackgroundTasks
 from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel
-import json
 import dataclasses
 import datetime
 import json
@@ -32,14 +30,13 @@ import dask.dataframe as dd
 from dateutil import parser
 from http import HTTPStatus
 
-API_PREFIX = Config.BASE_URL
-router = APIRouter(prefix=API_PREFIX)
+router = APIRouter(prefix=Config.BASE_URL)
 
 RECORD_PER_PARTITION: Optional[int] = 1000
 DATE_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 MIN_DATE = "1970-01-01T00:00:00Z"
 
-logger = init_log(logging.DEBUG)
+logger = init_log(Config.get_config())
 
 
 # Make all non-numeric and str field to str so that json do not throw serializable error
@@ -54,9 +51,9 @@ def convert_non_numeric_to_str(df):
 
 
 # Function to generate JSON lines from Dask DataFrame
-def _generate_json_array(dask, compress: bool = False):
+def _generate_json_array(dask_instance, compress: bool = False):
     record_list = []
-    for partition in dask.to_delayed():
+    for partition in dask_instance.to_delayed():
         partition_df = convert_non_numeric_to_str(partition.compute())
         for record in partition_df.to_dict(orient="records"):
             record_list.append(record)
@@ -144,7 +141,9 @@ def _verify_datatime_param(name: str, req_date: str) -> datetime:
     return _date
 
 
-def _verify_depth_param(name: str, req_value: numpy.double) -> numpy.double | None:
+def _verify_depth_param(
+    name: str, req_value: numpy.double | None
+) -> numpy.double | None:
     if req_value is not None and req_value > 0.0:
         error_message = ErrorResponse(
             status_code=HTTPStatus.BAD_REQUEST,
@@ -159,7 +158,7 @@ def _verify_depth_param(name: str, req_value: numpy.double) -> numpy.double | No
         return req_value
 
 
-def _verify_to_index_flag_param(flag: str) -> bool:
+def _verify_to_index_flag_param(flag: str | None) -> bool:
     if (flag is not None) and (flag.lower() == "true"):
         return True
     else:
@@ -195,7 +194,7 @@ def _response_partial_json(filtered: pd.DataFrame, compress: bool):
 
 
 # TODO: Need to use the metadata to assign correct type to netcdf, right now field type is wrong
-def _response_netcdf(filtered: pd.DataFrame):
+def _response_netcdf(filtered: pd.DataFrame, background_tasks: BackgroundTasks):
     # Convert the DataFrame to an xarray Dataset
     ds = xr.Dataset.from_dataframe(filtered)
 
@@ -208,7 +207,6 @@ def _response_netcdf(filtered: pd.DataFrame):
     response = FileResponse(
         path=tmp_file_name,
         filename="output.nc",
-        as_attachment=True,
         media_type="application/x-netcdf",
     )
 
@@ -221,8 +219,7 @@ def _response_netcdf(filtered: pd.DataFrame):
         except Exception as e:
             print(f"Error removing file {file_path}: {e}")
 
-    response.call_on_close(lambda: _remove_file_if_exists(tmp_file_name))
-
+    background_tasks.add_task(lambda: _remove_file_if_exists(tmp_file_name))
     return response
 
 
@@ -268,8 +265,7 @@ async def get_raw_metadata(uuid: str, request: Request):
 
 @router.get("/data/{uuid}/notebook_url", dependencies=[Depends(api_key_auth)])
 async def get_notebook_url(uuid: str, request: Request):
-    api_instance = get_api_instance(request)
-    i = api_instance.get_notebook_from(uuid)
+    i = API.get_notebook_from(uuid)
     if isinstance(i, ValueError):
         raise HTTPException(status_code=404, detail="Notebook URL not found")
     return i
@@ -314,6 +310,7 @@ async def get_temporal_extent(uuid: str, request: Request):
 async def get_data(
     uuid: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     start_date: Optional[str] = Query(default=MIN_DATE),
     end_date: Optional[str] = Query(
         default=datetime.datetime.now(timezone.utc).strftime(DATE_FORMAT)
@@ -360,7 +357,6 @@ async def get_data(
         filtered = result
 
     logger.info("Record number return %s for query", len(filtered.index))
-
     logger.info("Memory usage: %s", get_memory_usage_percentage())
 
     if f == "json":
@@ -371,7 +367,8 @@ async def get_data(
         else:
             return _response_json(filtered, compress)
     elif f == "netcdf":
-        return _response_netcdf(filtered)
+        return _response_netcdf(filtered, background_tasks)
+    return None
 
 
 def get_memory_usage_percentage():
