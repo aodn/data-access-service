@@ -370,6 +370,7 @@ async def get_data(
         return _response_netcdf(filtered, background_tasks)
     return None
 
+
 def get_memory_usage_percentage():
     process = psutil.Process(os.getpid())
     memory_info = process.memory_info()
