@@ -1,10 +1,11 @@
+import io
 import os
 import zipfile
-import io
+
 import boto3
 
 from data_access_service import init_log
-from data_access_service.config.config import Config, EnvType
+from data_access_service.config.config import Config
 
 
 class AWSClient:
@@ -57,7 +58,9 @@ class AWSClient:
 
         # Upload to S3
         self.s3.upload_fileobj(buffer, s3_bucket, s3_key)
-        return "s3://" + s3_bucket + "/" + s3_key
+        region = self.s3.meta.region_name
+        object_download_url = f"https://{s3_bucket}.s3.{region}.amazonaws.com/{s3_key}"
+        return object_download_url
 
     def send_email(self, recipient, subject, body_text):
         sender = self.config.get_sender_email()
