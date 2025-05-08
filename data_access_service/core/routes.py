@@ -158,8 +158,8 @@ def _verify_depth_param(
         return req_value
 
 
-def _verify_to_index_flag_param(flag: str | None) -> bool:
-    if (flag is not None) and (flag.lower() == "true"):
+def _verify_to_index_flag_param(flag: bool | None) -> bool:
+    if flag is not None:
         return True
     else:
         return False
