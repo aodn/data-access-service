@@ -219,7 +219,7 @@ def test_subsetting(localstack, aws_clients, setup_resources, mock_boto3_client)
                     == "finish processing data file whose uuid is: af5d0ff9-bb9c-4b7c-a63c-854a630b6984"
                 ), "Subject match"
                 assert (
-                    "You can download it. The download link is:  https://test-bucket.s3.us-east-1.amazonaws.com/job_id.zip"
+                    "You can download it. The download link is: https://test-bucket.s3.us-east-1.amazonaws.com/job_id.zip"
                     in call_args[0][2]
                 ), "Correct s3 path"
 
