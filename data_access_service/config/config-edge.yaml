@@ -1,0 +1,8 @@
+config-edge:
+  yaml:
+aws:
+  s3:
+    bucket_name:
+      csv: data-file-csv
+  ses:
+    sender_email: no.reply@aodn.org.au
