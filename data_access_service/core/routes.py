@@ -324,14 +324,20 @@ async def get_data(
     api_instance = get_api_instance(request)
     logger.info(
         """
-        Request details: 
+        Request details:
             uuid=%s,
             columns=%s,
             start_date=%s,
             end_date=%s,
             start_depth=%s,
             end_depth=%s
-        """, uuid, columns, start_date, end_date, start_depth, end_depth
+        """,
+        uuid,
+        columns,
+        start_date,
+        end_date,
+        start_depth,
+        end_depth,
     )
     start_date = _verify_datatime_param("start_date", start_date)
     end_date = _verify_datatime_param("end_date", end_date)

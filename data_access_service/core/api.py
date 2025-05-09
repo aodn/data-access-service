@@ -139,7 +139,7 @@ class API(BaseAPI):
 
             # You want depth field, but it is not in data
             if column.casefold() == "DEPTH".casefold() and (
-                    "DEPTH" not in meta or "depth" not in meta
+                "DEPTH" not in meta or "depth" not in meta
             ):
                 # Just ignore the field in the query, assume zero
                 pass
