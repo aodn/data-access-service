@@ -2,11 +2,8 @@ services:
   app:
     build: .
     container_name: data-access-service
-    environment:
-      GUNICORN_TIMEOUT: 3600
-      GUNICORN_WORKERS_NUM: 4
     env_file:
       - .env
     ports:
-      - "8000:8000"
-    command: poetry run uvicorn --host=0.0.0.0 --port=8000 --workers=4 --reload --log-config=log_config.yaml data_access_service.server:app
+      - "8000:5000"
+    command: python -m data_access_service.server
