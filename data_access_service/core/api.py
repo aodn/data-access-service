@@ -1,4 +1,5 @@
 import gzip
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 import logging
@@ -54,10 +55,46 @@ class API(BaseAPI):
         # init finalised, set as ready
         self._is_ready = True
 
-    def get_api_status(self) -> bool:
-        # used for checking if the API instance is ready
-        return self._is_ready
+    @staticmethod
+    def _split_date_range(date_start: datetime, date_end: datetime) -> list[tuple[datetime, datetime]]:
+        """Split date range into daily intervals."""
+        date_pairs = []
+        current_date = date_start
+        while current_date < date_end:
+            next_date = min(current_date + timedelta(days=1), date_end)
+            date_pairs.append((current_date, next_date))
+            current_date = next_date
+        return date_pairs
 
+    def _fetch_data_for_date_range(
+            self,
+            date_start: datetime,
+            date_end: datetime,
+            lat_min: float,
+            lat_max: float,
+            lon_min: float,
+            lon_max: float,
+            scalar_filter: str,
+            columns: list,
+            ds,
+            uuid
+    ):
+        """Fetch data for a single date range."""
+        try:
+            return ds.get_data(
+                date_start,
+                date_end,
+                lat_min,
+                lat_max,
+                lon_min,
+                lon_max,
+                scalar_filter,
+                self.map_column_names(uuid, columns),
+            )
+        except ValueError as e:
+            log.error(f"Error: {e}")
+            return None
+    
     # Do not use cache, so that we can refresh it again
     def _create_uuid_dataset_map(self):
         # A map contains dataset name and Metadata class, which is not
@@ -76,7 +113,11 @@ class API(BaseAPI):
                 )
             else:
                 log.error("Data not found for dataset " + key)
-
+                
+    def get_api_status(self) -> bool:
+        # used for checking if the API instance is ready
+        return self._is_ready
+    
     def get_mapped_meta_data(self, uuid: str | None):
         if uuid is not None:
             value = self._cached.get(uuid)
@@ -190,20 +231,47 @@ class API(BaseAPI):
             if date_end.tzinfo is not None:
                 date_end = date_end.astimezone(timezone.utc).replace(tzinfo=None)
 
-            try:
-                return ds.get_data(
-                    date_start,
-                    date_end,
-                    lat_min,
-                    lat_max,
-                    lon_min,
-                    lon_max,
-                    scalar_filter,
-                    self.map_column_names(uuid, columns),
-                )
-            except ValueError as e:
-                log.error(f"Error: {e}")
-                return None
+            # Split date range into daily chunks
+            date_pairs = self._split_date_range(date_start, date_end)
+
+            # Use ThreadPoolExecutor to run tasks concurrently
+            results = []
+            with ThreadPoolExecutor(max_workers=len(date_pairs)) as executor:
+                # Submit tasks for each date range
+                futures = [
+                    executor.submit(
+                        self._fetch_data_for_date_range,
+                        start,
+                        end,
+                        lat_min,
+                        lat_max,
+                        lon_min,
+                        lon_max,
+                        scalar_filter,
+                        columns,
+                        ds,
+                        uuid
+                    )
+                    for start, end in date_pairs
+                ]
+
+                # Collect results
+                for future in futures:
+                    result = future.result()
+                    if result is not None:  # Only include non-None results
+                        results.append(result)
+
+                # Aggregate results (adjust based on ds.get_data return type)
+                if not results:
+                    log.error("No valid data returned for any date range")
+                    return None
+
+                try:
+                    # Example: Assuming ds.get_data returns pandas DataFrames
+                    return pd.concat(results, ignore_index=True)
+                except Exception as e:
+                    log.error(f"Error aggregating results: {e}")
+                    return None
         else:
             return None
 
