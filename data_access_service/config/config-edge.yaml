@@ -1,5 +1,3 @@
-config-edge:
-  yaml:
 aws:
   s3:
     bucket_name:
