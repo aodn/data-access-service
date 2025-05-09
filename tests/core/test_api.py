@@ -73,7 +73,7 @@ class TestApi(unittest.TestCase):
             "TIME": ["2023-01-01", "2023-01-02"],
             "LONGITUDE": [10.5, np.nan],
             "LATITUDE": [np.nan, 20.5],
-            "DEPTH": [100.0, np.nan]
+            "DEPTH": [100.0, np.nan],
         }
         pandas_df = pd.DataFrame(data)
 
@@ -92,18 +92,20 @@ class TestApi(unittest.TestCase):
                 "time": "2023-01-01",  # Adjust format based on _reformat_date
                 "longitude": 10.5,
                 "latitude": None,
-                "depth": 100.0
+                "depth": 100.0,
             },
             {
                 "time": "2023-01-02",  # Adjust format based on _reformat_date
                 "longitude": None,
                 "latitude": 20.5,
-                "depth": None
-            }
+                "depth": None,
+            },
         ]
 
         # Verify that NaN values are converted to None (null in JSON)
-        assert parsed_result == expected, f"Expected {expected}, but got {parsed_result}"
+        assert (
+            parsed_result == expected
+        ), f"Expected {expected}, but got {parsed_result}"
 
         # Additional checks for None values
         assert parsed_result[0]["latitude"] is None, "LATITUDE NaN should be None"
