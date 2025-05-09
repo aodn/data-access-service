@@ -96,12 +96,16 @@ def _generate_partial_json_array(d: dask.dataframe.DataFrame, compress: bool = F
 
             #  may need to add more field here
             if "LONGITUDE" in record:
-                filtered_record["longitude"] = round(
-                    record["LONGITUDE"], COORDINATE_INDEX_PRECISION
+                filtered_record["longitude"] = (
+                    round(record["LONGITUDE"], COORDINATE_INDEX_PRECISION)
+                    if record["LONGITUDE"] is not None
+                    else None
                 )
             if "LATITUDE" in record:
-                filtered_record["latitude"] = round(
-                    record["LATITUDE"], COORDINATE_INDEX_PRECISION
+                filtered_record["latitude"] = (
+                    round(record["LATITUDE"], COORDINATE_INDEX_PRECISION)
+                    if record["LATITUDE"] is not None
+                    else None
                 )
             if "DEPTH" in record:
                 filtered_record["depth"] = (

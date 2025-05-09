@@ -1,11 +1,15 @@
 import json
 import unittest
+import dask.dataframe as dd
+import pandas as pd
+import numpy as np
 from pathlib import Path
 from unittest.mock import patch
 
 from aodn_cloud_optimised import DataQuery
 
 from data_access_service import API
+from data_access_service.core.routes import _generate_partial_json_array
 
 
 class TestApi(unittest.TestCase):
@@ -63,9 +67,48 @@ class TestApi(unittest.TestCase):
                 col, ["JULD", "DEPTH", "LATITUDE", "LONGITUDE"], "TIME mapped"
             )
 
-    def test_generate_partial_json_array(self):
-        # TODO: Need test this
-        pass
+    def test_nan_to_none_conversion(self):
+        # Create a sample pandas DataFrame with NaN values
+        data = {
+            "TIME": ["2023-01-01", "2023-01-02"],
+            "LONGITUDE": [10.5, np.nan],
+            "LATITUDE": [np.nan, 20.5],
+            "DEPTH": [100.0, np.nan]
+        }
+        pandas_df = pd.DataFrame(data)
+
+        # Convert to Dask DataFrame
+        dask_df = dd.from_pandas(pandas_df, npartitions=1)
+
+        # Call the function
+        result = _generate_partial_json_array(dask_df, compress=False)
+
+        # Parse the JSON result
+        parsed_result = json.loads(result)
+
+        # Expected output
+        expected = [
+            {
+                "time": "2023-01-01",  # Adjust format based on _reformat_date
+                "longitude": 10.5,
+                "latitude": None,
+                "depth": 100.0
+            },
+            {
+                "time": "2023-01-02",  # Adjust format based on _reformat_date
+                "longitude": None,
+                "latitude": 20.5,
+                "depth": None
+            }
+        ]
+
+        # Verify that NaN values are converted to None (null in JSON)
+        assert parsed_result == expected, f"Expected {expected}, but got {parsed_result}"
+
+        # Additional checks for None values
+        assert parsed_result[0]["latitude"] is None, "LATITUDE NaN should be None"
+        assert parsed_result[1]["longitude"] is None, "LONGITUDE NaN should be None"
+        assert parsed_result[1]["depth"] is None, "DEPTH NaN should be None"
 
 
 if __name__ == "__main__":
