@@ -50,6 +50,7 @@ def convert_non_numeric_to_str(df: DataFrame) -> DataFrame:
             return str(value)
         else:
             return value
+
     return df.map(convert_value)
 
 
@@ -76,7 +77,7 @@ def _generate_partial_json_array(d: dask.dataframe.DataFrame, compress: bool = F
 
         # Avoid NaN appear in the json output, map it to None and output
         # will become null for None value
-        partition_df = partition_df.replace({ numpy.nan: None })
+        partition_df = partition_df.replace({numpy.nan: None})
 
         for record in partition_df.to_dict(orient="records"):
             filtered_record = {}
@@ -103,7 +104,11 @@ def _generate_partial_json_array(d: dask.dataframe.DataFrame, compress: bool = F
                     record["LATITUDE"], COORDINATE_INDEX_PRECISION
                 )
             if "DEPTH" in record:
-                filtered_record["depth"] = round(record["DEPTH"], DEPTH_INDEX_PRECISION) if record["DEPTH"] is not None else None
+                filtered_record["depth"] = (
+                    round(record["DEPTH"], DEPTH_INDEX_PRECISION)
+                    if record["DEPTH"] is not None
+                    else None
+                )
             record_list.append(filtered_record)
 
     json_array = json.dumps(record_list)
