@@ -23,7 +23,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "data_access_service.server:app",
         host="0.0.0.0",
-        port=8000,
+        port=5000,
         reload=True,
         log_config=log_config_path,
     )

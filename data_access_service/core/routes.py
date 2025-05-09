@@ -158,8 +158,8 @@ def _verify_depth_param(
         return req_value
 
 
-def _verify_to_index_flag_param(flag: bool | None) -> bool:
-    if flag is not None:
+def _verify_to_index_flag_param(flag: str | bool | None) -> bool:
+    if (flag is not None) and bool(flag):
         return True
     else:
         return False
@@ -323,7 +323,21 @@ async def get_data(
 ):
     api_instance = get_api_instance(request)
     logger.info(
-        "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
+        """
+        Request details:
+            uuid=%s,
+            columns=%s,
+            start_date=%s,
+            end_date=%s,
+            start_depth=%s,
+            end_depth=%s
+        """,
+        uuid,
+        columns,
+        start_date,
+        end_date,
+        start_depth,
+        end_depth,
     )
     start_date = _verify_datatime_param("start_date", start_date)
     end_date = _verify_datatime_param("end_date", end_date)
