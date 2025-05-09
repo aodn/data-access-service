@@ -4,6 +4,7 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
 from data_access_service.core.api import API
+
 from data_access_service.core.routes import router as api_router
 
 
