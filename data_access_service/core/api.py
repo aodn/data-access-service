@@ -137,6 +137,13 @@ class API(BaseAPI):
             else:
                 output.append(column)
 
+            # You want depth field, but it is not in data
+            if column.casefold() == "DEPTH".casefold() and (
+                    "DEPTH" not in meta or "depth" not in meta
+            ):
+                # Just ignore the field in the query, assume zero
+                pass
+
         return output
 
     def get_dataset_data(
