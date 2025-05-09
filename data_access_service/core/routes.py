@@ -1,3 +1,7 @@
+from types import NoneType
+
+from dask.dataframe import DataFrame
+
 from data_access_service import init_log
 from data_access_service.core.api import API
 from data_access_service.utils.api_utils import api_key_auth
@@ -40,7 +44,7 @@ logger = init_log(Config.get_config())
 
 
 # Make all non-numeric and str field to str so that json do not throw serializable error
-def convert_non_numeric_to_str(df):
+def convert_non_numeric_to_str(df: DataFrame) -> DataFrame:
     def convert_value(value):
         if not isinstance(value, (int, float, str)):
             return str(value)
@@ -70,6 +74,11 @@ def _generate_partial_json_array(d: dask.dataframe.DataFrame, compress: bool = F
     record_list = []
     for partition in d.to_delayed():
         partition_df = convert_non_numeric_to_str(partition.compute())
+
+        # Avoid NaN appear in the json output, map it to None and output
+        # will become null for None value
+        partition_df = partition_df.replace({numpy.nan: None})
+
         for record in partition_df.to_dict(orient="records"):
             filtered_record = {}
             # Time field is special, there is no stand name and appear diff in raw data,
@@ -87,15 +96,23 @@ def _generate_partial_json_array(d: dask.dataframe.DataFrame, compress: bool = F
 
             #  may need to add more field here
             if "LONGITUDE" in record:
-                filtered_record["longitude"] = round(
-                    record["LONGITUDE"], COORDINATE_INDEX_PRECISION
+                filtered_record["longitude"] = (
+                    round(record["LONGITUDE"], COORDINATE_INDEX_PRECISION)
+                    if record["LONGITUDE"] is not None
+                    else None
                 )
             if "LATITUDE" in record:
-                filtered_record["latitude"] = round(
-                    record["LATITUDE"], COORDINATE_INDEX_PRECISION
+                filtered_record["latitude"] = (
+                    round(record["LATITUDE"], COORDINATE_INDEX_PRECISION)
+                    if record["LATITUDE"] is not None
+                    else None
                 )
             if "DEPTH" in record:
-                filtered_record["depth"] = round(record["DEPTH"], DEPTH_INDEX_PRECISION)
+                filtered_record["depth"] = (
+                    round(record["DEPTH"], DEPTH_INDEX_PRECISION)
+                    if record["DEPTH"] is not None
+                    else None
+                )
             record_list.append(filtered_record)
 
     json_array = json.dumps(record_list)
@@ -179,6 +196,7 @@ def _response_json(filtered: pd.DataFrame, compress: bool):
     return response
 
 
+# Parallel process records and map the field back to standard name
 def _response_partial_json(filtered: pd.DataFrame, compress: bool):
     ddf: dask.dataframe.DataFrame = dd.from_pandas(
         filtered, npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1
@@ -376,6 +394,7 @@ async def get_data(
     if f == "json":
         # Depends on whether receiver support gzip encoding
         compress = "gzip" in request.headers.get("Accept-Encoding", "")
+        logger.info("Use compressed output %s", compress)
         if is_to_index:
             return _response_partial_json(filtered, compress)
         else:
