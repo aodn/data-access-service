@@ -27,4 +27,5 @@ if __name__ == "__main__":
         port=5000,
         reload=True,
         log_config=log_config_path,
+        timeout_keep_alive=900,  # 15 mins
     )

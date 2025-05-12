@@ -90,10 +90,10 @@ aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git
     API_KEY="your_actual_api_key_here"
     ```
 
-   Host will be `http://localhost:8000`.
+   Host will be `http://localhost:5000` and default profile is DEV
 
     ```bash
-    $ poetry run uvicorn data_access_service.server:app --reload --log-config=log_config.yaml
+    $ python -m data_access_service.server
     ```
 
 ### Code formatting
