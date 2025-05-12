@@ -1,5 +1,3 @@
-from types import NoneType
-
 from dask.dataframe import DataFrame
 
 from data_access_service import init_log
@@ -33,6 +31,8 @@ import pandas as pd
 import dask.dataframe as dd
 from dateutil import parser
 from http import HTTPStatus
+
+from data_access_service.utils.sse_wrapper import sse_wrapper
 
 router = APIRouter(prefix=Config.BASE_URL)
 
@@ -241,6 +241,64 @@ def _response_netcdf(filtered: pd.DataFrame, background_tasks: BackgroundTasks):
     return response
 
 
+async def _fetch_data(
+        api_instance: API,
+        uuid: str,
+        request: Request,
+        background_tasks: BackgroundTasks,
+        start_date: datetime,
+        end_date: datetime,
+        start_depth: float | None,
+        end_depth: float | None,
+        is_to_index: bool,
+        columns: List[str],
+        f: str
+) :
+    result: Optional[pd.DataFrame] = api_instance.get_dataset_data(
+        uuid=uuid, date_start=start_date, date_end=end_date, columns=columns
+    )
+
+    # if result is None, return empty response
+    if result is None:
+        return Response("[]", media_type="application/json")
+
+    start_depth = _verify_depth_param("start_depth", start_depth)
+    end_depth = _verify_depth_param("end_depth", end_depth)
+
+    is_to_index = _verify_to_index_flag_param(is_to_index)
+
+    # The cloud optimized format is fast to lookup if there is an index, some field isn't part of the
+    # index and therefore will not gain to filter by those field, indexed fields are site_code, timestamp, polygon
+
+    # Depth is below sea level zero, so logic slightly diff
+    if start_depth > 0 and end_depth > 0:
+        filtered = result[
+            (result["DEPTH"] <= start_depth) & (result["DEPTH"] >= end_depth)
+        ]
+    elif start_depth > 0:
+        filtered = result[(result["DEPTH"] <= start_depth)]
+    elif end_depth > 0:
+        filtered = result[result["DEPTH"] >= end_depth]
+    else:
+        filtered = result
+
+    logger.info("Record number return %s for query", len(filtered.index))
+    logger.info("Memory usage: %s", get_memory_usage_percentage())
+
+    if f == "json" or f == "sse/json":
+        # Depends on whether receiver support gzip encoding
+        sse = f.startswith("sse/")
+        compress = "gzip" in request.headers.get("Accept-Encoding", "") and not sse
+        logger.info("Use compressed output %s", compress)
+        if is_to_index:
+            return _response_partial_json(filtered, compress)
+        else:
+            return _response_json(filtered, compress)
+    elif f == "netcdf":
+        return _response_netcdf(filtered, background_tasks)
+    return None
+
+
 class HealthCheckResponse(BaseModel):
     status: str
     status_code: int
@@ -360,48 +418,36 @@ async def get_data(
     start_date = _verify_datatime_param("start_date", start_date)
     end_date = _verify_datatime_param("end_date", end_date)
 
-    result: Optional[pd.DataFrame] = api_instance.get_dataset_data(
-        uuid=uuid, date_start=start_date, date_end=end_date, columns=columns
-    )
+    sse = f.startswith("sse/")
 
-    # if result is None, return empty response
-    if result is None:
-        return Response("[]", media_type="application/json")
-
-    start_depth = _verify_depth_param("start_depth", start_depth)
-    end_depth = _verify_depth_param("end_depth", end_depth)
-
-    is_to_index = _verify_to_index_flag_param(is_to_index)
-
-    # The cloud optimized format is fast to lookup if there is an index, some field isn't part of the
-    # index and therefore will not gain to filter by those field, indexed fields are site_code, timestamp, polygon
-
-    # Depth is below sea level zero, so logic slightly diff
-    if start_depth > 0 and end_depth > 0:
-        filtered = result[
-            (result["DEPTH"] <= start_depth) & (result["DEPTH"] >= end_depth)
-        ]
-    elif start_depth > 0:
-        filtered = result[(result["DEPTH"] <= start_depth)]
-    elif end_depth > 0:
-        filtered = result[result["DEPTH"] >= end_depth]
+    if sse:
+        return await sse_wrapper(
+            _fetch_data,
+            api_instance,
+            uuid,
+            request,
+            background_tasks,
+            start_date,
+            end_date,
+            start_depth,
+            end_depth,
+            is_to_index,
+            columns,
+            f
+        )
     else:
-        filtered = result
-
-    logger.info("Record number return %s for query", len(filtered.index))
-    logger.info("Memory usage: %s", get_memory_usage_percentage())
-
-    if f == "json":
-        # Depends on whether receiver support gzip encoding
-        compress = "gzip" in request.headers.get("Accept-Encoding", "")
-        logger.info("Use compressed output %s", compress)
-        if is_to_index:
-            return _response_partial_json(filtered, compress)
-        else:
-            return _response_json(filtered, compress)
-    elif f == "netcdf":
-        return _response_netcdf(filtered, background_tasks)
-    return None
+        return _fetch_data(
+            api_instance,
+            uuid,
+            request,
+            background_tasks,
+            start_date,
+            end_date,
+            start_depth,
+            end_depth,
+            is_to_index,
+            columns,
+            f)
 
 
 def get_memory_usage_percentage():
