@@ -77,11 +77,8 @@ class TestApi(unittest.TestCase):
         }
         pandas_df = pd.DataFrame(data)
 
-        # Convert to Dask DataFrame
-        dask_df = dd.from_pandas(pandas_df, npartitions=1)
-
         # Call the function
-        result = _generate_partial_json_array(dask_df, compress=False)
+        result = _generate_partial_json_array(pandas_df, compress=False)
 
         # Parse the JSON result
         parsed_result = json.loads(result)
