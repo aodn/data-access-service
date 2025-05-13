@@ -145,3 +145,43 @@ def get_boundary_of_year_month(
     end_date = get_final_day_of_month_(start_date).replace(hour=23, minute=59, second=59)
 
     return start_date, end_date
+
+def transfer_date_range_into_yearmonth(
+    start_date: str, end_date: str
+) -> list[dict]:
+    """
+    Transfer a date range into a list of dictionaries with year and month. currently, according to the
+    request from the frontend, the start & end date is in the format of "MM-yyyy"
+
+    Args:
+        start_date (str): Start date in the format "MM-yyyy".
+        end_date (str): End date in the format "MM-yyyy".
+
+    Returns:
+        list[dict]: List of dictionaries with year month in "MM-yyyy" format.
+    """
+    start = datetime.strptime(start_date, "%m-%Y")
+    end = datetime.strptime(end_date, "%m-%Y")
+    result = []
+
+    while start <= end:
+        result.append(start.strftime("%m-%Y"))
+        start += relativedelta(months=1)
+
+    return result
+
+def split_yearmonths_into_dict(yearmonths, chunk_size: int):
+    """
+    Split a list of yearmonths into a dictionary with chunks of a given size.
+
+    Args:
+        yearmonths (list): List of yearmonth strings.
+        chunk_size (int): Size of each chunk (default is 4).
+
+    Returns:
+        dict: Dictionary where keys are indices and values are chunks of yearmonths.
+    """
+    result = {}
+    for i in range(0, len(yearmonths), chunk_size):
+        result[i // chunk_size] = yearmonths[i:i + chunk_size]
+    return result
