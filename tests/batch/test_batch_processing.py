@@ -10,7 +10,7 @@ from aodn_cloud_optimised.lib.DataQuery import Metadata
 from botocore import UNSIGNED
 from botocore.exceptions import ClientError
 from testcontainers.localstack import LocalStackContainer
-from data_access_service.batch.subsetting import execute, ParamField
+from data_access_service.batch.subsetting import execute, Parameters
 from data_access_service.config.config import EnvType, Config, TestConfig
 from botocore.config import Config as BotoConfig
 
@@ -187,11 +187,11 @@ def test_subsetting(localstack, aws_clients, setup_resources, mock_boto3_client)
                 # Simulate AWS Batch job by running the executor directly
                 # Prepare the needed argument
                 params = {
-                    ParamField.UUID.value: "af5d0ff9-bb9c-4b7c-a63c-854a630b6984",
-                    ParamField.START_DATE.value: "2022-10-10",
-                    ParamField.END_DATE.value: "2023-10-10",
-                    ParamField.MULTI_POLYGON.value: world_polygon,
-                    ParamField.RECIPIENT.value: "noreply@testing.com",
+                    Parameters.UUID.value: "af5d0ff9-bb9c-4b7c-a63c-854a630b6984",
+                    Parameters.START_DATE.value: "2022-10-10",
+                    Parameters.END_DATE.value: "2023-10-10",
+                    Parameters.MULTI_POLYGON.value: world_polygon,
+                    Parameters.RECIPIENT.value: "noreply@testing.com",
                 }
                 execute("job_id", params)
                 mock_send_email.assert_called_once_with(
@@ -202,11 +202,11 @@ def test_subsetting(localstack, aws_clients, setup_resources, mock_boto3_client)
 
                 # Now try a valid time range
                 params = {
-                    ParamField.UUID.value: "af5d0ff9-bb9c-4b7c-a63c-854a630b6984",
-                    ParamField.START_DATE.value: "2010-01-01",
-                    ParamField.END_DATE.value: "2010-12-01",
-                    ParamField.MULTI_POLYGON.value: world_polygon,
-                    ParamField.RECIPIENT.value: "noreply@testing.com",
+                    Parameters.UUID.value: "af5d0ff9-bb9c-4b7c-a63c-854a630b6984",
+                    Parameters.START_DATE.value: "2010-01-01",
+                    Parameters.END_DATE.value: "2010-12-01",
+                    Parameters.MULTI_POLYGON.value: world_polygon,
+                    Parameters.RECIPIENT.value: "noreply@testing.com",
                 }
                 execute("job_id", params)
                 assert mock_send_email.call_count == 2
