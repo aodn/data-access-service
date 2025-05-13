@@ -9,7 +9,13 @@ def format_sse(data: dict, event: str = "message") -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-# SSE Wrapper function with periodic processing messages
+# SSE Wrapper function with periodic processing messages, it accept a function
+# which is the function that you want to execute and generate result
+#
+# Then this wrapper just send processing message out via SSE and then
+# when the function call completed, it attach the result to the last
+# SSE message and terminate connection. So any function can warp with
+# this function to get SSE support
 async def sse_wrapper(async_function, *function_args):
     async def sse_stream():
         try:
