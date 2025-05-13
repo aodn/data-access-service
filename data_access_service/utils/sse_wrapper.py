@@ -3,6 +3,7 @@ import json
 import time
 from fastapi.responses import StreamingResponse
 
+
 # Helper function to format SSE messages
 def format_sse(data: dict, event: str = "message") -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
@@ -13,7 +14,10 @@ async def sse_wrapper(async_function, *function_args):
     async def sse_stream():
         try:
             # Send initial processing message
-            yield format_sse({"status": "processing", "message": "Processing your request..."}, "processing")
+            yield format_sse(
+                {"status": "processing", "message": "Processing your request..."},
+                "processing",
+            )
 
             # Track start time for periodic messages
             start_time = time.time()
@@ -28,7 +32,7 @@ async def sse_wrapper(async_function, *function_args):
                 if time.time() - start_time >= processing_interval:
                     yield format_sse(
                         {"status": "processing", "message": "Still processing..."},
-                        "processing"
+                        "processing",
                     )
                     start_time = time.time()  # Reset timer
 
@@ -44,5 +48,5 @@ async def sse_wrapper(async_function, *function_args):
     return StreamingResponse(
         sse_stream(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )

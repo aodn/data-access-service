@@ -69,6 +69,7 @@ def _generate_json_array(dask_instance, compress: bool = False):
     else:
         return json_array
 
+
 # Use to remap the field name back to column that we pass it, the raw data itself may name the field differently
 # for different dataset
 def _generate_partial_json_array(filtered: pd.DataFrame, compress: bool = False) -> str:
@@ -190,9 +191,7 @@ def _verify_to_index_flag_param(flag: str | bool | None) -> bool:
 
 # Parallel process records and map the field back to standard name
 def _response_partial_json(json: str, compress: bool):
-    response = Response(
-        json, media_type="application/json"
-    )
+    response = Response(json, media_type="application/json")
 
     if compress:
         response.headers["Content-Encoding"] = "gzip"
@@ -231,15 +230,15 @@ def _response_netcdf(filtered: pd.DataFrame, background_tasks: BackgroundTasks):
 
 
 async def _fetch_data(
-        api_instance: API,
-        uuid: str,
-        start_date: datetime,
-        end_date: datetime,
-        start_depth: float | None,
-        end_depth: float | None,
-        columns: List[str],
-        compress: bool = False
-) -> str :
+    api_instance: API,
+    uuid: str,
+    start_date: datetime,
+    end_date: datetime,
+    start_depth: float | None,
+    end_depth: float | None,
+    columns: List[str],
+    compress: bool = False,
+) -> str:
     result: Optional[pd.DataFrame] = api_instance.get_dataset_data(
         uuid=uuid, date_start=start_date, date_end=end_date, columns=columns
     )
@@ -403,7 +402,7 @@ async def get_data(
             start_depth,
             end_depth,
             columns,
-            False
+            False,
         )
     else:
         json_str = await _fetch_data(
@@ -414,14 +413,14 @@ async def get_data(
             start_depth,
             end_depth,
             columns,
-            compress
+            compress,
         )
 
         if f == "json":
             # Depends on whether receiver support gzip encoding
             logger.info("Use compressed output %s", compress)
             return _response_partial_json(json_str, compress)
-        #elif f == "netcdf":
+        # elif f == "netcdf":
         #    return _response_netcdf(filtered, background_tasks)
         return None
 
