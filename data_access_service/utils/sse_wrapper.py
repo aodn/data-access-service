@@ -9,7 +9,7 @@ def format_sse(data: dict, event: str = "message") -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-# SSE Wrapper function with periodic processing messages, it accept a function
+# SSE Wrapper function with periodic processing messages, it accepts a function
 # which is the function that you want to execute and generate result
 #
 # Then this wrapper just send processing message out via SSE and then
