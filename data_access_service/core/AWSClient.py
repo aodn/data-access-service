@@ -62,6 +62,18 @@ class AWSClient:
         object_download_url = f"https://{s3_bucket}.s3.{region}.amazonaws.com/{s3_key}"
         return object_download_url
 
+    def upload_to_s3(self, file_path: str, s3_bucket: str, s3_key: str) -> str:
+
+        # Validate file
+        if not os.path.isfile(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        # Upload to S3
+        self.s3.upload_file(file_path, s3_bucket, s3_key)
+        region = self.s3.meta.region_name
+        object_download_url = f"https://{s3_bucket}.s3.{region}.amazonaws.com/{s3_key}"
+        return object_download_url
+
     def send_email(self, recipient, subject, body_text):
         sender = self.config.get_sender_email()
 
