@@ -4,9 +4,12 @@ import shutil
 from datetime import datetime, time
 from typing import List, Dict
 
+from numpy.f2py.auxfuncs import throw_error
+
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSClient import AWSClient
 from data_access_service.models.data_file_factory import DataFileFactory
+from data_access_service.tasks.upload_data_files import upload_all_files_in_folder_to_temp_s3
 from data_access_service.utils.date_time_utils import (
     get_monthly_date_range_array_from_,
     trim_date_range,
@@ -20,14 +23,14 @@ from data_access_service.utils.email_generator import (
 efs_mount_point = "/mount/efs/"
 
 
-def process_csv_data_file(
+def process_data_files(
     job_id: str,
     uuid: str,
-    start_date: str,
-    end_date: str,
+    start_date: datetime,
+    end_date: datetime,
     multi_polygon: str,
     recipient: str,
-):
+) -> str | None:
     config: Config = Config.get_config()
     log = init_log(config)
 
@@ -47,27 +50,28 @@ def process_csv_data_file(
     ]
 
     try:
-        start_date = parse_date(start_date)
-        end_date = parse_date(end_date, time(23, 59, 59))
+        # start_date = parse_date(start_date)
+        # end_date = parse_date(end_date, time(23, 59, 59))
 
         # generate csv file and upload to s3
         generate_csv_files(
             tmp_data_folder_path, start_date, end_date, multi_polygon_dict, uuid
         )
+        upload_all_files_in_folder_to_temp_s3(job_id=job_id, local_folder=tmp_data_folder_path, aws=aws)
 
-        data_file_zip_path = generate_zip_name(uuid, start_date, end_date)
-        object_url = aws.zip_directory_to_s3(
-            tmp_data_folder_path,
-            config.get_csv_bucket_name(),
-            job_id + ".zip",
-        )
-
-        # send email to recipient
-        finishing_subject = generate_completed_email_subject(uuid)
-        finishing_content = generate_completed_email_content(
-            uuid, conditions, object_url
-        )
-        aws.send_email(recipient, finishing_subject, finishing_content)
+        # data_file_zip_path = generate_zip_name(uuid, start_date, end_date)
+        # object_url = aws.zip_directory_to_s3(
+        #     tmp_data_folder_path,
+        #     config.get_csv_bucket_name(),
+        #     job_id + ".zip",
+        # )
+        #
+        # # send email to recipient
+        # finishing_subject = generate_completed_email_subject(uuid)
+        # finishing_content = generate_completed_email_content(
+        #     uuid, conditions, object_url
+        # )
+        # aws.send_email(recipient, finishing_subject, finishing_content)
 
     except TypeError as e:
         log.error(f"Error: {e}")
@@ -78,9 +82,9 @@ def process_csv_data_file(
     except Exception as e:
         log.error(f"Error: {e}")
         aws.send_email(recipient, "Error", "An error occurred.")
-    finally:
-        shutil.rmtree(tmp_data_folder_path)
-
+    # finally:
+        # shutil.rmtree(tmp_data_folder_path)
+    return None
 
 def generate_csv_files(
     folder_path: str,
