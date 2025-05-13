@@ -124,4 +124,5 @@ class AWSClient:
         response = self.batch.submit_job(**request)
 
         self.log.info(f"Job submitted: {response['jobId']}")
-        return response
+        # return job id
+        return response["jobId"]
