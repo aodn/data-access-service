@@ -1,7 +1,10 @@
+from typing import Tuple
+
 import pandas as pd
 from datetime import datetime, timedelta, time
 
 import pytz
+from dateutil import parser
 
 from data_access_service import API, init_log, Config
 from dateutil.relativedelta import relativedelta
@@ -22,13 +25,13 @@ def parse_date(
     )
 
 
-def get_final_day_of_(date: datetime) -> datetime:
+def get_final_day_of_month_(date: datetime) -> datetime:
     next_month = date.replace(day=28) + timedelta(days=4)
     last_day_of_month = next_month - timedelta(days=next_month.day)
     return last_day_of_month
 
 
-def get_first_day_of_(date: datetime) -> datetime:
+def get_first_day_of_month(date: datetime) -> datetime:
     return date.replace(day=1)
 
 
@@ -124,3 +127,21 @@ def trim_date_range(
         return metadata_start_date, metadata_end_date
     else:
         return None, None
+
+def get_boundary_of_year_month(
+    year_month_str: str,
+) -> Tuple[datetime, datetime]:
+    """
+    Get the first and last day of the month for a given year and month.
+
+    Args:
+        year_month_str (str): Year and month in the format "YYYY-MM".
+
+    Returns:
+        Tuple[datetime, datetime]: First and last day of the month.
+    """
+    year_month = parser.parse(year_month_str)
+    start_date = year_month.replace(day=1, hour=0, minute=0, second=0)
+    end_date = get_final_day_of_month_(start_date).replace(hour=23, minute=59, second=59)
+
+    return start_date, end_date
