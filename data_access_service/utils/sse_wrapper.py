@@ -1,6 +1,8 @@
 import asyncio
 import json
 import time
+import threading
+import queue
 from fastapi.responses import StreamingResponse
 
 
@@ -18,7 +20,35 @@ def format_sse(data: dict, event: str = "message") -> str:
 # this function to get SSE support
 async def sse_wrapper(async_function, *function_args):
     async def sse_stream():
+        # Thread-safe event to signal task completion
+        task_done_event = threading.Event()
+        # Thread-safe queue to pass task result or exception
+        result_queue = queue.Queue()
+        # Processing interval for periodic messages
+        processing_interval = 20  # Send processing message every 20 seconds
+
+        def run_new_event_loop():
+            # Create a new event loop in this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                # Create and run the task in the new event loop
+                task = loop.create_task(async_function(*function_args))
+                loop.run_until_complete(task)
+                # Put the result in the queue
+                result_queue.put(("success", task.result()))
+            except Exception as e:
+                # Put the exception in the queue
+                result_queue.put(("error", str(e)))
+            finally:
+                task_done_event.set()  # Signal task completion
+                loop.close()  # Clean up the event loop
+
         try:
+            # Start the new event loop in a separate thread
+            thread = threading.Thread(target=run_new_event_loop, daemon=True)
+            thread.start()
+
             # Send initial processing message
             yield format_sse(
                 {"status": "processing", "message": "Processing your request..."},
@@ -27,14 +57,10 @@ async def sse_wrapper(async_function, *function_args):
 
             # Track start time for periodic messages
             start_time = time.time()
-            processing_interval = 20  # Send processing message every 20 seconds
-
-            # Execute the async function in the background
-            task = asyncio.create_task(async_function(*function_args))
 
             # Send periodic processing messages while the task is running
-            while not task.done():
-                await asyncio.sleep(1)  # Check every second to avoid busy-waiting
+            while not task_done_event.is_set():
+                await asyncio.sleep(1)  # Non-blocking sleep in the main event loop
                 if time.time() - start_time >= processing_interval:
                     yield format_sse(
                         {"status": "processing", "message": "Still processing..."},
@@ -42,14 +68,18 @@ async def sse_wrapper(async_function, *function_args):
                     )
                     start_time = time.time()  # Reset timer
 
-            # Get the result of the async function
-            result = await task
+            # Wait for the task to complete and get the result from the queue
+            thread.join()  # Ensure the thread has finished
+            status, value = result_queue.get_nowait()
+            if status == "success":
+                yield format_sse({"status": "completed", "data": value}, "result")
+            else:
+                yield format_sse({"status": "error", "message": value}, "error")
 
-            # Send the result
-            yield format_sse({"status": "completed", "data": result}, "result")
         except Exception as e:
-            # Send error message
+            # Handle errors in the main event loop (e.g., queue issues)
             yield format_sse({"status": "error", "message": str(e)}, "error")
+            task_done_event.set()  # Ensure messaging stops
 
     return StreamingResponse(
         sse_stream(),
