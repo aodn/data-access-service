@@ -15,9 +15,10 @@ class AWSClient:
         self.log.info("Init AWS class")
         self.s3 = self.config.get_s3_client()
         self.ses = boto3.client("ses")
+        self.batch = boto3.client("batch")
 
     def zip_directory_to_s3(
-        self, directory_path: str, s3_bucket: str, s3_key: str
+            self, directory_path: str, s3_bucket: str, s3_key: str
     ) -> str:
         """
         Zip a directory and upload it as a stream to S3 without saving to disk.
@@ -92,3 +93,35 @@ class AWSClient:
         except Exception as e:
             self.log.info(f"Error sending email to {recipient}: {e}")
             raise e
+
+    def submit_a_job(self, job_name: str, job_queue: str, job_definition: str, parameters: dict, array_size: int = 0, dependency_job_id: str = None):
+        """
+        Submit a job to AWS Batch.
+
+        Args:
+            job_name: Name of the job.
+            job_queue: Job queue to submit the job to.
+            job_definition: Job definition to use.
+            parameters: Parameters for the job.
+            array_size: Size of the array job (default is 0, which means no array job).
+            dependency_job_id: Job ID of the job this job depends on (default is None).
+
+        Returns:
+            The response from the AWS Batch service.
+        """
+        request = {
+            "jobName": job_name,
+            "jobQueue": job_queue,
+            "jobDefinition": job_definition,
+            "parameters": parameters,
+        }
+
+        if array_size > 0:
+            request["arrayProperties"] = {"size": array_size}
+
+        if dependency_job_id:
+            request["dependsOn"] = [{"jobId": dependency_job_id}]
+        response = self.batch.submit_job(**request)
+
+        self.log.info(f"Job submitted: {response['jobId']}")
+        return response
