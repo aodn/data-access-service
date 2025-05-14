@@ -79,9 +79,9 @@ async def sse_wrapper(async_function, *function_args):
             if status == "success":
                 if type(value) is list:
                     # If it is a list, try to split it if too many lines there
-                    splitted = split_list(value)
-                    for i, chunk in enumerate(split_list(value)):
-                        yield format_sse({"status": "completed", "message": str(i) + "/" + str(len(splitted)) , "data": chunk}, "result")
+                    smaller_list = split_list(value)
+                    for i, chunk in enumerate(smaller_list):
+                        yield format_sse({"status": "completed", "message": str(i) + "/" + str(len(smaller_list)) , "data": chunk}, "result")
                 else:
                     yield format_sse({"status": "completed", "data": value}, "result")
             else:
