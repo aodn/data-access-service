@@ -35,7 +35,7 @@ match call_type:
         subsetting.init(job_id, parameters)
         # subsetting.execute(job_id, job_index, parameters)
     case "sub-setting-data-preparation":
-        subsetting.execute(job_id, job_index, parameters)
+        subsetting.prepare_data(job_id, job_index, parameters)
     case "sub-setting-data-collection":
         pass
     case _:

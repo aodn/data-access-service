@@ -10,7 +10,7 @@ from aodn_cloud_optimised.lib.DataQuery import Metadata
 from botocore import UNSIGNED
 from botocore.exceptions import ClientError
 from testcontainers.localstack import LocalStackContainer
-from data_access_service.batch.subsetting import execute, Parameters
+from data_access_service.batch.subsetting import prepare_data, Parameters
 from data_access_service.config.config import EnvType, Config, TestConfig
 from botocore.config import Config as BotoConfig
 
@@ -193,7 +193,7 @@ def test_subsetting(localstack, aws_clients, setup_resources, mock_boto3_client)
                     Parameters.MULTI_POLYGON.value: world_polygon,
                     Parameters.RECIPIENT.value: "noreply@testing.com",
                 }
-                execute("job_id", params)
+                prepare_data("job_id", params)
                 mock_send_email.assert_called_once_with(
                     "noreply@testing.com",
                     "Error",
@@ -208,7 +208,7 @@ def test_subsetting(localstack, aws_clients, setup_resources, mock_boto3_client)
                     Parameters.MULTI_POLYGON.value: world_polygon,
                     Parameters.RECIPIENT.value: "noreply@testing.com",
                 }
-                execute("job_id", params)
+                prepare_data("job_id", params)
                 assert mock_send_email.call_count == 2
                 call_args = mock_send_email.call_args
 

@@ -19,7 +19,7 @@ month_count_per_job = 6
 #     DATE_RANGES = "date_ranges"
 
 
-def execute(job_id, job_index, parameters):
+def prepare_data(job_id, job_index, parameters):
     logger = init_log(Config.get_config())
     # get params
     uuid = parameters[Parameters.UUID.value]
@@ -60,23 +60,33 @@ def init(job_id, parameters):
 
     # submit data preparation job
 
-    parameters["type"] = "sub-setting-data-preparation"
+    preparation_parameters = {
+        **parameters,
+        Parameters.TYPE.value: "sub-setting-data-preparation",
+    }
     data_preparation_job_id = aws_client.submit_a_job(
         job_name="prepare-data-for-job-" + job_id,
         job_queue="generate-csv-data-file",
         job_definition="generate-csv-data-file-dev",
-        parameters=parameters,
+        parameters=preparation_parameters,
         array_size=array_job_count,
         dependency_job_id=job_id,
     )
 
     #submit data collection job
-    # parameters["type"] = "sub-setting-data-collection"
-    # aws_client.submit_a_job(
-    #     job_name="collect-data-for-job-" + job_id,
-    #     job_queue="generate-csv-data-file",
-    #     job_definition="generate-csv-data-file-dev",
-    #     parameters=parameters,
-    # )
+
+    collection_parameters = {
+        **parameters,
+        Parameters.TYPE.value: "sub-setting-data-collection",
+    }
+
+
+    aws_client.submit_a_job(
+        job_name="collect-data-for-job-" + job_id,
+        job_queue="generate-csv-data-file",
+        job_definition="generate-csv-data-file-dev",
+        parameters=collection_parameters,
+        dependency_job_id=data_preparation_job_id
+    )
 
 
