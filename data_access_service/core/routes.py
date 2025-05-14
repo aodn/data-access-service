@@ -227,7 +227,7 @@ async def _fetch_data(
     end_date: datetime,
     start_depth: float | None,
     end_depth: float | None,
-    columns: List[str]
+    columns: List[str],
 ) -> list:
     result: Optional[pd.DataFrame] = api_instance.get_dataset_data(
         uuid=uuid, date_start=start_date, date_end=end_date, columns=columns
@@ -259,7 +259,6 @@ async def _fetch_data(
     logger.info("Memory usage: %s", get_memory_usage_percentage())
 
     return _generate_partial_json_array(filtered)
-
 
 
 class HealthCheckResponse(BaseModel):
@@ -392,17 +391,11 @@ async def get_data(
             end_date,
             start_depth,
             end_depth,
-            columns
+            columns,
         )
     else:
         result = await _fetch_data(
-            api_instance,
-            uuid,
-            start_date,
-            end_date,
-            start_depth,
-            end_depth,
-            columns
+            api_instance, uuid, start_date, end_date, start_depth, end_depth, columns
         )
 
         if f == "json":
