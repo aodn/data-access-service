@@ -30,7 +30,7 @@ async def sse_wrapper(async_function, *function_args):
         # Thread-safe queue to pass task result or exception
         result_queue = queue.Queue()
         # Processing interval for periodic messages
-        processing_interval = 20  # Send processing message every 20 seconds
+        processing_interval: float = 20.0  # Send processing message every 20 seconds
 
         def run_new_event_loop():
             # Create a new event loop in this thread
