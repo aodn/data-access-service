@@ -62,17 +62,12 @@ def _generate_json_array(dask_instance, compress: bool = False):
         for record in partition_df.to_dict(orient="records"):
             record_list.append(record)
 
-    json_array = json.dumps(record_list)
-
-    if compress:
-        return gzip_compress(json_array)
-    else:
-        return json_array
+    return _response_json(record_list, compress)
 
 
 # Use to remap the field name back to column that we pass it, the raw data itself may name the field differently
 # for different dataset
-def _generate_partial_json_array(filtered: pd.DataFrame, compress: bool = False) -> str:
+def _generate_partial_json_array(filtered: pd.DataFrame) -> list:
 
     ddf: dask.dataframe.DataFrame = dd.from_pandas(
         filtered, npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1
@@ -121,13 +116,7 @@ def _generate_partial_json_array(filtered: pd.DataFrame, compress: bool = False)
                     else None
                 )
             record_list.append(filtered_record)
-
-    json_array = json.dumps(record_list)
-
-    if compress:
-        return gzip_compress(json_array)
-    else:
-        return json_array
+    return record_list
 
 
 # currently only want year, month and date.
@@ -190,13 +179,15 @@ def _verify_to_index_flag_param(flag: str | bool | None) -> bool:
 
 
 # Parallel process records and map the field back to standard name
-def _response_partial_json(json: str, compress: bool):
-    response = Response(json, media_type="application/json")
+def _response_json(result: list, compress: bool):
+    json_array = json.dumps(result)
 
     if compress:
+        response = Response(gzip_compress(json_array), media_type="application/json")
         response.headers["Content-Encoding"] = "gzip"
-
-    return response
+        return response
+    else:
+        return Response(json_array, media_type="application/json")
 
 
 # TODO: Need to use the metadata to assign correct type to netcdf, right now field type is wrong
@@ -236,16 +227,15 @@ async def _fetch_data(
     end_date: datetime,
     start_depth: float | None,
     end_depth: float | None,
-    columns: List[str],
-    compress: bool = False,
-) -> str:
+    columns: List[str]
+) -> list:
     result: Optional[pd.DataFrame] = api_instance.get_dataset_data(
         uuid=uuid, date_start=start_date, date_end=end_date, columns=columns
     )
 
     # if result is None, return empty response
     if result is None:
-        return "[]"
+        return []
 
     start_depth = _verify_depth_param("start_depth", start_depth)
     end_depth = _verify_depth_param("end_depth", end_depth)
@@ -268,7 +258,8 @@ async def _fetch_data(
     logger.info("Record number return %s for query", len(filtered.index))
     logger.info("Memory usage: %s", get_memory_usage_percentage())
 
-    return _generate_partial_json_array(filtered, compress)
+    return _generate_partial_json_array(filtered)
+
 
 
 class HealthCheckResponse(BaseModel):
@@ -401,25 +392,23 @@ async def get_data(
             end_date,
             start_depth,
             end_depth,
-            columns,
-            False,
+            columns
         )
     else:
-        json_str = await _fetch_data(
+        result = await _fetch_data(
             api_instance,
             uuid,
             start_date,
             end_date,
             start_depth,
             end_depth,
-            columns,
-            compress,
+            columns
         )
 
         if f == "json":
             # Depends on whether receiver support gzip encoding
             logger.info("Use compressed output %s", compress)
-            return _response_partial_json(json_str, compress)
+            return _response_json(result, compress)
         # elif f == "netcdf":
         #    return _response_netcdf(filtered, background_tasks)
         return None

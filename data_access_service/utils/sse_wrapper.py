@@ -11,6 +11,11 @@ def format_sse(data: dict, event: str = "message") -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+def split_list(lst, chunk_size=50000):
+    """Split a list into chunks of specified size."""
+    return [lst[i:i + chunk_size] for i in range(0, len(lst), chunk_size)]
+
+
 # SSE Wrapper function with periodic processing messages, it accepts a function
 # which is the function that you want to execute and generate result
 #
@@ -72,7 +77,13 @@ async def sse_wrapper(async_function, *function_args):
             thread.join()  # Ensure the thread has finished
             status, value = result_queue.get_nowait()
             if status == "success":
-                yield format_sse({"status": "completed", "data": value}, "result")
+                if type(value) is list:
+                    # If it is a list, try to split it if too many lines there
+                    splitted = split_list(value)
+                    for i, chunk in enumerate(split_list(value)):
+                        yield format_sse({"status": "completed", "message": str(i) + "/" + str(len(splitted)) , "data": chunk}, "result")
+                else:
+                    yield format_sse({"status": "completed", "data": value}, "result")
             else:
                 yield format_sse({"status": "error", "message": value}, "error")
 
