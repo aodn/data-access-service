@@ -8,4 +8,5 @@ class Parameters(Enum):
     MULTI_POLYGON = "multi_polygon"
     RECIPIENT = "recipient"
     DATE_RANGES = "date_ranges"
+    TYPE = "type"
 

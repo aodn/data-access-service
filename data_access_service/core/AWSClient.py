@@ -94,7 +94,7 @@ class AWSClient:
             self.log.info(f"Error sending email to {recipient}: {e}")
             raise e
 
-    def submit_a_job(self, job_name: str, job_queue: str, job_definition: str, parameters: dict, array_size: int = 0, dependency_job_id: str = None):
+    def submit_a_job(self, job_name: str, job_queue: str, job_definition: str, parameters: dict, array_size: int = 0, dependency_job_id: str = None) -> str:
         """
         Submit a job to AWS Batch.
 
