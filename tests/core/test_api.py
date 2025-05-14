@@ -81,7 +81,7 @@ class TestApi(unittest.TestCase):
 
         # Parse the JSON result but need to get it back to object so that compare
         # of null in json string is converted back to None in object
-        parsed_result = json.loads(_response_json(result, compress = False).body)
+        parsed_result = json.loads(_response_json(result, compress=False).body)
 
         # Expected output
         expected = [
