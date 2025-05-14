@@ -84,7 +84,7 @@ async def sse_wrapper(async_function, *function_args):
                         yield format_sse(
                             {
                                 "status": "completed",
-                                "message": str(i) + "/" + str(len(smaller_list)),
+                                "message": str(i+1) + "/" + str(len(smaller_list)),
                                 "data": chunk,
                             },
                             "result",
