@@ -8,7 +8,7 @@ from unittest.mock import patch
 from aodn_cloud_optimised import DataQuery
 
 from data_access_service import API
-from data_access_service.core.routes import _generate_partial_json_array
+from data_access_service.core.routes import _generate_partial_json_array, _response_json
 
 
 class TestApi(unittest.TestCase):
@@ -77,10 +77,10 @@ class TestApi(unittest.TestCase):
         pandas_df = pd.DataFrame(data)
 
         # Call the function
-        result = _generate_partial_json_array(pandas_df, compress=False)
+        result = _generate_partial_json_array(pandas_df)
 
         # Parse the JSON result
-        parsed_result = json.loads(result)
+        parsed_result = json.loads(_response_json(result, compress = False).body)
 
         # Expected output
         expected = [
