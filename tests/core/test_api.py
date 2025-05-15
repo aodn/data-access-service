@@ -1,6 +1,5 @@
 import json
 import unittest
-import dask.dataframe as dd
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -9,7 +8,7 @@ from unittest.mock import patch
 from aodn_cloud_optimised import DataQuery
 
 from data_access_service import API
-from data_access_service.core.routes import _generate_partial_json_array
+from data_access_service.core.routes import _generate_partial_json_array, _response_json
 
 
 class TestApi(unittest.TestCase):
@@ -77,14 +76,12 @@ class TestApi(unittest.TestCase):
         }
         pandas_df = pd.DataFrame(data)
 
-        # Convert to Dask DataFrame
-        dask_df = dd.from_pandas(pandas_df, npartitions=1)
-
         # Call the function
-        result = _generate_partial_json_array(dask_df, compress=False)
+        result = _generate_partial_json_array(pandas_df)
 
-        # Parse the JSON result
-        parsed_result = json.loads(result)
+        # Parse the JSON result but need to get it back to object so that compare
+        # of null in json string is converted back to None in object
+        parsed_result = json.loads(_response_json(result, compress=False).body)
 
         # Expected output
         expected = [
