@@ -5,6 +5,7 @@ import threading
 import queue
 from fastapi.responses import StreamingResponse
 
+
 # Helper function to format SSE messages
 def format_sse(data: dict, event: str = "message") -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"

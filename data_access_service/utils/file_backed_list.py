@@ -15,12 +15,14 @@ class FileBackedList(list):
     def __init__(self, file_path: str = None):
         super().__init__()
         if file_path is None:
-            self.temp_file = tempfile.NamedTemporaryFile(mode='w+', encoding='utf-8', suffix='.jsonl', delete=False)
+            self.temp_file = tempfile.NamedTemporaryFile(
+                mode="w+", encoding="utf-8", suffix=".jsonl", delete=False
+            )
             self.file_path = self.temp_file.name
         else:
             self.file_path = file_path
             self.temp_file = None
-        self._file = open(self.file_path, 'w+', encoding='utf-8')
+        self._file = open(self.file_path, "w+", encoding="utf-8")
         self._length = 0
         self._closed = False
         self._line_positions = []  # Store byte offsets for each line
@@ -33,7 +35,7 @@ class FileBackedList(list):
             raise TypeError("Item must be a dictionary")
         # Record the current file position
         pos = self._file.tell()
-        json_str = json.dumps(item) + '\n'
+        json_str = json.dumps(item) + "\n"
         self._file.write(json_str)
         self._file.flush()
         self._line_positions.append(pos)
@@ -42,7 +44,7 @@ class FileBackedList(list):
     def __iter__(self) -> Iterator[Dict]:
         """Iterate over records by reading the file lazily."""
         self.close()
-        with open(self.file_path, 'r', encoding='utf-8') as f:
+        with open(self.file_path, "r", encoding="utf-8") as f:
             for line in f:
                 yield json.loads(line.strip())
 
@@ -74,7 +76,7 @@ class FileBackedList(list):
             if key < 0 or key >= self._length:
                 raise IndexError(f"Index {key} out of range for length {self._length}")
 
-            with open(self.file_path, 'r', encoding='utf-8') as f:
+            with open(self.file_path, "r", encoding="utf-8") as f:
                 f.seek(self._line_positions[key])
                 line = f.readline()
                 return json.loads(line.strip())
@@ -88,7 +90,7 @@ class FileBackedList(list):
                 raise ValueError(f"Invalid slice range: [{start}:{stop}]")
 
             result = []
-            with open(self.file_path, 'r', encoding='utf-8') as f:
+            with open(self.file_path, "r", encoding="utf-8") as f:
                 f.seek(self._line_positions[start])
                 # Read up to stop - start lines
                 for i in range(start, min(stop, self._length)):
