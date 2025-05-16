@@ -1,39 +1,41 @@
 # constants for test usage
+AWS_TEST_REGION = "us-east-1"
 
-init_job_id = "init-job-id"
-init_parameters = {
-    "uuid": "test-uuid",
-    "start_date": "02-2020",
-    "end_date": "04-2021",
-    "multi_polygon": "test-polygon",
+INIT_JOB_ID = "init-job-id"
+
+INIT_PARAMETERS = {
+    "uuid": "af5d0ff9-bb9c-4b7c-a63c-854a630b6984",
+    "start_date": "02-2014",
+    "end_date": "04-2015",
+    "multi_polygon": '{"type":"MultiPolygon","coordinates":[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}',
     "recipient": "test-recipient",
 }
 
-_preparation_parameters = {
-    **init_parameters,
+PREPARATION_PARAMETERS = {
+    **INIT_PARAMETERS,
     "type": "sub-setting-data-preparation",
-    "date_ranges":'{"0": ["02-2020", "03-2020", "04-2020", "05-2020", "06-2020", "07-2020", "08-2020", "09-2020", "10-2020", "11-2020", "12-2020", "01-2021", "02-2021", "03-2021", "04-2021"]}'
+    'date_ranges': '{"0": ["2014-02-01", "2014-04-30"], "1": ["2014-05-01", "2014-07-31"], "2": ["2014-08-01", "2014-10-31"], "3": ["2014-11-01", "2015-01-31"], "4": ["2015-02-01", "2015-04-30"]}'
 }
 
-preparation_job_submission_args = {
+PREPARATION_JOB_SUBMISSION_ARGS = {
     "job_name": "prepare-data-for-job-init-job-id",
     "job_queue": "generate-csv-data-file",
     "job_definition": "generate-csv-data-file-dev",
-    "parameters": _preparation_parameters,
-    "array_size": 3,
-    "dependency_job_id": init_job_id,
+    "parameters": PREPARATION_PARAMETERS,
+    "array_size": 5,
+    "dependency_job_id": INIT_JOB_ID,
 }
 
-_collection_parameters = {
-    **init_parameters,
+COLLECTION_PARAMETERS = {
+    **INIT_PARAMETERS,
     "type": "sub-setting-data-collection",
-    "date_ranges":'{"0": ["02-2020", "03-2020", "04-2020", "05-2020", "06-2020", "07-2020", "08-2020", "09-2020", "10-2020", "11-2020", "12-2020", "01-2021", "02-2021", "03-2021", "04-2021"]}'
+    'date_ranges': '{"0": ["2014-02-01", "2014-04-30"], "1": ["2014-05-01", "2014-07-31"], "2": ["2014-08-01", "2014-10-31"], "3": ["2014-11-01", "2015-01-31"], "4": ["2015-02-01", "2015-04-30"]}'
 }
 
-collection_job_submission_args = {
+COLLECTION_JOB_SUBMISSION_ARGS = {
     "job_name": "collect-data-for-job-init-job-id",
     "job_queue": "generate-csv-data-file",
     "job_definition": "generate-csv-data-file-dev",
-    "parameters": _collection_parameters,
+    "parameters": COLLECTION_PARAMETERS,
     "dependency_job_id": "test-job-id-returned",
 }
