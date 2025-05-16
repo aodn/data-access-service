@@ -155,11 +155,13 @@ class GzipFileBackedList(list):
         super().__init__()
         self._file_path = file_path
         if file_path is None:
-            self._temp_file = tempfile.NamedTemporaryFile(mode='wb', suffix='.jsonl.gz', delete=False)
+            self._temp_file = tempfile.NamedTemporaryFile(
+                mode="wb", suffix=".jsonl.gz", delete=False
+            )
             self._file_path = self._temp_file.name
         else:
             self._temp_file = None
-        self._file = gzip.open(self._file_path, 'wt', encoding='utf-8')
+        self._file = gzip.open(self._file_path, "wt", encoding="utf-8")
         self._length = 0
         self._closed = False
         self._read_file = None  # Cached file handle for reading
@@ -170,7 +172,7 @@ class GzipFileBackedList(list):
             raise ValueError("Cannot append to closed GzipFileBackedJsonList")
         if not isinstance(item, dict):
             raise TypeError("Item must be a dictionary")
-        json_str = json.dumps(item) + '\n'
+        json_str = json.dumps(item) + "\n"
         self._file.write(json_str)
         self._length += 1
 
@@ -181,7 +183,7 @@ class GzipFileBackedList(list):
     def __iter__(self) -> Iterator[Dict]:
         """Iterate over entries by reading the GZIP file lazily."""
         self.close()
-        with gzip.open(self._file_path, 'rt', encoding='utf-8') as f:
+        with gzip.open(self._file_path, "rt", encoding="utf-8") as f:
             for line in f:
                 yield json.loads(line.strip())
 
@@ -197,7 +199,7 @@ class GzipFileBackedList(list):
             if key < 0 or key >= self._length:
                 raise IndexError(f"Index {key} out of range")
             if self._read_file is None or self._read_file.closed:
-                self._read_file = gzip.open(self._file_path, 'rt', encoding='utf-8')
+                self._read_file = gzip.open(self._file_path, "rt", encoding="utf-8")
             else:
                 self._read_file.seek(0)  # Reset to start for GZIP
             for i, line in enumerate(self._read_file):
@@ -212,7 +214,7 @@ class GzipFileBackedList(list):
             if start < 0 or stop < 0 or start > stop:
                 raise ValueError(f"Invalid slice range: [{start}:{stop}]")
             if self._read_file is None or self._read_file.closed:
-                self._read_file = gzip.open(self._file_path, 'rt', encoding='utf-8')
+                self._read_file = gzip.open(self._file_path, "rt", encoding="utf-8")
             else:
                 self._read_file.seek(0)  # Reset to start for GZIP
             result = []
@@ -237,7 +239,7 @@ class GzipFileBackedList(list):
             List[Dict]: A chunk of JSON entries.
         """
         self.close()
-        with gzip.open(self._file_path, 'rt', encoding='utf-8') as f:
+        with gzip.open(self._file_path, "rt", encoding="utf-8") as f:
             chunk = []
             for i, line in enumerate(f):
                 if i % chunk_size == 0 and chunk:
