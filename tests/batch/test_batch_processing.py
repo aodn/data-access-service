@@ -193,7 +193,7 @@ def test_subsetting(localstack, aws_clients, setup_resources, mock_boto3_client)
                     Parameters.MULTI_POLYGON.value: world_polygon,
                     Parameters.RECIPIENT.value: "noreply@testing.com",
                 }
-                prepare_data("job_id", params)
+                prepare_data("job_id",0,  params)
                 mock_send_email.assert_called_once_with(
                     "noreply@testing.com",
                     "Error",

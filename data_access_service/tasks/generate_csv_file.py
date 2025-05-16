@@ -24,7 +24,7 @@ efs_mount_point = "/mount/efs/"
 
 
 def process_data_files(
-    job_id: str,
+    job_id_of_init: str,
     uuid: str,
     start_date: datetime,
     end_date: datetime,
@@ -34,7 +34,7 @@ def process_data_files(
     config: Config = Config.get_config()
     log = init_log(config)
 
-    tmp_data_folder_path = config.get_temp_folder(job_id)
+    tmp_data_folder_path = config.get_temp_folder(job_id_of_init)
     multi_polygon_dict = json.loads(multi_polygon)
 
     if None in [uuid, start_date, end_date, json.loads(multi_polygon), recipient]:
@@ -57,7 +57,7 @@ def process_data_files(
         generate_csv_files(
             tmp_data_folder_path, start_date, end_date, multi_polygon_dict, uuid
         )
-        upload_all_files_in_folder_to_temp_s3(job_id=job_id, local_folder=tmp_data_folder_path, aws=aws)
+        upload_all_files_in_folder_to_temp_s3(job_id=job_id_of_init, local_folder=tmp_data_folder_path, aws=aws)
 
         # data_file_zip_path = generate_zip_name(uuid, start_date, end_date)
         # object_url = aws.zip_directory_to_s3(
@@ -75,13 +75,13 @@ def process_data_files(
 
     except TypeError as e:
         log.error(f"Error: {e}")
-        aws.send_email(recipient, "Error", "Type Error occurred.")
+        # aws.send_email(recipient, "Error", "Type Error occurred.")
     except ValueError as e:
         log.error(f"Error: {e}")
-        aws.send_email(recipient, "Error", "No data found for selected conditions")
+        # aws.send_email(recipient, "Error", "No data found for selected conditions")
     except Exception as e:
         log.error(f"Error: {e}")
-        aws.send_email(recipient, "Error", "An error occurred.")
+        # aws.send_email(recipient, "Error", "An error occurred.")
     # finally:
         # shutil.rmtree(tmp_data_folder_path)
     return None
