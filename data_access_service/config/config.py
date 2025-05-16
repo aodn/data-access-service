@@ -22,8 +22,9 @@ class Config:
     BASE_URL = "/api/v1/das"
 
     def __init__(self):
-        self.config = None
-        self.s3 = boto3.client("s3")
+        self._config = None
+        self._size_for_mem_list = 1000000
+        self._s3 = boto3.client("s3")
 
     @staticmethod
     def load_config(file_path: str):
@@ -34,7 +35,7 @@ class Config:
         return config
 
     @staticmethod
-    def get_config(profile: EnvType = None):
+    def get_config(profile: EnvType | None = None):
         if profile is None:
             profile = EnvType(os.getenv("PROFILE", EnvType.DEV))
 
@@ -58,20 +59,24 @@ class Config:
     def get_temp_folder(job_id: str) -> str:
         return tempfile.mkdtemp(prefix=job_id)
 
+    # Set the max number of entry before we consider using file based backed list
+    def get_max_size_for_mem_list(self):
+        return self._size_for_mem_list
+
     def get_s3_client(self):
-        return self.s3
+        return self._s3
 
     def get_csv_bucket_name(self):
         return (
-            self.config["aws"]["s3"]["bucket_name"]["csv"]
-            if self.config is not None
+            self._config["aws"]["s3"]["bucket_name"]["csv"]
+            if self._config is not None
             else None
         )
 
     def get_sender_email(self):
         return (
-            self.config["aws"]["ses"]["sender_email"]
-            if self.config is not None
+            self._config["aws"]["ses"]["sender_email"]
+            if self._config is not None
             else None
         )
 
@@ -79,22 +84,22 @@ class Config:
 class TestConfig(Config):
     def __init__(self):
         super().__init__()
-        self.config = Config.load_config("tests/config/config-test.yaml")
+        self._config = Config.load_config("tests/config/config-test.yaml")
 
     def set_s3_client(self, s3_client):
-        self.s3 = s3_client
+        self._s3 = s3_client
 
 
 class DevConfig(Config):
     def __init__(self):
         super().__init__()
-        self.config = Config.load_config("data_access_service/config/config-dev.yaml")
+        self._config = Config.load_config("data_access_service/config/config-dev.yaml")
 
 
 class EdgeConfig(Config):
     def __init__(self):
         super().__init__()
-        self.config = Config.load_config("data_access_service/config/config-edge.yaml")
+        self._config = Config.load_config("data_access_service/config/config-edge.yaml")
 
 
 class StagingConfig(Config):
@@ -103,7 +108,7 @@ class StagingConfig(Config):
 
     def __init__(self):
         super().__init__()
-        self.config = Config.load_config(
+        self._config = Config.load_config(
             "data_access_service/config/config-staging.yaml"
         )
 
@@ -114,4 +119,4 @@ class ProdConfig(Config):
 
     def __init__(self):
         super().__init__()
-        self.config = Config.load_config("data_access_service/config/config-prod.yaml")
+        self._config = Config.load_config("data_access_service/config/config-prod.yaml")
