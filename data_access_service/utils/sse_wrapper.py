@@ -5,7 +5,6 @@ import threading
 import queue
 from fastapi.responses import StreamingResponse
 
-
 # Helper function to format SSE messages
 def format_sse(data: dict, event: str = "message") -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
@@ -77,7 +76,7 @@ async def sse_wrapper(async_function, *function_args):
             thread.join()  # Ensure the thread has finished
             status, value = result_queue.get_nowait()
             if status == "success":
-                if type(value) is list:
+                if isinstance(value, list):
                     # If it is a list, try to split it if too many lines there
                     smaller_list = split_list(value)
                     for i, chunk in enumerate(smaller_list):

@@ -10,8 +10,6 @@ from data_access_service.core.constants import (
 )
 from data_access_service.core.error import ErrorResponse
 from data_access_service.config.config import Config
-
-import logging
 from typing import Optional, List
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, BackgroundTasks
@@ -32,6 +30,7 @@ import dask.dataframe as dd
 from dateutil import parser
 from http import HTTPStatus
 
+from data_access_service.utils.file_backed_list import FileBackedList
 from data_access_service.utils.sse_wrapper import sse_wrapper
 
 router = APIRouter(prefix=Config.BASE_URL)
@@ -72,8 +71,13 @@ def _generate_partial_json_array(filtered: pd.DataFrame) -> list:
     ddf: dask.dataframe.DataFrame = dd.from_pandas(
         filtered, npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1
     )
+    if ddf.shape[0].compute() > 2000000:
+        # If it is bigger then 2M record, use the file backed list as memory likely not enough
+        record_list = FileBackedList()
+    else:
+        # It is faster to use in memory
+        record_list = []
 
-    record_list = []
     for partition in ddf.to_delayed():
         partition_df = convert_non_numeric_to_str(partition.compute())
 
@@ -347,7 +351,6 @@ async def get_temporal_extent(uuid: str, request: Request):
 @router.get("/data/{uuid}", dependencies=[Depends(api_key_auth)])
 async def get_data(
     request: Request,
-    background_tasks: BackgroundTasks,
     uuid: str,
     start_date: Optional[str] = Query(default=MIN_DATE),
     end_date: Optional[str] = Query(
