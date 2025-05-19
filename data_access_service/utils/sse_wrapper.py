@@ -1,9 +1,6 @@
-import asyncio
 import json
 import time
-import threading
-import queue
-from typing import AsyncGenerator, Callable, Awaitable
+from typing import AsyncGenerator, Callable, Generator, Any
 
 from fastapi.responses import StreamingResponse
 
@@ -13,22 +10,30 @@ def format_sse(data: dict, event: str = "message") -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-def split_list(lst, chunk_size=50000):
-    """Split a list into chunks of specified size."""
-    return [lst[i : i + chunk_size] for i in range(0, len(lst), chunk_size)]
+def split_list(lst, chunk_size=50000)-> Generator[Any, Any, None]:
+    """
+    Split a list into chunks of specified size.
+    :return: Generator to reduce memory usage.
+    """
+    return (lst[i : i + chunk_size] for i in range(0, len(lst), chunk_size))
 
 
-# SSE Wrapper function with periodic processing messages, it accepts a function of return type AsyncGenerator[dict, None]
-# which is the function that you want to execute and generate result with yield (Generator) return, this help to
-# reduce the memory use (aka avoid big list)
-#
-# Then this wrapper just send processing message out via SSE and then
-# when the function call completed, it attach the result to the last
-# SSE message and terminate connection. So any function can warp with
-# this function to get SSE support
 async def sse_wrapper(
     async_function: Callable[..., AsyncGenerator[dict, None]], *function_args
 ):
+    """
+    SSE Wrapper function with periodic processing messages, it accepts a function of return type AsyncGenerator[dict, None]
+    which is the function that you want to execute and generate result with yield (Generator) return, this help to
+    reduce the memory use (aka avoid big list)
+
+    Then this wrapper just send processing message out via SSE when the function call completed, it attached
+    the result to the last SSE message and terminate connection. So any function can warp with
+    this function to get SSE support
+
+    :param async_function:
+    :param function_args:
+    :return:
+    """
     async def sse_stream():
         # Processing interval for periodic messages
         processing_interval: float = 20.0  # Send processing message every 20 seconds
