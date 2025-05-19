@@ -202,7 +202,7 @@ class API(BaseAPI):
                     self.map_column_names(uuid, columns),
                 )
             except ValueError as e:
-                log.error(f"Error: {e}")
+                log.error(f"Error when query ds.get_data: {e}")
                 return None
         else:
             return None

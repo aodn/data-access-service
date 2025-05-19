@@ -1,4 +1,5 @@
 from dask.dataframe import DataFrame
+from numpy.core.records import record
 
 from data_access_service import init_log
 from data_access_service.core.api import API
@@ -177,8 +178,16 @@ def _verify_to_index_flag_param(flag: str | bool | None) -> bool:
 
 
 # Parallel process records and map the field back to standard name
-def _response_json(result: AsyncGenerator[dict, None], compress: bool):
-    json_array = json.dumps(result)
+def _response_json(
+    result: AsyncGenerator[dict, None] | Generator[dict, None, None], compress: bool
+):
+    async def _collect_async_gen(generator: AsyncGenerator[dict, None]) -> List[dict]:
+        return [record async for record in generator]
+
+    if isinstance(result, AsyncGenerator):
+        json_array = json.dumps(_collect_async_gen(result))
+    else:
+        json_array = json.dumps([item for item in result])
 
     if compress:
         response = Response(gzip_compress(json_array), media_type="application/json")
