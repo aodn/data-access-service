@@ -11,8 +11,7 @@ from data_access_service.core.constants import (
 from data_access_service.core.error import ErrorResponse
 from data_access_service.config.config import Config
 
-import logging
-from typing import Optional, List
+from typing import Optional, List, Generator, AsyncGenerator
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, BackgroundTasks
 from fastapi.responses import Response, FileResponse
@@ -56,24 +55,24 @@ def convert_non_numeric_to_str(df: DataFrame) -> DataFrame:
 
 # Function to generate JSON lines from Dask DataFrame
 def _generate_json_array(dask_instance, compress: bool = False):
-    record_list = []
-    for partition in dask_instance.to_delayed():
-        partition_df = convert_non_numeric_to_str(partition.compute())
-        for record in partition_df.to_dict(orient="records"):
-            record_list.append(record)
 
-    return _response_json(record_list, compress)
+    async def get_records():
+        for partition in dask_instance.to_delayed():
+            partition_df = convert_non_numeric_to_str(partition.compute())
+            for record in partition_df.to_dict(orient="records"):
+                yield record
+
+    return _response_json(get_records(), compress)
 
 
 # Use to remap the field name back to column that we pass it, the raw data itself may name the field differently
 # for different dataset
-def _generate_partial_json_array(filtered: pd.DataFrame) -> list:
+def _generate_partial_json_array(filtered: pd.DataFrame) -> Generator[dict, None, None]:
 
     ddf: dask.dataframe.DataFrame = dd.from_pandas(
         filtered, npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1
     )
 
-    record_list = []
     for partition in ddf.to_delayed():
         partition_df = convert_non_numeric_to_str(partition.compute())
 
@@ -115,8 +114,7 @@ def _generate_partial_json_array(filtered: pd.DataFrame) -> list:
                     if record["DEPTH"] is not None
                     else None
                 )
-            record_list.append(filtered_record)
-    return record_list
+            yield filtered_record
 
 
 # currently only want year, month and date.
@@ -179,7 +177,7 @@ def _verify_to_index_flag_param(flag: str | bool | None) -> bool:
 
 
 # Parallel process records and map the field back to standard name
-def _response_json(result: list, compress: bool):
+def _response_json(result: AsyncGenerator[dict, None], compress: bool):
     json_array = json.dumps(result)
 
     if compress:
@@ -228,14 +226,14 @@ async def _fetch_data(
     start_depth: float | None,
     end_depth: float | None,
     columns: List[str],
-) -> list:
+) -> AsyncGenerator[dict, None]:
     result: Optional[pd.DataFrame] = api_instance.get_dataset_data(
         uuid=uuid, date_start=start_date, date_end=end_date, columns=columns
     )
 
     # if result is None, return empty response
     if result is None:
-        return []
+        return
 
     start_depth = _verify_depth_param("start_depth", start_depth)
     end_depth = _verify_depth_param("end_depth", end_depth)
@@ -258,7 +256,8 @@ async def _fetch_data(
     logger.info("Record number return %s for query", len(filtered.index))
     logger.info("Memory usage: %s", get_memory_usage_percentage())
 
-    return _generate_partial_json_array(filtered)
+    for record in _generate_partial_json_array(filtered):
+        yield record
 
 
 class HealthCheckResponse(BaseModel):
@@ -347,7 +346,6 @@ async def get_temporal_extent(uuid: str, request: Request):
 @router.get("/data/{uuid}", dependencies=[Depends(api_key_auth)])
 async def get_data(
     request: Request,
-    background_tasks: BackgroundTasks,
     uuid: str,
     start_date: Optional[str] = Query(default=MIN_DATE),
     end_date: Optional[str] = Query(
@@ -394,7 +392,7 @@ async def get_data(
             columns,
         )
     else:
-        result = await _fetch_data(
+        result = _fetch_data(
             api_instance, uuid, start_date, end_date, start_depth, end_depth, columns
         )
 
