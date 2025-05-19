@@ -191,6 +191,7 @@ def _async_response_json(result: AsyncGenerator[dict, None], compress: bool):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
+
             async def collect():
                 async for i in result:
                     result_queue.put(i)  # Thread-safe append
@@ -213,7 +214,9 @@ def _async_response_json(result: AsyncGenerator[dict, None], compress: bool):
     thread.join()  # Ensure thread completes
 
     if compress:
-        response = Response(gzip_compress(json.dumps(json_results)), media_type="application/json")
+        response = Response(
+            gzip_compress(json.dumps(json_results)), media_type="application/json"
+        )
         response.headers["Content-Encoding"] = "gzip"
         return response
     else:
@@ -356,9 +359,7 @@ async def has_data(
     uuid: str,
     request: Request,
     start_date: Optional[str] = MIN_DATE,
-    end_date: Optional[str] = datetime.now(timezone.utc).strftime(
-        DATE_FORMAT
-    ),
+    end_date: Optional[str] = datetime.now(timezone.utc).strftime(DATE_FORMAT),
 ):
     api_instance = get_api_instance(request)
     logger.info(
