@@ -75,6 +75,9 @@ class Config:
             else None
         )
 
+    def get_api_key(self):
+        return os.getenv("API_KEY")
+
 
 class IntTestConfig(Config):
     def __init__(self):
@@ -83,6 +86,9 @@ class IntTestConfig(Config):
 
     def set_s3_client(self, s3_client):
         self.s3 = s3_client
+
+    def get_api_key(self):
+        return "testing"
 
 
 class DevConfig(Config):

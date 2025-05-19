@@ -7,39 +7,7 @@ from botocore import UNSIGNED
 from data_access_service.batch.subsetting import execute, ParamField
 from botocore.config import Config as BotoConfig
 from data_access_service.core.AWSClient import AWSClient
-from tests.core.test_with_s3 import TestWithS3, REGION
-
-
-# A polygon covering the whole world
-WORLD_POLYGON = """{
-    "coordinates": [
-        [
-            [
-                [
-                    -180,
-                    90
-                ],
-                [
-                    -180,
-                    -90
-                ],
-                [
-                    180,
-                    -90
-                ],
-                [
-                    180,
-                    90
-                ],
-                [
-                    -180,
-                    90
-                ]
-            ]
-        ]
-    ],
-    "type": "MultiPolygon"
-}"""
+from tests.core.test_with_s3 import TestWithS3, REGION, WORLD_POLYGON
 
 
 class TestSubsetting(TestWithS3):
