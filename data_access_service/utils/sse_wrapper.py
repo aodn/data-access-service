@@ -10,7 +10,7 @@ def format_sse(data: dict, event: str = "message") -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-def split_list(lst, chunk_size=50000)-> Generator[Any, Any, None]:
+def split_list(lst, chunk_size=50000) -> Generator[Any, Any, None]:
     """
     Split a list into chunks of specified size.
     :return: Generator to reduce memory usage.
@@ -34,6 +34,7 @@ async def sse_wrapper(
     :param function_args:
     :return:
     """
+
     async def sse_stream():
         # Processing interval for periodic messages
         processing_interval: float = 20.0  # Send processing message every 20 seconds
