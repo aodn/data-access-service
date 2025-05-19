@@ -8,7 +8,6 @@ from data_access_service.batch.subsetting import execute, ParamField
 from botocore.config import Config as BotoConfig
 from data_access_service.core.AWSClient import AWSClient
 from tests.core.test_with_s3 import TestWithS3, REGION
-from tests.utils import upload_to_s3, delete_object_in_s3
 
 
 # A polygon covering the whole world
@@ -51,7 +50,7 @@ class TestSubsetting(TestWithS3):
         s3 = mock_boto3_client("s3", config=BotoConfig(signature_version=UNSIGNED))
 
         # Upload test data
-        upload_to_s3(
+        TestWithS3.upload_to_s3(
             s3,
             DataQuery.BUCKET_OPTIMISED_DEFAULT,
             Path(__file__).parent.parent / "canned/s3_sample1",
@@ -82,7 +81,7 @@ class TestSubsetting(TestWithS3):
                 is not None
             )
         finally:
-            delete_object_in_s3(s3, DataQuery.BUCKET_OPTIMISED_DEFAULT)
+            TestWithS3.delete_object_in_s3(s3, DataQuery.BUCKET_OPTIMISED_DEFAULT)
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_subsetting(
@@ -92,7 +91,7 @@ class TestSubsetting(TestWithS3):
         s3_client, _ = aws_clients
 
         # Upload test data
-        upload_to_s3(
+        TestWithS3.upload_to_s3(
             s3_client,
             DataQuery.BUCKET_OPTIMISED_DEFAULT,
             Path(__file__).parent.parent / "canned/s3_sample1",
@@ -141,4 +140,6 @@ class TestSubsetting(TestWithS3):
                         in call_args[0][2]
                     ), "Correct s3 path"
                 finally:
-                    delete_object_in_s3(s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT)
+                    TestWithS3.delete_object_in_s3(
+                        s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT
+                    )
