@@ -49,7 +49,7 @@ class Config:
                 return StagingConfig()
 
             case EnvType.TESTING:
-                return TestConfig()
+                return IntTestConfig()
 
             case _:
                 return DevConfig()
@@ -76,7 +76,7 @@ class Config:
         )
 
 
-class TestConfig(Config):
+class IntTestConfig(Config):
     def __init__(self):
         super().__init__()
         self.config = Config.load_config("tests/config/config-test.yaml")
