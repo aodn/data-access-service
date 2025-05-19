@@ -94,8 +94,14 @@ def _generate_partial_json_array(filtered: pd.DataFrame) -> Generator[dict, None
                 filtered_record["time"] = _reformat_date(record["JULD"])
             elif "timestamp" in record:
                 filtered_record["time"] = _reformat_date(
-                    datetime.datetime.fromtimestamp(
+                    datetime.fromtimestamp(
                         record["timestamp"], tz=timezone.utc
+                    ).strftime(DATE_FORMAT)
+                )
+            elif "detection_timestamp" in record:
+                filtered_record["time"] = _reformat_date(
+                    datetime.fromtimestamp(
+                        record["detection_timestamp"], tz=timezone.utc
                     ).strftime(DATE_FORMAT)
                 )
 

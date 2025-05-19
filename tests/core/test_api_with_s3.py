@@ -1,4 +1,6 @@
 import pytest
+import gzip
+import json
 
 from pathlib import Path
 from fastapi.testclient import TestClient
@@ -21,7 +23,9 @@ class TestApiWithS3(TestWithS3):
         return TestClient(app)
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    def test_fetch_data_correct(self, setup_resources, localstack, aws_clients, client):
+    def test_auth_fetch_data_correct(
+        self, setup_resources, localstack, aws_clients, client
+    ):
         """Test subsetting with valid and invalid time ranges."""
         s3_client, _ = aws_clients
         config = Config.get_config()
@@ -72,9 +76,68 @@ class TestApiWithS3(TestWithS3):
                     assert response.status_code == HTTP_200_OK
                     assert isinstance(response.content, bytes)
 
-                    # Value is not correct but seems a data issue
+                    # TODO: Value is not correct but seems issue with lib
                     # assert len(response.content) > 10
 
+        finally:
+            TestWithS3.delete_object_in_s3(
+                s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT
+            )
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_fetch_data_correct(self, setup_resources, localstack, aws_clients, client):
+        """Test subsetting with valid and invalid time ranges."""
+        s3_client, _ = aws_clients
+        config = Config.get_config()
+
+        # Upload test data
+        TestWithS3.upload_to_s3(
+            s3_client,
+            DataQuery.BUCKET_OPTIMISED_DEFAULT,
+            Path(__file__).parent.parent / "canned/s3_sample2",
+        )
+
+        try:
+            with patch.object(AWSClient, "send_email") as mock_send_email:
+                with patch(
+                    "aodn_cloud_optimised.lib.DataQuery.ENDPOINT_URL",
+                    localstack.get_url(),
+                ):
+                    # Test with range, this dataset field is different, it called detection_timestamp
+                    param = {
+                        "start_date": "2009-11-07",
+                        "end_date": "2025-11-08",
+                        "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
+                    }
+
+                    response = client.get(
+                        config.BASE_URL + "/data/7e13b5f3-4a70-4e31-9e95-335efa491c5c",
+                        params=param,
+                        headers={"X-API-Key": config.get_api_key()},
+                    )
+
+                    # The X-API-KEY has typo, it should be X-API-Key
+                    assert response.status_code == HTTP_200_OK
+                    assert isinstance(response.content, bytes)
+
+                    # Read and process response body
+                    try:
+                        parsed = json.loads(response.content.decode("utf-8"))
+                        assert len(parsed) == 269052, "Number of record is incorrect"
+                        assert parsed[0] == {
+                            "depth": 0.0,
+                            "latitude": -36.2,
+                            "longitude": 150.2,
+                            "time": "2014-10-01",
+                        }, f"Unexpected JSON content: {parsed[0]}"
+                        assert parsed[269051] == {
+                            "depth": 60.0,
+                            "latitude": -36.2,
+                            "longitude": 150.2,
+                            "time": "2015-01-01",
+                        }, f"Unexpected JSON content: {parsed[269051]}"
+                    except json.JSONDecodeError as e:
+                        assert False, "Fail to parse to JSON"
         finally:
             TestWithS3.delete_object_in_s3(
                 s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT
