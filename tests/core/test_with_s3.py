@@ -13,6 +13,37 @@ from botocore import UNSIGNED
 # Default region for Localstack
 REGION = "us-east-1"
 
+# A polygon covering the whole world
+WORLD_POLYGON = """{
+    "coordinates": [
+        [
+            [
+                [
+                    -180,
+                    90
+                ],
+                [
+                    -180,
+                    -90
+                ],
+                [
+                    180,
+                    -90
+                ],
+                [
+                    180,
+                    90
+                ],
+                [
+                    -180,
+                    90
+                ]
+            ]
+        ]
+    ],
+    "type": "MultiPolygon"
+}"""
+
 
 class TestWithS3:
 

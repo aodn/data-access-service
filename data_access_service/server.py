@@ -8,11 +8,20 @@ from data_access_service.core.api import API
 from data_access_service.core.routes import router as api_router
 
 
-@asynccontextmanager
-async def lifespan(application: FastAPI):
+def api_setup(application: FastAPI):
+    """
+    This function is not async which can be use in test, the lifespan however
+    expect a async function which is not good for testing
+    :param application:
+    :return:
+    """
     application.state.api_instance = API()  # type: ignore
     application.include_router(api_router)
 
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    api_setup(application)
     yield
 
 
