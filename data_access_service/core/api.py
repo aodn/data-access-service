@@ -204,6 +204,9 @@ class API(BaseAPI):
             except ValueError as e:
                 log.error(f"Error when query ds.get_data: {e}")
                 raise e
+            except Exception as v:
+                log.error(f"Error when query ds.get_data: {v}")
+                raise
         else:
             return None
 

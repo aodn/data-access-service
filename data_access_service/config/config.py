@@ -6,6 +6,7 @@ import boto3
 import os
 import tempfile
 from enum import Enum
+from dotenv import load_dotenv
 
 
 class EnvType(Enum):
@@ -22,6 +23,7 @@ class Config:
     BASE_URL = "/api/v1/das"
 
     def __init__(self):
+        load_dotenv()
         self.config = None
         self.s3 = boto3.client("s3")
 
