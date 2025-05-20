@@ -8,6 +8,7 @@ import tempfile
 from enum import Enum
 from dotenv import load_dotenv
 
+
 class EnvType(Enum):
     DEV = "dev"
     TESTING = "testing"
@@ -25,7 +26,6 @@ class Config:
         load_dotenv()
         self.config = None
         self.s3 = boto3.client("s3")
-
 
     @staticmethod
     def load_config(file_path: str):
