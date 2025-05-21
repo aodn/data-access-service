@@ -38,12 +38,13 @@ class TestApi(unittest.TestCase):
             )
 
             # Now if you try to map the field, since this metadata do not have TIME, so it should return timestamp
+            # this record do not have DEPTH field, so we will remove it from query after map
             col = api.map_column_names(
                 "541d4f15-122a-443d-ab4e-2b5feb08d6a0",
                 ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             )
             self.assertListEqual(
-                col, ["timestamp", "DEPTH", "LATITUDE", "LONGITUDE"], "TIME mapped"
+                col, ["timestamp", "LATITUDE", "LONGITUDE"], "TIME mapped"
             )
 
             # This uuid have time so it will not map
@@ -53,7 +54,7 @@ class TestApi(unittest.TestCase):
             )
             self.assertListEqual(
                 col,
-                ["timestamp", "DEPTH", "LATITUDE", "LONGITUDE"],
+                ["timestamp", "LATITUDE", "LONGITUDE"],
                 "TIME no need to map",
             )
 
@@ -62,9 +63,7 @@ class TestApi(unittest.TestCase):
                 "95d6314c-cfc7-40ae-b439-85f14541db71",
                 ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             )
-            self.assertListEqual(
-                col, ["JULD", "DEPTH", "LATITUDE", "LONGITUDE"], "TIME mapped"
-            )
+            self.assertListEqual(col, ["JULD", "LATITUDE", "LONGITUDE"], "TIME mapped")
 
     def test_nan_to_none_conversion(self):
         # Create a sample pandas DataFrame with NaN values
