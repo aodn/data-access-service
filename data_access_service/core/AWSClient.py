@@ -126,3 +126,32 @@ class AWSClient:
         self.log.info(f"Job submitted: {response['jobId']}")
         # return job id
         return response["jobId"]
+
+    def get_s3_keys(self, bucket_name: str, folder_prefix: str) -> list:
+        keys = []
+        continuation_token = None
+
+        while True:
+            list_kwargs = {
+                'Bucket': bucket_name,
+                'Prefix': folder_prefix,
+            }
+            if continuation_token:
+                list_kwargs['ContinuationToken'] = continuation_token
+
+            response = self.s3.list_objects_v2(**list_kwargs)
+
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    keys.append(obj['Key'])
+
+            if response.get('IsTruncated'):  # Check if there are more keys to fetch
+                continuation_token = response['NextContinuationToken']
+            else:
+                break
+
+        return keys
+
+if __name__ == '__main__':
+    keys = AWSClient().get_s3_keys("havier-example-bucket", "")
+    print(keys)
