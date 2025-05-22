@@ -130,19 +130,21 @@ class API(BaseAPI):
             if column.casefold() == "TIME".casefold() and (
                 "TIME" not in meta or "time" not in meta
             ):
-                if "JULD" in meta:
-                    output.append("JULD")
-                elif "timestamp" in meta:
-                    output.append("timestamp")
-            else:
-                output.append(column)
-
+                match meta:
+                    case meta if "JULD" in meta:
+                        output.append("JULD")
+                    case meta if "timestamp" in meta:
+                        output.append("timestamp")
+                    case meta if "detection_timestamp" in meta:
+                        output.append("detection_timestamp")
             # You want depth field, but it is not in data
-            if column.casefold() == "DEPTH".casefold() and (
+            elif column.casefold() == "DEPTH".casefold() and (
                 "DEPTH" not in meta or "depth" not in meta
             ):
                 # Just ignore the field in the query, assume zero
                 pass
+            else:
+                output.append(column)
 
         return output
 

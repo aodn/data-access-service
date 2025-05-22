@@ -85,7 +85,9 @@ class TestApiWithS3(TestWithS3):
             )
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    def test_fetch_data_correct(self, setup_resources, localstack, aws_clients, client):
+    def test_fetch_data_correct_without_depth(
+        self, setup_resources, localstack, aws_clients, client
+    ):
         """Test subsetting with valid and invalid time ranges."""
         s3_client, _ = aws_clients
         config = Config.get_config()
@@ -103,7 +105,7 @@ class TestApiWithS3(TestWithS3):
                     "aodn_cloud_optimised.lib.DataQuery.ENDPOINT_URL",
                     localstack.get_url(),
                 ):
-                    # Test with range, this dataset field is different, it called detection_timestamp
+                    # Test with range, this dataset field is different, dataset without DEPTH
                     param = {
                         "start_date": "2009-11-07",
                         "end_date": "2025-11-08",
@@ -125,13 +127,11 @@ class TestApiWithS3(TestWithS3):
                         parsed = json.loads(response.content.decode("utf-8"))
                         assert len(parsed) == 269052, "Number of record is incorrect"
                         assert parsed[0] == {
-                            "depth": 0.0,
                             "latitude": -36.2,
                             "longitude": 150.2,
                             "time": "2014-10-01",
                         }, f"Unexpected JSON content: {parsed[0]}"
                         assert parsed[269051] == {
-                            "depth": 60.0,
                             "latitude": -36.2,
                             "longitude": 150.2,
                             "time": "2015-01-01",
