@@ -5,6 +5,7 @@ import boto3
 import os
 
 from _pytest.monkeypatch import MonkeyPatch
+from testcontainers.core.waiting_utils import wait_for_logs
 
 from data_access_service.config.config import EnvType, Config, IntTestConfig
 from aodn_cloud_optimised.lib import DataQuery
@@ -54,13 +55,12 @@ class TestWithS3:
         """Set environment variable for testing profile."""
         os.environ["PROFILE"] = EnvType.TESTING.value
         yield
-        # Cleanup environment variable after tests
-        os.environ.pop("PROFILE", None)
 
     @pytest.fixture(scope="class")
     def localstack(self):
         """Start LocalStack container with SQS and S3 services."""
         with LocalStackContainer(image="localstack/localstack:4.3.0") as localstack:
+            wait_for_logs(localstack, "Ready")
             yield localstack
 
     @pytest.fixture(scope="class")
