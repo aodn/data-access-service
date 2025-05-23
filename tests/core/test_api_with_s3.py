@@ -16,7 +16,7 @@ from unittest.mock import patch
 class TestApiWithS3(TestWithS3):
 
     @pytest.fixture(scope="class")
-    def upload_test_case_to_s3(self, aws_clients):
+    def upload_test_case_to_s3(self, aws_clients, localstack, mock_boto3_client):
         s3_client, _ = aws_clients
         # Upload test data
         TestWithS3.upload_to_s3(
