@@ -100,6 +100,7 @@ class TestWithS3:
         monkeypatch.setattr(DataQuery.boto3, "client", wrapped_client)
         monkeypatch.setattr(DataQuery, "ENDPOINT_URL", localstack.get_url())
         yield wrapped_client
+        monkeypatch.undo()
 
     @pytest.fixture(scope="class")
     def setup_resources(self, aws_clients, mock_boto3_client):
