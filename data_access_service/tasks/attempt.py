@@ -4,9 +4,12 @@ import zipfile
 from io import BytesIO
 import os
 
+from data_access_service.core.AWSClient import AWSClient
+
 
 class ZipStreamingBody:
     def __init__(self, bucket_name: str, s3_keys: List[str]):
+        self._zip_stream = None
         self._bucket_name = bucket_name
         self._s3_keys = s3_keys
         self._index = 0
@@ -32,7 +35,7 @@ class ZipStreamingBody:
             yield chunk
 
     def read(self, size=-1):
-        if not hasattr(self, "_zip_stream"):
+        if self._zip_stream is None:
             self._zip_stream = self._stream_zip()
 
         try:
@@ -48,6 +51,9 @@ if __name__ == "__main__":
     s3_key = 'compressed_file.txt.zip'
     paths = ['t1.txt', 't1 - Copy.txt']
 
+    aws = AWSClient()
+    keys = aws.get_s3_keys(bucket_name=bucket_name, folder_prefix="data")
+    print(keys)
     # Stream and upload
     try:
         stream = ZipStreamingBody(bucket_name=bucket_name, s3_keys=paths)
