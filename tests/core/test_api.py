@@ -38,13 +38,14 @@ class TestApi(unittest.TestCase):
             )
 
             # Now if you try to map the field, since this metadata do not have TIME, so it should return timestamp
-            # this record do not have DEPTH field, so we will remove it from query after map
+            # this record do not have DEPTH field, so we will remove it from query after map, the field is of small
+            # letter for this recordset
             col = api.map_column_names(
                 "541d4f15-122a-443d-ab4e-2b5feb08d6a0",
                 ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             )
             self.assertListEqual(
-                col, ["timestamp", "LATITUDE", "LONGITUDE"], "TIME mapped"
+                col, ["timestamp", "latitude", "longitude"], "TIME mapped"
             )
 
             # This uuid have time so it will not map
