@@ -17,6 +17,7 @@ class ZipStreamingBody:
         self._zip_buffer = BytesIO()
 
     def _stream_zip(self, chunk_size=1024 * 1024):
+        print("stream_zip")
         s3_client = boto3.client('s3')
         with zipfile.ZipFile(self._zip_buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as zip_file:
             while self._index < len(self._s3_keys):
@@ -39,7 +40,14 @@ class ZipStreamingBody:
         print(self._zip_buffer.getbuffer().nbytes / (1024 * 1024))
         while chunk := self._zip_buffer.read(chunk_size):  # Stream in chunks
             print("Yielding chunk of size:", len(chunk))
+            print("buffer size is:")
+            print(self._zip_buffer.getbuffer().nbytes / (1024 * 1024))
             yield chunk
+            remaining_data = self._zip_buffer.read()
+            self._zip_buffer.seek(0)
+            self._zip_buffer.truncate(0)
+            self._zip_buffer.write(remaining_data)
+            self._zip_buffer.seek(0)
 
     def read(self, size):
         if self._zip_stream is None:
@@ -80,7 +88,7 @@ if __name__ == "__main__":
     print(keys)
     # Stream and upload
     try:
-        stream = ZipStreamingBody(bucket_name=bucket_name, s3_keys=paths + keys)
+        stream = ZipStreamingBody(bucket_name=bucket_name, s3_keys=paths + keys[:1])
         s3_client.upload_fileobj(stream, bucket_name, s3_key)
         print(f"Successfully uploaded {s3_key} to S3 bucket {bucket_name}")
     except Exception as e:
