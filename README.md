@@ -43,7 +43,16 @@ cloud optimized data. Please do not access S3 directly and should via this libra
 Right now the version is always `main` branch which is not idea, we should be able to use tag version
 
 ```bash
-aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", branch = "main" }
+aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", tag = "v0.1.44" }
+```
+
+### Error in dependencies
+You may try to clean the cache by using the following command
+```commandline
+poetry cache clear --all PyPI
+poetry env remove --all
+poetry lock
+poetry install
 ```
 
 ### Installation and Usage

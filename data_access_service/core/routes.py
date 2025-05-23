@@ -112,10 +112,22 @@ def _generate_partial_json_array(filtered: pd.DataFrame) -> Generator[dict, None
                     if record["LONGITUDE"] is not None
                     else None
                 )
+            elif "longitude" in record:
+                filtered_record["longitude"] = (
+                    round(record["longitude"], COORDINATE_INDEX_PRECISION)
+                    if record["longitude"] is not None
+                    else None
+                )
             if "LATITUDE" in record:
                 filtered_record["latitude"] = (
                     round(record["LATITUDE"], COORDINATE_INDEX_PRECISION)
                     if record["LATITUDE"] is not None
+                    else None
+                )
+            elif "latitude" in record:
+                filtered_record["latitude"] = (
+                    round(record["latitude"], COORDINATE_INDEX_PRECISION)
+                    if record["latitude"] is not None
                     else None
                 )
             if "DEPTH" in record:
@@ -283,6 +295,10 @@ async def _fetch_data(
         result: Optional[pd.DataFrame] = api_instance.get_dataset_data(
             uuid=uuid, date_start=start_date, date_end=end_date, columns=columns
         )
+        # If we get nothing
+        if result is None:
+            return
+
     except ValueError as e:
         # TODO If error return empty response. This maybe hard to debug
         return

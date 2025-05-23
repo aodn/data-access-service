@@ -48,7 +48,7 @@ class API(BaseAPI):
         # updated it as times go
         self._instance = DataQuery.GetAodn()
         self._metadata = self._instance.get_metadata()
-        self._create_uuid_dataset_map()
+        self.refresh_uuid_dataset_map()
 
         log.info("Done init")
         # init finalised, set as ready
@@ -59,23 +59,25 @@ class API(BaseAPI):
         return self._is_ready
 
     # Do not use cache, so that we can refresh it again
-    def _create_uuid_dataset_map(self):
+    def refresh_uuid_dataset_map(self):
         # A map contains dataset name and Metadata class, which is not
         # so useful in our case, we need UUID
         catalog = self._metadata.metadata_catalog_uncached()
 
         for key in catalog:
             data = catalog.get(key)
-            uuid = data.get("dataset_metadata").get("metadata_uuid")
 
-            if uuid is not None and uuid != "":
-                log.info("Adding uuid " + uuid + " name " + key)
-                self._raw[uuid] = data
-                self._cached[uuid] = Descriptor(
-                    uuid=uuid, dname=key, depth=_extract_depth(data)
-                )
-            else:
-                log.error("Data not found for dataset " + key)
+            if data.get("dataset_metadata") is not None:
+                uuid = data.get("dataset_metadata").get("metadata_uuid")
+
+                if uuid is not None and uuid != "":
+                    log.info("Adding uuid " + uuid + " name " + key)
+                    self._raw[uuid] = data
+                    self._cached[uuid] = Descriptor(
+                        uuid=uuid, dname=key, depth=_extract_depth(data)
+                    )
+                else:
+                    log.error("Data not found for dataset " + key)
 
     def get_mapped_meta_data(self, uuid: str | None):
         if uuid is not None:
@@ -103,7 +105,7 @@ class API(BaseAPI):
     def has_data(self, uuid: str, start_date: datetime, end_date: datetime):
         md: Descriptor = self._cached.get(uuid)
         if md is not None:
-            ds: DataQuery.Dataset = self._instance.get_dataset(md.dname)
+            ds: DataQuery.DataSource = self._instance.get_dataset(md.dname)
             te = ds.get_temporal_extent()
             return start_date <= te[0] and te[1] <= end_date
         return False
@@ -111,7 +113,7 @@ class API(BaseAPI):
     def get_temporal_extent(self, uuid: str) -> (datetime, datetime):
         md: Descriptor = self._cached.get(uuid)
         if md is not None:
-            ds: DataQuery.Dataset = self._instance.get_dataset(md.dname)
+            ds: DataQuery.DataSource = self._instance.get_dataset(md.dname)
             return ds.get_temporal_extent()
         else:
             return ()
@@ -135,14 +137,32 @@ class API(BaseAPI):
                         output.append("JULD")
                     case meta if "timestamp" in meta:
                         output.append("timestamp")
-                    case meta if "detection_timestamp" in meta:
-                        output.append("detection_timestamp")
+                    case meta if "TIME" in meta:
+                        output.append("TIME")
+                    case meta if "time" in meta:
+                        output.append("time")
             # You want depth field, but it is not in data
             elif column.casefold() == "DEPTH".casefold() and (
                 "DEPTH" not in meta or "depth" not in meta
             ):
                 # Just ignore the field in the query, assume zero
                 pass
+            elif column.casefold() == "LATITUDE".casefold() and (
+                "LATITUDE" not in meta or "latitude" not in meta
+            ):
+                match meta:
+                    case meta if "latitude" in meta:
+                        output.append("latitude")
+                    case meta if "LATITUDE" in meta:
+                        output.append("LATITUDE")
+            elif column.casefold() == "LONGITUDE".casefold() and (
+                "LONGITUDE" not in meta or "longitude" not in meta
+            ):
+                match meta:
+                    case meta if "longitude" in meta:
+                        output.append("longitude")
+                    case meta if "LONGITUDE" in meta:
+                        output.append("LONGITUDE")
             else:
                 output.append(column)
 
@@ -163,7 +183,7 @@ class API(BaseAPI):
         md: Descriptor = self._cached.get(uuid)
 
         if md is not None:
-            ds: DataQuery.Dataset = self._instance.get_dataset(md.dname)
+            ds: DataQuery.DataSource = self._instance.get_dataset(md.dname)
 
             # Default get 10 days of data
             if date_start is None:
@@ -194,8 +214,8 @@ class API(BaseAPI):
 
             try:
                 return ds.get_data(
-                    date_start,
-                    date_end,
+                    str(date_start),
+                    str(date_end),
                     lat_min,
                     lat_max,
                     lon_min,
