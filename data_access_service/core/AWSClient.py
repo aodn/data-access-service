@@ -143,6 +143,9 @@ class AWSClient:
 
             if 'Contents' in response:
                 for obj in response['Contents']:
+                    # Filter out folders (if any)
+                    if obj['Key'].endswith('/'):
+                        continue
                     keys.append(obj['Key'])
 
             if response.get('IsTruncated'):  # Check if there are more keys to fetch
@@ -151,7 +154,3 @@ class AWSClient:
                 break
 
         return keys
-
-if __name__ == '__main__':
-    keys = AWSClient().get_s3_keys("havier-example-bucket", "")
-    print(keys)
