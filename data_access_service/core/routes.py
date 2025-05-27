@@ -1,3 +1,19 @@
+import asyncio
+import threading
+import dataclasses
+import datetime
+import json
+import os
+import tempfile
+
+import dask.dataframe
+import psutil
+import xarray as xr
+import numpy
+import pandas as pd
+import dask.dataframe as dd
+
+from queue import Queue
 from dask.dataframe import DataFrame
 
 from data_access_service import init_log
@@ -11,24 +27,11 @@ from data_access_service.core.constants import (
 from data_access_service.core.error import ErrorResponse
 from data_access_service.config.config import Config
 
-import logging
-from typing import Optional, List
+from typing import Optional, List, Generator, AsyncGenerator
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, BackgroundTasks
 from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel
-import dataclasses
-import datetime
-import json
-import os
-import tempfile
-
-import dask.dataframe
-import psutil
-import xarray as xr
-import numpy
-import pandas as pd
-import dask.dataframe as dd
 from dateutil import parser
 from http import HTTPStatus
 
@@ -56,24 +59,24 @@ def convert_non_numeric_to_str(df: DataFrame) -> DataFrame:
 
 # Function to generate JSON lines from Dask DataFrame
 def _generate_json_array(dask_instance, compress: bool = False):
-    record_list = []
-    for partition in dask_instance.to_delayed():
-        partition_df = convert_non_numeric_to_str(partition.compute())
-        for record in partition_df.to_dict(orient="records"):
-            record_list.append(record)
 
-    return _response_json(record_list, compress)
+    async def get_records():
+        for partition in dask_instance.to_delayed():
+            partition_df = convert_non_numeric_to_str(partition.compute())
+            for record in partition_df.to_dict(orient="records"):
+                yield record
+
+    return _async_response_json(get_records(), compress)
 
 
 # Use to remap the field name back to column that we pass it, the raw data itself may name the field differently
 # for different dataset
-def _generate_partial_json_array(filtered: pd.DataFrame) -> list:
+def _generate_partial_json_array(filtered: pd.DataFrame) -> Generator[dict, None, None]:
 
     ddf: dask.dataframe.DataFrame = dd.from_pandas(
         filtered, npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1
     )
 
-    record_list = []
     for partition in ddf.to_delayed():
         partition_df = convert_non_numeric_to_str(partition.compute())
 
@@ -91,8 +94,14 @@ def _generate_partial_json_array(filtered: pd.DataFrame) -> list:
                 filtered_record["time"] = _reformat_date(record["JULD"])
             elif "timestamp" in record:
                 filtered_record["time"] = _reformat_date(
-                    datetime.datetime.fromtimestamp(
+                    datetime.fromtimestamp(
                         record["timestamp"], tz=timezone.utc
+                    ).strftime(DATE_FORMAT)
+                )
+            elif "detection_timestamp" in record:
+                filtered_record["time"] = _reformat_date(
+                    datetime.fromtimestamp(
+                        record["detection_timestamp"], tz=timezone.utc
                     ).strftime(DATE_FORMAT)
                 )
 
@@ -115,8 +124,7 @@ def _generate_partial_json_array(filtered: pd.DataFrame) -> list:
                     if record["DEPTH"] is not None
                     else None
                 )
-            record_list.append(filtered_record)
-    return record_list
+            yield filtered_record
 
 
 # currently only want year, month and date.
@@ -179,8 +187,50 @@ def _verify_to_index_flag_param(flag: str | bool | None) -> bool:
 
 
 # Parallel process records and map the field back to standard name
-def _response_json(result: list, compress: bool):
-    json_array = json.dumps(result)
+def _async_response_json(result: AsyncGenerator[dict, None], compress: bool):
+    # Thread-safe queue to collect results
+    result_queue = Queue()
+    json_results = []
+
+    def run_async_iteration():
+        # Create a new event loop for the thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+
+            async def collect():
+                async for i in result:
+                    result_queue.put(i)  # Thread-safe append
+                result_queue.put(None)  # Sentinel to indicate completion
+
+            loop.run_until_complete(collect())
+        finally:
+            loop.close()
+
+    # Start thread to run async iteration
+    thread = threading.Thread(target=run_async_iteration)
+    thread.start()
+
+    # Wait for results and collect
+    while True:
+        item = result_queue.get()
+        if item is None:  # Sentinel indicates completion
+            break
+        json_results.append(item)  # Serialize each item
+    thread.join()  # Ensure thread completes
+
+    if compress:
+        response = Response(
+            gzip_compress(json.dumps(json_results)), media_type="application/json"
+        )
+        response.headers["Content-Encoding"] = "gzip"
+        return response
+    else:
+        return Response(json.dumps(json_results), media_type="application/json")
+
+
+def _response_json(result: Generator[dict, None, None], compress: bool):
+    json_array = json.dumps([x for x in result])
 
     if compress:
         response = Response(gzip_compress(json_array), media_type="application/json")
@@ -228,37 +278,38 @@ async def _fetch_data(
     start_depth: float | None,
     end_depth: float | None,
     columns: List[str],
-) -> list:
-    result: Optional[pd.DataFrame] = api_instance.get_dataset_data(
-        uuid=uuid, date_start=start_date, date_end=end_date, columns=columns
-    )
-
-    # if result is None, return empty response
-    if result is None:
-        return []
-
-    start_depth = _verify_depth_param("start_depth", start_depth)
-    end_depth = _verify_depth_param("end_depth", end_depth)
-
-    # The cloud optimized format is fast to lookup if there is an index, some field isn't part of the
-    # index and therefore will not gain to filter by those field, indexed fields are site_code, timestamp, polygon
-
-    # Depth is below sea level zero, so logic slightly diff
-    if start_depth > 0 and end_depth > 0:
-        filtered = result[
-            (result["DEPTH"] <= start_depth) & (result["DEPTH"] >= end_depth)
-        ]
-    elif start_depth > 0:
-        filtered = result[(result["DEPTH"] <= start_depth)]
-    elif end_depth > 0:
-        filtered = result[result["DEPTH"] >= end_depth]
+) -> AsyncGenerator[dict, None]:
+    try:
+        result: Optional[pd.DataFrame] = api_instance.get_dataset_data(
+            uuid=uuid, date_start=start_date, date_end=end_date, columns=columns
+        )
+    except ValueError as e:
+        # TODO If error return empty response. This maybe hard to debug
+        return
     else:
-        filtered = result
+        start_depth = _verify_depth_param("start_depth", start_depth)
+        end_depth = _verify_depth_param("end_depth", end_depth)
 
-    logger.info("Record number return %s for query", len(filtered.index))
-    logger.info("Memory usage: %s", get_memory_usage_percentage())
+        # The cloud optimized format is fast to lookup if there is an index, some field isn't part of the
+        # index and therefore will not gain to filter by those field, indexed fields are site_code, timestamp, polygon
 
-    return _generate_partial_json_array(filtered)
+        # Depth is below sea level zero, so logic slightly diff
+        if start_depth > 0 and end_depth > 0:
+            filtered = result[
+                (result["DEPTH"] <= start_depth) & (result["DEPTH"] >= end_depth)
+            ]
+        elif start_depth > 0:
+            filtered = result[(result["DEPTH"] <= start_depth)]
+        elif end_depth > 0:
+            filtered = result[result["DEPTH"] >= end_depth]
+        else:
+            filtered = result
+
+        logger.info("Record number return %s for query", len(filtered.index))
+        logger.info("Memory usage: %s", get_memory_usage_percentage())
+
+        for record in _generate_partial_json_array(filtered):
+            yield record
 
 
 class HealthCheckResponse(BaseModel):
@@ -314,9 +365,7 @@ async def has_data(
     uuid: str,
     request: Request,
     start_date: Optional[str] = MIN_DATE,
-    end_date: Optional[str] = datetime.datetime.now(datetime.timezone.utc).strftime(
-        DATE_FORMAT
-    ),
+    end_date: Optional[str] = datetime.now(timezone.utc).strftime(DATE_FORMAT),
 ):
     api_instance = get_api_instance(request)
     logger.info(
@@ -347,11 +396,10 @@ async def get_temporal_extent(uuid: str, request: Request):
 @router.get("/data/{uuid}", dependencies=[Depends(api_key_auth)])
 async def get_data(
     request: Request,
-    background_tasks: BackgroundTasks,
     uuid: str,
     start_date: Optional[str] = Query(default=MIN_DATE),
     end_date: Optional[str] = Query(
-        default=datetime.datetime.now(timezone.utc).strftime(DATE_FORMAT)
+        default=datetime.now(timezone.utc).strftime(DATE_FORMAT)
     ),
     columns: Optional[List[str]] = Query(default=None),
     start_depth: Optional[float] = Query(default=-1.0),
@@ -394,14 +442,14 @@ async def get_data(
             columns,
         )
     else:
-        result = await _fetch_data(
+        result = _fetch_data(
             api_instance, uuid, start_date, end_date, start_depth, end_depth, columns
         )
 
         if f == "json":
             # Depends on whether receiver support gzip encoding
             logger.info("Use compressed output %s", compress)
-            return _response_json(result, compress)
+            return _async_response_json(result, compress)
         # elif f == "netcdf":
         #    return _response_netcdf(filtered, background_tasks)
         return None

@@ -6,6 +6,7 @@ import boto3
 import os
 import tempfile
 from enum import Enum
+from dotenv import load_dotenv
 
 
 class EnvType(Enum):
@@ -22,6 +23,7 @@ class Config:
     BASE_URL = "/api/v1/das"
 
     def __init__(self):
+        load_dotenv()
         self.config = None
         self.s3 = boto3.client("s3")
 
@@ -49,7 +51,7 @@ class Config:
                 return StagingConfig()
 
             case EnvType.TESTING:
-                return TestConfig()
+                return IntTestConfig()
 
             case _:
                 return DevConfig()
@@ -75,14 +77,20 @@ class Config:
             else None
         )
 
+    def get_api_key(self):
+        return os.getenv("API_KEY")
 
-class TestConfig(Config):
+
+class IntTestConfig(Config):
     def __init__(self):
         super().__init__()
         self.config = Config.load_config("tests/config/config-test.yaml")
 
     def set_s3_client(self, s3_client):
         self.s3 = s3_client
+
+    def get_api_key(self):
+        return "testing"
 
 
 class DevConfig(Config):
