@@ -3,7 +3,7 @@ import json
 from data_access_service import init_log, Config, API
 from data_access_service.batch.batch_enums import Parameters
 from data_access_service.core.AWSClient import AWSClient
-from data_access_service.tasks.generate_csv_file import process_data_files
+from data_access_service.tasks.csv_file_generation import process_data_files
 from data_access_service.utils.date_time_utils import get_boundary_of_year_month, trim_date_range, \
     supply_day, split_date_range, parse_date
 

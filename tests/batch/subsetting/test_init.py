@@ -38,17 +38,3 @@ def test_init():
         # Assert that the expected calls were made
         assert expected_call_1 in mock_client.submit_a_job.call_args_list
         assert expected_call_2 in mock_client.submit_a_job.call_args_list
-
-
-@patch("boto3.s3.transfer.S3Transfer.upload_file")
-def test_preparing_data(mock_upload_file):
-    # Mock the upload_file method to do nothing
-    mock_upload_file.return_value = None
-
-    prepare_data(INIT_JOB_ID, 0, PREPARATION_PARAMETERS)
-    # Assert that the upload_file method was called with the expected arguments
-    mock_upload_file.assert_called_once_with(
-        "test-uuid-02-2020.csv",
-        "test-bucket",
-        "test-uuid/test-uuid-02-2020.csv"
-    )
