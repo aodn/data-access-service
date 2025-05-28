@@ -216,7 +216,7 @@ trio = ["trio (>=0.26.1)"]
 
 [[package]]
 name = "aodn-cloud-optimised"
-version = "0.1.44"
+version = "0.1.46"
 description = "Cloud optimised data formats for IMOS NetCDF files and CSVs."
 optional = false
 python-versions = ">=3.10, <4.0"
@@ -254,8 +254,8 @@ zarr = "==2.18.3"
 [package.source]
 type = "git"
 url = "https://github.com/aodn/aodn_cloud_optimised.git"
-reference = "v0.1.44"
-resolved_reference = "3cf4695221bca1cfa9808b28952569cfca0d59dd"
+reference = "v0.1.46"
+resolved_reference = "7e78560287f43ea15df3d53404c187918fde5dc9"
 
 [[package]]
 name = "asciitree"
@@ -6393,4 +6393,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10.14"
-content-hash = "fd84b7f001b609affa8087c8223606db57e3fb0c4e11b2500dfb9dfbbff14247"
+content-hash = "43b5731c8be5715197d84e85917e342fc6991bc7a358c54cdaca5bc0c7af5fa4"
