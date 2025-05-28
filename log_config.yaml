@@ -27,6 +27,15 @@ loggers:
     handlers:
       - access
     propagate: no
+  botocore:
+    level: INFO
+    propagate: no
+  s3fs:
+    level: INFO
+    propagate: no
+  aiobotocore:
+    level: INFO
+    propagate: no
 root:
   level: DEBUG
   handlers:
