@@ -1,5 +1,5 @@
 import gzip
-import asyncio
+
 import pandas as pd
 import logging
 
@@ -64,20 +64,12 @@ class API(BaseAPI):
         # UUID to metadata mapper and init it, a scheduler need to
         # updated it as times go
         self._instance = DataQuery.GetAodn()
-        # Start background task for get_metadata
-        self._init_task = asyncio.create_task(self._initialize_metadata())
-        log.info("Started background metadata initialization")
+        self._metadata = self._instance.get_metadata()
+        self.refresh_uuid_dataset_map()
 
-    async def _initialize_metadata(self):
-        try:
-            # Run the time-consuming get_metadata in the background
-            self._metadata = await asyncio.to_thread(self._instance.get_metadata)
-            self.refresh_uuid_dataset_map()
-            log.info("Done initializing metadata")
-            self._is_ready = True  # Set ready only after completion
-        except Exception as e:
-            log.error(f"Metadata initialization failed: {e}")
-            self._is_ready = False  # Keep or set to False on failure
+        log.info("Done init")
+        # init finalised, set as ready
+        self._is_ready = True
 
     def get_api_status(self) -> bool:
         # used for checking if the API instance is ready
