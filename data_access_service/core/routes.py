@@ -341,15 +341,14 @@ def get_api_instance(request: Request) -> API:
 @router.get("/health", response_model=HealthCheckResponse)
 async def health_check(request: Request):
     """
-    Health check endpoint.
+    Health check endpoint. The init now become very slow due to the need to load zarr data on init
+    so we report status code OK, to avoid AWS timeout but the status value is STARTING
     """
     api_instance = get_api_instance(request)
     if api_instance.get_api_status():
         return HealthCheckResponse(status="UP", status_code=HTTPStatus.OK)
     else:
-        return HealthCheckResponse(
-            status="STARTING", status_code=HTTPStatus.SERVICE_UNAVAILABLE
-        )
+        return HealthCheckResponse(status="STARTING", status_code=HTTPStatus.OK)
 
 
 @router.get("/metadata", dependencies=[Depends(api_key_auth)])
