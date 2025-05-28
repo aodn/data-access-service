@@ -1,4 +1,6 @@
+import asyncio
 import gzip
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 import logging
@@ -61,9 +63,20 @@ class API(BaseAPI):
         self._raw = dict()
         self._cached = dict()
 
-        # UUID to metadata mapper and init it, a scheduler need to
-        # updated it as times go
+        # UUID to metadata mapper
         self._instance = DataQuery.GetAodn()
+        self._metadata = None
+        self._is_ready = False
+
+    async def async_initialize_metadata(self):
+        # Use ThreadPoolExecutor to run blocking calls in a separate thread
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as executor:
+            # Schedule the blocking calls in a thread
+            await loop.run_in_executor(executor, self.initialize_metadata)
+
+    def initialize_metadata(self):
+        """Helper method to run blocking initialization tasks."""
         self._metadata = self._instance.get_metadata()
         self.refresh_uuid_dataset_map()
 

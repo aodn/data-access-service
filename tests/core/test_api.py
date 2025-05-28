@@ -28,6 +28,7 @@ class TestApi(unittest.TestCase):
         )
         def test_map_column_names(self, get_metadata):
             api = API()
+            api.initialize_metadata()
 
             d = api.get_raw_meta_data("541d4f15-122a-443d-ab4e-2b5feb08d6a0")
             meta: dict = d.get("dataset_metadata")
