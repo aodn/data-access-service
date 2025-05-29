@@ -9,6 +9,7 @@ from numpy.f2py.auxfuncs import throw_error
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSClient import AWSClient
 from data_access_service.models.data_file_factory import DataFileFactory
+from data_access_service.server import api_setup
 from data_access_service.tasks.data_file_upload import upload_all_files_in_folder_to_temp_s3
 from data_access_service.utils.date_time_utils import (
     get_monthly_date_range_array_from_,
@@ -94,6 +95,8 @@ def generate_csv_files(
 ):
     log = init_log(Config.get_config())
     api = API()
+    # Use sync init, it does not matter the load is slow as we run in batch
+    api.initialize_metadata()
 
     # TODO: currently, assume polygons are all rectangles. when cloud-optimized library is upgraded,
     #  we can change to use the polygon coordinates directly

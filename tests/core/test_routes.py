@@ -28,7 +28,7 @@ class TestRoutes(unittest.TestCase):
             response = client.get("/api/v1/das/health")
             self.assertEqual(
                 response.json(),
-                {"status": "STARTING", "status_code": HTTPStatus.SERVICE_UNAVAILABLE},
+                {"status": "STARTING", "status_code": HTTPStatus.OK},
             )
 
 

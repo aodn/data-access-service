@@ -4,6 +4,9 @@ import pytest
 import boto3
 import os
 
+from _pytest.monkeypatch import MonkeyPatch
+from testcontainers.core.waiting_utils import wait_for_logs
+
 from data_access_service.config.config import EnvType, Config, IntTestConfig
 from aodn_cloud_optimised.lib import DataQuery
 from testcontainers.localstack import LocalStackContainer
@@ -52,13 +55,12 @@ class TestWithS3:
         """Set environment variable for testing profile."""
         os.environ["PROFILE"] = EnvType.TESTING.value
         yield
-        # Cleanup environment variable after tests
-        os.environ.pop("PROFILE", None)
 
     @pytest.fixture(scope="class")
     def localstack(self):
         """Start LocalStack container with SQS and S3 services."""
         with LocalStackContainer(image="localstack/localstack:4.3.0") as localstack:
+            wait_for_logs(localstack, "Ready")
             yield localstack
 
     @pytest.fixture(scope="class")
@@ -80,9 +82,10 @@ class TestWithS3:
         )
         yield s3_client, sqs_client
 
-    @pytest.fixture(scope="function")
-    def mock_boto3_client(self, monkeypatch, localstack):
+    @pytest.fixture(scope="class")
+    def mock_boto3_client(self, localstack):
         """Mock boto3.client to use LocalStack endpoint for S3 and SES."""
+        monkeypatch = MonkeyPatch()  # Create manual MonkeyPatch instance
         original_client = boto3.client
 
         def wrapped_client(*args, **kwargs):
@@ -95,10 +98,17 @@ class TestWithS3:
             return original_client(*args, **kwargs)
 
         monkeypatch.setattr(DataQuery.boto3, "client", wrapped_client)
+        monkeypatch.setattr(DataQuery, "ENDPOINT_URL", localstack.get_url())
+
+        # Other test may have call this get_s3_filesystem() this function is cached and
+        # may use different ENDPOINT_URL other than the one above
+        # so we need to clear it now before the next call happens
+        DataQuery.get_s3_filesystem.cache_clear()
         yield wrapped_client
+        monkeypatch.undo()
 
     @pytest.fixture(scope="class")
-    def setup_resources(self, aws_clients):
+    def setup_resources(self, aws_clients, mock_boto3_client):
         """Set up S3 buckets and SQS queue for testing."""
         s3_client, sqs_client = aws_clients
         config: IntTestConfig = Config.get_config()
@@ -115,13 +125,15 @@ class TestWithS3:
 
     # Util function to upload canned test data to localstack s3 or any s3
     @staticmethod
-    def upload_to_s3(s3_client, bucket_name, sub_folder):
-        for root, _, files in os.walk(sub_folder):
+    def upload_to_s3(s3_client, bucket_name, folder):
+
+        folder = Path(folder)  # Convert to Path object for robust path handling
+        for root, dirs, files in os.walk(folder):
             for file in files:
                 local_path = Path(root) / file
                 # Compute S3 key relative to TEST_DATA_FOLDER
-                relative_path = local_path.relative_to(sub_folder)
-                s3_key = f"{relative_path}"
+                relative_path = local_path.relative_to(folder)
+                s3_key = str(relative_path).replace("\\", "/")
                 s3_client.upload_file(str(local_path), bucket_name, s3_key)
                 print(f"Uploaded {local_path} to s3://{bucket_name}/{s3_key}")
 
