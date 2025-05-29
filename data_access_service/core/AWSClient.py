@@ -63,7 +63,7 @@ class AWSClient:
         object_download_url = f"https://{s3_bucket}.s3.{region}.amazonaws.com/{s3_key}"
         return object_download_url
 
-    def upload_to_s3(self, file_path: str, s3_bucket: str, s3_key: str) -> str:
+    def upload_file_to_s3(self, file_path: str, s3_bucket: str, s3_key: str) -> str:
 
         # Validate file
         if not os.path.isfile(file_path):
@@ -74,6 +74,17 @@ class AWSClient:
         region = self.s3.meta.region_name
         object_download_url = f"https://{s3_bucket}.s3.{region}.amazonaws.com/{s3_key}"
         return object_download_url
+
+    def upload_fileobj_to_s3(self, file_obj: any,  s3_bucket: str, s3_key: str) -> str:
+        try:
+            self.s3.upload_fileobj(file_obj, s3_bucket, s3_key)
+            region = self.s3.meta.region_name
+            object_download_url = f"https://{s3_bucket}.s3.{region}.amazonaws.com/{s3_key}"
+            return object_download_url
+        except Exception as e:
+            self.log.error(f"Error uploading file object to S3: {e}")
+            raise e
+
 
     def send_email(self, recipient, subject, body_text):
         sender = self.config.get_sender_email()
@@ -154,3 +165,11 @@ class AWSClient:
                 break
 
         return keys
+
+    def get_s3_object(self, bucket_name: str, s3_key: str):
+        try:
+            response = self.s3.get_object(Bucket=bucket_name, Key=s3_key)
+            return response['Body'].read()
+        except self.s3.exceptions.NoSuchKey:
+            self.log.error(f"Object {s3_key} not found in bucket {bucket_name}.")
+            return None
