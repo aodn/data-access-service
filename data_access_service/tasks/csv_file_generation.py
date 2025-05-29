@@ -29,7 +29,6 @@ def process_data_files(
     start_date: datetime,
     end_date: datetime,
     multi_polygon: str,
-    recipient: str,
 ) -> str | None:
     config: Config = Config.get_config()
     log = init_log(config)
@@ -37,7 +36,7 @@ def process_data_files(
     tmp_data_folder_path = config.get_temp_folder(job_id_of_init)
     multi_polygon_dict = json.loads(multi_polygon)
 
-    if None in [uuid, start_date, end_date, json.loads(multi_polygon), recipient]:
+    if None in [uuid, start_date, end_date, json.loads(multi_polygon)]:
         raise ValueError("One or more required arguments are None")
 
     aws = AWSClient()

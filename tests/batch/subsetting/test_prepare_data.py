@@ -1,22 +1,21 @@
-import hashlib
 import os
+import zipfile
 from io import BytesIO
 from pathlib import Path
 
 import boto3
 import pytest
-import zipfile
 from aodn_cloud_optimised.lib import DataQuery
-from aodn_cloud_optimised.lib.DataQuery import Metadata
 from botocore import UNSIGNED
 from botocore.config import Config as BotoConfig
 from testcontainers.localstack import LocalStackContainer
 
 from data_access_service.batch.subsetting import prepare_data
-from data_access_service.config.config import EnvType, Config, TestConfig
-from data_access_service.tasks.data_collection import ZipStreamingBody
+from data_access_service.config.config import EnvType, Config, IntTestConfig
+from data_access_service.tasks.data_collection import collect_data_files
 from tests.batch.batch_test_consts import AWS_TEST_REGION, INIT_JOB_ID, PREPARATION_PARAMETERS
-from tests.utils import upload_to_s3, delete_object_in_s3
+from tests.core.test_with_s3 import TestWithS3
+from unittest.mock import MagicMock
 
 
 @pytest.fixture(scope="module")
@@ -71,7 +70,7 @@ def setup_resources(aws_clients):
     s3_client, sqs_client = aws_clients
 
     # Overwrite with local stack s3 mock client
-    config: TestConfig = Config.get_config()
+    config: IntTestConfig = Config.get_config()
     config.set_s3_client(s3_client)
 
     # Create S3 buckets
@@ -86,11 +85,16 @@ def setup_resources(aws_clients):
 
     return queue_url
 
-def test_mock_list_object_v2(setup_resources, mock_boto3_client):
+def test_data_preparation_and_collection(setup_resources, mock_boto3_client, monkeypatch):
     s3 = mock_boto3_client("s3")
+
+    mock_send_email = MagicMock()
+    monkeypatch.setattr("data_access_service.tasks.data_collection.AWSClient.send_email", mock_send_email)
+
+
     try:
         # Upload folder to create test data
-        upload_to_s3(
+        TestWithS3.upload_to_s3(
             s3,
             DataQuery.BUCKET_OPTIMISED_DEFAULT,
             Path(__file__).parent.parent.parent / "canned/s3_sample1",
@@ -101,6 +105,7 @@ def test_mock_list_object_v2(setup_resources, mock_boto3_client):
 
         bucket_name = Config.get_config().get_csv_bucket_name()
         response = s3.list_objects_v2(Bucket=bucket_name)
+
 
         objects = []
         if "Contents" in response:
@@ -113,13 +118,19 @@ def test_mock_list_object_v2(setup_resources, mock_boto3_client):
         assert objects[3] == "init-job-id/temp/date_2015-02-01_2015-04-30_bbox_-180_-90_180_90.csv"
 
         # Check if the files are compressed and uploaded correctly
-        compressed_s3_key = "data.zip"
-        stream = ZipStreamingBody(bucket=bucket_name, s3_keys=objects, s3=s3)
-        s3.upload_fileobj(stream, bucket_name, compressed_s3_key)
+        compressed_s3_key = "init-job-id/data.zip"
+        collect_data_files(master_job_id="init-job-id", dataset_uuid="test-dataset-uuid", recipient="test@example.com")
         response3 = s3.list_objects_v2(Bucket=bucket_name, Prefix=compressed_s3_key)
         assert "Contents" in response3
         assert len(response3["Contents"]) == 1
         assert response3["Contents"][0]["Key"] == compressed_s3_key
+
+        # Check if the email was sent correctly
+        mock_send_email.assert_called_once_with(
+            recipient="test@example.com",
+            subject="Finish processing data file whose uuid is:  test-dataset-uuid",
+            body_text="You can download the data file from the following link: https://test-bucket.s3.us-east-1.amazonaws.com/init-job-id/data.zip",
+        )
 
         # Check if the uncompressed size matches the sum of the individual file sizes
         uncompressed_size = get_uncompressed_zip_size_from_s3(bucket_name, compressed_s3_key, s3)
@@ -132,8 +143,8 @@ def test_mock_list_object_v2(setup_resources, mock_boto3_client):
         assert uncompressed_size == obj_sum_size, "The size of the extracted files does not match the downloaded files."
 
     finally:
-        delete_object_in_s3(s3, DataQuery.BUCKET_OPTIMISED_DEFAULT)
-        delete_object_in_s3(s3, Config.get_config().get_csv_bucket_name())
+        TestWithS3.delete_object_in_s3(s3, DataQuery.BUCKET_OPTIMISED_DEFAULT)
+        TestWithS3.delete_object_in_s3(s3, Config.get_config().get_csv_bucket_name())
 
 def get_uncompressed_zip_size_from_s3(bucket_name, zip_key, s3_client):
     # Retrieve the ZIP file from S3
@@ -153,4 +164,3 @@ def get_object_size_from_s3(bucket_name, object_key, s3_client):
         return response['ContentLength']
     except s3_client.exceptions.ClientError as e:
         raise ValueError(f"Error retrieving object size for {object_key}: {e}") from e
-        return None

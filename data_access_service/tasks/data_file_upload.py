@@ -13,6 +13,6 @@ def upload_all_files_in_folder_to_temp_s3(job_id: str, local_folder: str, aws: A
         for file in files:
             local_file_path = os.path.join(root, file)
             s3_key = f"{s3_temp_folder}{os.path.relpath(local_file_path, local_folder)}"
-            aws.upload_to_s3(local_file_path, bucket_name, s3_key)
+            aws.upload_file_to_s3(local_file_path, bucket_name, s3_key)
 
     return s3_temp_folder

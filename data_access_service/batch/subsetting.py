@@ -4,22 +4,12 @@ from data_access_service import init_log, Config, API
 from data_access_service.batch.batch_enums import Parameters
 from data_access_service.core.AWSClient import AWSClient
 from data_access_service.tasks.csv_file_generation import process_data_files
+from data_access_service.tasks.data_collection import ZipStreamingBody, collect_data_files
 from data_access_service.utils.date_time_utils import get_boundary_of_year_month, trim_date_range, \
     supply_day, split_date_range, parse_date
 
 # we may need to change the divisor later according to cost or performance consideration
 month_count_per_job = 3
-
-
-#
-# class ParamField(Enum):
-#     UUID = "uuid"
-#     START_DATE = "start_date"
-#     END_DATE = "end_date"
-#     MULTI_POLYGON = "multi_polygon"
-#     RECIPIENT = "recipient"
-#     DATE_RANGES = "date_ranges"
-
 
 def init(job_id_of_init, parameters):
     logger = init_log(Config.get_config())
@@ -77,11 +67,9 @@ def prepare_data(master_job_id, job_index, parameters):
     logger.info("Date Ranges:", date_ranges_dict)
 
     multi_polygon = parameters[Parameters.MULTI_POLYGON.value]
-    recipient = parameters[Parameters.RECIPIENT.value]
 
     logger.info("UUID:", uuid)
     logger.info("Multi Polygon:", multi_polygon)
-    logger.info("Recipient:", recipient)
 
     date_range = date_ranges_dict[str(job_index)]
     start_date = parse_date(date_range[0])
@@ -89,6 +77,28 @@ def prepare_data(master_job_id, job_index, parameters):
     logger.info("Start Date:", start_date)
     logger.info("End Date:", end_date)
 
-    process_data_files(master_job_id, uuid, start_date, end_date, multi_polygon, recipient)
+    process_data_files(master_job_id, uuid, start_date, end_date, multi_polygon)
+
+
+def collect_data(master_job_id, parameters):
+    recipient = parameters[Parameters.RECIPIENT.value]
+    uuid = parameters[Parameters.UUID.value]
+
+    collect_data_files(master_job_id=master_job_id, dataset_uuid=uuid, recipient=recipient)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
