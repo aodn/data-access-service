@@ -11,7 +11,7 @@ def collect_data_files(master_job_id: str, dataset_uuid: str, recipient: str):
 
     aws = AWSClient()
     bucket_name = Config.get_config().get_csv_bucket_name()
-    s3_key_of_data_files = aws.get_s3_keys(bucket_name=bucket_name, folder_prefix=f"{master_job_id}/temp")
+    s3_key_of_data_files = aws.get_s3_keys(bucket_name=bucket_name, folder_prefix=Config.get_s3_temp_folder_name(master_job_id))
 
     stream = ZipStreamingBody(bucket=bucket_name, s3_keys=s3_key_of_data_files, aws=aws)
     download_url = aws.upload_fileobj_to_s3(file_obj=stream, s3_bucket=bucket_name, s3_key=f"{master_job_id}/data.zip")

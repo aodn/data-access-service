@@ -70,6 +70,14 @@ class Config:
             else None
         )
 
+    @staticmethod
+    def get_s3_temp_folder_name(master_job_id:str):
+        """
+        Returns the temporary folder (to place all the data file to zip later) name for a given master job ID.
+        :param master_job_id: The ID of the master job, which is the init job ID.
+        """
+        return f"{master_job_id}/temp/"
+
     def get_sender_email(self):
         return (
             self.config["aws"]["ses"]["sender_email"]
