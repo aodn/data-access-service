@@ -6,6 +6,7 @@ from pathlib import Path
 import boto3
 import pytest
 from aodn_cloud_optimised.lib import DataQuery
+from aodn_cloud_optimised.lib.DataQuery import Metadata
 from botocore import UNSIGNED
 from botocore.config import Config as BotoConfig
 from testcontainers.localstack import LocalStackContainer
@@ -18,133 +19,161 @@ from tests.core.test_with_s3 import TestWithS3
 from unittest.mock import MagicMock
 
 
-@pytest.fixture(scope="module")
-def setup():
-    os.environ["PROFILE"] = EnvType.TESTING.value
+# @pytest.fixture(scope="module")
+# def setup():
+#     os.environ["PROFILE"] = EnvType.TESTING.value
+#
+#
+# @pytest.fixture(scope="module")
+# def localstack(setup):
+#     # Start LocalStack with SQS and S3
+#     with LocalStackContainer(image="localstack/localstack:4.3.0") as localstack:
+#         yield localstack
+#
+# @pytest.fixture(scope="module")
+# def aws_clients(localstack):
+#     # Initialize AWS clients pointing to LocalStack
+#     s3_client = boto3.client(
+#         "s3",
+#         endpoint_url=localstack.get_url(),
+#         aws_access_key_id="test",
+#         aws_secret_access_key="test",
+#         region_name=AWS_TEST_REGION,
+#     )
+#     sqs_client = boto3.client(
+#         "sqs",
+#         endpoint_url=localstack.get_url(),
+#         aws_access_key_id="test",
+#         aws_secret_access_key="test",
+#         region_name=AWS_TEST_REGION,
+#     )
+#     return s3_client, sqs_client
+#
+# @pytest.fixture
+# def mock_boto3_client(monkeypatch, localstack):
+#     # Wrap boto3.client to use LocalStack endpoint
+#     original_client = boto3.client
+#
+#     def wrapped_client(*args, **kwargs):
+#         if args and args[0] in ["s3", "ses"]:
+#             kwargs["endpoint_url"] = localstack.get_url()
+#             kwargs["region_name"] = AWS_TEST_REGION
+#             kwargs["config"] = BotoConfig(
+#                 signature_version=UNSIGNED, s3={"addressing_style": "path"}
+#             )
+#         return original_client(*args, **kwargs)
+#
+#     monkeypatch.setattr(DataQuery.boto3, "client", wrapped_client)
+#     return wrapped_client
+#
+# @pytest.fixture(scope="module")
+# def setup_resources(aws_clients):
+#     s3_client, sqs_client = aws_clients
+#
+#     # Overwrite with local stack s3 mock client
+#     config: IntTestConfig = Config.get_config()
+#     config.set_s3_client(s3_client)
+#
+#     # Create S3 buckets
+#     s3_client.create_bucket(Bucket=config.get_csv_bucket_name())
+#
+#     # Setup mock data for query
+#     s3_client.create_bucket(Bucket=DataQuery.BUCKET_OPTIMISED_DEFAULT)
+#
+#     # Create SQS queue
+#     response = sqs_client.create_queue(QueueName="job-queue")
+#     queue_url = response["QueueUrl"]
+#
+#     return queue_url
+class TestDataGeneration(TestWithS3):
+
+    def test_data_preparation_and_collection(
+            self, setup_resources, mock_boto3_client, monkeypatch
+    ):
+        s3 = mock_boto3_client("s3")
+
+        mock_send_email = MagicMock()
+        monkeypatch.setattr("data_access_service.tasks.data_collection.AWSClient.send_email", mock_send_email)
 
 
-@pytest.fixture(scope="module")
-def localstack(setup):
-    # Start LocalStack with SQS and S3
-    with LocalStackContainer(image="localstack/localstack:4.3.0") as localstack:
-        yield localstack
-
-@pytest.fixture(scope="module")
-def aws_clients(localstack):
-    # Initialize AWS clients pointing to LocalStack
-    s3_client = boto3.client(
-        "s3",
-        endpoint_url=localstack.get_url(),
-        aws_access_key_id="test",
-        aws_secret_access_key="test",
-        region_name=AWS_TEST_REGION,
-    )
-    sqs_client = boto3.client(
-        "sqs",
-        endpoint_url=localstack.get_url(),
-        aws_access_key_id="test",
-        aws_secret_access_key="test",
-        region_name=AWS_TEST_REGION,
-    )
-    return s3_client, sqs_client
-
-@pytest.fixture
-def mock_boto3_client(monkeypatch, localstack):
-    # Wrap boto3.client to use LocalStack endpoint
-    original_client = boto3.client
-
-    def wrapped_client(*args, **kwargs):
-        if args and args[0] in ["s3", "ses"]:
-            kwargs["endpoint_url"] = localstack.get_url()
-            kwargs["region_name"] = AWS_TEST_REGION
-            kwargs["config"] = BotoConfig(
-                signature_version=UNSIGNED, s3={"addressing_style": "path"}
+        try:
+            # Upload folder to create test data
+            TestWithS3.upload_to_s3(
+                s3,
+                DataQuery.BUCKET_OPTIMISED_DEFAULT,
+                Path(__file__).parent.parent.parent / "canned/s3_sample1",
             )
-        return original_client(*args, **kwargs)
 
-    monkeypatch.setattr(DataQuery.boto3, "client", wrapped_client)
-    return wrapped_client
+            # List objects in S3
+            response = s3.list_objects_v2(
+                Bucket=DataQuery.BUCKET_OPTIMISED_DEFAULT,
+                Prefix=DataQuery.ROOT_PREFIX_CLOUD_OPTIMISED_PATH,
+                Delimiter="/",
+            )
 
-@pytest.fixture(scope="module")
-def setup_resources(aws_clients):
-    s3_client, sqs_client = aws_clients
+            folders = [
+                prefix["Prefix"][len(prefix) - 1:]
+                for prefix in response.get("CommonPrefixes", [])
+                if prefix["Prefix"].endswith(".parquet/")
+            ]
 
-    # Overwrite with local stack s3 mock client
-    config: IntTestConfig = Config.get_config()
-    config.set_s3_client(s3_client)
+            assert len(folders) == 2
+            assert folders[0] == "animal_acoustic_tracking_delayed_qc.parquet/"
 
-    # Create S3 buckets
-    s3_client.create_bucket(Bucket=config.get_csv_bucket_name())
+            # Verify DataQuery functionality
+            aodn = DataQuery.GetAodn()
+            metadata: Metadata = aodn.get_metadata()
+            assert (
+                    metadata.metadata_catalog().get(
+                        "animal_acoustic_tracking_delayed_qc.parquet"
+                    )
+                    is not None
+            )
 
-    # Setup mock data for query
-    s3_client.create_bucket(Bucket=DataQuery.BUCKET_OPTIMISED_DEFAULT)
+            # prepare data according to the test parameters
+            for i in range(5):
+                prepare_data(master_job_id=INIT_JOB_ID, job_index=i, parameters=PREPARATION_PARAMETERS)
 
-    # Create SQS queue
-    response = sqs_client.create_queue(QueueName="job-queue")
-    queue_url = response["QueueUrl"]
-
-    return queue_url
-
-def test_data_preparation_and_collection(setup_resources, mock_boto3_client, monkeypatch):
-    s3 = mock_boto3_client("s3")
-
-    mock_send_email = MagicMock()
-    monkeypatch.setattr("data_access_service.tasks.data_collection.AWSClient.send_email", mock_send_email)
-
-
-    try:
-        # Upload folder to create test data
-        TestWithS3.upload_to_s3(
-            s3,
-            DataQuery.BUCKET_OPTIMISED_DEFAULT,
-            Path(__file__).parent.parent.parent / "canned/s3_sample1",
-        )
-        # prepare data according to the test parameters
-        for i in range(5):
-            prepare_data(master_job_id=INIT_JOB_ID, job_index=i, parameters=PREPARATION_PARAMETERS)
-
-        bucket_name = Config.get_config().get_csv_bucket_name()
-        response = s3.list_objects_v2(Bucket=bucket_name)
+            bucket_name = Config.get_config().get_csv_bucket_name()
+            response = s3.list_objects_v2(Bucket=bucket_name)
 
 
-        objects = []
-        if "Contents" in response:
-            for obj in response["Contents"]:
-                objects.append(obj["Key"])
-        assert len(objects) == 4
-        assert objects[0] == "init-job-id/temp/date_2014-03-01_2014-03-31_bbox_-180_-90_180_90.csv"
-        assert objects[1] == "init-job-id/temp/date_2014-06-01_2014-06-30_bbox_-180_-90_180_90.csv"
-        assert objects[2] == "init-job-id/temp/date_2014-11-01_2014-11-30_bbox_-180_-90_180_90.csv"
-        assert objects[3] == "init-job-id/temp/date_2015-02-01_2015-04-30_bbox_-180_-90_180_90.csv"
+            objects = []
+            if "Contents" in response:
+                for obj in response["Contents"]:
+                    objects.append(obj["Key"])
+            #  in test parquet, only 1 data csv for the provided range
+            assert len(objects) == 1
+            assert objects[0] == 'init-job-id/temp/date_2010-11-17_2010-11-30_bbox_-180_-90_180_90.csv'
 
-        # Check if the files are compressed and uploaded correctly
-        compressed_s3_key = "init-job-id/data.zip"
-        collect_data_files(master_job_id="init-job-id", dataset_uuid="test-dataset-uuid", recipient="test@example.com")
-        response3 = s3.list_objects_v2(Bucket=bucket_name, Prefix=compressed_s3_key)
-        assert "Contents" in response3
-        assert len(response3["Contents"]) == 1
-        assert response3["Contents"][0]["Key"] == compressed_s3_key
+            # Check if the files are compressed and uploaded correctly
+            compressed_s3_key = "init-job-id/data.zip"
+            collect_data_files(master_job_id="init-job-id", dataset_uuid="test-dataset-uuid", recipient="test@example.com")
+            response2 = s3.list_objects_v2(Bucket=bucket_name, Prefix=compressed_s3_key)
+            assert "Contents" in response2
+            assert len(response2["Contents"]) == 1
+            assert response2["Contents"][0]["Key"] == compressed_s3_key
 
-        # Check if the email was sent correctly
-        mock_send_email.assert_called_once_with(
-            recipient="test@example.com",
-            subject="Finish processing data file whose uuid is:  test-dataset-uuid",
-            body_text="You can download the data file from the following link: https://test-bucket.s3.us-east-1.amazonaws.com/init-job-id/data.zip",
-        )
+            # Check if the email was sent correctly
+            mock_send_email.assert_called_once_with(
+                recipient="test@example.com",
+                subject="Finish processing data file whose uuid is:  test-dataset-uuid",
+                body_text="You can download the data file from the following link: https://test-bucket.s3.us-east-1.amazonaws.com/init-job-id/data.zip",
+            )
 
-        # Check if the uncompressed size matches the sum of the individual file sizes
-        uncompressed_size = get_uncompressed_zip_size_from_s3(bucket_name, compressed_s3_key, s3)
-        obj_sum_size = 0
-        for obj in objects:
-            obj_size = get_object_size_from_s3(bucket_name, obj, s3)
-            if obj_size is not None:
-                obj_sum_size += obj_size
+            # Check if the uncompressed size matches the sum of the individual file sizes
+            uncompressed_size = get_uncompressed_zip_size_from_s3(bucket_name, compressed_s3_key, s3)
+            obj_sum_size = 0
+            for obj in objects:
+                obj_size = get_object_size_from_s3(bucket_name, obj, s3)
+                if obj_size is not None:
+                    obj_sum_size += obj_size
 
-        assert uncompressed_size == obj_sum_size, "The size of the extracted files does not match the downloaded files."
+            assert uncompressed_size == obj_sum_size, "The size of the extracted files does not match the downloaded files."
 
-    finally:
-        TestWithS3.delete_object_in_s3(s3, DataQuery.BUCKET_OPTIMISED_DEFAULT)
-        TestWithS3.delete_object_in_s3(s3, Config.get_config().get_csv_bucket_name())
+        finally:
+            TestWithS3.delete_object_in_s3(s3, DataQuery.BUCKET_OPTIMISED_DEFAULT)
+            TestWithS3.delete_object_in_s3(s3, Config.get_config().get_csv_bucket_name())
 
 def get_uncompressed_zip_size_from_s3(bucket_name, zip_key, s3_client):
     # Retrieve the ZIP file from S3
