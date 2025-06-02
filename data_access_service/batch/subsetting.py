@@ -3,9 +3,9 @@ import json
 from data_access_service import init_log, Config, API
 from data_access_service.batch.batch_enums import Parameters
 from data_access_service.core.AWSClient import AWSClient
+from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.tasks.generate_csv_file import process_data_files
-from data_access_service.tasks.data_collection import ZipStreamingBody, collect_data_files
-from data_access_service.utils.date_time_utils import get_boundary_of_year_month, trim_date_range, \
+from data_access_service.utils.date_time_utils import trim_date_range, \
     supply_day, split_date_range, parse_date
 
 # we may need to change the divisor later according to cost or performance consideration
@@ -28,7 +28,6 @@ def init(job_id_of_init, parameters):
     aws_client = AWSClient()
 
     # submit data preparation job
-
     preparation_parameters = {
         **parameters,
         Parameters.TYPE.value: "sub-setting-data-preparation",
@@ -43,7 +42,6 @@ def init(job_id_of_init, parameters):
     )
 
     # submit data collection job
-
     collection_parameters = {
         **parameters,
         Parameters.TYPE.value: "sub-setting-data-collection",

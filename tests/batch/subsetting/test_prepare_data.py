@@ -1,90 +1,18 @@
-import os
 import zipfile
 from io import BytesIO
 from pathlib import Path
-
-import boto3
-import pytest
-from aodn_cloud_optimised.lib import DataQuery
-from aodn_cloud_optimised.lib.DataQuery import Metadata
-from botocore import UNSIGNED
-from botocore.config import Config as BotoConfig
-from testcontainers.localstack import LocalStackContainer
-
-from data_access_service.batch.subsetting import prepare_data
-from data_access_service.config.config import EnvType, Config, IntTestConfig
-from data_access_service.tasks.data_collection import collect_data_files
-from tests.batch.batch_test_consts import AWS_TEST_REGION, INIT_JOB_ID, PREPARATION_PARAMETERS
-from tests.core.test_with_s3 import TestWithS3
 from unittest.mock import MagicMock
 
+from aodn_cloud_optimised.lib import DataQuery
+from aodn_cloud_optimised.lib.DataQuery import Metadata
 
-# @pytest.fixture(scope="module")
-# def setup():
-#     os.environ["PROFILE"] = EnvType.TESTING.value
-#
-#
-# @pytest.fixture(scope="module")
-# def localstack(setup):
-#     # Start LocalStack with SQS and S3
-#     with LocalStackContainer(image="localstack/localstack:4.3.0") as localstack:
-#         yield localstack
-#
-# @pytest.fixture(scope="module")
-# def aws_clients(localstack):
-#     # Initialize AWS clients pointing to LocalStack
-#     s3_client = boto3.client(
-#         "s3",
-#         endpoint_url=localstack.get_url(),
-#         aws_access_key_id="test",
-#         aws_secret_access_key="test",
-#         region_name=AWS_TEST_REGION,
-#     )
-#     sqs_client = boto3.client(
-#         "sqs",
-#         endpoint_url=localstack.get_url(),
-#         aws_access_key_id="test",
-#         aws_secret_access_key="test",
-#         region_name=AWS_TEST_REGION,
-#     )
-#     return s3_client, sqs_client
-#
-# @pytest.fixture
-# def mock_boto3_client(monkeypatch, localstack):
-#     # Wrap boto3.client to use LocalStack endpoint
-#     original_client = boto3.client
-#
-#     def wrapped_client(*args, **kwargs):
-#         if args and args[0] in ["s3", "ses"]:
-#             kwargs["endpoint_url"] = localstack.get_url()
-#             kwargs["region_name"] = AWS_TEST_REGION
-#             kwargs["config"] = BotoConfig(
-#                 signature_version=UNSIGNED, s3={"addressing_style": "path"}
-#             )
-#         return original_client(*args, **kwargs)
-#
-#     monkeypatch.setattr(DataQuery.boto3, "client", wrapped_client)
-#     return wrapped_client
-#
-# @pytest.fixture(scope="module")
-# def setup_resources(aws_clients):
-#     s3_client, sqs_client = aws_clients
-#
-#     # Overwrite with local stack s3 mock client
-#     config: IntTestConfig = Config.get_config()
-#     config.set_s3_client(s3_client)
-#
-#     # Create S3 buckets
-#     s3_client.create_bucket(Bucket=config.get_csv_bucket_name())
-#
-#     # Setup mock data for query
-#     s3_client.create_bucket(Bucket=DataQuery.BUCKET_OPTIMISED_DEFAULT)
-#
-#     # Create SQS queue
-#     response = sqs_client.create_queue(QueueName="job-queue")
-#     queue_url = response["QueueUrl"]
-#
-#     return queue_url
+from data_access_service.batch.subsetting import prepare_data
+from data_access_service.config.config import Config
+from data_access_service.tasks.data_collection import collect_data_files
+from tests.batch.batch_test_consts import INIT_JOB_ID, PREPARATION_PARAMETERS
+from tests.core.test_with_s3 import TestWithS3
+
+
 class TestDataGeneration(TestWithS3):
 
     def test_data_preparation_and_collection(

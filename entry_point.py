@@ -33,10 +33,9 @@ call_type = parameters["type"]
 match call_type:
     case "sub-setting":
         subsetting.init(job_id_of_init=job_id, parameters=parameters)
-        # subsetting.execute(job_id, job_index, parameters)
     case "sub-setting-data-preparation":
         subsetting.prepare_data(master_job_id=job_id, job_index=job_index, parameters=parameters)
     case "sub-setting-data-collection":
-        pass
+        subsetting.collect_data(master_job_id=job_id, parameters=parameters)
     case _:
         logging.error("Unknow call type", call_type)
