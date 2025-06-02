@@ -3,8 +3,6 @@ import zipfile
 from io import BytesIO
 from typing import List
 
-import boto3
-
 from data_access_service import Config
 from data_access_service.core.AWSClient import AWSClient
 
@@ -58,8 +56,3 @@ class ZipStreamingBody:
         except StopIteration:
             return b''
 
-
-if __name__ == '__main__':
-    # determine why in line 40, the response is bytes not dict, test in real s3
-    aws = AWSClient()
-    collect_data_files("init-job-id", "test-dataset-uuid", "este@te.com");
