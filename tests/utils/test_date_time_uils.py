@@ -10,7 +10,9 @@ from data_access_service.utils.date_time_utils import (
     get_final_day_of_month_,
     next_month_first_day,
     trim_date_range,
-    get_monthly_date_range_array_from_, get_boundary_of_year_month, transfer_date_range_into_yearmonth,
+    get_monthly_date_range_array_from_,
+    get_boundary_of_year_month,
+    transfer_date_range_into_yearmonth,
     split_yearmonths_into_dict,
 )
 
@@ -416,9 +418,7 @@ class TestDateTimeUtils(unittest.TestCase):
 
     def test_invalid_metadata_single_element(self):
         """Test when metadata temporal extent has one element. just return the original start & end dates."""
-        self.api.get_temporal_extent = MagicMock(
-            return_value=(datetime(2023, 1, 1),)
-        )
+        self.api.get_temporal_extent = MagicMock(return_value=(datetime(2023, 1, 1),))
 
         requested_start = datetime(2023, 1, 1)
         requested_end = datetime(2023, 12, 31)
@@ -428,11 +428,14 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(result, (requested_start, requested_end))
         self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
 
-
     def test_invalid_metadata_too_many_elements(self):
         """Test when metadata temporal extent has more than two elements. just return the original start & end dates."""
         self.api.get_temporal_extent = MagicMock(
-            return_value=(datetime(2023, 1, 1), datetime(2023, 12, 31), datetime(2024, 1, 1))
+            return_value=(
+                datetime(2023, 1, 1),
+                datetime(2023, 12, 31),
+                datetime(2024, 1, 1),
+            )
         )
 
         requested_start = datetime(2023, 1, 1)
@@ -522,7 +525,9 @@ class TestDateTimeUtils(unittest.TestCase):
         start_date = "09-2020"
         end_date = "10-2021"
 
-        yearmonths = transfer_date_range_into_yearmonth(start_date=start_date, end_date=end_date)
+        yearmonths = transfer_date_range_into_yearmonth(
+            start_date=start_date, end_date=end_date
+        )
         expected_yearmonths = [
             "09-2020",
             "10-2020",

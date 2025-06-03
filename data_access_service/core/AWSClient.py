@@ -18,7 +18,6 @@ class AWSClient:
         self.ses = boto3.client("ses")
         self.batch = boto3.client("batch")
 
-
     def upload_file_to_s3(self, file_path: str, s3_bucket: str, s3_key: str) -> str:
         """
         Upload a file to an S3 bucket. Must be a file, not a file-like object.
@@ -38,7 +37,7 @@ class AWSClient:
         object_download_url = f"https://{s3_bucket}.s3.{region}.amazonaws.com/{s3_key}"
         return object_download_url
 
-    def upload_fileobj_to_s3(self, file_obj: any,  s3_bucket: str, s3_key: str) -> str:
+    def upload_fileobj_to_s3(self, file_obj: any, s3_bucket: str, s3_key: str) -> str:
         """
         Upload a file-like object to an S3 bucket.
         Args:
@@ -49,12 +48,13 @@ class AWSClient:
         try:
             self.s3.upload_fileobj(file_obj, s3_bucket, s3_key)
             region = self.s3.meta.region_name
-            object_download_url = f"https://{s3_bucket}.s3.{region}.amazonaws.com/{s3_key}"
+            object_download_url = (
+                f"https://{s3_bucket}.s3.{region}.amazonaws.com/{s3_key}"
+            )
             return object_download_url
         except Exception as e:
             self.log.error(f"Error uploading file object to S3: {e}")
             raise e
-
 
     def send_email(self, recipient, subject, body_text):
         sender = self.config.get_sender_email()
@@ -75,7 +75,15 @@ class AWSClient:
             self.log.info(f"Error sending email to {recipient}: {e}")
             raise e
 
-    def submit_a_job(self, job_name: str, job_queue: str, job_definition: str, parameters: dict, array_size: int = 0, dependency_job_id: str = None) -> str:
+    def submit_a_job(
+        self,
+        job_name: str,
+        job_queue: str,
+        job_definition: str,
+        parameters: dict,
+        array_size: int = 0,
+        dependency_job_id: str = None,
+    ) -> str:
         """
         Submit a job to AWS Batch.
 
@@ -120,23 +128,23 @@ class AWSClient:
 
         while True:
             list_kwargs = {
-                'Bucket': bucket_name,
-                'Prefix': folder_prefix,
+                "Bucket": bucket_name,
+                "Prefix": folder_prefix,
             }
             if continuation_token:
-                list_kwargs['ContinuationToken'] = continuation_token
+                list_kwargs["ContinuationToken"] = continuation_token
 
             response = self.s3.list_objects_v2(**list_kwargs)
 
-            if 'Contents' in response:
-                for obj in response['Contents']:
+            if "Contents" in response:
+                for obj in response["Contents"]:
                     # Filter out folders (if any)
-                    if obj['Key'].endswith('/'):
+                    if obj["Key"].endswith("/"):
                         continue
-                    keys.append(obj['Key'])
+                    keys.append(obj["Key"])
 
-            if response.get('IsTruncated'):  # Check if there are more keys to fetch
-                continuation_token = response['NextContinuationToken']
+            if response.get("IsTruncated"):  # Check if there are more keys to fetch
+                continuation_token = response["NextContinuationToken"]
             else:
                 break
 
@@ -154,7 +162,7 @@ class AWSClient:
         """
         try:
             response = self.s3.get_object(Bucket=bucket_name, Key=s3_key)
-            return response['Body'].read()
+            return response["Body"].read()
         except self.s3.exceptions.NoSuchKey:
             self.log.error(f"Object {s3_key} not found in bucket {bucket_name}.")
             return None

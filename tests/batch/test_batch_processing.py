@@ -14,7 +14,6 @@ from tests.core.test_with_s3 import TestWithS3, REGION, WORLD_POLYGON
 class TestSubsetting(TestWithS3):
     """Test class for subsetting functionality with LocalStack and S3."""
 
-
     @pytest.mark.skip(reason="Skip this test for now. Recover it later")
     def test_mock_list_object_v2(self, setup_resources, mock_boto3_client):
         """Verify that objects can be listed and DataQuery works with mock data."""
@@ -56,7 +55,9 @@ class TestSubsetting(TestWithS3):
         finally:
             TestWithS3.delete_object_in_s3(s3, DataQuery.BUCKET_OPTIMISED_DEFAULT)
 
-    @pytest.mark.skip(reason="Skip this test for now because the function has changed alot")
+    @pytest.mark.skip(
+        reason="Skip this test for now because the function has changed alot"
+    )
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_subsetting(
         self, localstack, aws_clients, setup_resources, mock_boto3_client

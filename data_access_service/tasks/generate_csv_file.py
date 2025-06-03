@@ -6,7 +6,9 @@ from typing import List, Dict
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSClient import AWSClient
 from data_access_service.models.data_file_factory import DataFileFactory
-from data_access_service.tasks.data_file_upload import upload_all_files_in_folder_to_temp_s3
+from data_access_service.tasks.data_file_upload import (
+    upload_all_files_in_folder_to_temp_s3,
+)
 from data_access_service.utils.date_time_utils import (
     get_monthly_date_range_array_from_,
     trim_date_range,
@@ -38,8 +40,9 @@ def process_data_files(
         generate_csv_files(
             tmp_data_folder_path, start_date, end_date, multi_polygon_dict, uuid
         )
-        upload_all_files_in_folder_to_temp_s3(master_job_id=job_id_of_init, local_folder=tmp_data_folder_path, aws=aws)
-
+        upload_all_files_in_folder_to_temp_s3(
+            master_job_id=job_id_of_init, local_folder=tmp_data_folder_path, aws=aws
+        )
 
     except TypeError as e:
         log.error(f"Error: {e}")
@@ -48,6 +51,7 @@ def process_data_files(
     except Exception as e:
         log.error(f"Error: {e}")
     return None
+
 
 def generate_csv_files(
     folder_path: str,

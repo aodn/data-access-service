@@ -5,11 +5,16 @@ from data_access_service.batch.batch_enums import Parameters
 from data_access_service.core.AWSClient import AWSClient
 from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.tasks.generate_csv_file import process_data_files
-from data_access_service.utils.date_time_utils import trim_date_range, \
-    supply_day, split_date_range, parse_date
+from data_access_service.utils.date_time_utils import (
+    trim_date_range,
+    supply_day,
+    split_date_range,
+    parse_date,
+)
 
 # we may need to change the divisor later according to cost or performance consideration
 month_count_per_job = 3
+
 
 def init(job_id_of_init, parameters):
     logger = init_log(Config.get_config())
@@ -19,10 +24,17 @@ def init(job_id_of_init, parameters):
     end_date_str = parameters[Parameters.END_DATE.value]
 
     requested_start_date, requested_end_date = supply_day(start_date_str, end_date_str)
-    start_date, end_date = trim_date_range(api=API(), uuid=uuid, requested_start_date=requested_start_date,
-                                           requested_end_date=requested_end_date)
-    date_ranges = split_date_range(start_date=start_date, end_date=end_date,
-                                   month_count_per_job=month_count_per_job)
+    start_date, end_date = trim_date_range(
+        api=API(),
+        uuid=uuid,
+        requested_start_date=requested_start_date,
+        requested_end_date=requested_end_date,
+    )
+    date_ranges = split_date_range(
+        start_date=start_date,
+        end_date=end_date,
+        month_count_per_job=month_count_per_job,
+    )
     parameters[Parameters.DATE_RANGES.value] = json.dumps(date_ranges)
 
     aws_client = AWSClient()
@@ -53,7 +65,7 @@ def init(job_id_of_init, parameters):
         job_queue="generate-csv-data-file",
         job_definition="generate-csv-data-file-dev",
         parameters=collection_parameters,
-        dependency_job_id=data_preparation_job_id
+        dependency_job_id=data_preparation_job_id,
     )
 
 
@@ -85,21 +97,6 @@ def collect_data(parameters):
     uuid = parameters[Parameters.UUID.value]
     master_job_id = parameters[Parameters.MASTER_JOB_ID.value]
 
-    collect_data_files(master_job_id=master_job_id, dataset_uuid=uuid, recipient=recipient)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    collect_data_files(
+        master_job_id=master_job_id, dataset_uuid=uuid, recipient=recipient
+    )

@@ -2,8 +2,12 @@ from datetime import datetime
 from unittest.mock import patch, MagicMock, call
 
 from data_access_service.batch.subsetting import init
-from tests.batch.batch_test_consts import INIT_JOB_ID, INIT_PARAMETERS, PREPARATION_JOB_SUBMISSION_ARGS, \
-    COLLECTION_JOB_SUBMISSION_ARGS
+from tests.batch.batch_test_consts import (
+    INIT_JOB_ID,
+    INIT_PARAMETERS,
+    PREPARATION_JOB_SUBMISSION_ARGS,
+    COLLECTION_JOB_SUBMISSION_ARGS,
+)
 
 
 @patch("data_access_service.batch.subsetting.AWSClient")
@@ -12,13 +16,13 @@ def test_init(mock_get_temporal_extent, MockAWSClient):
 
     # Mock the get_temporal_extent method to return a fixed value
     mock_get_temporal_extent.return_value = (
-        datetime(1970, 1, 1), datetime(2024, 12, 31)
+        datetime(1970, 1, 1),
+        datetime(2024, 12, 31),
     )
 
     mock_client = MockAWSClient.return_value
     mock_client.submit_a_job = MagicMock()
     mock_client.submit_a_job.return_value = "test-job-id-returned"
-
 
     # Call the init function
     init(INIT_JOB_ID, INIT_PARAMETERS)

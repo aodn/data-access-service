@@ -16,13 +16,15 @@ from tests.core.test_with_s3 import TestWithS3
 class TestDataGeneration(TestWithS3):
 
     def test_data_preparation_and_collection(
-            self, setup_resources, mock_boto3_client, monkeypatch
+        self, setup_resources, mock_boto3_client, monkeypatch
     ):
         s3 = mock_boto3_client("s3")
 
         mock_send_email = MagicMock()
-        monkeypatch.setattr("data_access_service.tasks.data_collection.AWSClient.send_email", mock_send_email)
-
+        monkeypatch.setattr(
+            "data_access_service.tasks.data_collection.AWSClient.send_email",
+            mock_send_email,
+        )
 
         try:
             # Upload folder to create test data
@@ -40,7 +42,7 @@ class TestDataGeneration(TestWithS3):
             )
 
             folders = [
-                prefix["Prefix"][len(prefix) - 1:]
+                prefix["Prefix"][len(prefix) - 1 :]
                 for prefix in response.get("CommonPrefixes", [])
                 if prefix["Prefix"].endswith(".parquet/")
             ]
@@ -52,19 +54,18 @@ class TestDataGeneration(TestWithS3):
             aodn = DataQuery.GetAodn()
             metadata: Metadata = aodn.get_metadata()
             assert (
-                    metadata.metadata_catalog().get(
-                        "animal_acoustic_tracking_delayed_qc.parquet"
-                    )
-                    is not None
+                metadata.metadata_catalog().get(
+                    "animal_acoustic_tracking_delayed_qc.parquet"
+                )
+                is not None
             )
 
             # prepare data according to the test parameters
             for i in range(5):
-                prepare_data( job_index=i, parameters=PREPARATION_PARAMETERS)
+                prepare_data(job_index=i, parameters=PREPARATION_PARAMETERS)
 
             bucket_name = Config.get_config().get_csv_bucket_name()
             response = s3.list_objects_v2(Bucket=bucket_name)
-
 
             objects = []
             if "Contents" in response:
@@ -72,11 +73,18 @@ class TestDataGeneration(TestWithS3):
                     objects.append(obj["Key"])
             #  in test parquet, only 1 data csv for the provided range
             assert len(objects) == 1
-            assert objects[0] == 'init-job-id/temp/date_2010-11-17_2010-11-30_bbox_-180_-90_180_90.csv'
+            assert (
+                objects[0]
+                == "init-job-id/temp/date_2010-11-17_2010-11-30_bbox_-180_-90_180_90.csv"
+            )
 
             # Check if the files are compressed and uploaded correctly
             compressed_s3_key = "init-job-id/data.zip"
-            collect_data_files(master_job_id="init-job-id", dataset_uuid="test-dataset-uuid", recipient="test@example.com")
+            collect_data_files(
+                master_job_id="init-job-id",
+                dataset_uuid="test-dataset-uuid",
+                recipient="test@example.com",
+            )
             response2 = s3.list_objects_v2(Bucket=bucket_name, Prefix=compressed_s3_key)
             assert "Contents" in response2
             assert len(response2["Contents"]) == 1
@@ -90,34 +98,42 @@ class TestDataGeneration(TestWithS3):
             )
 
             # Check if the uncompressed size matches the sum of the individual file sizes
-            uncompressed_size = get_uncompressed_zip_size_from_s3(bucket_name, compressed_s3_key, s3)
+            uncompressed_size = get_uncompressed_zip_size_from_s3(
+                bucket_name, compressed_s3_key, s3
+            )
             obj_sum_size = 0
             for obj in objects:
                 obj_size = get_object_size_from_s3(bucket_name, obj, s3)
                 if obj_size is not None:
                     obj_sum_size += obj_size
 
-            assert uncompressed_size == obj_sum_size, "The size of the extracted files does not match the downloaded files."
+            assert (
+                uncompressed_size == obj_sum_size
+            ), "The size of the extracted files does not match the downloaded files."
 
         finally:
             TestWithS3.delete_object_in_s3(s3, DataQuery.BUCKET_OPTIMISED_DEFAULT)
-            TestWithS3.delete_object_in_s3(s3, Config.get_config().get_csv_bucket_name())
+            TestWithS3.delete_object_in_s3(
+                s3, Config.get_config().get_csv_bucket_name()
+            )
+
 
 def get_uncompressed_zip_size_from_s3(bucket_name, zip_key, s3_client):
     # Retrieve the ZIP file from S3
     zip_obj = s3_client.get_object(Bucket=bucket_name, Key=zip_key)
-    zip_data = BytesIO(zip_obj['Body'].read())
+    zip_data = BytesIO(zip_obj["Body"].read())
 
     # Calculate the total uncompressed size
     total_size = 0
-    with zipfile.ZipFile(zip_data, 'r') as zip_ref:
+    with zipfile.ZipFile(zip_data, "r") as zip_ref:
         for file_info in zip_ref.infolist():
             total_size += file_info.file_size
     return total_size
 
+
 def get_object_size_from_s3(bucket_name, object_key, s3_client):
     try:
         response = s3_client.head_object(Bucket=bucket_name, Key=object_key)
-        return response['ContentLength']
+        return response["ContentLength"]
     except s3_client.exceptions.ClientError as e:
         raise ValueError(f"Error retrieving object size for {object_key}: {e}") from e

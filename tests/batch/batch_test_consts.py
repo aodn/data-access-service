@@ -17,7 +17,7 @@ PREPARATION_PARAMETERS = {
     **INIT_PARAMETERS,
     Parameters.MASTER_JOB_ID.value: INIT_JOB_ID,
     Parameters.TYPE.value: "sub-setting-data-preparation",
-    Parameters.DATE_RANGES.value: '{"0": ["2010-02-01", "2010-04-30"], "1": ["2010-05-01", "2010-07-31"], "2": ["2010-08-01", "2010-10-31"], "3": ["2010-11-01", "2011-01-31"], "4": ["2011-02-01", "2011-04-30"]}'
+    Parameters.DATE_RANGES.value: '{"0": ["2010-02-01", "2010-04-30"], "1": ["2010-05-01", "2010-07-31"], "2": ["2010-08-01", "2010-10-31"], "3": ["2010-11-01", "2011-01-31"], "4": ["2011-02-01", "2011-04-30"]}',
 }
 
 PREPARATION_JOB_SUBMISSION_ARGS = {
