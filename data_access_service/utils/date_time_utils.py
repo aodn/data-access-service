@@ -207,9 +207,9 @@ def supply_day(start_date_str: str, end_date_str: str) -> Tuple[datetime, dateti
     """
     pattern = r"^(0[1-9]|1[0-2])-\d{4}$"
     if (not re.match(pattern, start_date_str)) or (not re.match(pattern, end_date_str)):
-        raise ValueError(
-            "Date strings are not in format 'MM-yyyy'. please use other function or update this one"
-        )
+        # currently, the if no date ranges selected in frontend, the start_date & end_date will be in this format: "yyyy-MM-dd",
+        # so for this case, we don't need to supply the day
+        return parser.parse(start_date_str), parser.parse(end_date_str)
 
     start_date = parser.parse(start_date_str)
     end_date = parser.parse(end_date_str)
