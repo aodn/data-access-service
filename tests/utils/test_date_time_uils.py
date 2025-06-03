@@ -403,51 +403,44 @@ class TestDateTimeUtils(unittest.TestCase):
         self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
 
     def test_invalid_metadata_empty(self):
-        """Test when metadata temporal extent is empty."""
+        """Test when metadata temporal extent is empty. The original start & end dates should be returned."""
         self.api.get_temporal_extent = MagicMock(return_value=())
 
-        with self.assertRaises(ValueError) as cm:
-            trim_date_range(
-                self.api, "test-uuid", datetime(2023, 1, 1), datetime(2023, 12, 31)
-            )
+        requested_start = datetime(2023, 1, 1)
+        requested_end = datetime(2023, 12, 31)
 
-        self.assertEqual(str(cm.exception), "Invalid metadata temporal extent: ()")
+        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+
+        self.assertEqual(result, (requested_start, requested_end))
         self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
 
     def test_invalid_metadata_single_element(self):
-        """Test when metadata temporal extent has one element."""
-        self.api.get_temporal_extent = MagicMock(return_value=(datetime(2023, 1, 1),))
-
-        with self.assertRaises(ValueError) as cm:
-            trim_date_range(
-                self.api, "test-uuid", datetime(2023, 1, 1), datetime(2023, 12, 31)
-            )
-
-        self.assertEqual(
-            str(cm.exception),
-            "Invalid metadata temporal extent: (datetime.datetime(2023, 1, 1, 0, 0),)",
+        """Test when metadata temporal extent has one element. just return the original start & end dates."""
+        self.api.get_temporal_extent = MagicMock(
+            return_value=(datetime(2023, 1, 1),)
         )
+
+        requested_start = datetime(2023, 1, 1)
+        requested_end = datetime(2023, 12, 31)
+
+        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+
+        self.assertEqual(result, (requested_start, requested_end))
         self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
 
+
     def test_invalid_metadata_too_many_elements(self):
-        """Test when metadata temporal extent has more than two elements."""
+        """Test when metadata temporal extent has more than two elements. just return the original start & end dates."""
         self.api.get_temporal_extent = MagicMock(
-            return_value=(
-                datetime(2023, 1, 1),
-                datetime(2023, 12, 31),
-                datetime(2024, 1, 1),
-            )
+            return_value=(datetime(2023, 1, 1), datetime(2023, 12, 31), datetime(2024, 1, 1))
         )
 
-        with self.assertRaises(ValueError) as cm:
-            trim_date_range(
-                self.api, "test-uuid", datetime(2023, 1, 1), datetime(2023, 12, 31)
-            )
+        requested_start = datetime(2023, 1, 1)
+        requested_end = datetime(2023, 12, 31)
 
-        self.assertEqual(
-            str(cm.exception),
-            "Invalid metadata temporal extent: (datetime.datetime(2023, 1, 1, 0, 0), datetime.datetime(2023, 12, 31, 0, 0), datetime.datetime(2024, 1, 1, 0, 0))",
-        )
+        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+
+        self.assertEqual(result, (requested_start, requested_end))
         self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
 
     def test_timezone_stripped_metadata(self):

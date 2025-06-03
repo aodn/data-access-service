@@ -87,9 +87,8 @@ def trim_date_range(
     log.info(f"Original date range: {requested_start_date} to {requested_end_date}")
     metadata_temporal_extent = api.get_temporal_extent(uuid=uuid)
     if len(metadata_temporal_extent) != 2:
-        raise ValueError(
-            f"Invalid metadata temporal extent: {metadata_temporal_extent}"
-        )
+        log.warning(f"Invalid metadata temporal extent: {metadata_temporal_extent}")
+        return requested_start_date, requested_end_date
 
     metadata_start_date, metadata_end_date = metadata_temporal_extent
 
