@@ -9,4 +9,5 @@ class Parameters(Enum):
     RECIPIENT = "recipient"
     DATE_RANGES = "date_ranges"
     TYPE = "type"
+    MASTER_JOB_ID = "master_job_id"
 

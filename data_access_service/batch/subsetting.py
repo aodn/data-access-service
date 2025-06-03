@@ -30,6 +30,7 @@ def init(job_id_of_init, parameters):
     # submit data preparation job
     preparation_parameters = {
         **parameters,
+        Parameters.MASTER_JOB_ID.value: job_id_of_init,
         Parameters.TYPE.value: "sub-setting-data-preparation",
     }
     data_preparation_job_id = aws_client.submit_a_job(
@@ -43,7 +44,7 @@ def init(job_id_of_init, parameters):
 
     # submit data collection job
     collection_parameters = {
-        **parameters,
+        **preparation_parameters,
         Parameters.TYPE.value: "sub-setting-data-collection",
     }
 
@@ -56,10 +57,11 @@ def init(job_id_of_init, parameters):
     )
 
 
-def prepare_data(master_job_id, job_index, parameters):
+def prepare_data(job_index, parameters):
     logger = init_log(Config.get_config())
     # get params
     uuid = parameters[Parameters.UUID.value]
+    master_job_id = parameters[Parameters.MASTER_JOB_ID.value]
     date_ranges = parameters[Parameters.DATE_RANGES.value]
     date_ranges_dict = json.loads(date_ranges)
     logger.info("Date Ranges:", date_ranges_dict)
@@ -78,9 +80,10 @@ def prepare_data(master_job_id, job_index, parameters):
     process_data_files(master_job_id, uuid, start_date, end_date, multi_polygon)
 
 
-def collect_data(master_job_id, parameters):
+def collect_data(parameters):
     recipient = parameters[Parameters.RECIPIENT.value]
     uuid = parameters[Parameters.UUID.value]
+    master_job_id = parameters[Parameters.MASTER_JOB_ID.value]
 
     collect_data_files(master_job_id=master_job_id, dataset_uuid=uuid, recipient=recipient)
 

@@ -1,8 +1,7 @@
 from datetime import datetime
 from unittest.mock import patch, MagicMock, call
 
-from data_access_service.batch.subsetting import init, prepare_data
-from tests.batch.batch_test_consts import PREPARATION_PARAMETERS
+from data_access_service.batch.subsetting import init
 from tests.batch.batch_test_consts import INIT_JOB_ID, INIT_PARAMETERS, PREPARATION_JOB_SUBMISSION_ARGS, \
     COLLECTION_JOB_SUBMISSION_ARGS
 

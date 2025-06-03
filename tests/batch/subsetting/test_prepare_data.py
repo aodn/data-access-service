@@ -60,7 +60,7 @@ class TestDataGeneration(TestWithS3):
 
             # prepare data according to the test parameters
             for i in range(5):
-                prepare_data(master_job_id=INIT_JOB_ID, job_index=i, parameters=PREPARATION_PARAMETERS)
+                prepare_data( job_index=i, parameters=PREPARATION_PARAMETERS)
 
             bucket_name = Config.get_config().get_csv_bucket_name()
             response = s3.list_objects_v2(Bucket=bucket_name)
