@@ -71,6 +71,20 @@ class Config:
             else None
         )
 
+    def get_job_queue_name(self):
+        return (
+            self.config["aws"]["batch"]["job_queue"]
+            if self.config is not None
+            else None
+        )
+
+    def get_job_definition_name(self):
+        return (
+            self.config["aws"]["batch"]["job_definition"]
+            if self.config is not None
+            else None
+        )
+
     @staticmethod
     def get_s3_temp_folder_name(master_job_id: str):
         """

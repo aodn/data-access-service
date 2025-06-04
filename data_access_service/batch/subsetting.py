@@ -45,8 +45,8 @@ def init(job_id_of_init, parameters):
     }
     data_preparation_job_id = aws_client.submit_a_job(
         job_name="prepare-data-for-job-" + job_id_of_init,
-        job_queue="generate-csv-data-file",
-        job_definition="generate-csv-data-file-dev",
+        job_queue=config.get_job_queue_name(),
+        job_definition=config.get_job_definition_name(),
         parameters=preparation_parameters,
         array_size=len(date_ranges),
         dependency_job_id=job_id_of_init,
@@ -60,8 +60,8 @@ def init(job_id_of_init, parameters):
 
     aws_client.submit_a_job(
         job_name="collect-data-for-job-" + job_id_of_init,
-        job_queue="generate-csv-data-file",
-        job_definition="generate-csv-data-file-dev",
+        job_queue=config.get_job_queue_name(),
+        job_definition=config.get_job_definition_name(),
         parameters=collection_parameters,
         dependency_job_id=data_preparation_job_id,
     )

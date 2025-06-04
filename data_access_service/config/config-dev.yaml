@@ -5,3 +5,6 @@ aws:
       csv: havier-example-bucket
   ses:
     sender_email: no.reply@aodn.org.au
+  batch:
+    job_queue: generate-csv-data-file
+    job_definition: generate-csv-data-file-dev
