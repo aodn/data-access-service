@@ -78,6 +78,14 @@ class Config:
         """
         return f"{master_job_id}/temp/"
 
+    @staticmethod
+    def get_month_count_per_job():
+        """
+        Returns the number of months to process in each job.
+        This is used to split the date range into smaller chunks for processing.
+        """
+        return 12
+
     def get_sender_email(self):
         return (
             self.config["aws"]["ses"]["sender_email"]

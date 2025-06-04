@@ -12,13 +12,10 @@ from data_access_service.utils.date_time_utils import (
     parse_date,
 )
 
-# we may need to change the divisor later according to cost or performance consideration
-month_count_per_job = 3
-
-
 def init(job_id_of_init, parameters):
-    logger = init_log(Config.get_config())
 
+    config = Config.get_config()
+    month_count_per_job = config.get_month_count_per_job()
     uuid = parameters[Parameters.UUID.value]
     start_date_str = parameters[Parameters.START_DATE.value]
     end_date_str = parameters[Parameters.END_DATE.value]
