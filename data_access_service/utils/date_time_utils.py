@@ -1,7 +1,11 @@
+import re
+from typing import Tuple
+
 import pandas as pd
 from datetime import datetime, timedelta, time
 
 import pytz
+from dateutil import parser
 
 from data_access_service import API, init_log, Config
 from dateutil.relativedelta import relativedelta
@@ -22,13 +26,13 @@ def parse_date(
     )
 
 
-def get_final_day_of_(date: datetime) -> datetime:
+def get_final_day_of_month_(date: datetime) -> datetime:
     next_month = date.replace(day=28) + timedelta(days=4)
     last_day_of_month = next_month - timedelta(days=next_month.day)
     return last_day_of_month
 
 
-def get_first_day_of_(date: datetime) -> datetime:
+def get_first_day_of_month(date: datetime) -> datetime:
     return date.replace(day=1)
 
 
@@ -83,9 +87,8 @@ def trim_date_range(
     log.info(f"Original date range: {requested_start_date} to {requested_end_date}")
     metadata_temporal_extent = api.get_temporal_extent(uuid=uuid)
     if len(metadata_temporal_extent) != 2:
-        raise ValueError(
-            f"Invalid metadata temporal extent: {metadata_temporal_extent}"
-        )
+        log.warning(f"Invalid metadata temporal extent: {metadata_temporal_extent}")
+        return requested_start_date, requested_end_date
 
     metadata_start_date, metadata_end_date = metadata_temporal_extent
 
@@ -123,4 +126,121 @@ def trim_date_range(
         # Request cover all the metadata range, so use metadata range due to smaller range
         return metadata_start_date, metadata_end_date
     else:
+        log.info(
+            f"Requested date range: {requested_start_date} to {requested_end_date} "
+            f"does not overlap with metadata range: {metadata_start_date} to {metadata_end_date}"
+        )
         return None, None
+
+
+def get_boundary_of_year_month(
+    year_month_str: str,
+) -> Tuple[datetime, datetime]:
+    """
+    Get the first and last day of the month for a given year and month.
+
+    Args:
+        year_month_str (str): Year and month in the format "YYYY-MM".
+
+    Returns:
+        Tuple[datetime, datetime]: First and last day of the month.
+    """
+    year_month = parser.parse(year_month_str)
+    start_date = year_month.replace(day=1, hour=0, minute=0, second=0)
+    end_date = get_final_day_of_month_(start_date).replace(
+        hour=23, minute=59, second=59
+    )
+
+    return start_date, end_date
+
+
+def transfer_date_range_into_yearmonth(start_date: str, end_date: str) -> list[dict]:
+    """
+    Transfer a date range into a list of dictionaries with year and month. currently, according to the
+    request from the frontend, the start & end date is in the format of "MM-yyyy"
+
+    Args:
+        start_date (str): Start date in the format "MM-yyyy".
+        end_date (str): End date in the format "MM-yyyy".
+
+    Returns:
+        list[dict]: List of dictionaries with year month in "MM-yyyy" format.
+    """
+    start = datetime.strptime(start_date, "%m-%Y")
+    end = datetime.strptime(end_date, "%m-%Y")
+    result = []
+
+    while start <= end:
+        result.append(start.strftime("%m-%Y"))
+        start += relativedelta(months=1)
+
+    return result
+
+
+def split_yearmonths_into_dict(yearmonths, chunk_size: int):
+    """
+    Split a list of yearmonths into a dictionary with chunks of a given size.
+
+    Args:
+        yearmonths (list): List of yearmonth strings.
+        chunk_size (int): Size of each chunk (default is 4).
+
+    Returns:
+        dict: Dictionary where keys are indices and values are chunks of yearmonths.
+    """
+    result = {}
+    for i in range(0, len(yearmonths), chunk_size):
+        result[i // chunk_size] = yearmonths[i : i + chunk_size]
+    return result
+
+
+def supply_day(start_date_str: str, end_date_str: str) -> Tuple[datetime, datetime]:
+    """
+    Supply the day to the start and end date strings. if the date string is not in this format: "MM-yyyy", don't use this function
+
+    Args:
+        start_date_str (str): Start date string.
+        end_date_str (str): End date string.
+
+    Returns:
+        Tuple[datetime, datetime]: Start and end dates as datetime objects.
+    """
+    pattern = r"^(0[1-9]|1[0-2])-\d{4}$"
+    if (not re.match(pattern, start_date_str)) or (not re.match(pattern, end_date_str)):
+        # currently, the if no date ranges selected in frontend, the start_date & end_date will be in this format: "yyyy-MM-dd",
+        # so for this case, we don't need to supply the day
+        return parser.parse(start_date_str), parser.parse(end_date_str)
+
+    start_date = parser.parse(start_date_str)
+    end_date = parser.parse(end_date_str)
+
+    start_date = start_date.replace(day=1, hour=0, minute=0, second=0)
+    end_date = get_final_day_of_month_(end_date).replace(hour=23, minute=59, second=59)
+
+    return start_date, end_date
+
+
+def split_date_range(
+    start_date: datetime,
+    end_date: datetime,
+    month_count_per_job: int,
+) -> dict:
+    date_ranges = {}
+    index = 0
+    # to make sure the start date is at the very beginning of the month
+    current_start_date = start_date.replace(hour=0, minute=0, second=0)
+    while current_start_date <= end_date:
+        current_end_date = get_final_day_of_month_(
+            current_start_date + relativedelta(months=(month_count_per_job - 1))
+        ).replace(hour=23, minute=59, second=59)
+
+        # Check if the end date exceeds the original end date
+        if current_end_date > end_date:
+            current_end_date = end_date.replace(hour=23, minute=59, second=59)
+        date_ranges[index] = [
+            current_start_date.strftime("%Y-%m-%d"),
+            current_end_date.strftime("%Y-%m-%d"),
+        ]
+        index += 1
+        current_start_date = current_end_date + relativedelta(seconds=1)
+    return date_ranges

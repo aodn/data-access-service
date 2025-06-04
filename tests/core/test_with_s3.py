@@ -89,7 +89,7 @@ class TestWithS3:
         original_client = boto3.client
 
         def wrapped_client(*args, **kwargs):
-            if args and args[0] in ["s3", "ses"]:
+            if args and args[0] in ["s3", "ses", "batch"]:
                 kwargs["endpoint_url"] = localstack.get_url()
                 kwargs["region_name"] = REGION
                 kwargs["config"] = BotoConfig(

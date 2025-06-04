@@ -11,22 +11,30 @@ client = boto3.client("batch")
 
 # Get the job ID from the environment variable
 job_id = os.getenv("AWS_BATCH_JOB_ID")
-logger.info("Job ID:", job_id)
+logger.info(f"Job ID:{job_id}")
+
+# Get the index of the child job
+job_index = os.getenv("AWS_BATCH_JOB_ARRAY_INDEX")
+if job_index is not None:
+    logger.info(f"Job Index: { job_index }")
 
 # Retrieve the job details
 response = client.describe_jobs(jobs=[job_id])
 job = response["jobs"][0]
-logger.info("Job:", job)
 
 # Extract parameters from the job details
 parameters = job["parameters"]
-logger.info("Parameters:", parameters)
+logger.info(f"Parameters: {parameters}")
 
 # Switch based on parameter call_type
 call_type = parameters["type"]
 
 match call_type:
     case "sub-setting":
-        subsetting.execute(job_id, parameters)
+        subsetting.init(job_id_of_init=job_id, parameters=parameters)
+    case "sub-setting-data-preparation":
+        subsetting.prepare_data(job_index=job_index, parameters=parameters)
+    case "sub-setting-data-collection":
+        subsetting.collect_data(parameters=parameters)
     case _:
         logging.error("Unknow call type", call_type)

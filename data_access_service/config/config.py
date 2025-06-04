@@ -37,6 +37,7 @@ class Config:
 
     @staticmethod
     def get_config(profile: EnvType = None):
+        print(f"Env profile is : {profile}")
         if profile is None:
             profile = EnvType(os.getenv("PROFILE", EnvType.DEV))
 
@@ -69,6 +70,36 @@ class Config:
             if self.config is not None
             else None
         )
+
+    def get_job_queue_name(self):
+        return (
+            self.config["aws"]["batch"]["job_queue"]
+            if self.config is not None
+            else None
+        )
+
+    def get_job_definition_name(self):
+        return (
+            self.config["aws"]["batch"]["job_definition"]
+            if self.config is not None
+            else None
+        )
+
+    @staticmethod
+    def get_s3_temp_folder_name(master_job_id: str):
+        """
+        Returns the temporary folder (to place all the data file to zip later) name for a given master job ID.
+        :param master_job_id: The ID of the master job, which is the init job ID.
+        """
+        return f"{master_job_id}/temp/"
+
+    @staticmethod
+    def get_month_count_per_job():
+        """
+        Returns the number of months to process in each job.
+        This is used to split the date range into smaller chunks for processing.
+        """
+        return 12
 
     def get_sender_email(self):
         return (

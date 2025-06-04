@@ -7,10 +7,13 @@ from unittest.mock import MagicMock
 from data_access_service.core.api import BaseAPI
 from data_access_service.utils.date_time_utils import (
     parse_date,
-    get_final_day_of_,
+    get_final_day_of_month_,
     next_month_first_day,
     trim_date_range,
     get_monthly_date_range_array_from_,
+    get_boundary_of_year_month,
+    transfer_date_range_into_yearmonth,
+    split_yearmonths_into_dict,
 )
 
 
@@ -55,7 +58,7 @@ class TestDateTimeUtils(unittest.TestCase):
     def test_get_final_day_of_(self):
         date = datetime(2023, 2, 15)
         expected_date = datetime(2023, 2, 28)
-        self.assertEqual(get_final_day_of_(date), expected_date)
+        self.assertEqual(get_final_day_of_month_(date), expected_date)
 
     def test_next_month_first_day(self):
         date = datetime(2023, 1, 31)
@@ -402,34 +405,31 @@ class TestDateTimeUtils(unittest.TestCase):
         self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
 
     def test_invalid_metadata_empty(self):
-        """Test when metadata temporal extent is empty."""
+        """Test when metadata temporal extent is empty. The original start & end dates should be returned."""
         self.api.get_temporal_extent = MagicMock(return_value=())
 
-        with self.assertRaises(ValueError) as cm:
-            trim_date_range(
-                self.api, "test-uuid", datetime(2023, 1, 1), datetime(2023, 12, 31)
-            )
+        requested_start = datetime(2023, 1, 1)
+        requested_end = datetime(2023, 12, 31)
 
-        self.assertEqual(str(cm.exception), "Invalid metadata temporal extent: ()")
+        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+
+        self.assertEqual(result, (requested_start, requested_end))
         self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
 
     def test_invalid_metadata_single_element(self):
-        """Test when metadata temporal extent has one element."""
+        """Test when metadata temporal extent has one element. just return the original start & end dates."""
         self.api.get_temporal_extent = MagicMock(return_value=(datetime(2023, 1, 1),))
 
-        with self.assertRaises(ValueError) as cm:
-            trim_date_range(
-                self.api, "test-uuid", datetime(2023, 1, 1), datetime(2023, 12, 31)
-            )
+        requested_start = datetime(2023, 1, 1)
+        requested_end = datetime(2023, 12, 31)
 
-        self.assertEqual(
-            str(cm.exception),
-            "Invalid metadata temporal extent: (datetime.datetime(2023, 1, 1, 0, 0),)",
-        )
+        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+
+        self.assertEqual(result, (requested_start, requested_end))
         self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
 
     def test_invalid_metadata_too_many_elements(self):
-        """Test when metadata temporal extent has more than two elements."""
+        """Test when metadata temporal extent has more than two elements. just return the original start & end dates."""
         self.api.get_temporal_extent = MagicMock(
             return_value=(
                 datetime(2023, 1, 1),
@@ -438,15 +438,12 @@ class TestDateTimeUtils(unittest.TestCase):
             )
         )
 
-        with self.assertRaises(ValueError) as cm:
-            trim_date_range(
-                self.api, "test-uuid", datetime(2023, 1, 1), datetime(2023, 12, 31)
-            )
+        requested_start = datetime(2023, 1, 1)
+        requested_end = datetime(2023, 12, 31)
 
-        self.assertEqual(
-            str(cm.exception),
-            "Invalid metadata temporal extent: (datetime.datetime(2023, 1, 1, 0, 0), datetime.datetime(2023, 12, 31, 0, 0), datetime.datetime(2024, 1, 1, 0, 0))",
-        )
+        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+
+        self.assertEqual(result, (requested_start, requested_end))
         self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
 
     def test_timezone_stripped_metadata(self):
@@ -504,3 +501,69 @@ class TestDateTimeUtils(unittest.TestCase):
 
         self.assertEqual(str(cm.exception), "API error")
         self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
+
+    def test_get_boundary_of_year_month(self):
+        """Test the boundary of a year-month string."""
+        year_month_str = "2023-10"
+        expected_start = datetime(2023, 10, 1, 0, 0, 0)
+        expected_end = datetime(2023, 10, 31, 23, 59, 59)
+
+        start_date, end_date = get_boundary_of_year_month(year_month_str)
+
+        self.assertEqual(start_date, expected_start)
+        self.assertEqual(end_date, expected_end)
+
+        year_month_str2 = "02-2023"
+        expected_start2 = datetime(2023, 2, 1, 0, 0, 0)
+        expected_end2 = datetime(2023, 2, 28, 23, 59, 59)
+
+        start_date2, end_date2 = get_boundary_of_year_month(year_month_str2)
+        self.assertEqual(start_date2, expected_start2)
+        self.assertEqual(end_date2, expected_end2)
+
+    def test_transfer_date_range_into_yearmonth(self):
+        start_date = "09-2020"
+        end_date = "10-2021"
+
+        yearmonths = transfer_date_range_into_yearmonth(
+            start_date=start_date, end_date=end_date
+        )
+        expected_yearmonths = [
+            "09-2020",
+            "10-2020",
+            "11-2020",
+            "12-2020",
+            "01-2021",
+            "02-2021",
+            "03-2021",
+            "04-2021",
+            "05-2021",
+            "06-2021",
+            "07-2021",
+            "08-2021",
+            "09-2021",
+            "10-2021",
+        ]
+        self.assertEqual(yearmonths, expected_yearmonths)
+
+    def test_split_yearmonths_into_dict(self):
+        yearmonths = [
+            "2023-01",
+            "2023-02",
+            "2023-03",
+            "2023-04",
+            "2023-05",
+            "2023-06",
+            "2023-07",
+            "2023-08",
+            "2023-09",
+            "2023-10",
+        ]
+        expected_dict = {
+            0: ["2023-01", "2023-02", "2023-03"],
+            1: ["2023-04", "2023-05", "2023-06"],
+            2: ["2023-07", "2023-08", "2023-09"],
+            3: ["2023-10"],
+        }
+        result = split_yearmonths_into_dict(yearmonths, 3)
+        self.assertEqual(result, expected_dict)
