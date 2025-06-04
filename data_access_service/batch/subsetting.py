@@ -12,6 +12,7 @@ from data_access_service.utils.date_time_utils import (
     parse_date,
 )
 
+
 def init(job_id_of_init, parameters):
 
     config = Config.get_config()
