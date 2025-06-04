@@ -73,18 +73,18 @@ def prepare_data(job_index, parameters):
     master_job_id = parameters[Parameters.MASTER_JOB_ID.value]
     date_ranges = parameters[Parameters.DATE_RANGES.value]
     date_ranges_dict = json.loads(date_ranges)
-    logger.info("Date Ranges:", date_ranges_dict)
+    logger.info(f"Date Ranges:{date_ranges_dict}")
 
     multi_polygon = parameters[Parameters.MULTI_POLYGON.value]
 
-    logger.info("UUID:", uuid)
-    logger.info("Multi Polygon:", multi_polygon)
+    logger.info(f"UUID:{uuid}")
+    logger.info(f"Multi Polygon:{multi_polygon}")
 
     date_range = date_ranges_dict[str(job_index)]
     start_date = parse_date(date_range[0])
     end_date = parse_date(date_range[1])
-    logger.info("Start Date:", start_date)
-    logger.info("End Date:", end_date)
+    logger.info(f"Start Date:{start_date}")
+    logger.info(f"End Date:{end_date}")
 
     process_data_files(master_job_id, uuid, start_date, end_date, multi_polygon)
 

@@ -156,7 +156,7 @@ def query_data(
             lon_max=max_lon,
         )
     except ValueError as e:
-        log.info("seems like no data for this polygon", e)
+        log.info(f"seems like no data for this polygon. Error: {e}")
     except Exception as e:
         log.error(f"Error: {e}")
 

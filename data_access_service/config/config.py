@@ -37,6 +37,7 @@ class Config:
 
     @staticmethod
     def get_config(profile: EnvType = None):
+        print(f"Env profile is : {profile}")
         if profile is None:
             profile = EnvType(os.getenv("PROFILE", EnvType.DEV))
 
