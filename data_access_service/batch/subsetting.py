@@ -5,6 +5,7 @@ from data_access_service.batch.batch_enums import Parameters
 from data_access_service.core.AWSClient import AWSClient
 from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.tasks.generate_csv_file import process_data_files
+from datetime import time
 from data_access_service.utils.date_time_utils import (
     trim_date_range,
     supply_day,
@@ -67,7 +68,7 @@ def init(job_id_of_init, parameters):
     )
 
 
-def prepare_data(job_index, parameters):
+def prepare_data(parameters, job_index=-1):
     logger = init_log(Config.get_config())
     # get params
     uuid = parameters[Parameters.UUID.value]
@@ -81,11 +82,17 @@ def prepare_data(job_index, parameters):
     logger.info(f"UUID:{uuid}")
     logger.info(f"Multi Polygon:{multi_polygon}")
 
-    date_range = date_ranges_dict[str(job_index)]
-    start_date = parse_date(date_range[0])
-    end_date = parse_date(date_range[1])
-    logger.info(f"Start Date:{start_date}")
-    logger.info(f"End Date:{end_date}")
+    if job_index > -1:
+        date_range = date_ranges_dict[str(job_index)]
+        start_date = parse_date(date_range[0])
+        end_date = parse_date(date_range[1])
+        logger.info(f"Start Date:{start_date}")
+        logger.info(f"End Date:{end_date}")
+    elif job_index == -1: # if the date range is small, only 1 job is created, so no index is provided
+        start_date = parse_date(parameters[Parameters.START_DATE.value])
+        end_date = parse_date(parameters[Parameters.END_DATE.value], time_value=time(23, 59, 59))
+    else:
+        raise ValueError(f"Invalid job index: {job_index}")
 
     process_data_files(master_job_id, uuid, start_date, end_date, multi_polygon)
 

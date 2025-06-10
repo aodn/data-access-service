@@ -81,7 +81,7 @@ class AWSClient:
         job_queue: str,
         job_definition: str,
         parameters: dict,
-        array_size: int = 0,
+        array_size: int = 1,
         dependency_job_id: str = None,
     ) -> str:
         """
@@ -105,7 +105,7 @@ class AWSClient:
             "parameters": parameters,
         }
 
-        if array_size > 0:
+        if array_size > 1:
             request["arrayProperties"] = {"size": array_size}
 
         if dependency_job_id:
