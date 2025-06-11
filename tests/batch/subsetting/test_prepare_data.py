@@ -130,8 +130,6 @@ class TestDataGeneration(TestWithS3):
             assert False, f"prepare_data raised an exception: {e}"
 
 
-
-
 def get_uncompressed_zip_size_from_s3(bucket_name, zip_key, s3_client):
     # Retrieve the ZIP file from S3
     zip_obj = s3_client.get_object(Bucket=bucket_name, Key=zip_key)

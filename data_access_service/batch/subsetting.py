@@ -82,7 +82,9 @@ def prepare_data(parameters, job_index):
     logger.info(f"UUID:{uuid}")
     logger.info(f"Multi Polygon:{multi_polygon}")
 
-    if job_index is None:# if the date range is small, only 1 job is created, so no index is provided
+    if (
+        job_index is None
+    ):  # if the date range is small, only 1 job is created, so no index is provided
         raw_start_date = parameters[Parameters.START_DATE.value]
         raw_end_date = parameters[Parameters.END_DATE.value]
         start_date, end_date = supply_day(raw_start_date, raw_end_date)

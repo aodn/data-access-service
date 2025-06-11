@@ -56,8 +56,12 @@ def test_init(mock_get_month_count_per_job, mock_get_temporal_extent, MockAWSCli
 @patch("data_access_service.batch.subsetting.AWSClient")
 @patch("data_access_service.core.api.API.get_temporal_extent")
 @patch("data_access_service.config.config.Config.get_month_count_per_job")
-def test_init_with_very_narrow_date_range(mock_get_month_count_per_job, mock_get_temporal_extent, MockAWSClient):
-    mock_get_month_count_per_job.return_value = 1200 # Set a very high month count to ensure no splitting occurs
+def test_init_with_very_narrow_date_range(
+    mock_get_month_count_per_job, mock_get_temporal_extent, MockAWSClient
+):
+    mock_get_month_count_per_job.return_value = (
+        1200  # Set a very high month count to ensure no splitting occurs
+    )
     # Mock the get_temporal_extent method to return a fixed value
     mock_get_temporal_extent.return_value = (
         datetime(1970, 1, 1),
