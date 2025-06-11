@@ -68,7 +68,7 @@ def init(job_id_of_init, parameters):
     )
 
 
-def prepare_data(parameters, job_index=-1):
+def prepare_data(parameters, job_index):
     logger = init_log(Config.get_config())
     # get params
     uuid = parameters[Parameters.UUID.value]
@@ -88,7 +88,7 @@ def prepare_data(parameters, job_index=-1):
         end_date = parse_date(date_range[1])
         logger.info(f"Start Date:{start_date}")
         logger.info(f"End Date:{end_date}")
-    elif job_index == -1: # if the date range is small, only 1 job is created, so no index is provided
+    elif job_index == None: # if the date range is small, only 1 job is created, so no index is provided
         start_date = parse_date(parameters[Parameters.START_DATE.value])
         end_date = parse_date(parameters[Parameters.END_DATE.value], time_value=time(23, 59, 59))
     else:
