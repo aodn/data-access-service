@@ -11,6 +11,7 @@ from data_access_service.config.config import Config
 from data_access_service.tasks.data_collection import collect_data_files
 from tests.batch.batch_test_consts import PREPARATION_PARAMETERS
 from tests.core.test_with_s3 import TestWithS3
+from datetime import datetime, time
 
 
 class TestDataGeneration(TestWithS3):
@@ -116,6 +117,19 @@ class TestDataGeneration(TestWithS3):
             TestWithS3.delete_object_in_s3(
                 s3, Config.get_config().get_csv_bucket_name()
             )
+
+    def test_data_preparation_without_index(self, mock_boto3_client):
+        # Test the prepare_data function without a job index
+        parameters = PREPARATION_PARAMETERS.copy()
+        parameters["job_index"] = None
+        parameters["start_date"] = "02-2010"
+        parameters["end_date"] = "04-2011"
+        try:
+            prepare_data(parameters, job_index=None)
+        except Exception as e:
+            assert False, f"prepare_data raised an exception: {e}"
+
+
 
 
 def get_uncompressed_zip_size_from_s3(bucket_name, zip_key, s3_client):
