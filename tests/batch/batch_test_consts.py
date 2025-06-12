@@ -23,7 +23,7 @@ PREPARATION_PARAMETERS = {
 PREPARATION_JOB_SUBMISSION_ARGS = {
     "job_name": "prepare-data-for-job-init-job-id",
     "job_queue": "generate-csv-data-file",
-    "job_definition": "generate-csv-data-file",
+    "job_definition": "generate-csv-data-file-dev",
     "parameters": PREPARATION_PARAMETERS,
     "array_size": 5,
     "dependency_job_id": INIT_JOB_ID,
@@ -37,7 +37,7 @@ COLLECTION_PARAMETERS = {
 COLLECTION_JOB_SUBMISSION_ARGS = {
     "job_name": "collect-data-for-job-init-job-id",
     "job_queue": "generate-csv-data-file",
-    "job_definition": "generate-csv-data-file",
+    "job_definition": "generate-csv-data-file-dev",
     "parameters": COLLECTION_PARAMETERS,
     "dependency_job_id": "test-job-id-returned",
 }
