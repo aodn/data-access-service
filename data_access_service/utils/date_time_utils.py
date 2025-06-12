@@ -14,6 +14,12 @@ from data_access_service.core.api import BaseAPI
 
 YEAR_MONTH_DAY = "%Y-%m-%d"
 
+# %z do not produce Z for +0000, %z just add the offset value which is fine
+# for client, however if you prefer to have Z the please replace the string
+# output manually
+DATE_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
+MIN_DATE = "1970-01-01T00:00:00Z"
+
 
 # parse all common format of date string into given format, such as "%Y-%m-%d"
 def parse_date(
@@ -38,6 +44,21 @@ def get_first_day_of_month(date: datetime) -> datetime:
 
 def next_month_first_day(date: datetime) -> datetime:
     return (date + relativedelta(months=1)).replace(day=1)
+
+
+def ensure_timezone(dt: datetime) -> datetime:
+    """
+    Check if datetime has timezone info; if not, assume UTC.
+
+    Args:
+        dt: Input datetime object
+
+    Returns:
+        Datetime object with timezone info (UTC if none was present)
+    """
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=pytz.UTC)
+    return dt
 
 
 def get_monthly_date_range_array_from_(
