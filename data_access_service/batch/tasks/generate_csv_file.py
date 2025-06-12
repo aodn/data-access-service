@@ -6,7 +6,7 @@ from typing import List, Dict
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSClient import AWSClient
 from data_access_service.models.data_file_factory import DataFileFactory
-from data_access_service.tasks.data_file_upload import (
+from data_access_service.batch.tasks.data_file_upload import (
     upload_all_files_in_folder_to_temp_s3,
 )
 from data_access_service.utils.date_time_utils import (

@@ -8,6 +8,8 @@ import tempfile
 from enum import Enum
 from dotenv import load_dotenv
 
+from data_access_service.batch.tasks.sync_aws_batch_configs import sync_aws_batch_configs
+
 
 class EnvType(Enum):
     DEV = "dev"
@@ -24,6 +26,7 @@ class Config:
 
     def __init__(self):
         load_dotenv()
+        sync_aws_batch_configs()
         self.config = None
         self.s3 = boto3.client("s3")
 

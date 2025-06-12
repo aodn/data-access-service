@@ -1,11 +1,15 @@
 import io
+import json
 import os
 import zipfile
+from pathlib import Path
 
 import boto3
+from deepdiff import DeepDiff
 
 from data_access_service import init_log
-from data_access_service.config.config import Config
+from data_access_service.config.config import Config, DevConfig
+from data_access_service.utils.json_utils import is_json_different
 
 
 class AWSClient:
@@ -76,13 +80,13 @@ class AWSClient:
             raise e
 
     def submit_a_job(
-        self,
-        job_name: str,
-        job_queue: str,
-        job_definition: str,
-        parameters: dict,
-        array_size: int = 1,
-        dependency_job_id: str = None,
+            self,
+            job_name: str,
+            job_queue: str,
+            job_definition: str,
+            parameters: dict,
+            array_size: int = 1,
+            dependency_job_id: str = None,
     ) -> str:
         """
         Submit a job to AWS Batch.
@@ -166,3 +170,68 @@ class AWSClient:
         except self.s3.exceptions.NoSuchKey:
             self.log.error(f"Object {s3_key} not found in bucket {bucket_name}.")
             return None
+
+    def get_job_definition_config(self, job_definition_name: str) -> dict:
+        """
+        Retrieve the JSON configuration of a job definition from AWS Batch.
+        Args:
+            job_definition_name: Name of the job definition to retrieve.
+
+        Returns:
+            The JSON configuration of the job definition.
+        """
+        try:
+            response = self.batch.describe_job_definitions(
+                jobDefinitionName=job_definition_name,
+                status="ACTIVE",
+            )
+            job_definitions = response.get("jobDefinitions", [])
+            if not job_definitions:
+                self.log.error(f"No active job definitions found for: {job_definition_name}")
+                return None
+            # Get the latest revision of the job definition
+            latest_job_definition = max(job_definitions, key=lambda x: x["revision"])
+            return latest_job_definition
+        except Exception as e:
+            self.log.error(f"Error retrieving job definition config: {e}")
+            raise e
+
+    def register_job_definition(self, job_definition_path: Path):
+
+        try:
+            with open(job_definition_path, 'r') as file:
+                job_definition_config = json.load(file)
+
+
+            # Register the job definition
+            if type(self.config) == DevConfig:
+                original_name = job_definition_config["jobDefinitionName"]
+                job_definition_config["jobDefinitionName"] = f"{original_name}-dev"
+
+            env_profile = os.getenv("PROFILE", "testing")
+            job_definition_config["containerProperties"]["environment"] = [
+                {"name": "PROFILE", "value": env_profile},
+            ]
+            response = self.batch.register_job_definition(**job_definition_config)
+
+            print(f"Job definition registered successfully: {response['jobDefinitionName']}")
+            return response
+        except Exception as e:
+            print(f"Error registering job definition: {e}")
+            raise e
+
+
+
+if __name__ == '__main__':
+    aws_client = AWSClient()
+    # Example usage
+    cloud_job_definition = aws_client.get_job_definition_config("generate-csv-data-file123123")
+    local_job_definition_path = Path(__file__).parent.parent / "config/batch/generatecsv/download_csv_job_definition.json"
+    if cloud_job_definition is None:
+        aws_client.register_job_definition(local_job_definition_path)
+
+    c = is_json_different(cloud_job_definition, Path(__file__).parent.parent / "config/batch/generatecsv/download_csv_job_definition.json", ["root['jobDefinitionArn']", "root['revision']", "root['status']", "root['containerOrchestrationType']"])
+    if c:
+        aws_client.register_job_definition(Path(__file__).parent.parent / "config/batch/generatecsv/download_csv_job_definition.json")
+    print("is different: ", c)
+
