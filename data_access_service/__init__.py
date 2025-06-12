@@ -11,8 +11,14 @@ def init_log(config: Config):
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
+    # If add new logger setting, please put in alphabetical order
+    logging.getLogger("aiobotocore").setLevel(logging.WARNING)
+    logging.getLogger("botocore").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("numcodecs").setLevel(logging.WARNING)
+    logging.getLogger("s3fs").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
 
     logger = logging.getLogger(__name__)
     return logger
