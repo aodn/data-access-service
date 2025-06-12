@@ -1,7 +1,7 @@
 aws:
   s3:
     bucket_name:
-      csv: data-file-csv
+      csv: aodn-cloud-optimized-subset-edge
   ses:
     sender_email: no.reply@aodn.org.au
   batch:
