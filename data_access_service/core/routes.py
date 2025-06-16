@@ -288,6 +288,7 @@ def _response_netcdf(filtered: pd.DataFrame, background_tasks: BackgroundTasks):
 async def _fetch_data(
     api_instance: API,
     uuid: str,
+    key: str,
     start_date: datetime,
     end_date: datetime,
     start_depth: float | None,
@@ -296,7 +297,11 @@ async def _fetch_data(
 ) -> AsyncGenerator[dict, None]:
     try:
         result: Optional[pd.DataFrame] = api_instance.get_dataset_data(
-            uuid=uuid, date_start=start_date, date_end=end_date, columns=columns
+            uuid=uuid,
+            key=key,
+            date_start=start_date,
+            date_end=end_date,
+            columns=columns,
         )
         # If we get nothing
         if result is None:
@@ -358,10 +363,7 @@ async def health_check(request: Request):
 @router.get("/metadata/{uuid}", dependencies=[Depends(api_key_auth)])
 async def get_mapped_metadata(uuid: Optional[str] = None, request: Request = None):
     api_instance = get_api_instance(request)
-    if uuid is not None:
-        return dataclasses.asdict(api_instance.get_mapped_meta_data(uuid))
-    else:
-        return list(api_instance.get_mapped_meta_data(None))
+    return api_instance.get_mapped_meta_data(uuid)
 
 
 @router.get("/metadata/{uuid}/raw", dependencies=[Depends(api_key_auth)])
@@ -378,9 +380,10 @@ async def get_notebook_url(uuid: str, request: Request):
     return i
 
 
-@router.get("/data/{uuid}/has_data", dependencies=[Depends(api_key_auth)])
+@router.get("/data/{uuid}/{key}/has_data", dependencies=[Depends(api_key_auth)])
 async def has_data(
     uuid: str,
+    key: str,
     request: Request,
     start_date: Optional[str] = MIN_DATE,
     end_date: Optional[str] = datetime.now(timezone.utc).strftime(DATE_FORMAT),
@@ -391,15 +394,15 @@ async def has_data(
     )
     start_date = _verify_datatime_param("start_date", start_date)
     end_date = _verify_datatime_param("end_date", end_date)
-    result = str(api_instance.has_data(uuid, start_date, end_date)).lower()
+    result = str(api_instance.has_data(uuid, key, start_date, end_date)).lower()
     return Response(result, media_type="application/json")
 
 
-@router.get("/data/{uuid}/temporal_extent", dependencies=[Depends(api_key_auth)])
-async def get_temporal_extent(uuid: str, request: Request):
+@router.get("/data/{uuid}/{key}/temporal_extent", dependencies=[Depends(api_key_auth)])
+async def get_temporal_extent(uuid: str, key: str, request: Request):
     api_instance = get_api_instance(request)
     try:
-        start_date, end_date = api_instance.get_temporal_extent(uuid)
+        start_date, end_date = api_instance.get_temporal_extent(uuid, key)
         result = [
             {
                 "start_date": ensure_timezone(start_date).strftime(DATE_FORMAT),
@@ -411,10 +414,11 @@ async def get_temporal_extent(uuid: str, request: Request):
         raise HTTPException(status_code=404, detail="Temporal extent not found")
 
 
-@router.get("/data/{uuid}", dependencies=[Depends(api_key_auth)])
+@router.get("/data/{uuid}/{key}", dependencies=[Depends(api_key_auth)])
 async def get_data(
     request: Request,
     uuid: str,
+    key: str,
     start_date: Optional[str] = Query(default=MIN_DATE),
     end_date: Optional[str] = Query(
         default=datetime.now(timezone.utc).strftime(DATE_FORMAT)
@@ -453,6 +457,7 @@ async def get_data(
             _fetch_data,
             api_instance,
             uuid,
+            key,
             start_date,
             end_date,
             start_depth,
@@ -461,7 +466,14 @@ async def get_data(
         )
     else:
         result = _fetch_data(
-            api_instance, uuid, start_date, end_date, start_depth, end_depth, columns
+            api_instance,
+            uuid,
+            key,
+            start_date,
+            end_date,
+            start_depth,
+            end_depth,
+            columns,
         )
 
         if f == "json":

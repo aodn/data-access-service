@@ -7,9 +7,13 @@ import logging
 
 from datetime import timedelta, datetime, timezone
 from io import BytesIO
-from typing import Optional
+from typing import Optional, Dict, Any
+
+import xarray
 from aodn_cloud_optimised import DataQuery
 from aodn_cloud_optimised.lib.config import get_notebook_url
+from pyarrow.parquet import ParquetDataset
+
 from data_access_service.core.descriptor import Depth, Descriptor
 
 log = logging.getLogger(__name__)
@@ -33,12 +37,19 @@ def gzip_compress(data):
 
 
 class BaseAPI:
-    def get_temporal_extent(self, uuid: str) -> (datetime, datetime):
+    def get_temporal_extent(self, uuid: str, key: str) -> (datetime, datetime):
+        pass
+
+    def get_mapped_meta_data(self, uuid: str | None) -> Dict[str, Descriptor]:
+        pass
+
+    def has_data(self, uuid: str, key: str, start_date: datetime, end_date: datetime):
         pass
 
     def get_dataset_data(
         self,
         uuid: str,
+        key: str,
         date_start: datetime = None,
         date_end: datetime = None,
         lat_min=None,
@@ -53,6 +64,57 @@ class BaseAPI:
     def get_api_status(self) -> bool:
         return False
 
+    @staticmethod
+    def zarr_to_dataframe(dataset: xarray.Dataset, columns=None):
+        """
+        Filter an xarray.Dataset to specific columns (variables) and convert to a Pandas DataFrame.
+
+        Args:
+            dataset: xarray.Dataset, potentially Zarr-backed.
+            columns: List of variable names to select (default: all variables).
+
+        Returns:
+            pandas.DataFrame: DataFrame containing the specified columns.
+
+        Raises:
+            RuntimeError: If the dataset is not initialized.
+            KeyError: If requested columns are not found.
+        """
+        # Check if dataset is initialized
+        if dataset is None:
+            raise RuntimeError("Dataset not initialized")
+
+        # Get available variables
+        available_columns = list(dataset.data_vars) + list(dataset.coords)
+
+        # Use all variables if none specified
+        columns = columns or available_columns
+
+        # Validate requested columns
+        if not all(col in available_columns for col in columns):
+            raise KeyError(f"Some columns {columns} not found in {available_columns}")
+
+        # Create a new Dataset with selected variables and promote coordinates if needed
+        selected_data = {}
+        for col in columns:
+            if col in dataset.data_vars:
+                selected_data[col] = dataset[col]
+            elif col in dataset.coords:
+                # Promote coordinate to data variable
+                selected_data[col] = dataset.coords[col]
+
+        # Select specified variables (returns a new Dataset)
+        filtered_dataset = xarray.Dataset(selected_data)
+
+        # Convert to Pandas DataFrame
+        df = filtered_dataset.to_pandas()
+
+        # Reset index if needed to include coordinates as columns
+        if isinstance(df.index, pd.MultiIndex) or df.index.name is not None:
+            df = df.reset_index()
+
+        return df[columns]
+
 
 class API(BaseAPI):
     def __init__(self):
@@ -60,8 +122,8 @@ class API(BaseAPI):
         self._is_ready = False
         log.info("Init parquet data query instance")
 
-        self._raw = dict()
-        self._cached = dict()
+        self._raw: Dict[str, Dict[str, Any]] = dict()
+        self._cached: Dict[str, Dict[str, Descriptor]] = dict()
 
         # UUID to metadata mapper
         self._instance = DataQuery.GetAodn()
@@ -100,25 +162,33 @@ class API(BaseAPI):
 
             if uuid is not None and uuid != "":
                 log.info("Adding uuid " + uuid + " name " + key)
-                self._raw[uuid] = data
-                self._cached[uuid] = Descriptor(
+                if uuid not in self._raw:
+                    self._raw[uuid] = dict()
+                # We can add directly because the dict() created
+                self._raw[uuid][key] = data
+
+                if uuid not in self._cached:
+                    self._cached[uuid] = dict()
+                # We can add directly because the dict() created
+                self._cached[uuid][key] = Descriptor(
                     uuid=uuid, dname=key, depth=_extract_depth(data)
                 )
             else:
                 log.error("Mising UUID entry for dataset " + key)
 
-    def get_mapped_meta_data(self, uuid: str | None):
+    def get_mapped_meta_data(self, uuid: str | None) -> Dict[str, Descriptor]:
         if uuid is not None:
             value = self._cached.get(uuid)
         else:
-            value = self._cached.values()
+            # Return all values
+            value = self._cached
 
         if value is not None:
             return value
         else:
-            return Descriptor(uuid=uuid)
+            return {"not_exist": Descriptor(uuid=uuid)}
 
-    def get_raw_meta_data(self, uuid: str) -> dict:
+    def get_raw_meta_data(self, uuid: str) -> Dict[str, Any]:
         value = self._raw.get(uuid)
 
         if value is not None:
@@ -130,30 +200,30 @@ class API(BaseAPI):
     Given a time range, we find if this uuid temporal cover the whole range
     """
 
-    def has_data(self, uuid: str, start_date: datetime, end_date: datetime):
-        md: Descriptor = self._cached.get(uuid)
-        if md is not None:
-            ds: DataQuery.DataSource = self._instance.get_dataset(md.dname)
+    def has_data(self, uuid: str, key: str, start_date: datetime, end_date: datetime):
+        md: Dict[str, Descriptor] = self._cached.get(uuid)
+        if md is not None and md[key] is not None:
+            ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
             te = ds.get_temporal_extent()
             return start_date <= te[0] and te[1] <= end_date
         return False
 
-    def get_temporal_extent(self, uuid: str) -> (datetime, datetime):
-        md: Descriptor = self._cached.get(uuid)
+    def get_temporal_extent(self, uuid: str, key: str) -> (datetime, datetime):
+        md: Dict[str, Descriptor] = self._cached.get(uuid)
         if md is not None:
-            ds: DataQuery.DataSource = self._instance.get_dataset(md.dname)
+            ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
             return ds.get_temporal_extent()
         else:
             return ()
 
     def map_column_names(
-        self, uuid: str, columns: list[str] | None
+        self, uuid: str, key: str, columns: list[str] | None
     ) -> list[str] | None:
 
         if columns is None:
             return columns
 
-        meta = self.get_raw_meta_data(uuid)
+        meta: Dict[str, Any] = self.get_raw_meta_data(uuid)[key]
         output = list()
         for column in columns:
             # You want TIME field but not in there, try map to something else
@@ -199,6 +269,7 @@ class API(BaseAPI):
     def get_dataset_data(
         self,
         uuid: str,
+        key: str,
         date_start: datetime = None,
         date_end: datetime = None,
         lat_min=None,
@@ -208,58 +279,84 @@ class API(BaseAPI):
         scalar_filter=None,
         columns: list[str] = None,
     ) -> Optional[pd.DataFrame]:
-        md: Descriptor = self._cached.get(uuid)
+        mds: Dict[str, Descriptor] = self._cached.get(uuid)
 
-        if md is not None:
-            ds: DataQuery.DataSource = self._instance.get_dataset(md.dname)
+        if mds is not None:
+            md = mds[key]
+            if md is not None:
+                ds: DataQuery.DataSource = self._instance.get_dataset(md.dname)
 
-            # Default get 10 days of data
-            if date_start is None:
-                date_start = datetime.now(timezone.utc) - timedelta(days=10)
-            else:
-                if date_start.tzinfo is None:
-                    date_start = pd.to_datetime(date_start).tz_localize(timezone.utc)
+                # Default get 10 days of data
+                if date_start is None:
+                    date_start = datetime.now(timezone.utc) - timedelta(days=10)
                 else:
-                    date_start = pd.to_datetime(date_start).tz_convert(timezone.utc)
+                    if date_start.tzinfo is None:
+                        date_start = pd.to_datetime(date_start).tz_localize(
+                            timezone.utc
+                        )
+                    else:
+                        date_start = pd.to_datetime(date_start).tz_convert(timezone.utc)
 
-            if date_end is None:
-                date_end = datetime.now(timezone.utc)
-            else:
-                if date_end.tzinfo is None:
-                    date_end = pd.to_datetime(date_end).tz_localize(timezone.utc)
+                if date_end is None:
+                    date_end = datetime.now(timezone.utc)
                 else:
-                    date_end = pd.to_datetime(date_end).tz_convert(timezone.utc)
+                    if date_end.tzinfo is None:
+                        date_end = pd.to_datetime(date_end).tz_localize(timezone.utc)
+                    else:
+                        date_end = pd.to_datetime(date_end).tz_convert(timezone.utc)
 
-            # The get_data call the pyarrow and compare only works with non timezone datetime
-            # now make sure the timezone is correctly convert to utc then remove it.
-            # As get_date datetime are all utc, but the pyarrow do not support compare of datetime vs
-            # datetime with timezone.
-            if date_start.tzinfo is not None:
-                date_start = date_start.astimezone(timezone.utc).replace(tzinfo=None)
+                # The get_data call the pyarrow and compare only works with non timezone datetime
+                # now make sure the timezone is correctly convert to utc then remove it.
+                # As get_date datetime are all utc, but the pyarrow do not support compare of datetime vs
+                # datetime with timezone.
+                if date_start.tzinfo is not None:
+                    date_start = date_start.astimezone(timezone.utc).replace(
+                        tzinfo=None
+                    )
 
-            if date_end.tzinfo is not None:
-                date_end = date_end.astimezone(timezone.utc).replace(tzinfo=None)
+                if date_end.tzinfo is not None:
+                    date_end = date_end.astimezone(timezone.utc).replace(tzinfo=None)
 
-            try:
-                return ds.get_data(
-                    str(date_start),
-                    str(date_end),
-                    lat_min,
-                    lat_max,
-                    lon_min,
-                    lon_max,
-                    scalar_filter,
-                    self.map_column_names(uuid, columns),
-                )
-            except ValueError as e:
-                log.error(f"Error when query ds.get_data: {e}")
-                raise e
-            except Exception as v:
-                log.error(f"Error when query ds.get_data: {v}")
-                raise
+                try:
+                    if isinstance(ds, ParquetDataset):
+                        return ds.get_data(
+                            str(date_start),
+                            str(date_end),
+                            lat_min,
+                            lat_max,
+                            lon_min,
+                            lon_max,
+                            scalar_filter,
+                            self.map_column_names(uuid, key, columns),
+                        )
+                    else:
+                        # Lib slightly different for Zar file
+                        result = ds.get_data(
+                            str(date_start),
+                            str(date_end),
+                            lat_min,
+                            lat_max,
+                            lon_min,
+                            lon_max,
+                            scalar_filter,
+                        )
+
+                        return API.zarr_to_dataframe(
+                            result, self.map_column_names(uuid, key, columns)
+                        )
+
+                except ValueError as e:
+                    log.error(f"Error when query ds.get_data: {e}")
+                    raise e
+                except Exception as v:
+                    log.error(f"Error when query ds.get_data: {v}")
+                    raise
+            else:
+                return None
         else:
             return None
 
+    # TODO potential issue with UUID to dataset not 1 to 1
     @staticmethod
     def get_notebook_from(uuid: str) -> str:
         return get_notebook_url(uuid)
