@@ -92,9 +92,9 @@ def get_monthly_date_range_array_from_(
     # Create result list
     return [
         {
-            "start_date": group["date"].min().to_pydatetime(),
+            "start_date": group["date"].min().round("us").to_pydatetime(),
             "end_date": datetime.combine(
-                group["date"].max().to_pydatetime(), time(23, 59, 59)
+                group["date"].max().round("us").to_pydatetime(), time(23, 59, 59)
             ),
         }
         for _, group in monthly_groups

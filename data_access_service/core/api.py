@@ -135,7 +135,7 @@ class API(BaseAPI):
         loop = asyncio.get_event_loop()
         with ThreadPoolExecutor() as executor:
             # Schedule the blocking calls in a thread
-            await loop.run_in_executor(executor, self.initialize_metadata)
+            await loop.run_in_executor(executor, lambda: self.initialize_metadata())
 
     def initialize_metadata(self):
         """Helper method to run blocking initialization tasks."""

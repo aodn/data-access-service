@@ -13,12 +13,15 @@ from data_access_service.utils.date_time_utils import (
     parse_date,
 )
 
+config = Config.get_config()
+logger = init_log(config)
+
 
 def init(job_id_of_init, parameters):
 
-    config = Config.get_config()
     month_count_per_job = config.get_month_count_per_job()
     uuid = parameters[Parameters.UUID.value]
+    key = parameters[Parameters.KEY.value]
     start_date_str = parameters[Parameters.START_DATE.value]
     end_date_str = parameters[Parameters.END_DATE.value]
 
@@ -26,6 +29,7 @@ def init(job_id_of_init, parameters):
     start_date, end_date = trim_date_range(
         api=API(),
         uuid=uuid,
+        key=key,
         requested_start_date=requested_start_date,
         requested_end_date=requested_end_date,
     )
@@ -69,7 +73,6 @@ def init(job_id_of_init, parameters):
 
 
 def prepare_data(parameters, job_index):
-    logger = init_log(Config.get_config())
     # get params
     uuid = parameters[Parameters.UUID.value]
     # An uuid can host multiple data file, so we need a key
