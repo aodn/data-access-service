@@ -7,3 +7,8 @@ aws:
   batch:
     job_queue: generate-csv-data-file
     job_definition: generate-csv-data-file
+    # for different env, some fields may be different.
+    job_definition_distinct_fields:
+      environment:
+        - name: PROFILE
+          value: staging
