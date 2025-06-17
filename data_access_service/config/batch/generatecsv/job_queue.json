@@ -1,0 +1,12 @@
+{
+  "jobQueue": "generate-csv-data-file",
+  "state": "ENABLED",
+  "priority": 1,
+  "computeEnvironmentOrder": [
+    {
+      "order": 1,
+      "computeEnvironment": "arn:aws:batch:ap-southeast-2:704910415367:compute-environment/generate-csv-data-file"
+    }
+  ],
+  "jobStateTimeLimitActions": []
+}

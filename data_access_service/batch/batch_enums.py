@@ -15,3 +15,4 @@ class AWSResource(Enum):
     S3 = "s3"
     SES = "ses"
     BATCH = "batch"
+

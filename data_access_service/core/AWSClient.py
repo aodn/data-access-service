@@ -171,7 +171,7 @@ class AWSClient:
             self.log.error(f"Object {s3_key} not found in bucket {bucket_name}.")
             return None
 
-    def get_job_definition_config(self, job_definition_name: str) -> dict:
+    def get_batch_job_definition_config(self, job_definition_name: str) -> dict:
         """
         Retrieve the JSON configuration of a job definition from AWS Batch.
         Args:
@@ -188,7 +188,7 @@ class AWSClient:
             job_definitions = response.get("jobDefinitions", [])
             if not job_definitions:
                 self.log.error(f"No active job definitions found for: {job_definition_name}")
-                return None
+                return {}
             # Get the latest revision of the job definition
             latest_job_definition = max(job_definitions, key=lambda x: x["revision"])
             return latest_job_definition
@@ -196,42 +196,85 @@ class AWSClient:
             self.log.error(f"Error retrieving job definition config: {e}")
             raise e
 
-    def register_job_definition(self, job_definition_path: Path):
+    def get_batch_job_queue_config(self, job_queue_name: str) -> dict:
+        """
+        Retrieve the JSON configuration of a job queue from AWS Batch.
+        Args:
+            job_queue_name: Name of the job queue to retrieve.
 
+        Returns:
+            The JSON configuration of the job queue.
+        """
         try:
-            with open(job_definition_path, 'r') as file:
-                job_definition_config = json.load(file)
-
-
-            # Register the job definition
-            if type(self.config) == DevConfig:
-                original_name = job_definition_config["jobDefinitionName"]
-                job_definition_config["jobDefinitionName"] = f"{original_name}-dev"
-
-            env_profile = os.getenv("PROFILE", "testing")
-            job_definition_config["containerProperties"]["environment"] = [
-                {"name": "PROFILE", "value": env_profile},
-            ]
-            response = self.batch.register_job_definition(**job_definition_config)
-
-            print(f"Job definition registered successfully: {response['jobDefinitionName']}")
-            return response
+            response = self.batch.describe_job_queues(jobQueues=[job_queue_name])
+            job_queues = response.get("jobQueues", [])
+            if not job_queues:
+                self.log.error(f"No job queues found for: {job_queue_name}")
+                return {}
+            for job_queue in job_queues:
+                if job_queue["jobQueueName"] == job_queue_name:
+                    return job_queue
+            self.log.warning(f"Job queue {job_queue_name} not found in the response.")
+            return {}  # Return the first (and should be only) job queue
         except Exception as e:
-            print(f"Error registering job definition: {e}")
+            self.log.error(f"Error retrieving job queue config: {e}")
+            raise e
+
+    def get_batch_compute_environment_config(self, compute_environment_name: str) -> dict:
+        """
+        Retrieve the JSON configuration of a compute environment from AWS Batch.
+        Args:
+            compute_environment_name: Name of the compute environment to retrieve.
+
+        Returns:
+            The JSON configuration of the compute environment.
+        """
+        try:
+            response = self.batch.describe_compute_environments(
+                computeEnvironments=[compute_environment_name]
+            )
+            compute_environments = response.get("computeEnvironments", [])
+            if not compute_environments:
+                self.log.error(f"No compute environments found for: {compute_environment_name}")
+                return {}
+            for env in compute_environments:
+                if env["computeEnvironmentName"] == compute_environment_name:
+                    return env
+            self.log.warning(f"Compute environment {compute_environment_name} not found in the response.")
+            return {}  # Return the first (and should be only) compute environment
+        except Exception as e:
+            self.log.error(f"Error retrieving compute environment config: {e}")
             raise e
 
 
 
-if __name__ == '__main__':
-    aws_client = AWSClient()
-    # Example usage
-    cloud_job_definition = aws_client.get_job_definition_config("generate-csv-data-file123123")
-    local_job_definition_path = Path(__file__).parent.parent / "config/batch/generatecsv/download_csv_job_definition.json"
-    if cloud_job_definition is None:
-        aws_client.register_job_definition(local_job_definition_path)
+    def does_compute_environment_need_update(self, compute_environment_name: str, local_compute_environment: dict) -> bool:
+        remote_compute_environment = self.get_batch_compute_environment_config(compute_environment_name)
+        for key, value in local_compute_environment.items():
+            # When updating a compute environment, we need to use "computeEnvironment" to instead "computeEnvironmentName"
+            if key == "computeEnvironment" and value != remote_compute_environment["computeEnvironmentName"]:
+                raise ValueError(
+                    f"Compute environment name mismatch: local {value} vs remote {remote_compute_environment['computeEnvironmentName']}"
+                )
+            if value != remote_compute_environment.get(key):
+                self.log.info(f"Compute environment {compute_environment_name} needs update")
+                return True
 
-    c = is_json_different(cloud_job_definition, Path(__file__).parent.parent / "config/batch/generatecsv/download_csv_job_definition.json", ["root['jobDefinitionArn']", "root['revision']", "root['status']", "root['containerOrchestrationType']"])
-    if c:
-        aws_client.register_job_definition(Path(__file__).parent.parent / "config/batch/generatecsv/download_csv_job_definition.json")
-    print("is different: ", c)
+        return False
+
+
+    def register_batch_job_definition(self, job_definition: dict):
+        response = self.batch.register_job_definition(**job_definition)
+        self.log.info(f"Job definition registered successfully: {response['jobDefinitionName']}")
+        return response
+
+    def update_batch_job_queue(self, job_queue: dict):
+        response = self.batch.update_job_queue(**job_queue)
+        self.log.info(f"Job queue updated successfully: {response['jobQueueName']}")
+        return response
+
+    def update_batch_compute_environment(self, compute_environment: dict):
+        response = self.batch.update_compute_environment(**compute_environment)
+        self.log.info(f"Compute environment updated successfully: {response['computeEnvironmentName']}")
+        return response
 

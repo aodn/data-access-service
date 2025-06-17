@@ -5,18 +5,9 @@ import yaml
 import boto3
 import os
 import tempfile
-from enum import Enum
 from dotenv import load_dotenv
 
-from data_access_service.batch.tasks.sync_aws_batch_configs import sync_aws_batch_configs
-
-
-class EnvType(Enum):
-    DEV = "dev"
-    TESTING = "testing"
-    EDGE = "edge"
-    STAGING = "staging"
-    PRODUCTION = "prod"
+from data_access_service.config.env_type import EnvType
 
 
 class Config:
@@ -26,7 +17,6 @@ class Config:
 
     def __init__(self):
         load_dotenv()
-        sync_aws_batch_configs()
         self.config = None
         self.s3 = boto3.client("s3")
 
@@ -65,6 +55,9 @@ class Config:
     def get_temp_folder(job_id: str) -> str:
         return tempfile.mkdtemp(prefix=job_id)
 
+
+
+
     def get_s3_client(self):
         return self.s3
 
@@ -88,6 +81,27 @@ class Config:
             if self.config is not None
             else None
         )
+
+    def get_job_queue_name(self):
+        return (
+            self.config["aws"]["batch"]["job_queue"]
+            if self.config is not None
+            else None
+        )
+
+    def get_compute_environment_name(self):
+        return (
+            self.config["aws"]["batch"]["compute_environment"]
+            if self.config is not None
+            else None
+        )
+
+    def get_job_definition_distinct_fields(self):
+        """
+        Returns the distinct fields that should be ignored when comparing job definitions.
+        This is used to determine if a job definition needs to be updated.
+        """
+        return self.config["aws"]["batch"].get("job_definition_distinct_fields", [])
 
     @staticmethod
     def get_s3_temp_folder_name(master_job_id: str):

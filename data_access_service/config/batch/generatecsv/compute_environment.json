@@ -1,0 +1,19 @@
+{
+  "computeEnvironment": "generate-csv-data-file",
+  "state": "ENABLED",
+  "computeResources": {
+    "maxvCpus": 255,
+    "instanceTypes": [],
+    "subnets": [
+      "subnet-0f01c003154ba57de",
+      "subnet-059e22e682c386b90",
+      "subnet-002c9ffa5f9e49020"
+    ],
+    "securityGroupIds": [
+      "sg-00e1102b0f0f95136"
+    ],
+    "tags": {},
+    "ec2Configuration": []
+  },
+  "serviceRole": "arn:aws:iam::704910415367:role/aws-service-role/batch.amazonaws.com/AWSServiceRoleForBatch"
+}

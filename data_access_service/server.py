@@ -8,6 +8,8 @@ from data_access_service.core.api import API
 
 from data_access_service.core.routes import router as api_router
 
+from data_access_service.batch.tasks.sync_aws_batch_configs import sync_aws_batch_configs
+
 
 def api_setup(application: FastAPI):
     """
@@ -30,6 +32,7 @@ def api_setup(application: FastAPI):
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    sync_aws_batch_configs()
     api_setup(application)
     yield
 

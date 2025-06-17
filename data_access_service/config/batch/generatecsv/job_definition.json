@@ -52,13 +52,13 @@
       "cpuArchitecture": "X86_64"
     }
   },
-  "jobDefinitionName": "generate-csv-data-file2",
+  "jobDefinitionName": "generate-csv-data-file",
   "parameters": {},
   "platformCapabilities": [
     "FARGATE"
   ],
   "retryStrategy": {
-    "attempts": 1,
+    "attempts": 5,
     "evaluateOnExit": []
   },
   "tags": {},
