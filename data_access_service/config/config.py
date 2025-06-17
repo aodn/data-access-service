@@ -55,9 +55,6 @@ class Config:
     def get_temp_folder(job_id: str) -> str:
         return tempfile.mkdtemp(prefix=job_id)
 
-
-
-
     def get_s3_client(self):
         return self.s3
 

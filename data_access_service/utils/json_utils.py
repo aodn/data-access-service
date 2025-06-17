@@ -8,11 +8,11 @@ def is_json_different(json_1: dict, json_2: dict, ignored_files: list[str]) -> b
     differences = DeepDiff(json_1, json_2, ignore_order=True)
 
     # Filter out ignored fields
-    for addedItem in differences.get( "dictionary_item_added", []):
-        if addedItem not in ignored_files: # new field added
+    for addedItem in differences.get("dictionary_item_added", []):
+        if addedItem not in ignored_files:  # new field added
             return True
 
-    for removedItem in differences.get( "dictionary_item_removed", []):
+    for removedItem in differences.get("dictionary_item_removed", []):
         if removedItem not in ignored_files:
             return True
 
@@ -22,8 +22,8 @@ def is_json_different(json_1: dict, json_2: dict, ignored_files: list[str]) -> b
 
     return False
 
-def has_json_value_changed(json_data: dict, key: str, new_value: any) -> bool:
 
+def has_json_value_changed(json_data: dict, key: str, new_value: any) -> bool:
     """
     Check if a specific key's value in a JSON-like dictionary has changed.
 
@@ -36,6 +36,7 @@ def has_json_value_changed(json_data: dict, key: str, new_value: any) -> bool:
         bool: True if the value has changed, False otherwise.
     """
     return json_data.get(key) != new_value
+
 
 def replace_json_values(json_data: dict, replacements: dict) -> dict:
     """

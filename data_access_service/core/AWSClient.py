@@ -80,13 +80,13 @@ class AWSClient:
             raise e
 
     def submit_a_job(
-            self,
-            job_name: str,
-            job_queue: str,
-            job_definition: str,
-            parameters: dict,
-            array_size: int = 1,
-            dependency_job_id: str = None,
+        self,
+        job_name: str,
+        job_queue: str,
+        job_definition: str,
+        parameters: dict,
+        array_size: int = 1,
+        dependency_job_id: str = None,
     ) -> str:
         """
         Submit a job to AWS Batch.
@@ -187,7 +187,9 @@ class AWSClient:
             )
             job_definitions = response.get("jobDefinitions", [])
             if not job_definitions:
-                self.log.error(f"No active job definitions found for: {job_definition_name}")
+                self.log.error(
+                    f"No active job definitions found for: {job_definition_name}"
+                )
                 return {}
             # Get the latest revision of the job definition
             latest_job_definition = max(job_definitions, key=lambda x: x["revision"])
@@ -220,7 +222,9 @@ class AWSClient:
             self.log.error(f"Error retrieving job queue config: {e}")
             raise e
 
-    def get_batch_compute_environment_config(self, compute_environment_name: str) -> dict:
+    def get_batch_compute_environment_config(
+        self, compute_environment_name: str
+    ) -> dict:
         """
         Retrieve the JSON configuration of a compute environment from AWS Batch.
         Args:
@@ -235,37 +239,49 @@ class AWSClient:
             )
             compute_environments = response.get("computeEnvironments", [])
             if not compute_environments:
-                self.log.error(f"No compute environments found for: {compute_environment_name}")
+                self.log.error(
+                    f"No compute environments found for: {compute_environment_name}"
+                )
                 return {}
             for env in compute_environments:
                 if env["computeEnvironmentName"] == compute_environment_name:
                     return env
-            self.log.warning(f"Compute environment {compute_environment_name} not found in the response.")
+            self.log.warning(
+                f"Compute environment {compute_environment_name} not found in the response."
+            )
             return {}  # Return the first (and should be only) compute environment
         except Exception as e:
             self.log.error(f"Error retrieving compute environment config: {e}")
             raise e
 
-
-
-    def does_compute_environment_need_update(self, compute_environment_name: str, local_compute_environment: dict) -> bool:
-        remote_compute_environment = self.get_batch_compute_environment_config(compute_environment_name)
+    def does_compute_environment_need_update(
+        self, compute_environment_name: str, local_compute_environment: dict
+    ) -> bool:
+        remote_compute_environment = self.get_batch_compute_environment_config(
+            compute_environment_name
+        )
         for key, value in local_compute_environment.items():
             # When updating a compute environment, we need to use "computeEnvironment" to instead "computeEnvironmentName"
-            if key == "computeEnvironment" and value != remote_compute_environment["computeEnvironmentName"]:
+            if (
+                key == "computeEnvironment"
+                and value != remote_compute_environment["computeEnvironmentName"]
+            ):
                 raise ValueError(
                     f"Compute environment name mismatch: local {value} vs remote {remote_compute_environment['computeEnvironmentName']}"
                 )
             if value != remote_compute_environment.get(key):
-                self.log.info(f"Compute environment {compute_environment_name} needs update")
+                self.log.info(
+                    f"Compute environment {compute_environment_name} needs update"
+                )
                 return True
 
         return False
 
-
     def register_batch_job_definition(self, job_definition: dict):
         response = self.batch.register_job_definition(**job_definition)
-        self.log.info(f"Job definition registered successfully: {response['jobDefinitionName']}")
+        self.log.info(
+            f"Job definition registered successfully: {response['jobDefinitionName']}"
+        )
         return response
 
     def update_batch_job_queue(self, job_queue: dict):
@@ -275,6 +291,7 @@ class AWSClient:
 
     def update_batch_compute_environment(self, compute_environment: dict):
         response = self.batch.update_compute_environment(**compute_environment)
-        self.log.info(f"Compute environment updated successfully: {response['computeEnvironmentName']}")
+        self.log.info(
+            f"Compute environment updated successfully: {response['computeEnvironmentName']}"
+        )
         return response
-
