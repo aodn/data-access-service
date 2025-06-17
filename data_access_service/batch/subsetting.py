@@ -81,20 +81,14 @@ def prepare_data(parameters, job_index):
     logger.info(f"UUID:{uuid}")
     logger.info(f"Multi Polygon:{multi_polygon}")
 
-    if (
-        job_index is None
-    ):  # if the date range is small, only 1 job is created, so no index is provided
-        raw_start_date = parameters[Parameters.START_DATE.value]
-        raw_end_date = parameters[Parameters.END_DATE.value]
-        start_date, end_date = supply_day(raw_start_date, raw_end_date)
-    elif job_index > -1:
-        date_range = date_ranges_dict[str(job_index)]
-        start_date = parse_date(date_range[0])
-        end_date = parse_date(date_range[1])
-        logger.info(f"Start Date:{start_date}")
-        logger.info(f"End Date:{end_date}")
-    else:
-        raise ValueError(f"Invalid job index: {job_index}")
+    if job_index is None:
+        job_index = 0
+
+    date_range = date_ranges_dict[str(job_index)]
+    start_date = parse_date(date_range[0])
+    end_date = parse_date(date_range[1])
+    logger.info(f"Start Date:{start_date}")
+    logger.info(f"End Date:{end_date}")
 
     process_data_files(master_job_id, uuid, start_date, end_date, multi_polygon)
 

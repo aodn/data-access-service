@@ -1,7 +1,7 @@
 aws:
   s3:
     bucket_name:
-      csv: portal-staging-subsetting-data-files
+      csv: aodn-cloud-optimized-subset-staging
   ses:
     sender_email: no.reply@aodn.org.au
   batch:

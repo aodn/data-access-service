@@ -35,13 +35,16 @@ from pydantic import BaseModel
 from dateutil import parser
 from http import HTTPStatus
 
+from data_access_service.utils.date_time_utils import (
+    ensure_timezone,
+    MIN_DATE,
+    DATE_FORMAT,
+)
 from data_access_service.utils.sse_wrapper import sse_wrapper
 
 router = APIRouter(prefix=Config.BASE_URL)
 
 RECORD_PER_PARTITION: Optional[int] = 1000
-DATE_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
-MIN_DATE = "1970-01-01T00:00:00Z"
 
 logger = init_log(Config.get_config())
 
@@ -399,8 +402,8 @@ async def get_temporal_extent(uuid: str, request: Request):
         start_date, end_date = api_instance.get_temporal_extent(uuid)
         result = [
             {
-                "start_date": start_date.strftime(DATE_FORMAT),
-                "end_date": end_date.strftime(DATE_FORMAT),
+                "start_date": ensure_timezone(start_date).strftime(DATE_FORMAT),
+                "end_date": ensure_timezone(end_date).strftime(DATE_FORMAT),
             }
         ]
         return Response(content=json.dumps(result), media_type="application/json")

@@ -4,6 +4,9 @@ import pandas as pd
 
 from datetime import datetime
 from unittest.mock import MagicMock
+
+import pytz
+
 from data_access_service.core.api import BaseAPI
 from data_access_service.utils.date_time_utils import (
     parse_date,
@@ -14,6 +17,7 @@ from data_access_service.utils.date_time_utils import (
     get_boundary_of_year_month,
     transfer_date_range_into_yearmonth,
     split_yearmonths_into_dict,
+    ensure_timezone,
 )
 
 
@@ -567,3 +571,39 @@ class TestDateTimeUtils(unittest.TestCase):
         }
         result = split_yearmonths_into_dict(yearmonths, 3)
         self.assertEqual(result, expected_dict)
+
+    def test_datetime_without_timezone(self):
+        # Test case: datetime without timezone should be assigned UTC
+        dt = datetime(2025, 6, 12, 8, 34)
+        result = ensure_timezone(dt)
+        self.assertEqual(result.tzinfo, pytz.UTC)
+        self.assertEqual(result, datetime(2025, 6, 12, 8, 34, tzinfo=pytz.UTC))
+
+    def test_datetime_with_timezone(self):
+        # Test case: datetime with timezone should remain unchanged
+        tz = pytz.timezone("US/Pacific")
+        dt = datetime(2025, 6, 12, 8, 34, tzinfo=tz)
+        result = ensure_timezone(dt)
+        self.assertEqual(result.tzinfo, tz)
+        self.assertEqual(result, dt)
+
+    def test_datetime_with_different_timezone(self):
+        # Test case: datetime with non-UTC timezone should remain unchanged
+        tz = pytz.timezone("Asia/Tokyo")
+        dt = datetime(2025, 6, 12, 8, 34, tzinfo=tz)
+        result = ensure_timezone(dt)
+        self.assertEqual(result.tzinfo, tz)
+        self.assertEqual(result, dt)
+
+    def test_datetime_preservation(self):
+        # Test case: ensure original datetime components are preserved
+        dt = datetime(2025, 6, 12, 8, 34, 56, 123456)
+        result = ensure_timezone(dt)
+        self.assertEqual(result.year, 2025)
+        self.assertEqual(result.month, 6)
+        self.assertEqual(result.day, 12)
+        self.assertEqual(result.hour, 8)
+        self.assertEqual(result.minute, 34)
+        self.assertEqual(result.second, 56)
+        self.assertEqual(result.microsecond, 123456)
+        self.assertEqual(result.tzinfo, pytz.UTC)
