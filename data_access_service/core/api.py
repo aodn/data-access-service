@@ -11,8 +11,8 @@ from typing import Optional, Dict, Any
 
 import xarray
 from aodn_cloud_optimised import DataQuery
+from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, ZarrDataSource
 from aodn_cloud_optimised.lib.config import get_notebook_url
-from pyarrow.parquet import ParquetDataset
 
 from data_access_service.core.descriptor import Depth, Descriptor
 
@@ -281,7 +281,7 @@ class API(BaseAPI):
     ) -> Optional[pd.DataFrame]:
         mds: Dict[str, Descriptor] = self._cached.get(uuid)
 
-        if mds is not None:
+        if mds is not None and key in mds:
             md = mds[key]
             if md is not None:
                 ds: DataQuery.DataSource = self._instance.get_dataset(md.dname)
@@ -318,7 +318,7 @@ class API(BaseAPI):
                     date_end = date_end.astimezone(timezone.utc).replace(tzinfo=None)
 
                 try:
-                    if isinstance(ds, ParquetDataset):
+                    if isinstance(ds, ParquetDataSource):
                         return ds.get_data(
                             str(date_start),
                             str(date_end),
@@ -329,7 +329,7 @@ class API(BaseAPI):
                             scalar_filter,
                             self.map_column_names(uuid, key, columns),
                         )
-                    else:
+                    elif isinstance(ds, ZarrDataSource):
                         # Lib slightly different for Zar file
                         result = ds.get_data(
                             str(date_start),

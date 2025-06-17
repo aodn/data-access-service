@@ -48,15 +48,20 @@ class TestApiWithS3(TestWithS3):
                 "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             }
 
+            target = (
+                config.BASE_URL
+                + "/data/541d4f15-122a-443d-ab4e-2b5feb08d6a0/animal_acoustic_tracking_delayed_qc.parquet"
+            )
+
             response = client.get(
-                config.BASE_URL + "/data/541d4f15-122a-443d-ab4e-2b5feb08d6a0",
+                target,
                 params=param,
             )
             # We have not set key so forbidden
             assert response.status_code == HTTP_403_FORBIDDEN
 
             response = client.get(
-                config.BASE_URL + "/data/541d4f15-122a-443d-ab4e-2b5feb08d6a0",
+                target,
                 params=param,
                 headers={"X-API-KEY": "test"},
             )
@@ -65,7 +70,7 @@ class TestApiWithS3(TestWithS3):
             assert response.status_code == HTTP_401_UNAUTHORIZED
 
             response = client.get(
-                config.BASE_URL + "/data/541d4f15-122a-443d-ab4e-2b5feb08d6a0",
+                target,
                 params=param,
                 headers={"X-API-Key": config.get_api_key()},
             )
@@ -106,7 +111,8 @@ class TestApiWithS3(TestWithS3):
             }
 
             response = client.get(
-                config.BASE_URL + "/data/7e13b5f3-4a70-4e31-9e95-335efa491c5c",
+                config.BASE_URL
+                + "/data/7e13b5f3-4a70-4e31-9e95-335efa491c5c/mooring_temperature_logger_delayed_qc.parquet",
                 params=param,
                 headers={"X-API-Key": config.get_api_key()},
             )

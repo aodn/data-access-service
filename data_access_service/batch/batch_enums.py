@@ -3,6 +3,7 @@ from enum import Enum
 
 class Parameters(Enum):
     UUID = "uuid"
+    KEY = "key"
     START_DATE = "start_date"
     END_DATE = "end_date"
     MULTI_POLYGON = "multi_polygon"
