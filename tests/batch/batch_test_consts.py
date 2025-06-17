@@ -7,6 +7,7 @@ INIT_JOB_ID = "init-job-id"
 
 INIT_PARAMETERS = {
     Parameters.UUID.value: "af5d0ff9-bb9c-4b7c-a63c-854a630b6984",
+    Parameters.KEY.value: "autonomous_underwater_vehicle.parquet",
     Parameters.START_DATE.value: "02-2010",
     Parameters.END_DATE.value: "04-2011",
     Parameters.MULTI_POLYGON.value: '{"type":"MultiPolygon","coordinates":[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}',
