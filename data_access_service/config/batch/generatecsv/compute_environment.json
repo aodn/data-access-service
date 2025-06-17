@@ -2,8 +2,7 @@
   "computeEnvironment": "generate-csv-data-file",
   "state": "ENABLED",
   "computeResources": {
-    "maxvCpus": 255,
-    "instanceTypes": [],
+    "maxvCpus": 32,
     "subnets": [
       "subnet-0f01c003154ba57de",
       "subnet-059e22e682c386b90",

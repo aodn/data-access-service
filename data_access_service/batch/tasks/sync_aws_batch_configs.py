@@ -53,7 +53,7 @@ def sync_aws_batch_job_queue(config: Config, aws: AWSClient, log: Logger):
 
     # if is_json_different(json_1=cloud_job_queue, json_2=local_job_queue, ignored_files=batch_json_settings_ignored_field):
     if does_job_queue_need_update(cloud_job_queue=cloud_job_queue, local_job_queue=local_job_queue, log=log):
-        log.info("Cloud job queue is different from local. Registering new job queue: " + job_queue_name)
+        log.info("Cloud job queue is different from local. Updating job queue: " + job_queue_name)
         aws.update_batch_job_queue(local_job_queue)
         return
 
@@ -71,7 +71,7 @@ def sync_aws_batch_compute_environment(config: Config, aws: AWSClient, log: Logg
 
     # if is_json_different(json_1=cloud_compute_environment, json_2=local_compute_environment, ignored_files=batch_json_settings_ignored_field):
     if does_compute_environment_need_update(cloud_compute_environment=cloud_compute_environment, local_compute_environment=local_compute_environment, log=log):
-        log.info("Cloud compute environment is different from local. Registering new compute environment: " + compute_environment_name)
+        log.info("Cloud compute environment is different from local. Updating compute environment: " + compute_environment_name)
         aws.update_batch_compute_environment(local_compute_environment)
         return
 
@@ -89,11 +89,16 @@ def does_job_queue_need_update(cloud_job_queue: dict, local_job_queue: dict, log
     for key, value in local_job_queue.items():
 
         # When updating a job queue, we need to use "jobQueue" to instead "jobQueueName"
-        if key == "jobQueue" and value != cloud_job_queue["jobQueueName"]:
-            raise ValueError(
-                f"Job queue name mismatch: local {value} vs remote {cloud_job_queue['jobQueueName']}"
-            )
-        if value != cloud_job_queue.get(key):
+        if key == "jobQueue":
+            if value != cloud_job_queue["jobQueueName"]:
+                raise ValueError(
+                    f"Job queue name mismatch: local {value} vs remote {cloud_job_queue['jobQueueName']}"
+                )
+        elif isinstance(value, dict):
+            if is_json_different(value, cloud_job_queue.get(key, {}), ignored_files=[]):
+                log.info(f"Compute environment needs update")
+                return True
+        elif value != cloud_job_queue.get(key):
             log.info(f"Job queue needs update")
             return True
 
@@ -105,11 +110,16 @@ def does_compute_environment_need_update(cloud_compute_environment: dict, local_
 
 
         # When updating a compute environment, we need to use "computeEnvironment" to instead "computeEnvironmentName"
-        if key == "computeEnvironment" and value != cloud_compute_environment["computeEnvironmentName"]:
-            raise ValueError(
-                f"Compute environment name mismatch: local {value} vs remote {cloud_compute_environment['computeEnvironmentName']}"
-            )
-        if value != cloud_compute_environment.get(key):
+        if key == "computeEnvironment":
+            if value != cloud_compute_environment["computeEnvironmentName"]:
+                raise ValueError(
+                    f"Compute environment name mismatch: local {value} vs remote {cloud_compute_environment['computeEnvironmentName']}"
+                )
+        elif isinstance(value, dict):
+            if is_json_different(value, cloud_compute_environment.get(key, {}), ignored_files=["root['type']"]):
+                log.info(f"Compute environment needs update")
+                return True
+        elif value != cloud_compute_environment.get(key):
             log.info(f"Compute environment needs update")
             return True
 
