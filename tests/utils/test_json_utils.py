@@ -34,7 +34,3 @@ class TestJsonUtils(unittest.TestCase):
         replacements = {"key4": "new_value4"}
         expected_result = {"key1": "value1", "key2": {"key3": "value3"}}
         self.assertEqual(replace_json_values(json_data, replacements), expected_result)
-
-
-if __name__ == "__main__":
-    unittest.main()
