@@ -79,12 +79,6 @@ class Config:
             else None
         )
 
-    def get_job_queue_name(self):
-        return (
-            self.config["aws"]["batch"]["job_queue"]
-            if self.config is not None
-            else None
-        )
 
     def get_compute_environment_name(self):
         return (

@@ -8,9 +8,7 @@ from data_access_service.core.api import API
 
 from data_access_service.core.routes import router as api_router
 
-from data_access_service.batch.tasks.sync_aws_batch_configs import (
-    sync_aws_batch_configs,
-)
+from data_access_service.tasks.sync_aws_batch_configs import sync_aws_batch_configs
 
 
 def api_setup(application: FastAPI):

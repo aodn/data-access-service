@@ -1,6 +1,6 @@
 import unittest
-from unittest.mock import MagicMock, patch
-from data_access_service.batch.tasks.sync_aws_batch_configs import (
+from unittest.mock import patch
+from data_access_service.tasks.sync_aws_batch_configs import (
     sync_aws_batch_job_definition,
     sync_aws_batch_job_queue,
     sync_aws_batch_compute_environment,
@@ -9,9 +9,9 @@ from data_access_service.batch.tasks.sync_aws_batch_configs import (
 
 class TestSyncAWSBatchConfigs(unittest.TestCase):
 
-    @patch("data_access_service.batch.tasks.sync_aws_batch_configs.AWSClient")
-    @patch("data_access_service.batch.tasks.sync_aws_batch_configs.Config")
-    @patch("data_access_service.batch.tasks.sync_aws_batch_configs.init_log")
+    @patch("data_access_service.tasks.sync_aws_batch_configs.AWSClient")
+    @patch("data_access_service.tasks.sync_aws_batch_configs.Config")
+    @patch("data_access_service.tasks.sync_aws_batch_configs.init_log")
     def test_sync_aws_batch_job_definition_no_changes(
         self, mock_log, mock_config, mock_aws_client
     ):
@@ -36,9 +36,9 @@ class TestSyncAWSBatchConfigs(unittest.TestCase):
                 "Cloud job definition is the same as local. No need to register a new job definition: test-job-definition"
             )
 
-    @patch("data_access_service.batch.tasks.sync_aws_batch_configs.AWSClient")
-    @patch("data_access_service.batch.tasks.sync_aws_batch_configs.Config")
-    @patch("data_access_service.batch.tasks.sync_aws_batch_configs.init_log")
+    @patch("data_access_service.tasks.sync_aws_batch_configs.AWSClient")
+    @patch("data_access_service.tasks.sync_aws_batch_configs.Config")
+    @patch("data_access_service.tasks.sync_aws_batch_configs.init_log")
     def test_sync_aws_batch_job_queue_needs_update(
         self, mock_log, mock_config, mock_aws_client
     ):
@@ -66,9 +66,9 @@ class TestSyncAWSBatchConfigs(unittest.TestCase):
                 )
                 mock_aws.update_batch_job_queue.assert_called_once()
 
-    @patch("data_access_service.batch.tasks.sync_aws_batch_configs.AWSClient")
-    @patch("data_access_service.batch.tasks.sync_aws_batch_configs.Config")
-    @patch("data_access_service.batch.tasks.sync_aws_batch_configs.init_log")
+    @patch("data_access_service.tasks.sync_aws_batch_configs.AWSClient")
+    @patch("data_access_service.tasks.sync_aws_batch_configs.Config")
+    @patch("data_access_service.tasks.sync_aws_batch_configs.init_log")
     def test_sync_aws_batch_compute_environment_no_cloud_environment(
         self, mock_log, mock_config, mock_aws_client
     ):
