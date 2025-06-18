@@ -5,16 +5,9 @@ import yaml
 import boto3
 import os
 import tempfile
-from enum import Enum
 from dotenv import load_dotenv
 
-
-class EnvType(Enum):
-    DEV = "dev"
-    TESTING = "testing"
-    EDGE = "edge"
-    STAGING = "staging"
-    PRODUCTION = "prod"
+from data_access_service.config.env_type import EnvType
 
 
 class Config:
@@ -85,6 +78,20 @@ class Config:
             if self.config is not None
             else None
         )
+
+    def get_compute_environment_name(self):
+        return (
+            self.config["aws"]["batch"]["compute_environment"]
+            if self.config is not None
+            else None
+        )
+
+    def get_job_definition_distinct_fields(self):
+        """
+        Returns the distinct fields that should be ignored when comparing job definitions.
+        This is used to determine if a job definition needs to be updated.
+        """
+        return self.config["aws"]["batch"].get("job_definition_distinct_fields", [])
 
     @staticmethod
     def get_s3_temp_folder_name(master_job_id: str):

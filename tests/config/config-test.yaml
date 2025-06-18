@@ -4,3 +4,13 @@ aws:
       csv: test-bucket
   ses:
     sender_email: no.reply@aodn.org.au
+  batch:
+    compute_environment: generate-csv-data-file
+    job_queue: generate-csv-data-file
+    job_definition: generate-csv-data-file-dev
+    # for different env, some fields may be different.
+    job_definition_distinct_fields:
+      environment:
+        - name: PROFILE
+          value: dev
+      jobDefinitionName: generate-csv-data-file-dev

@@ -36,6 +36,7 @@ watchdog = "^4.0.1"
 xmltodict = "^0.13.0"
 windrose = ">=1.9.2"
 coverage = "^7.8.0"
+deepdiff = "^8.5.0"
 
 [tool.poetry.group.test.dependencies]
 pytest = "^6.0.0"
