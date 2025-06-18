@@ -1,0 +1,11 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "WAVELENGTH_Lu"
+    ],
+    "comment": "This is the wavelength at which the upwelling radiance was measured.",
+    "long_name": "upwelling radiance wavelength",
+    "standard_name": "radiation_wavelength",
+    "units": "nm",
+    "valid_max": 1062.0,
+    "valid_min": 398.0
+}

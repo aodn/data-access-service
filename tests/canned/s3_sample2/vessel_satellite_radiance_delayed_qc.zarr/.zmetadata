@@ -1,0 +1,777 @@
+{
+    "metadata": {
+        ".zattrs": {
+            "Conventions": "CF-1.6 IMOS-1.4",
+            "abstract": "Irradiance and radiance spectra from DALEC0001 on board AIMS RV Solander. Spectra are triplets of Downwelling irradiance (Ed), Upwelling radiance from the water surface (Lu), Sky radiance (Lsky). Ancillary attitude data for the DALEC are pitch (degrees), pitch standard deviation (degrees), roll (degrees), roll standard deviation (degrees) and gear position (degrees from the bow). \nVoyage information for the AIMS vessel Solander can be found at https://apps.aims.gov.au/voyage-tracker/vessel/2 Voyage reports and underway data for Marine National Facility (e.g. Southern Surveyor) can be found at https://www.marine.csiro.au/data/trawler/, using the Voyage_number attribute to identify the voyage. Calibration File:DALEC0001_2024_06_21.cal Data Source:DALEC_20241105_20241116_20241115.log Geographic extent, Latitude:  -9.95823 -  -9.94248; Longitude:  130.30544 -  130.34430; Time: 2024-11-15T23:36:07Z - 2024-11-15T23:51:08Z",
+            "acknowledgement": "Any users of IMOS data are required to clearly acknowledge the source of the material derived from IMOS in the format: \"Data was sourced from Australia's Integrated Marine Observing System (IMOS) - IMOS is enabled by the National Collaborative Research Infrastructure Strategy (NCRIS).\"",
+            "author": "Lovell, Jenny",
+            "cdm_data_type": "trajectory",
+            "citation": "Citation to be used in publications should follow the format: 'IMOS.[year-of-data-download],[Title],[Data access URL],accessed [date-of access]\u2019",
+            "credit": " The collection of this data was supported by the Scientists and Crew of the RV Solander operated by the Australian Institute of Marine Science.",
+            "data_centre": "Australian Ocean Data Network (AODN)",
+            "data_centre_email": "info@aodn.org.au",
+            "disclaimer": "Data, products and services from IMOS are provided \"as is\" without any warranty as to fitness for a particular purpose.",
+            "file_version": "Level 1 - calibrated radiance and irradiance data",
+            "file_version_quality_control": "Incomplete triplets (Ed, Lu, Lsky) have been removed. Data have been filtered for attitude and solar zenith angle (pitch<5deg; roll<5deg; pitch_sd<2deg; roll_sd<2deg; sun zenith<60deg;). \nTriplets that result in remote sensing reflectance less than -0.002 (using the Mobley (2015) rho tables) in the wavelength range 400-800nm have been removed.Lu_qc and Lsky_qc include tests for view azimuth greater than 60 deg from the bow and relative azimuth in the range 85-95 or 130-140. Data have not been filtered for cloud.",
+            "geospatial_vertical_max": 0,
+            "geospatial_vertical_min": 0,
+            "history": "v2024.0\nVersion release notes for both L1 and L2 data:\nv2024.0: Correction to residual sky and sun glint removal in Rrs resulting in maximum offset of 0.0006 [sr -1] compared to processing version v2023.0.\n  Rrs_xflags expanded to provide information on sun glint risk (SZA<10).\nv2023.0: Minor changes to global attribute 'abstract' clarifying that the data is not cloud filtered.\nv2021.0: Introduction of QC arrays for all radiometric variables.\n  Level 2 data includes RRS_xflags to indicate solar zenith angle exceeds 50 degrees.\n  Level 2 data are excluded if solar zenith angle exceeds 60 degrees (previously 70 degrees).\n  Updates to meta-data for consistency with IMOS HyperOCR datasets.\nv2016.0: Initial processing version.\nDevice: DALEC, DALEC serial number: 0001, Ed spectrometer module: SN053741, Lu spectrometer module: SN053744, Lsky spectrometer module: SN053743, Calibrated DALEC Transect File, DALECproc v6.0, Calibration File:DALEC0001_2024_06_21.cal, Data Source:DALEC_20241105_20241116_20241115.log",
+            "id_tag": "20241115_233607.0995.13030.DALECspec",
+            "institution": "CSIRO",
+            "keywords": "oceans>ocean optics>irradiance,oceans>ocean optics>radiance,oceans>ocean optics>water-leaving radiance",
+            "license": "http://creativecommons.org/licenses/by/4.0/",
+            "metadata_uuid": "28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+            "naming_authority": "IMOS",
+            "principal_investigator": "Schroeder, Thomas",
+            "principal_investigator_email": "thomas.schroeder@csiro.au",
+            "project": "Integrated Marine Observing System (IMOS)",
+            "source": "Irradiance and radiance spectra from DALEC0001 on board AIMS RV Solander",
+            "standard_name_vocabulary": "NetCDF Climate and Forecast (CF) Metadata Convention Standard Name Table 47",
+            "time_coverage_end": "2024-11-15T23:51:08Z",
+            "time_coverage_start": "2024-11-15T23:36:07Z",
+            "title": "FILL UP MANUALLY - CHECK DOCUMENTATION"
+        },
+        ".zgroup": {
+            "zarr_format": 2
+        },
+        "Ed/.zarray": {
+            "chunks": [
+                200,
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                200,
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "Ed/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "WAVELENGTH_Ed",
+                "TIME"
+            ],
+            "ancillary_variables": "LATITUDE LONGITUDE relaz sza pitch pitchsd roll rollsd gearpos Ed_quality_control",
+            "cell_method": "LATITUDE: LONGITUDE: TIME: point",
+            "coordinates": "LATITUDE LONGITUDE",
+            "long_name": "Surface Downwelling Irradiance in air",
+            "standard_name": "surface_downwelling_spectral_radiative_flux_in_air",
+            "units": "W m^-2 nm^-1",
+            "valid_max": 10.0,
+            "valid_min": 0.0
+        },
+        "Ed_quality_control/.zarray": {
+            "chunks": [
+                200,
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<i4",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                200,
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "Ed_quality_control/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "WAVELENGTH_Ed",
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE",
+            "flag_meanings": "No_QC_was_performed Good_data Probably_good_data Bad_data_that_are_potentially_correctable Bad_data Value_changed Not_used Not_used Not_used Missing_value",
+            "flag_values": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+            ],
+            "long_name": "Surface Downwelling Irradiance Quality Control",
+            "quality_control_conventions": "IMOS standard flags",
+            "standard_name": "surface_downwelling_spectral_radiative_flux_in_air status_flag",
+            "valid_max": 9,
+            "valid_min": 0
+        },
+        "LATITUDE/.zarray": {
+            "chunks": [
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "LATITUDE/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "axis": "Y",
+            "long_name": "latitude",
+            "reference_datum": "geographical coordinates, WGS84 projection",
+            "standard_name": "latitude",
+            "units": "degrees_north",
+            "valid_max": 90.0,
+            "valid_min": -90.0
+        },
+        "LONGITUDE/.zarray": {
+            "chunks": [
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "LONGITUDE/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "axis": "X",
+            "long_name": "longitude",
+            "reference_datum": "geographical coordinates, WGS84 projection",
+            "standard_name": "longitude",
+            "units": "degrees_east",
+            "valid_max": 180.0,
+            "valid_min": -180.0
+        },
+        "Lsky/.zarray": {
+            "chunks": [
+                200,
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                200,
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "Lsky/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "WAVELENGTH_Lsky",
+                "TIME"
+            ],
+            "ancillary_variables": "LATITUDE LONGITUDE relaz sza pitch pitchsd roll rollsd gearpos Lsky_quality_control",
+            "cell_method": "LATITUDE: LONGITUDE: TIME: point",
+            "coordinates": "LATITUDE LONGITUDE",
+            "long_name": "Downwelling spectral radiance in air",
+            "standard_name": "downwelling_spectral_radiance_in_air",
+            "units": "W m^-2 nm^-1 sr^-1",
+            "valid_max": 10.0,
+            "valid_min": 0.0
+        },
+        "Lsky_quality_control/.zarray": {
+            "chunks": [
+                200,
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<i4",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                200,
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "Lsky_quality_control/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "WAVELENGTH_Lsky",
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE",
+            "flag_meanings": "No_QC_was_performed Good_data Probably_good_data Bad_data_that_are_potentially_correctable Bad_data Value_changed Not_used Not_used Not_used Missing_value",
+            "flag_values": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+            ],
+            "long_name": "Downwelling spectral radiance in air Quality Control",
+            "quality_control_conventions": "IMOS standard flags",
+            "standard_name": "downwelling_spectral_radiance_in_air status_flag",
+            "valid_max": 9,
+            "valid_min": 0
+        },
+        "Lu/.zarray": {
+            "chunks": [
+                200,
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                200,
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "Lu/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "WAVELENGTH_Lu",
+                "TIME"
+            ],
+            "ancillary_variables": "LATITUDE LONGITUDE relaz sza pitch pitchsd roll rollsd gearpos Lu_quality_control",
+            "cell_method": "LATITUDE: LONGITUDE: TIME: point",
+            "coordinates": "LATITUDE LONGITUDE",
+            "long_name": "Surface upwelling spectral radiance in air emerging from Sea Water",
+            "standard_name": "surface_upwelling_spectral_radiance_in_air_emerging_from_sea_water",
+            "units": "W m^-2 nm^-1 sr^-1",
+            "valid_max": 10.0,
+            "valid_min": 0.0
+        },
+        "Lu_quality_control/.zarray": {
+            "chunks": [
+                200,
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<i4",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                200,
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "Lu_quality_control/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "WAVELENGTH_Lu",
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE",
+            "flag_meanings": "No_QC_was_performed Good_data Probably_good_data Bad_data_that_are_potentially_correctable Bad_data Value_changed Not_used Not_used Not_used Missing_value",
+            "flag_values": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+            ],
+            "long_name": "Surface upwelling spectral radiance in air emerging from Sea Water Quality Control",
+            "quality_control_conventions": "IMOS standard flags",
+            "standard_name": "surface_upwelling_spectral_radiance_in_air_emerging_from_sea_water status_flag",
+            "valid_max": 9,
+            "valid_min": 0
+        },
+        "TIME/.zarray": {
+            "chunks": [
+                39415
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "TIME/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "axis": "T",
+            "calendar": "gregorian",
+            "long_name": "UTC time",
+            "standard_name": "time",
+            "units": "seconds since 1970-01-01T00:00:00+00:00",
+            "valid_max": 10000000000.0,
+            "valid_min": 0.0
+        },
+        "WAVELENGTH_Ed/.zarray": {
+            "chunks": [
+                200
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                200
+            ],
+            "zarr_format": 2
+        },
+        "WAVELENGTH_Ed/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "WAVELENGTH_Ed"
+            ],
+            "comment": "This is the wavelength at which the downwelling irradiance was measured.",
+            "long_name": "downwelling irradiance wavelength",
+            "standard_name": "radiation_wavelength",
+            "units": "nm",
+            "valid_max": 1062.0,
+            "valid_min": 398.0
+        },
+        "WAVELENGTH_Lsky/.zarray": {
+            "chunks": [
+                200
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                200
+            ],
+            "zarr_format": 2
+        },
+        "WAVELENGTH_Lsky/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "WAVELENGTH_Lsky"
+            ],
+            "comment": "This is the wavelength at which the sky radiance was measured.",
+            "long_name": "sky radiance wavelength",
+            "standard_name": "radiation_wavelength",
+            "units": "nm",
+            "valid_max": 1062.0,
+            "valid_min": 398.0
+        },
+        "WAVELENGTH_Lu/.zarray": {
+            "chunks": [
+                200
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                200
+            ],
+            "zarr_format": 2
+        },
+        "WAVELENGTH_Lu/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "WAVELENGTH_Lu"
+            ],
+            "comment": "This is the wavelength at which the upwelling radiance was measured.",
+            "long_name": "upwelling radiance wavelength",
+            "standard_name": "radiation_wavelength",
+            "units": "nm",
+            "valid_max": 1062.0,
+            "valid_min": 398.0
+        },
+        "filename/.zarray": {
+            "chunks": [
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<U18",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "filename/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE"
+        },
+        "gearpos/.zarray": {
+            "chunks": [
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "gearpos/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE",
+            "long_name": "DALEC gear position",
+            "units": "degrees"
+        },
+        "pitch/.zarray": {
+            "chunks": [
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "pitch/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE",
+            "long_name": "DALEC pitch",
+            "units": "degrees"
+        },
+        "pitchsd/.zarray": {
+            "chunks": [
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "pitchsd/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE",
+            "long_name": "DALEC pitch standard deviation",
+            "units": "degrees"
+        },
+        "platform_code/.zarray": {
+            "chunks": [
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<U7",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "platform_code/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE"
+        },
+        "quality_control_version/.zarray": {
+            "chunks": [
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<U49",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "quality_control_version/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE"
+        },
+        "relaz/.zarray": {
+            "chunks": [
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "relaz/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE",
+            "long_name": "relative solar azimuth",
+            "units": "degrees"
+        },
+        "roll/.zarray": {
+            "chunks": [
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "roll/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE",
+            "long_name": "DALEC roll",
+            "units": "degrees"
+        },
+        "rollsd/.zarray": {
+            "chunks": [
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "rollsd/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE",
+            "long_name": "DALEC roll standard deviation",
+            "units": "degrees"
+        },
+        "sza/.zarray": {
+            "chunks": [
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "sza/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE",
+            "long_name": "solar zenith angle",
+            "units": "degrees"
+        },
+        "voyage_number/.zarray": {
+            "chunks": [
+                1000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<U10",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5207
+            ],
+            "zarr_format": 2
+        },
+        "voyage_number/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE"
+        }
+    },
+    "zarr_consolidated_format": 1
+}
