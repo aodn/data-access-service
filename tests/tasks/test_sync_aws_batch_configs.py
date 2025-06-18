@@ -24,7 +24,7 @@ class TestSyncAWSBatchConfigs(unittest.TestCase):
             "test-job-definition"
         )
         with patch(
-            "data_access_service.batch.tasks.sync_aws_batch_configs.get_local_json"
+            "data_access_service.tasks.sync_aws_batch_configs.get_local_json"
         ) as mock_get_local_json:
             mock_get_local_json.return_value = {"key": "value"}
 
@@ -49,11 +49,11 @@ class TestSyncAWSBatchConfigs(unittest.TestCase):
         mock_aws.get_batch_job_queue_config.return_value = {"key": "old_value"}
         mock_config_instance.get_job_queue_name.return_value = "test-job-queue"
         with patch(
-            "data_access_service.batch.tasks.sync_aws_batch_configs.get_local_json"
+            "data_access_service.tasks.sync_aws_batch_configs.get_local_json"
         ) as mock_get_local_json:
             mock_get_local_json.return_value = {"key": "new_value"}
             with patch(
-                "data_access_service.batch.tasks.sync_aws_batch_configs.does_job_queue_need_update"
+                "data_access_service.tasks.sync_aws_batch_configs.does_job_queue_need_update"
             ) as mock_needs_update:
                 mock_needs_update.return_value = True
 
