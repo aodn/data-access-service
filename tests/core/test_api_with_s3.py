@@ -1,3 +1,5 @@
+from typing import Dict, Any
+
 import pytest
 import json
 
@@ -135,6 +137,85 @@ class TestApiWithS3(TestWithS3):
                     "longitude": 150.2,
                     "time": "2015-01-01",
                 }, f"Unexpected JSON content: {parsed[269051]}"
+            except json.JSONDecodeError as e:
+                assert False, "Fail to parse to JSON"
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_same_uuid_map_two_dataset_correct(
+        self, setup_resources, localstack, aws_clients, client
+    ):
+        """Test subsetting with valid and invalid time ranges."""
+        s3_client, _ = aws_clients
+        config = Config.get_config()
+
+        # We only verify the zarr data where two zarr have same UUID
+        with patch.object(AWSClient, "send_email") as mock_send_email:
+            # Test with range, this dataset field is different, dataset without DEPTH
+            param = {
+                "start_date": "2024-02-01",
+                "end_date": "2024-02-28",
+                "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
+            }
+
+            response = client.get(
+                config.BASE_URL + "/metadata/28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                headers={"X-API-Key": config.get_api_key()},
+            )
+
+            assert response.status_code == HTTP_200_OK
+            assert isinstance(response.content, bytes)
+
+            # Read and process response body
+            try:
+                metadata: Dict[str, Any] = json.loads(response.content.decode("utf-8"))
+
+                # We should get a map
+                assert all(
+                    key in metadata
+                    for key in [
+                        "vessel_satellite_radiance_delayed_qc.zarr",
+                        "vessel_satellite_radiance_derived_product.zarr",
+                    ]
+                ), "No missing key"
+
+            except json.JSONDecodeError as e:
+                assert False, "Fail to parse to JSON"
+
+            # Now call to extract some values from the zarr file
+            response = client.get(
+                config.BASE_URL
+                + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_delayed_qc.zarr",
+                params=param,
+                headers={"X-API-Key": config.get_api_key()},
+            )
+
+            assert response.status_code == HTTP_200_OK
+            assert isinstance(response.content, bytes)
+
+            # Read and process response body
+            try:
+                parsed = json.loads(response.content.decode("utf-8"))
+                assert len(parsed) == 5967, "Number of record is incorrect"
+
+            except json.JSONDecodeError as e:
+                assert False, "Fail to parse to JSON"
+
+            # Now call to another zarr file having same UUID, create with this date range
+            response = client.get(
+                config.BASE_URL
+                + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_derived_product.zarr",
+                params=param,
+                headers={"X-API-Key": config.get_api_key()},
+            )
+
+            assert response.status_code == HTTP_200_OK
+            assert isinstance(response.content, bytes)
+
+            # Read and process response body
+            try:
+                parsed = json.loads(response.content.decode("utf-8"))
+                assert len(parsed) == 5961, "Number of record is incorrect"
+
             except json.JSONDecodeError as e:
                 assert False, "Fail to parse to JSON"
 

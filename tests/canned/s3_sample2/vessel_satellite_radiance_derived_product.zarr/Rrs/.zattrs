@@ -1,0 +1,14 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "WAVELENGTH",
+        "TIME"
+    ],
+    "ancillary_variables": "Rrs_xflags relaz sza windspeed",
+    "cell_method": "LATITUDE: LONGITUDE: TIME: point",
+    "coordinates": "LATITUDE LONGITUDE",
+    "intercept": 0.0,
+    "long_name": "Remote Sensing Reflectance",
+    "slope": 1.0,
+    "units": "sr^-1",
+    "varname": "Rrs"
+}
