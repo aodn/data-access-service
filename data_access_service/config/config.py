@@ -79,7 +79,6 @@ class Config:
             else None
         )
 
-
     def get_compute_environment_name(self):
         return (
             self.config["aws"]["batch"]["compute_environment"]

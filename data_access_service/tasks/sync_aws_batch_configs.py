@@ -15,8 +15,7 @@ job_queue_path = (
     Path(__file__).parent.parent / "config/batch/generatecsv/job_queue.json"
 )
 compute_environment_path = (
-    Path(__file__).parent.parent
-    / "config/batch/generatecsv/compute_environment.json"
+    Path(__file__).parent.parent / "config/batch/generatecsv/compute_environment.json"
 )
 
 
@@ -32,7 +31,6 @@ def sync_aws_batch_configs():
     if all(type(config) is x for x in (EdgeConfig, StagingConfig, ProdConfig)):
         sync_aws_batch_compute_environment(config=config, aws=aws, log=log)
         sync_aws_batch_job_queue(config=config, aws=aws, log=log)
-
 
 
 def sync_aws_batch_job_definition(config: Config, aws: AWSClient, log: Logger):
@@ -82,7 +80,6 @@ def sync_aws_batch_job_queue(config: Config, aws: AWSClient, log: Logger):
         )
         return
 
-    # if is_json_different(json_1=cloud_job_queue, json_2=local_job_queue, ignored_files=batch_json_settings_ignored_field):
     if does_job_queue_need_update(
         cloud_job_queue=cloud_job_queue, local_job_queue=local_job_queue, log=log
     ):
@@ -118,7 +115,6 @@ def sync_aws_batch_compute_environment(config: Config, aws: AWSClient, log: Logg
         )
         return
 
-    # if is_json_different(json_1=cloud_compute_environment, json_2=local_compute_environment, ignored_files=batch_json_settings_ignored_field):
     if does_compute_environment_need_update(
         cloud_compute_environment=cloud_compute_environment,
         local_compute_environment=local_compute_environment,
