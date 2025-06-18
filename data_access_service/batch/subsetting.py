@@ -13,12 +13,15 @@ from data_access_service.utils.date_time_utils import (
     parse_date,
 )
 
+config = Config.get_config()
+logger = init_log(config)
+
 
 def init(job_id_of_init, parameters):
 
-    config = Config.get_config()
     month_count_per_job = config.get_month_count_per_job()
     uuid = parameters[Parameters.UUID.value]
+    key = parameters[Parameters.KEY.value]
     start_date_str = parameters[Parameters.START_DATE.value]
     end_date_str = parameters[Parameters.END_DATE.value]
 
@@ -26,6 +29,7 @@ def init(job_id_of_init, parameters):
     start_date, end_date = trim_date_range(
         api=API(),
         uuid=uuid,
+        key=key,
         requested_start_date=requested_start_date,
         requested_end_date=requested_end_date,
     )
@@ -69,18 +73,15 @@ def init(job_id_of_init, parameters):
 
 
 def prepare_data(parameters, job_index):
-    logger = init_log(Config.get_config())
     # get params
     uuid = parameters[Parameters.UUID.value]
+    # An uuid can host multiple data file, so we need a key
+    # to narrow our target file. Right now it will be the filename
+    key = parameters[Parameters.KEY.value]
     master_job_id = parameters[Parameters.MASTER_JOB_ID.value]
     date_ranges = parameters[Parameters.DATE_RANGES.value]
     date_ranges_dict = json.loads(date_ranges)
-    logger.info(f"Date Ranges:{date_ranges_dict}")
-
     multi_polygon = parameters[Parameters.MULTI_POLYGON.value]
-
-    logger.info(f"UUID:{uuid}")
-    logger.info(f"Multi Polygon:{multi_polygon}")
 
     if job_index is None:
         job_index = 0
@@ -88,10 +89,15 @@ def prepare_data(parameters, job_index):
     date_range = date_ranges_dict[str(job_index)]
     start_date = parse_date(date_range[0])
     end_date = parse_date(date_range[1])
+
+    logger.info(f"UUID: {uuid}")
+    logger.info(f"KEY: {key}")
+    logger.info(f"Date Ranges: {date_ranges_dict}")
+    logger.info(f"Multi Polygon: {multi_polygon}")
     logger.info(f"Start Date:{start_date}")
     logger.info(f"End Date:{end_date}")
 
-    process_data_files(master_job_id, uuid, start_date, end_date, multi_polygon)
+    process_data_files(master_job_id, uuid, key, start_date, end_date, multi_polygon)
 
 
 def collect_data(parameters):

@@ -16,29 +16,30 @@ from data_access_service.utils.date_time_utils import (
 
 efs_mount_point = "/mount/efs/"
 
+config: Config = Config.get_config()
+log = init_log(config)
+
 
 def process_data_files(
     job_id_of_init: str,
     uuid: str,
+    key: str,
     start_date: datetime,
     end_date: datetime,
     multi_polygon: str,
 ) -> str | None:
-    config: Config = Config.get_config()
-    log = init_log(config)
-
     tmp_data_folder_path = config.get_temp_folder(job_id_of_init)
     multi_polygon_dict = json.loads(multi_polygon)
 
-    if None in [uuid, start_date, end_date, json.loads(multi_polygon)]:
+    if None in [uuid, key, start_date, end_date, json.loads(multi_polygon)]:
         raise ValueError("One or more required arguments are None")
 
     aws = AWSClient()
-    log.info("start " + uuid)
+    log.info(f"Start prepare {uuid}-{key}")
 
     try:
         generate_csv_files(
-            tmp_data_folder_path, start_date, end_date, multi_polygon_dict, uuid
+            tmp_data_folder_path, uuid, key, start_date, end_date, multi_polygon_dict
         )
         upload_all_files_in_folder_to_temp_s3(
             master_job_id=job_id_of_init, local_folder=tmp_data_folder_path, aws=aws
@@ -55,12 +56,12 @@ def process_data_files(
 
 def generate_csv_files(
     folder_path: str,
+    uuid: str,
+    key: str,
     start_date: datetime,
     end_date: datetime,
     multi_polygon: dict,
-    uuid: str,
 ):
-    log = init_log(Config.get_config())
     api = API()
     # Use sync init, it does not matter the load is slow as we run in batch
     api.initialize_metadata()
@@ -85,6 +86,7 @@ def generate_csv_files(
         start_date, end_date = trim_date_range(
             api=api,
             uuid=uuid,
+            key=key,
             requested_start_date=start_date,
             requested_end_date=end_date,
         )
@@ -97,6 +99,7 @@ def generate_csv_files(
                 df = query_data(
                     api,
                     uuid,
+                    key,
                     date_range["start_date"],
                     date_range["end_date"],
                     min_lat,
@@ -128,6 +131,7 @@ def generate_csv_files(
 def query_data(
     api,
     uuid: str,
+    key: str,
     start_date: datetime,
     end_date: datetime,
     min_lat,
@@ -135,10 +139,8 @@ def query_data(
     min_lon,
     max_lon,
 ):
-    log = init_log(Config.get_config())
-
     log.info(
-        f"Querying data for uuid={uuid}, start_date={start_date}, end_date={end_date}, "
+        f"Querying data for uuid={uuid}, key={key}, start_date={start_date}, end_date={end_date}, "
     )
     log.info(
         f"lat_min={min_lat}, lat_max={max_lat}, lon_min={min_lon}, lon_max={max_lon}"
@@ -148,6 +150,7 @@ def query_data(
     try:
         df = api.get_dataset_data(
             uuid=uuid,
+            key=key,
             date_start=start_date,
             date_end=end_date,
             lat_min=min_lat,

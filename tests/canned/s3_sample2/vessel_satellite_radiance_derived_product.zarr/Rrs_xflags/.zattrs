@@ -1,0 +1,18 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "WAVELENGTH",
+        "TIME"
+    ],
+    "ancillary_variables": "relaz sza windspeed",
+    "coordinates": "LATITUDE LONGITUDE",
+    "flag_description": "A flag value of 1 indicates that the solar zenith angle exceeds 50 degrees. \nA flag value of 2 indicates that the solar zenith angle is less than 10 degrees and data is likely to be affected by residual sun glint. \nThe Rrs data with Rrs_xflags>0 may be excluded for precision uses.",
+    "flag_meanings": "sza_below_50 sza_above_50 sza_below_10",
+    "flag_values": [
+        0,
+        1,
+        2
+    ],
+    "long_name": "Extra Flag for Remote Sensing Reflectance",
+    "standard_name": "status_flag",
+    "varname": "Rrs_xflags"
+}

@@ -1,5 +1,7 @@
 import json
 import unittest
+from typing import Dict, Any
+
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -8,6 +10,7 @@ from unittest.mock import patch
 from aodn_cloud_optimised import DataQuery
 
 from data_access_service import API
+from data_access_service.core.descriptor import Descriptor
 from data_access_service.core.routes import _generate_partial_json_array, _response_json
 
 
@@ -30,7 +33,11 @@ class TestApi(unittest.TestCase):
             api = API()
             api.initialize_metadata()
 
-            d = api.get_raw_meta_data("541d4f15-122a-443d-ab4e-2b5feb08d6a0")
+            uuid = "541d4f15-122a-443d-ab4e-2b5feb08d6a0"
+            key = "animal_acoustic_tracking_delayed_qc.parquet"
+
+            md: Dict[str, Any] = api.get_raw_meta_data(uuid)
+            d = md.get(key)
             meta: dict = d.get("dataset_metadata")
             self.assertEqual(
                 meta.get("title").casefold(),
@@ -42,7 +49,8 @@ class TestApi(unittest.TestCase):
             # this record do not have DEPTH field, so we will remove it from query after map, the field is of small
             # letter for this recordset
             col = api.map_column_names(
-                "541d4f15-122a-443d-ab4e-2b5feb08d6a0",
+                uuid,
+                key,
                 ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             )
             self.assertListEqual(
@@ -52,6 +60,7 @@ class TestApi(unittest.TestCase):
             # This uuid have time so it will not map
             col = api.map_column_names(
                 "af5d0ff9-bb9c-4b7c-a63c-854a630b6984",
+                "autonomous_underwater_vehicle.parquet",
                 ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             )
             self.assertListEqual(
@@ -63,6 +72,7 @@ class TestApi(unittest.TestCase):
             # This uuid have JULD but no time and timestamp, so map it to JULD
             col = api.map_column_names(
                 "95d6314c-cfc7-40ae-b439-85f14541db71",
+                "animal_ctd_satellite_relay_tagging_delayed_qc.parquet",
                 ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             )
             self.assertListEqual(col, ["JULD", "LATITUDE", "LONGITUDE"], "TIME mapped")

@@ -28,6 +28,7 @@ class TestGenerateCSVFile:
         start_date, end_date = trim_date_range(
             api=mock_api,
             uuid="test-uuid",
+            key="test-key",
             requested_start_date=datetime(2021, 1, 1),
             requested_end_date=datetime(2021, 12, 31),
         )
@@ -42,6 +43,7 @@ class TestGenerateCSVFile:
         start_date, end_date = trim_date_range(
             api=mock_api,
             uuid="test-uuid",
+            key="test-key",
             requested_start_date=datetime(2019, 1, 1),
             requested_end_date=datetime(2023, 1, 1),
         )
@@ -54,6 +56,7 @@ class TestGenerateCSVFile:
         result = query_data(
             api=mock_api,
             uuid="test-uuid",
+            key="test-key",
             start_date=datetime(2021, 1, 1),
             end_date=datetime(2021, 12, 31),
             min_lat=-10,
@@ -69,6 +72,7 @@ class TestGenerateCSVFile:
         result = query_data(
             api=mock_api,
             uuid="test-uuid",
+            key="test-key",
             start_date=datetime(2021, 1, 1),
             end_date=datetime(2021, 12, 31),
             min_lat=-10,

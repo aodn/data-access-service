@@ -1,0 +1,14 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "WAVELENGTH",
+        "TIME"
+    ],
+    "ancillary_variables": "relaz sza windspeed",
+    "cell_method": "LATITUDE: LONGITUDE: TIME: point",
+    "coordinates": "LATITUDE LONGITUDE",
+    "intercept": 0.0,
+    "long_name": "Fractional contribution of reflected sky light",
+    "slope": 1.0,
+    "units": "1",
+    "varname": "rho"
+}

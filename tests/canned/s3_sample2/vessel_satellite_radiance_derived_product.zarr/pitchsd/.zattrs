@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "TIME"
+    ],
+    "cell_methods": "TIME: standard_deviation",
+    "coordinates": "LATITUDE LONGITUDE",
+    "long_name": "DALEC pitch standard deviation",
+    "standard_name": "platform_pitch_angle standard_error",
+    "units": "degrees"
+}
