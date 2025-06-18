@@ -32,7 +32,6 @@ def api_setup(application: FastAPI):
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    sync_aws_batch_configs()
     api_setup(application)
     yield
 

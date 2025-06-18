@@ -1,15 +1,9 @@
-import io
-import json
 import os
-import zipfile
-from pathlib import Path
 
 import boto3
-from deepdiff import DeepDiff
 
 from data_access_service import init_log
-from data_access_service.config.config import Config, DevConfig
-from data_access_service.utils.json_utils import is_json_different
+from data_access_service.config.config import Config
 
 
 class AWSClient:
@@ -280,18 +274,18 @@ class AWSClient:
     def register_batch_job_definition(self, job_definition: dict):
         response = self.batch.register_job_definition(**job_definition)
         self.log.info(
-            f"Job definition registered successfully: {response['jobDefinitionName']}"
+            f"Job definition registered successfully"
         )
         return response
 
     def update_batch_job_queue(self, job_queue: dict):
         response = self.batch.update_job_queue(**job_queue)
-        self.log.info(f"Job queue updated successfully: {response['jobQueueName']}")
+        self.log.info(f"Job queue updated successfully")
         return response
 
     def update_batch_compute_environment(self, compute_environment: dict):
         response = self.batch.update_compute_environment(**compute_environment)
         self.log.info(
-            f"Compute environment updated successfully: {response['computeEnvironmentName']}"
+            f"Compute environment updated successfully"
         )
         return response
