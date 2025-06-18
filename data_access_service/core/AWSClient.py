@@ -273,9 +273,7 @@ class AWSClient:
 
     def register_batch_job_definition(self, job_definition: dict):
         response = self.batch.register_job_definition(**job_definition)
-        self.log.info(
-            f"Job definition registered successfully"
-        )
+        self.log.info(f"Job definition registered successfully")
         return response
 
     def update_batch_job_queue(self, job_queue: dict):
@@ -285,7 +283,5 @@ class AWSClient:
 
     def update_batch_compute_environment(self, compute_environment: dict):
         response = self.batch.update_compute_environment(**compute_environment)
-        self.log.info(
-            f"Compute environment updated successfully"
-        )
+        self.log.info(f"Compute environment updated successfully")
         return response
