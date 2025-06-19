@@ -107,7 +107,7 @@ class BaseAPI:
         filtered_dataset = xarray.Dataset(selected_data)
 
         # Convert to Pandas DataFrame
-        df = filtered_dataset.to_pandas()
+        df = filtered_dataset.to_dataframe()
 
         # Reset index if needed to include coordinates as columns
         if isinstance(df.index, pd.MultiIndex) or df.index.name is not None:
