@@ -11,3 +11,9 @@ class Parameters(Enum):
     DATE_RANGES = "date_ranges"
     TYPE = "type"
     MASTER_JOB_ID = "master_job_id"
+
+
+class AWSResource(Enum):
+    S3 = "s3"
+    SES = "ses"
+    BATCH = "batch"

@@ -58,7 +58,7 @@
     "FARGATE"
   ],
   "retryStrategy": {
-    "attempts": 1,
+    "attempts": 5,
     "evaluateOnExit": []
   },
   "tags": {},
