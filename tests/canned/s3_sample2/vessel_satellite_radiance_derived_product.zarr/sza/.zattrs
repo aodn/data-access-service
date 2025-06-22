@@ -1,0 +1,9 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "TIME"
+    ],
+    "coordinates": "LATITUDE LONGITUDE",
+    "long_name": "solar zenith angle",
+    "standard_name": "solar_zenith_angle",
+    "units": "degrees"
+}

@@ -1,0 +1,620 @@
+{
+    "metadata": {
+        ".zattrs": {
+            "Conventions": "CF-1.6,IMOS-1.4",
+            "abstract": "Remote sensing reflectance from DALEC0001 on board AIMS RV Solander. Spectra have been quality controlled based on attitude (pitch, roll, angle relative to bow) and processed to remote sensing reflectance (Rrs). Glint correction has been implemented as described by Brando et al (2016). Data are included as individual spectra, however, it is recommended that users select suitable temporal or spatial sample sets and calculate the mean of the 5-25 percentile range to minimize the effects of surface roughness in the estimation of Rrs (Hooker et al. 2002,  Zibordi et al. 2004).\n Voyage information for the AIMS vessel Solander can be found at https://apps.aims.gov.au/voyage-tracker/vessel/2 Voyage reports and underway data for Marine National Facility (e.g. Southern Surveyor) can be found at https://www.marine.csiro.au/data/trawler/, using the Voyage_number attribute to identify the voyage. Calibration File:DALEC0001_2024_06_21.cal Data Source:DALEC_20241105_20241116_20241115.log Geographic extent, Latitude:  -9.95810 -  -9.94248; Longitude:  130.30563 -  130.34430; Time: 2024-11-15T23:36:12Z - 2024-11-15T23:51:08Z",
+            "acknowledgement": "Any users of IMOS data are required to clearly acknowledge the source of the material derived from IMOS in the format: \n\"Data was sourced from the Integrated Marine Observing System (IMOS) - IMOS is a national collaborative research infrastructure, supported by the Australian Government.\" If relevant, also credit other organisations involved in collection of this particular datastream (as listed in \"credit\" in the metadata record).",
+            "author": "Lovell, Jenny",
+            "cdm_data_type": "trajectory",
+            "citation": "Citation to be used in publications should follow the format: 'IMOS.[year-of-data-download],[Title],[Data access URL],accessed [date-of access]\u2019",
+            "comment": "The retrieved rho is theoretical, and should only be used as an estimate. Overcast sky, constant rho=0.028 was used.",
+            "credit": " The collection of this data was supported by the Scientists and Crew of the RV Solander operated by the Australian Institute of Marine Science.",
+            "data_centre": "Australian Ocean Data Network (AODN)",
+            "data_centre_email": "info@aodn.org.au",
+            "disclaimer": "Any users of IMOS data are required to clearly acknowledge the source of the material.\n Data, products and services from IMOS are provided \"as is\" without any warranty as to fitness for a particular purpose.",
+            "file_version": "Level 2 - derived product",
+            "file_version_quality_control": "Data have been filtered based on the following limits: sza<60degrees; pitch<5degrees; roll<5degrees;pitchsd<2degrees; rollsd<2degrees; abs(gearpos)<120degrees; and 85<relaz<95 OR 130<relaz<140. \nGearPos threshold eliminates spectra where the DALEC is pointing too close to the platform. \nData were rejected if the calculated Rrs was less than 0.0 in the wavelength range 400-800nm.\nIn addition, the Rrs_xflags variable provides extra flags for precision uses. A flag value of 1 indicates that the solar zenith angle exceeds 50 degrees.\nA flag value of 2 indicates that the sun is within 10 deg of zenith and thus data are likely to be affected by residual sun glint.\nFor precision use, data should be excluded where Rrs_xflags>0\nData have not been filtered for cloud.",
+            "geospatial_vertical_max": 0,
+            "geospatial_vertical_min": 0,
+            "history": "v2024.0\nVersion release notes for both L1 and L2 data:\nv2024.0: Correction to residual sky and sun glint removal in Rrs resulting in maximum offset of 0.0006 [sr -1] compared to processing version v2023.0.\n  Rrs_xflags expanded to provide information on sun glint risk (SZA<10).\nv2023.0: Minor changes to global attribute 'abstract' clarifying that the data is not cloud filtered.\nv2021.0: Introduction of QC arrays for all radiometric variables.\n  Level 2 data includes RRS_xflags to indicate solar zenith angle exceeds 50 degrees.\n  Level 2 data are excluded if solar zenith angle exceeds 60 degrees (previously 70 degrees).\n  Updates to meta-data for consistency with IMOS HyperOCR datasets.\nv2016.0: Initial processing version.\nDevice: DALEC, DALEC serial number: 0001, Ed spectrometer module: SN053741, Lu spectrometer module: SN053744, Lsky spectrometer module: SN053743, Calibrated DALEC Transect File, DALECproc v6.0, Calibration File:DALEC0001_2024_06_21.cal, Data Source:DALEC_20241105_20241116_20241115.log Steps in calculation of Rrs are: 1) The convolution of measured DALEC spectra (Lu, Ed, Lsky) to common spectral bandwidth and abscissa values for radiometric applications; 2) The retrieval of the fractional contribution (rho) of reflected skylight into the sea-viewing (Lu) sensor by interpolation of LUT according to Mobley (2015), indexed by sensor zenith angle, sun zentih angle, relative azimuth angle and wind speed. 3) Further residual glint correction is made by adjusting Rrs to the Ruddick et al (2006) similarity spectrum in the 700-800 nm range. Wind speed measurements are not always available during DALEC deployment. Where wind data were not available, forecast wind speed from the ACCESS-R (regional) model was used (http://www.bom.gov.au/australia/charts/about/about_access.shtml). If this was not available a default value of 5kt was used.  This is indicated by the wind_speed attribute \"wind_source\" which has values of \"Measured\", \"Modelled\" or \"Default\". In overcast conditions, Mobley (1999) recommends using rho=0.028. Such a situation will be indicated in the comment field.",
+            "id_tag": "20241115_233612.0995.13030.DALECRrs",
+            "institution": "CSIRO",
+            "keywords": "oceans>ocean optics>reflectance",
+            "license": "http://creativecommons.org/licenses/by/4.0/",
+            "metadata_uuid": "28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+            "naming_authority": "IMOS",
+            "principal_investigator": "Schroeder, Thomas",
+            "principal_investigator_email": "thomas.schroeder@csiro.au",
+            "project": "Integrated Marine Observing System (IMOS)",
+            "references": "Brando et al. \"The Potential of Autonomous Ship-Borne Hyperspectral Radiometers for the Validation of Ocean Color Radiometry Data\" Remote Sensing (2016) 8(2)150; doi:10.3390/rs8020150. Hooker et al. \"An evaluation of above- and in-water methods for determining water-leaving radiances.\" J. Atmos Ocean. Tech. (2002) 19, 486\u2013515. C. D. Mobley, \"Estimation of the remote-sensing reflectance from above-surface measurements.\" Appl.Opt.(1999), 38, 7442\u20137455. C. D. Mobley, \"Polarized reflectance and transmittance properties of windblown sea surfaces.\" Appl.Opt.(2015), 54, 4828\u20134849. Ruddick et. al. \"Seaborne measurements of near infrared water-leaving reflectance: The similarity spectrum for turbid waters\" Limnol. Oceanogr., 51(2), 2006, 1167\u20131179. i.e. http://www.aslo.org/lo/toc/vol_51/issue_2/1167.pdf and http://www.vliz.be/imisdocs/publications/96695.pdf. Zibordi et al. \"An autonomous above-water system for the validation of ocean color radiance data.\" IEEE Trans. Geosci. Remote Sens. (2004) 42, 401\u2013415.",
+            "source": "Remote sensing reflectance from DALEC0001 on board AIMS RV Solander",
+            "standard_name_vocabulary": "NetCDF Climate and Forecast (CF) Metadata Convention Standard Name Table 47",
+            "time_coverage_end": "2024-11-15T23:51:08Z",
+            "time_coverage_start": "2024-11-15T23:36:12Z",
+            "title": "FILL UP MANUALLY - CHECK DOCUMENTATION"
+        },
+        ".zgroup": {
+            "zarr_format": 2
+        },
+        "LATITUDE/.zarray": {
+            "chunks": [
+                10000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "LATITUDE/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "axis": "Y",
+            "long_name": "latitude",
+            "reference_datum": "geographical coordinates, WGS84 projection",
+            "standard_name": "latitude",
+            "units": "degrees_north",
+            "valid_max": 90.0,
+            "valid_min": -90.0
+        },
+        "LONGITUDE/.zarray": {
+            "chunks": [
+                10000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "LONGITUDE/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "axis": "X",
+            "long_name": "longitude",
+            "reference_datum": "geographical coordinates, WGS84 projection",
+            "standard_name": "longitude",
+            "units": "degrees_east",
+            "valid_max": 180.0,
+            "valid_min": -180.0
+        },
+        "Rrs/.zarray": {
+            "chunks": [
+                596,
+                10000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                596,
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "Rrs/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "WAVELENGTH",
+                "TIME"
+            ],
+            "ancillary_variables": "Rrs_xflags relaz sza windspeed",
+            "cell_method": "LATITUDE: LONGITUDE: TIME: point",
+            "coordinates": "LATITUDE LONGITUDE",
+            "intercept": 0.0,
+            "long_name": "Remote Sensing Reflectance",
+            "slope": 1.0,
+            "units": "sr^-1",
+            "varname": "Rrs"
+        },
+        "Rrs_xflags/.zarray": {
+            "chunks": [
+                596,
+                10000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<i4",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                596,
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "Rrs_xflags/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "WAVELENGTH",
+                "TIME"
+            ],
+            "ancillary_variables": "relaz sza windspeed",
+            "coordinates": "LATITUDE LONGITUDE",
+            "flag_description": "A flag value of 1 indicates that the solar zenith angle exceeds 50 degrees. \nA flag value of 2 indicates that the solar zenith angle is less than 10 degrees and data is likely to be affected by residual sun glint. \nThe Rrs data with Rrs_xflags>0 may be excluded for precision uses.",
+            "flag_meanings": "sza_below_50 sza_above_50 sza_below_10",
+            "flag_values": [
+                0,
+                1,
+                2
+            ],
+            "long_name": "Extra Flag for Remote Sensing Reflectance",
+            "standard_name": "status_flag",
+            "varname": "Rrs_xflags"
+        },
+        "TIME/.zarray": {
+            "chunks": [
+                35979
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "TIME/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "axis": "T",
+            "calendar": "gregorian",
+            "long_name": "UTC time",
+            "standard_name": "time",
+            "units": "seconds since 1970-01-01T00:00:00+00:00",
+            "valid_max": 10000000000.0,
+            "valid_min": 0.0
+        },
+        "WAVELENGTH/.zarray": {
+            "chunks": [
+                596
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                596
+            ],
+            "zarr_format": 2
+        },
+        "WAVELENGTH/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "WAVELENGTH"
+            ],
+            "comment": "Wavelengths associated with the Rrs values after the input spectral values were resampled to common spectral bandwidth and abscissa values.",
+            "long_name": "wavelength",
+            "standard_name": "radiation_wavelength",
+            "units": "nm",
+            "valid_max": 1062.0,
+            "valid_min": 398.0
+        },
+        "filename/.zarray": {
+            "chunks": [
+                10000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<U18",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "filename/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE"
+        },
+        "gearpos/.zarray": {
+            "chunks": [
+                10000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "gearpos/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE",
+            "long_name": "DALEC gear position",
+            "units": "degrees"
+        },
+        "pitch/.zarray": {
+            "chunks": [
+                10000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "pitch/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE",
+            "long_name": "Platform pitch angle",
+            "standard_name": "platform_pitch_angle",
+            "units": "degrees"
+        },
+        "pitchsd/.zarray": {
+            "chunks": [
+                10000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "pitchsd/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "cell_methods": "TIME: standard_deviation",
+            "coordinates": "LATITUDE LONGITUDE",
+            "long_name": "DALEC pitch standard deviation",
+            "standard_name": "platform_pitch_angle standard_error",
+            "units": "degrees"
+        },
+        "platform_code/.zarray": {
+            "chunks": [
+                10000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<U7",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "platform_code/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE"
+        },
+        "quality_control_version/.zarray": {
+            "chunks": [
+                10000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<U49",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "quality_control_version/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE"
+        },
+        "relaz/.zarray": {
+            "chunks": [
+                10000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "relaz/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE",
+            "long_name": "relative solar azimuth",
+            "standard_name": "angle_of_rotation_from_solar_azimuth_to_platform_azimuth",
+            "units": "degrees"
+        },
+        "rho/.zarray": {
+            "chunks": [
+                596,
+                10000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                596,
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "rho/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "WAVELENGTH",
+                "TIME"
+            ],
+            "ancillary_variables": "relaz sza windspeed",
+            "cell_method": "LATITUDE: LONGITUDE: TIME: point",
+            "coordinates": "LATITUDE LONGITUDE",
+            "intercept": 0.0,
+            "long_name": "Fractional contribution of reflected sky light",
+            "slope": 1.0,
+            "units": "1",
+            "varname": "rho"
+        },
+        "roll/.zarray": {
+            "chunks": [
+                10000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "roll/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE",
+            "long_name": "Platform roll angle",
+            "standard_name": "platform_roll_angle",
+            "units": "degrees"
+        },
+        "rollsd/.zarray": {
+            "chunks": [
+                10000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "rollsd/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "cell_methods": "TIME: standard_deviation",
+            "coordinates": "LATITUDE LONGITUDE",
+            "long_name": "DALEC roll standard deviation",
+            "standard_name": "platform_roll_angle standard_error",
+            "units": "degrees"
+        },
+        "sza/.zarray": {
+            "chunks": [
+                10000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "sza/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE",
+            "long_name": "solar zenith angle",
+            "standard_name": "solar_zenith_angle",
+            "units": "degrees"
+        },
+        "voyage_number/.zarray": {
+            "chunks": [
+                10000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<U10",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "voyage_number/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE"
+        },
+        "windspeed/.zarray": {
+            "chunks": [
+                10000
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                5961
+            ],
+            "zarr_format": 2
+        },
+        "windspeed/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "coordinates": "LATITUDE LONGITUDE",
+            "intercept": 0.0,
+            "long_name": "Wind speed",
+            "slope": 1.0,
+            "units": "knots",
+            "varname": "windspeed",
+            "wind_source": "Modelled"
+        }
+    },
+    "zarr_consolidated_format": 1
+}

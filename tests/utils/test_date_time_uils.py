@@ -268,10 +268,14 @@ class TestDateTimeUtils(unittest.TestCase):
         requested_start = datetime(2023, 6, 1)
         requested_end = datetime(2023, 6, 30)
 
-        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+        result = trim_date_range(
+            self.api, "test-uuid", "test-key", requested_start, requested_end
+        )
 
         self.assertEqual((requested_start, requested_end), result)
-        self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
+        self.api.get_temporal_extent.assert_called_with(
+            uuid="test-uuid", key="test-key"
+        )
 
     def test_partial_overlap_start_before(self):
         """Test when requested start is before metadata start."""
@@ -283,10 +287,14 @@ class TestDateTimeUtils(unittest.TestCase):
         requested_start = datetime(2022, 12, 1)
         requested_end = datetime(2023, 6, 30)
 
-        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+        result = trim_date_range(
+            self.api, "test-uuid", "test-key", requested_start, requested_end
+        )
 
         self.assertEqual(result, (metadata_start, requested_end))
-        self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
+        self.api.get_temporal_extent.assert_called_with(
+            uuid="test-uuid", key="test-key"
+        )
 
     def test_partial_overlap_end_after(self):
         """Test when requested end is after metadata end."""
@@ -298,10 +306,14 @@ class TestDateTimeUtils(unittest.TestCase):
         requested_start = datetime(2023, 6, 1)
         requested_end = datetime(2024, 1, 31)
 
-        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+        result = trim_date_range(
+            self.api, "test-uuid", "test-key", requested_start, requested_end
+        )
 
         self.assertEqual(result, (requested_start, metadata_end))
-        self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
+        self.api.get_temporal_extent.assert_called_with(
+            uuid="test-uuid", key="test-key"
+        )
 
     def test_partial_overlap_both_outside(self):
         """Test when requested range spans metadata range."""
@@ -313,10 +325,14 @@ class TestDateTimeUtils(unittest.TestCase):
         requested_start = datetime(2022, 12, 1)
         requested_end = datetime(2024, 1, 31)
 
-        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+        result = trim_date_range(
+            self.api, "test-uuid", "test-key", requested_start, requested_end
+        )
 
         self.assertEqual(result, (metadata_start, metadata_end))
-        self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
+        self.api.get_temporal_extent.assert_called_with(
+            uuid="test-uuid", key="test-key"
+        )
 
     def test_exactly_matches_metadata_range(self):
         """Test when requested range exactly matches metadata range."""
@@ -328,10 +344,14 @@ class TestDateTimeUtils(unittest.TestCase):
         requested_start = datetime(2023, 1, 1)
         requested_end = datetime(2023, 12, 31)
 
-        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+        result = trim_date_range(
+            self.api, "test-uuid", "test-key", requested_start, requested_end
+        )
 
         self.assertEqual(result, (requested_start, requested_end))
-        self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
+        self.api.get_temporal_extent.assert_called_with(
+            uuid="test-uuid", key="test-key"
+        )
 
     def test_no_overlap_before_metadata(self):
         """Test when requested range is entirely before metadata range."""
@@ -343,10 +363,14 @@ class TestDateTimeUtils(unittest.TestCase):
         requested_start = datetime(2022, 1, 1)
         requested_end = datetime(2022, 12, 31)
 
-        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+        result = trim_date_range(
+            self.api, "test-uuid", "test-key", requested_start, requested_end
+        )
 
         self.assertEqual(result, (None, None))
-        self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
+        self.api.get_temporal_extent.assert_called_with(
+            uuid="test-uuid", key="test-key"
+        )
 
     def test_no_overlap_after_metadata(self):
         """Test when requested range is entirely after metadata range."""
@@ -358,10 +382,14 @@ class TestDateTimeUtils(unittest.TestCase):
         requested_start = datetime(2024, 1, 1)
         requested_end = datetime(2024, 12, 31)
 
-        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+        result = trim_date_range(
+            self.api, "test-uuid", "test-key", requested_start, requested_end
+        )
 
         self.assertEqual(result, (None, None))
-        self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
+        self.api.get_temporal_extent.assert_called_with(
+            uuid="test-uuid", key="test-key"
+        )
 
     def test_same_requested_dates_within_metadata(self):
         """Test when requested start and end dates are the same (within metadata)."""
@@ -373,10 +401,14 @@ class TestDateTimeUtils(unittest.TestCase):
         requested_start = datetime(2023, 6, 1)
         requested_end = datetime(2023, 6, 1)
 
-        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+        result = trim_date_range(
+            self.api, "test-uuid", "test-key", requested_start, requested_end
+        )
 
         self.assertEqual(result, (requested_start, requested_end))
-        self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
+        self.api.get_temporal_extent.assert_called_with(
+            uuid="test-uuid", key="test-key"
+        )
 
     def test_requested_matches_metadata_start(self):
         """Test when requested range starts at metadata start."""
@@ -388,10 +420,14 @@ class TestDateTimeUtils(unittest.TestCase):
         requested_start = datetime(2023, 1, 1)
         requested_end = datetime(2023, 6, 30)
 
-        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+        result = trim_date_range(
+            self.api, "test-uuid", "test-key", requested_start, requested_end
+        )
 
         self.assertEqual(result, (requested_start, requested_end))
-        self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
+        self.api.get_temporal_extent.assert_called_with(
+            uuid="test-uuid", key="test-key"
+        )
 
     def test_same_metadata_dates(self):
         """Test when metadata start and end dates are the same."""
@@ -403,10 +439,14 @@ class TestDateTimeUtils(unittest.TestCase):
         requested_start = datetime(2023, 1, 1)
         requested_end = datetime(2023, 1, 1)
 
-        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+        result = trim_date_range(
+            self.api, "test-uuid", "test-key", requested_start, requested_end
+        )
 
         self.assertEqual(result, (requested_start, requested_end))
-        self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
+        self.api.get_temporal_extent.assert_called_with(
+            uuid="test-uuid", key="test-key"
+        )
 
     def test_invalid_metadata_empty(self):
         """Test when metadata temporal extent is empty. The original start & end dates should be returned."""
@@ -415,10 +455,14 @@ class TestDateTimeUtils(unittest.TestCase):
         requested_start = datetime(2023, 1, 1)
         requested_end = datetime(2023, 12, 31)
 
-        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+        result = trim_date_range(
+            self.api, "test-uuid", "test-key", requested_start, requested_end
+        )
 
         self.assertEqual(result, (requested_start, requested_end))
-        self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
+        self.api.get_temporal_extent.assert_called_with(
+            uuid="test-uuid", key="test-key"
+        )
 
     def test_invalid_metadata_single_element(self):
         """Test when metadata temporal extent has one element. just return the original start & end dates."""
@@ -427,10 +471,14 @@ class TestDateTimeUtils(unittest.TestCase):
         requested_start = datetime(2023, 1, 1)
         requested_end = datetime(2023, 12, 31)
 
-        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+        result = trim_date_range(
+            self.api, "test-uuid", "test-key", requested_start, requested_end
+        )
 
         self.assertEqual(result, (requested_start, requested_end))
-        self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
+        self.api.get_temporal_extent.assert_called_with(
+            uuid="test-uuid", key="test-key"
+        )
 
     def test_invalid_metadata_too_many_elements(self):
         """Test when metadata temporal extent has more than two elements. just return the original start & end dates."""
@@ -445,10 +493,14 @@ class TestDateTimeUtils(unittest.TestCase):
         requested_start = datetime(2023, 1, 1)
         requested_end = datetime(2023, 12, 31)
 
-        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+        result = trim_date_range(
+            self.api, "test-uuid", "test-key", requested_start, requested_end
+        )
 
         self.assertEqual(result, (requested_start, requested_end))
-        self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
+        self.api.get_temporal_extent.assert_called_with(
+            uuid="test-uuid", key="test-key"
+        )
 
     def test_timezone_stripped_metadata(self):
         """Test when metadata dates have timezone info (should be stripped)."""
@@ -464,12 +516,16 @@ class TestDateTimeUtils(unittest.TestCase):
         requested_start = datetime(2023, 6, 1)
         requested_end = datetime(2023, 6, 30)
 
-        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+        result = trim_date_range(
+            self.api, "test-uuid", "test-key", requested_start, requested_end
+        )
 
         self.assertEqual(result, (requested_start, requested_end))
         self.assertIsNone(result[0].tzinfo)
         self.assertIsNone(result[1].tzinfo)
-        self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
+        self.api.get_temporal_extent.assert_called_with(
+            uuid="test-uuid", key="test-key"
+        )
 
     def test_timezone_stripped_requested(self):
         """Test when requested dates have timezone info (should be preserved in logic but naive in output)."""
@@ -484,7 +540,9 @@ class TestDateTimeUtils(unittest.TestCase):
         requested_start = datetime(2023, 6, 1, tzinfo=timezone.utc)
         requested_end = datetime(2023, 6, 30, tzinfo=timezone.utc)
 
-        result = trim_date_range(self.api, "test-uuid", requested_start, requested_end)
+        result = trim_date_range(
+            self.api, "test-uuid", "test-key", requested_start, requested_end
+        )
 
         requested_start_naive = requested_start.replace(tzinfo=None)
         requested_end_naive = requested_end.replace(tzinfo=None)
@@ -492,7 +550,9 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(result, (requested_start_naive, requested_end_naive))
         self.assertIsNone(result[0].tzinfo)
         self.assertIsNone(result[1].tzinfo)
-        self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
+        self.api.get_temporal_extent.assert_called_with(
+            uuid="test-uuid", key="test-key"
+        )
 
     def test_api_failure(self):
         """Test when API call fails."""
@@ -500,11 +560,17 @@ class TestDateTimeUtils(unittest.TestCase):
 
         with self.assertRaises(Exception) as cm:
             trim_date_range(
-                self.api, "test-uuid", datetime(2023, 1, 1), datetime(2023, 12, 31)
+                self.api,
+                "test-uuid",
+                "test-key",
+                datetime(2023, 1, 1),
+                datetime(2023, 12, 31),
             )
 
         self.assertEqual(str(cm.exception), "API error")
-        self.api.get_temporal_extent.assert_called_with(uuid="test-uuid")
+        self.api.get_temporal_extent.assert_called_with(
+            uuid="test-uuid", key="test-key"
+        )
 
     def test_get_boundary_of_year_month(self):
         """Test the boundary of a year-month string."""

@@ -1,0 +1,12 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "TIME"
+    ],
+    "coordinates": "LATITUDE LONGITUDE",
+    "intercept": 0.0,
+    "long_name": "Wind speed",
+    "slope": 1.0,
+    "units": "knots",
+    "varname": "windspeed",
+    "wind_source": "Modelled"
+}

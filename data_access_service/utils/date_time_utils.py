@@ -21,6 +21,10 @@ DATE_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 MIN_DATE = "1970-01-01T00:00:00Z"
 
 
+config: Config = Config.get_config()
+log = init_log(config)
+
+
 # parse all common format of date string into given format, such as "%Y-%m-%d"
 def parse_date(
     date_string: str,
@@ -88,9 +92,9 @@ def get_monthly_date_range_array_from_(
     # Create result list
     return [
         {
-            "start_date": group["date"].min().to_pydatetime(),
+            "start_date": group["date"].min().round("us").to_pydatetime(),
             "end_date": datetime.combine(
-                group["date"].max().to_pydatetime(), time(23, 59, 59)
+                group["date"].max().round("us").to_pydatetime(), time(23, 59, 59)
             ),
         }
         for _, group in monthly_groups
@@ -100,13 +104,13 @@ def get_monthly_date_range_array_from_(
 def trim_date_range(
     api: BaseAPI,
     uuid: str,
+    key: str,
     requested_start_date: datetime,
     requested_end_date: datetime,
 ) -> (datetime | None, datetime | None):
-    log = init_log(Config.get_config())
 
     log.info(f"Original date range: {requested_start_date} to {requested_end_date}")
-    metadata_temporal_extent = api.get_temporal_extent(uuid=uuid)
+    metadata_temporal_extent = api.get_temporal_extent(uuid=uuid, key=key)
     if len(metadata_temporal_extent) != 2:
         log.warning(f"Invalid metadata temporal extent: {metadata_temporal_extent}")
         return requested_start_date, requested_end_date
