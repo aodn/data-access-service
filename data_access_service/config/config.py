@@ -59,8 +59,8 @@ class Config:
                 return DevConfig()
 
     @staticmethod
-    def get_temp_folder(job_id: str) -> str:
-        return tempfile.mkdtemp(prefix=job_id)
+    def get_temp_folder(job_id: str, key: str) -> str:
+        return tempfile.mkdtemp(prefix=job_id + "_" + key)
 
     def get_s3_client(self):
         return self.s3

@@ -11,7 +11,6 @@ from data_access_service.config.config import Config
 from data_access_service.tasks.data_collection import collect_data_files
 from tests.batch.batch_test_consts import PREPARATION_PARAMETERS
 from tests.core.test_with_s3 import TestWithS3
-from datetime import datetime, time
 
 
 class TestDataGeneration(TestWithS3):

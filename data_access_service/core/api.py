@@ -2,12 +2,13 @@ import asyncio
 import gzip
 from concurrent.futures import ThreadPoolExecutor
 
+import dask.dataframe as dd
 import pandas as pd
 import logging
 
 from datetime import timedelta, datetime, timezone
 from io import BytesIO
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 import xarray
 from aodn_cloud_optimised import DataQuery
@@ -17,6 +18,7 @@ from aodn_cloud_optimised.lib.config import get_notebook_url
 from data_access_service.core.descriptor import Depth, Descriptor
 
 log = logging.getLogger(__name__)
+RECORD_PER_PARTITION: int = 1000
 
 
 def _extract_depth(data: dict):
@@ -65,13 +67,16 @@ class BaseAPI:
         return False
 
     @staticmethod
-    def zarr_to_dataframe(dataset: xarray.Dataset, columns=None):
+    def zarr_to_dask_dataframe(
+        dataset: xarray.Dataset, columns: Optional[List[str]] = None
+    ) -> dd.DataFrame | None:
         """
         Filter an xarray.Dataset to specific columns (variables) and convert to a Pandas DataFrame.
 
         Args:
             dataset: xarray.Dataset, potentially Zarr-backed.
             columns: List of variable names to select (default: all variables).
+            npartitions: size
 
         Returns:
             pandas.DataFrame: DataFrame containing the specified columns.
@@ -83,6 +88,13 @@ class BaseAPI:
         # Check if dataset is initialized
         if dataset is None:
             raise RuntimeError("Dataset not initialized")
+
+        # Short circuit here, it is much memory efficient to check size before
+        # convert it to dask. After convert to dask, if you want to check size
+        # it force data load and in most case takes all memory can result in
+        # MemoryError exception
+        if not dataset.sizes or any(size == 0 for size in dataset.sizes.values()):
+            return None
 
         # Get available variables
         available_columns = list(dataset.data_vars) + list(dataset.coords)
@@ -106,14 +118,17 @@ class BaseAPI:
         # Select specified variables (returns a new Dataset)
         filtered_dataset = xarray.Dataset(selected_data)
 
-        # Convert to Pandas DataFrame
-        df = filtered_dataset.to_dataframe()
+        # Convert to Dask DataFrame
+        ddf = filtered_dataset.to_dask_dataframe()
 
-        # Reset index if needed to include coordinates as columns
-        if isinstance(df.index, pd.MultiIndex) or df.index.name is not None:
-            df = df.reset_index()
+        # Reset index to include coordinates as columns
+        ddf = ddf.reset_index()
+        ddf = ddf.repartition(npartitions=RECORD_PER_PARTITION)
 
-        return df[columns]
+        # Filter to requested columns
+        ddf = ddf[columns]
+
+        return ddf
 
 
 class API(BaseAPI):
@@ -278,7 +293,7 @@ class API(BaseAPI):
         lon_max=None,
         scalar_filter=None,
         columns: list[str] = None,
-    ) -> Optional[pd.DataFrame]:
+    ) -> Optional[dd.DataFrame]:
         mds: Dict[str, Descriptor] = self._cached.get(uuid)
 
         if mds is not None and key in mds:
@@ -319,7 +334,7 @@ class API(BaseAPI):
 
                 try:
                     if isinstance(ds, ParquetDataSource):
-                        return ds.get_data(
+                        result = ds.get_data(
                             str(date_start),
                             str(date_end),
                             lat_min,
@@ -328,6 +343,10 @@ class API(BaseAPI):
                             lon_max,
                             scalar_filter,
                             self.map_column_names(uuid, key, columns),
+                        )
+
+                        return dd.from_pandas(
+                            result, npartitions=None, chunksize=None, sort=True
                         )
                     elif isinstance(ds, ZarrDataSource):
                         # Lib slightly different for Zar file
@@ -341,7 +360,7 @@ class API(BaseAPI):
                             scalar_filter,
                         )
 
-                        return API.zarr_to_dataframe(
+                        return API.zarr_to_dask_dataframe(
                             result, self.map_column_names(uuid, key, columns)
                         )
 

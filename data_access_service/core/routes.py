@@ -1,12 +1,10 @@
 import asyncio
 import threading
-import dataclasses
 import datetime
 import json
 import os
 import tempfile
 
-import dask.dataframe
 import psutil
 import xarray as xr
 import numpy
@@ -74,10 +72,9 @@ def _generate_json_array(dask_instance, compress: bool = False):
 
 # Use to remap the field name back to column that we pass it, the raw data itself may name the field differently
 # for different dataset
-def _generate_partial_json_array(filtered: pd.DataFrame) -> Generator[dict, None, None]:
-
-    ddf: dask.dataframe.DataFrame = dd.from_pandas(
-        filtered, npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1
+def _generate_partial_json_array(filtered: dd.DataFrame) -> Generator[dict, None, None]:
+    ddf = filtered.repartition(
+        npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1
     )
 
     for partition in ddf.to_delayed():
@@ -296,7 +293,7 @@ async def _fetch_data(
     columns: List[str],
 ) -> AsyncGenerator[dict, None]:
     try:
-        result: Optional[pd.DataFrame] = api_instance.get_dataset_data(
+        result: Optional[dd.DataFrame] = api_instance.get_dataset_data(
             uuid=uuid,
             key=key,
             date_start=start_date,

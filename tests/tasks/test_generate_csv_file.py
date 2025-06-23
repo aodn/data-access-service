@@ -1,16 +1,22 @@
-from datetime import datetime
-from unittest.mock import patch, MagicMock
-
 import pytest
 
+from datetime import datetime
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+from data_access_service.core.AWSClient import AWSClient
+from aodn_cloud_optimised.lib import DataQuery
+
+from data_access_service import Config
 from data_access_service.tasks.generate_csv_file import (
     trim_date_range,
     query_data,
     generate_zip_name,
+    process_data_files,
 )
+from tests.core.test_with_s3 import TestWithS3, REGION
 
 
-class TestGenerateCSVFile:
+class TestGenerateCSVFile(TestWithS3):
 
     @pytest.fixture
     def mock_api(self):
@@ -19,6 +25,16 @@ class TestGenerateCSVFile:
     @pytest.fixture
     def mock_aws(self):
         return MagicMock()
+
+    @pytest.fixture(scope="class")
+    def upload_test_case_to_s3(self, aws_clients, localstack, mock_boto3_client):
+        s3_client, _ = aws_clients
+        # Upload test data
+        TestWithS3.upload_to_s3(
+            s3_client,
+            DataQuery.BUCKET_OPTIMISED_DEFAULT,
+            Path(__file__).parent.parent / "canned/s3_sample2",
+        )
 
     def test_trim_date_range_within_bounds(self, mock_api):
         mock_api.get_temporal_extent.return_value = [
@@ -88,3 +104,26 @@ class TestGenerateCSVFile:
         end_date = datetime(2021, 12, 31)
         zip_name = generate_zip_name(uuid, start_date, end_date)
         assert zip_name == "test-uuid_2021-01-01_2021-12-31"
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_generate_csv_with_s3(
+        self, setup_resources, localstack, aws_clients, upload_test_case_to_s3
+    ):
+        """Test subsetting with valid and invalid time ranges."""
+        s3_client, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+
+        # This uuid contains two dataset in the canned data
+        # uuid 28f8bfed-ca6a-472a-84e4-42563ce4df3f name vessel_satellite_radiance_delayed_qc.zarr
+        # uuid 28f8bfed-ca6a-472a-84e4-42563ce4df3f name vessel_satellite_radiance_derived_product.zarr
+        with patch.object(AWSClient, "send_email") as mock_send_email:
+            test_job_id = "10"
+            process_data_files(
+                test_job_id,
+                "28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                ["*"],
+                datetime.strptime("2011-01-01 00:00:00", "%Y-%m-%d %H:%M:%S"),
+                datetime.strptime("2011-09-01 00:00:00", "%Y-%m-%d %H:%M:%S"),
+                None,
+            )

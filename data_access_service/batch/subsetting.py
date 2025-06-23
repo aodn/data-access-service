@@ -5,7 +5,6 @@ from data_access_service.batch.batch_enums import Parameters
 from data_access_service.core.AWSClient import AWSClient
 from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.tasks.generate_csv_file import process_data_files
-from datetime import time
 from data_access_service.utils.date_time_utils import (
     trim_date_range,
     supply_day,
@@ -77,7 +76,12 @@ def prepare_data(parameters, job_index):
     uuid = parameters[Parameters.UUID.value]
     # An uuid can host multiple data file, so we need a key
     # to narrow our target file. Right now it will be the filename
-    key = parameters[Parameters.KEY.value]
+    # if nothing specified, assume all files taken
+    key = (
+        ["*"]
+        if parameters[Parameters.KEY.value] is None
+        else [item.strip() for item in parameters[Parameters.KEY.value].split(",")]
+    )
     master_job_id = parameters[Parameters.MASTER_JOB_ID.value]
     date_ranges = parameters[Parameters.DATE_RANGES.value]
     date_ranges_dict = json.loads(date_ranges)
