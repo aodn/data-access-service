@@ -12,9 +12,6 @@ from data_access_service.utils.date_time_utils import (
     parse_date,
 )
 
-config = Config.get_config()
-logger = init_log(config)
-
 
 def _get_key(parameters) -> list[str]:
     return (
@@ -31,6 +28,8 @@ def _get_uuid(parameters) -> str:
 # The only purpose is to create suitable number of child job, we can fine tune the value
 # on what is optimal value later
 def init(job_id_of_init, parameters):
+    # Must be here, this give change for test to init properly before calling get_config()
+    config = Config.get_config()
 
     month_count_per_job = config.get_month_count_per_job()
     start_date_str = parameters[Parameters.START_DATE.value]
@@ -49,11 +48,11 @@ def init(job_id_of_init, parameters):
     preparation_parameters = {
         **parameters,
         Parameters.MASTER_JOB_ID.value: job_id_of_init,
+        Parameters.TYPE.value: "sub-setting-data-preparation",
         Parameters.DATE_RANGES.value: json.dumps(date_ranges),
         Parameters.INTERMEDIATE_OUTPUT_FOLDER.value: config.get_temp_folder(
             job_id_of_init
         ),
-        Parameters.TYPE.value: "sub-setting-data-preparation",
     }
     data_preparation_job_id = aws_client.submit_a_job(
         job_name="prepare-data-for-job-" + job_id_of_init,
@@ -80,6 +79,9 @@ def init(job_id_of_init, parameters):
 
 
 def prepare_data(parameters, job_index):
+    config = Config.get_config()
+    logger = init_log(config)
+
     # get params
     uuid = _get_uuid(parameters)
     # An uuid can host multiple data file, so we need a key

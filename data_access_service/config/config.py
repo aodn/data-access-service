@@ -124,6 +124,10 @@ class IntTestConfig(Config):
     def get_api_key(self):
         return "testing"
 
+    @staticmethod
+    def get_temp_folder(job_id: str) -> str:
+        return f"/tmp/tmp{job_id}"
+
 
 class DevConfig(Config):
     def __init__(self):
