@@ -16,28 +16,32 @@ config = Config.get_config()
 logger = init_log(config)
 
 
+def _get_key(parameters) -> list[str]:
+    return (
+        ["*"]
+        if parameters[Parameters.KEY.value] is None
+        else [item.strip() for item in parameters[Parameters.KEY.value].split(",")]
+    )
+
+
+def _get_uuid(parameters) -> str:
+    return parameters[Parameters.UUID.value]
+
+
+# The only purpose is to create suitable number of child job, we can fine tune the value
+# on what is optimal value later
 def init(job_id_of_init, parameters):
 
     month_count_per_job = config.get_month_count_per_job()
-    uuid = parameters[Parameters.UUID.value]
-    key = parameters[Parameters.KEY.value]
     start_date_str = parameters[Parameters.START_DATE.value]
     end_date_str = parameters[Parameters.END_DATE.value]
 
     requested_start_date, requested_end_date = supply_day(start_date_str, end_date_str)
-    start_date, end_date = trim_date_range(
-        api=API(),
-        uuid=uuid,
-        key=key,
-        requested_start_date=requested_start_date,
-        requested_end_date=requested_end_date,
-    )
     date_ranges = split_date_range(
-        start_date=start_date,
-        end_date=end_date,
+        start_date=requested_start_date,
+        end_date=requested_end_date,
         month_count_per_job=month_count_per_job,
     )
-    parameters[Parameters.DATE_RANGES.value] = json.dumps(date_ranges)
 
     aws_client = AWSClient()
 
@@ -45,6 +49,10 @@ def init(job_id_of_init, parameters):
     preparation_parameters = {
         **parameters,
         Parameters.MASTER_JOB_ID.value: job_id_of_init,
+        Parameters.DATE_RANGES.value: json.dumps(date_ranges),
+        Parameters.INTERMEDIATE_OUTPUT_FOLDER.value: config.get_temp_folder(
+            job_id_of_init
+        ),
         Parameters.TYPE.value: "sub-setting-data-preparation",
     }
     data_preparation_job_id = aws_client.submit_a_job(
@@ -73,19 +81,16 @@ def init(job_id_of_init, parameters):
 
 def prepare_data(parameters, job_index):
     # get params
-    uuid = parameters[Parameters.UUID.value]
+    uuid = _get_uuid(parameters)
     # An uuid can host multiple data file, so we need a key
     # to narrow our target file. Right now it will be the filename
     # if nothing specified, assume all files taken
-    key = (
-        ["*"]
-        if parameters[Parameters.KEY.value] is None
-        else [item.strip() for item in parameters[Parameters.KEY.value].split(",")]
-    )
+    key = _get_key(parameters)
     master_job_id = parameters[Parameters.MASTER_JOB_ID.value]
     date_ranges = parameters[Parameters.DATE_RANGES.value]
     date_ranges_dict = json.loads(date_ranges)
     multi_polygon = parameters[Parameters.MULTI_POLYGON.value]
+    intermediate_output_folder = parameters[Parameters.INTERMEDIATE_OUTPUT_FOLDER.value]
 
     if job_index is None:
         job_index = 0
@@ -101,7 +106,15 @@ def prepare_data(parameters, job_index):
     logger.info(f"Start Date:{start_date}")
     logger.info(f"End Date:{end_date}")
 
-    process_data_files(master_job_id, uuid, key, start_date, end_date, multi_polygon)
+    process_data_files(
+        master_job_id,
+        intermediate_output_folder,
+        uuid,
+        key,
+        start_date,
+        end_date,
+        multi_polygon,
+    )
 
 
 def collect_data(parameters):

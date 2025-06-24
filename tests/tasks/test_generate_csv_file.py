@@ -106,7 +106,7 @@ class TestGenerateCSVFile(TestWithS3):
         assert zip_name == "test-uuid_2021-01-01_2021-12-31"
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    def test_generate_csv_with_s3(
+    def test_generate_csv_with_zarr(
         self, setup_resources, localstack, aws_clients, upload_test_case_to_s3
     ):
         """Test subsetting with valid and invalid time ranges."""
@@ -118,12 +118,19 @@ class TestGenerateCSVFile(TestWithS3):
         # uuid 28f8bfed-ca6a-472a-84e4-42563ce4df3f name vessel_satellite_radiance_delayed_qc.zarr
         # uuid 28f8bfed-ca6a-472a-84e4-42563ce4df3f name vessel_satellite_radiance_derived_product.zarr
         with patch.object(AWSClient, "send_email") as mock_send_email:
-            test_job_id = "10"
-            process_data_files(
-                test_job_id,
-                "28f8bfed-ca6a-472a-84e4-42563ce4df3f",
-                ["*"],
-                datetime.strptime("2011-01-01 00:00:00", "%Y-%m-%d %H:%M:%S"),
-                datetime.strptime("2011-09-01 00:00:00", "%Y-%m-%d %H:%M:%S"),
-                None,
-            )
+            try:
+                test_job_id = "10"
+                process_data_files(
+                    test_job_id,
+                    "28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                    ["*"],
+                    datetime.strptime("2011-01-01 00:00:00", "%Y-%m-%d %H:%M:%S"),
+                    datetime.strptime("2011-09-01 00:00:00", "%Y-%m-%d %H:%M:%S"),
+                    None,
+                )
+                # Should not arrive this line as zarr cannot convert to CSV
+                assert False
+            except MemoryError as me:
+                # Expect to throw exception as zarr file is too big and not make sense to
+                # convert to CSV
+                pass

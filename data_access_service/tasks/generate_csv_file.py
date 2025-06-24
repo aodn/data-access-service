@@ -4,6 +4,9 @@ import dask.dataframe as dd
 
 from datetime import datetime
 from typing import List, Dict, Optional
+
+from numcodecs import Zstd
+
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSClient import AWSClient
 from data_access_service.core.descriptor import Descriptor
@@ -26,6 +29,7 @@ api = API()
 
 def process_data_files(
     job_id_of_init: str,
+    intermediate_output_folder: str,
     uuid: str,
     keys: List[str],
     start_date: datetime,
@@ -41,7 +45,7 @@ def process_data_files(
     if not api.get_api_status():
         api.initialize_metadata()
 
-    if None in [uuid, keys, start_date, end_date]:
+    if None in [uuid, keys, start_date, end_date, intermediate_output_folder]:
         raise ValueError("One or more required arguments are None")
 
     if "*" in keys:
@@ -54,11 +58,11 @@ def process_data_files(
 
     aws = AWSClient()
 
-    try:
-        for datum in dataset:
+    for datum in dataset:
+        try:
             log.info(f"Start prepare {uuid}-{datum}")
-            tmp_data_folder_path = config.get_temp_folder(job_id_of_init, datum)
-            _generate_csv_files_polygon(
+            tmp_data_folder_path = f"{intermediate_output_folder}/{datum}"
+            _generate_partition_output_with_polygon(
                 tmp_data_folder_path,
                 uuid,
                 datum,
@@ -69,36 +73,25 @@ def process_data_files(
             upload_all_files_in_folder_to_temp_s3(
                 master_job_id=job_id_of_init, local_folder=tmp_data_folder_path, aws=aws
             )
-
-    except TypeError as e:
-        log.error(f"Error: {e}")
-    except ValueError as e:
-        log.error(f"Error: {e}")
-    except Exception as e:
-        log.error(f"Error: {e}")
+        except TypeError as e:
+            log.error(f"Error: {e}")
+            raise e
+        except ValueError as e:
+            log.error(f"Error: {e}")
+            raise e
+        except MemoryError as e:
+            # If you try to convert a zarr to CSV, it will be too big to fit into memory or file due to multiple dimension
+            # hence it is not something we can support
+            raise MemoryError(f"Data file {datum} too big to convert to CSV : {e}")
+        except Exception as e:
+            log.error(f"Error: {e}")
+            raise e
     return None
 
 
-def _generate_file_name(
-    folder_path: str,
-    start_date: datetime,
-    end_date: datetime,
-    min_lat: int = -90,
-    max_lat: int = 90,
-    min_lon: int = -180,
-    max_lon: int = 180,
-):
-    min_lat = -90 if min_lat is None else min_lat
-    max_lat = 90 if max_lat is None else max_lat
-
-    min_lon = -180 if min_lon is None else min_lon
-    max_lon = 180 if max_lon is None else max_lon
-
-    return f"{folder_path}/date_{start_date.strftime(YEAR_MONTH_DAY)}_{end_date.strftime(YEAR_MONTH_DAY)}_bbox_{int(round(min_lon, 0))}_{int(round(min_lat, 0))}_{int(round(max_lon, 0))}_{int(round(max_lat, 0))}.csv"
-
-
-def _generate_csv_files(
-    folder_path: str,
+def _generate_partition_output(
+    root_folder_path: str,
+    array_index: str,
     uuid: str,
     key: str,
     start_date: datetime,
@@ -108,6 +101,8 @@ def _generate_csv_files(
     min_lon,
     max_lon,
 ):
+    # We need to split it smaller due to fact that the lib return data with to_parquet internally
+    # which use a lot of memory.
     start_date, end_date = trim_date_range(
         api=api,
         uuid=uuid,
@@ -120,8 +115,8 @@ def _generate_csv_files(
         date_ranges = get_monthly_date_range_array_from_(
             start_date=start_date, end_date=end_date
         )
-
-        combined_result: dd.DataFrame | None = None
+        # Use only for Zarr data
+        consolidate_zarr = None
 
         for date_range in date_ranges:
             result: Optional[dd.DataFrame] = query_data(
@@ -136,19 +131,36 @@ def _generate_csv_files(
                 max_lon,
             )
             if result is not None:
-                if combined_result is None:
-                    combined_result = result
+                if key.endswith("parquet"):
+                    # With parquet we can write on each result because of the partition by TIME
+                    # create different directory
+                    output_path = f"{root_folder_path}/{key}/part-{array_index}/"
+                    result.to_parquet(
+                        output_path,
+                        partition_on=["TIME"],  # Partition by region column
+                        compression="zstd",  # Use Zstd for small file size
+                        engine="pyarrow",  # Use pyarrow for performance
+                        write_index=False,  # Exclude index to save space
+                    )
                 else:
-                    combined_result = dd.concat([combined_result, result])
+                    # Zarr do not support directory partition hence we need to consolidate
+                    # it before write to disk.
+                    if consolidate_zarr is None:
+                        consolidate_zarr = result
+                    else:
+                        consolidate_zarr = dd.concat([consolidate_zarr, result], axis=0)
 
-        if combined_result is not None:
-            csv_file_path = _generate_file_name(
-                folder_path, start_date, end_date, min_lat, max_lat, min_lon, max_lon
+        if consolidate_zarr is not None:
+            output_path = f"{root_folder_path}/{key}/part-{array_index}.zarr"
+            consolidate_zarr.to_zarr(
+                output_path,
+                mode="w",  # Overwrite if exists
+                encoding={"value": {"compressor": Zstd(level=1)}},
+                compute=True,  # Compute immediately
             )
-            dd.to_csv(combined_result, filename=csv_file_path, index=False)
 
 
-def _generate_csv_files_polygon(
+def _generate_partition_output_with_polygon(
     folder_path: str,
     uuid: str,
     key: str,
@@ -170,7 +182,7 @@ def _generate_csv_files_polygon(
             min_lon = lats_lons["min_lon"]
             max_lon = lats_lons["max_lon"]
 
-            _generate_csv_files(
+            _generate_partition_output(
                 folder_path,
                 uuid,
                 key,
@@ -182,7 +194,7 @@ def _generate_csv_files_polygon(
                 max_lon,
             )
     else:
-        _generate_csv_files(
+        _generate_partition_output(
             folder_path, uuid, key, start_date, end_date, None, None, None, None
         )
 
@@ -224,8 +236,10 @@ def query_data(
         )
     except ValueError as e:
         log.info(f"seems like no data for this polygon. Error: {e}")
+        raise e
     except Exception as e:
         log.error(f"Error: {e}")
+        raise e
 
     if df is not None:
         return df

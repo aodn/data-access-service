@@ -18,7 +18,6 @@ from aodn_cloud_optimised.lib.config import get_notebook_url
 from data_access_service.core.descriptor import Depth, Descriptor
 
 log = logging.getLogger(__name__)
-RECORD_PER_PARTITION: int = 1000
 
 
 def _extract_depth(data: dict):
@@ -97,7 +96,7 @@ class BaseAPI:
             return None
 
         # Get available variables
-        available_columns = list(dataset.data_vars) + list(dataset.coords)
+        available_columns = list(dataset.variables)
 
         # Use all variables if none specified
         columns = columns or available_columns
@@ -109,11 +108,8 @@ class BaseAPI:
         # Create a new Dataset with selected variables and promote coordinates if needed
         selected_data = {}
         for col in columns:
-            if col in dataset.data_vars:
+            if col in dataset.variables:
                 selected_data[col] = dataset[col]
-            elif col in dataset.coords:
-                # Promote coordinate to data variable
-                selected_data[col] = dataset.coords[col]
 
         # Select specified variables (returns a new Dataset)
         filtered_dataset = xarray.Dataset(selected_data)
@@ -123,7 +119,6 @@ class BaseAPI:
 
         # Reset index to include coordinates as columns
         ddf = ddf.reset_index()
-        ddf = ddf.repartition(npartitions=RECORD_PER_PARTITION)
 
         # Filter to requested columns
         ddf = ddf[columns]
