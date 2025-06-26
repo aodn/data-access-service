@@ -9,7 +9,7 @@ def upload_all_files_in_folder_to_temp_s3(
 ) -> str:
     config: Config = Config.get_config()
     bucket_name = config.get_csv_bucket_name()
-    s3_temp_folder = Config.get_s3_temp_folder_name(master_job_id)
+    s3_temp_folder = config.get_s3_temp_folder_name(master_job_id)
 
     for root, _, files in os.walk(local_folder):
         for file in files:

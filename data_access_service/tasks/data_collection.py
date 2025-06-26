@@ -1,5 +1,7 @@
 import os
 import zipfile
+import dask.dataframe as dd
+
 from io import BytesIO
 from typing import List
 
@@ -10,16 +12,23 @@ from data_access_service.core.AWSClient import AWSClient
 def collect_data_files(master_job_id: str, dataset_uuid: str, recipient: str):
 
     aws = AWSClient()
-    bucket_name = Config.get_config().get_csv_bucket_name()
-    s3_key_of_data_files = aws.get_s3_keys(
-        bucket_name=bucket_name,
-        folder_prefix=Config.get_s3_temp_folder_name(master_job_id),
+    config = Config.get_config()
+    bucket_name = config.get_csv_bucket_name()
+    dataset: list[str] = aws.list_s3_folders(
+        bucket_name=bucket_name, prefix=config.get_s3_temp_folder_name(master_job_id)
     )
 
-    stream = ZipStreamingBody(bucket=bucket_name, s3_keys=s3_key_of_data_files, aws=aws)
-    download_url = aws.upload_fileobj_to_s3(
-        file_obj=stream, s3_bucket=bucket_name, s3_key=f"{master_job_id}/data.zip"
-    )
+    # We can have multiple dataset to the same UUID, they are export accordingly under different folder
+    # so we need to scan each folder and depends on the folder name
+    download_url = None
+    for d in dataset:
+        if d.endswith(".parquet"):
+            p = aws.read_parquet_from_s3(
+                f"s3://{bucket_name}/{config.get_s3_temp_folder_name(master_job_id)}{d}"
+            )
+            download_url = aws.write_csv_to_s3(
+                p, bucket_name, f"{master_job_id}/{d.replace('.parquet', '')}.zip"
+            )
 
     subject = f"Finish processing data file whose uuid is:  {dataset_uuid}"
     body_text = (

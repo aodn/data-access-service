@@ -10,7 +10,6 @@ from numcodecs import Zstd
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSClient import AWSClient
 from data_access_service.core.descriptor import Descriptor
-from data_access_service.utils.date_time_utils import YEAR_MONTH_DAY
 from data_access_service.tasks.data_file_upload import (
     upload_all_files_in_folder_to_temp_s3,
 )
@@ -29,6 +28,7 @@ api = API()
 
 def process_data_files(
     job_id_of_init: str,
+    job_index: str,
     intermediate_output_folder: str,
     uuid: str,
     keys: List[str],
@@ -61,18 +61,21 @@ def process_data_files(
     for datum in dataset:
         try:
             log.info(f"Start prepare {uuid}-{datum}")
-            tmp_data_folder_path = f"{intermediate_output_folder}/{datum}"
-            _generate_partition_output_with_polygon(
-                tmp_data_folder_path,
+            has_result = _generate_partition_output_with_polygon(
+                intermediate_output_folder,
+                job_index,
                 uuid,
                 datum,
                 start_date,
                 end_date,
                 multi_polygon_dict,
             )
-            upload_all_files_in_folder_to_temp_s3(
-                master_job_id=job_id_of_init, local_folder=tmp_data_folder_path, aws=aws
-            )
+            if has_result:
+                upload_all_files_in_folder_to_temp_s3(
+                    master_job_id=job_id_of_init,
+                    local_folder=intermediate_output_folder,
+                    aws=aws,
+                )
         except TypeError as e:
             log.error(f"Error: {e}")
             raise e
@@ -91,7 +94,7 @@ def process_data_files(
 
 def _generate_partition_output(
     root_folder_path: str,
-    array_index: str,
+    job_index: str,
     uuid: str,
     key: str,
     start_date: datetime,
@@ -134,10 +137,14 @@ def _generate_partition_output(
                 if key.endswith("parquet"):
                     # With parquet we can write on each result because of the partition by TIME
                     # create different directory
-                    output_path = f"{root_folder_path}/{key}/part-{array_index}/"
+                    output_path = f"{root_folder_path}/{key}/part-{job_index}/"
+
+                    # Derive partition key without time
+                    result["PARTITION_KEY"] = result["TIME"].dt.strftime("%Y-%m-%d")
+
                     result.to_parquet(
                         output_path,
-                        partition_on=["TIME"],  # Partition by region column
+                        partition_on=["PARTITION_KEY"],  # Partition by region column
                         compression="zstd",  # Use Zstd for small file size
                         engine="pyarrow",  # Use pyarrow for performance
                         write_index=False,  # Exclude index to save space
@@ -151,7 +158,7 @@ def _generate_partition_output(
                         consolidate_zarr = dd.concat([consolidate_zarr, result], axis=0)
 
         if consolidate_zarr is not None:
-            output_path = f"{root_folder_path}/{key}/part-{array_index}.zarr"
+            output_path = f"{root_folder_path}/{key}/part-{job_index}.zarr"
             consolidate_zarr.to_zarr(
                 output_path,
                 mode="w",  # Overwrite if exists
@@ -162,12 +169,13 @@ def _generate_partition_output(
 
 def _generate_partition_output_with_polygon(
     folder_path: str,
+    array_index: str,
     uuid: str,
     key: str,
     start_date: datetime,
     end_date: datetime,
     multi_polygon: dict | None,
-):
+) -> bool:
     # Use sync init, it does not matter the load is slow as we run in batch
     if not api.get_api_status():
         api.initialize_metadata()
@@ -184,6 +192,7 @@ def _generate_partition_output_with_polygon(
 
             _generate_partition_output(
                 folder_path,
+                array_index,
                 uuid,
                 key,
                 start_date,
@@ -195,13 +204,25 @@ def _generate_partition_output_with_polygon(
             )
     else:
         _generate_partition_output(
-            folder_path, uuid, key, start_date, end_date, None, None, None, None
+            folder_path,
+            array_index,
+            uuid,
+            key,
+            start_date,
+            end_date,
+            None,
+            None,
+            None,
+            None,
         )
 
-    if not any(os.scandir(folder_path)):
-        raise ValueError(
+    if not os.path.isdir(folder_path):
+        log.info(
             f" No data found for uuid={uuid}, start_date={start_date}, end_date={end_date}, multi_polygon={multi_polygon}"
         )
+        return False
+    else:
+        return True
 
 
 def query_data(

@@ -6,6 +6,8 @@ import boto3
 import os
 import tempfile
 from enum import Enum
+
+from botocore.client import BaseClient
 from dotenv import load_dotenv
 
 
@@ -62,7 +64,7 @@ class Config:
     def get_temp_folder(job_id: str) -> str:
         return tempfile.mkdtemp(suffix=job_id)
 
-    def get_s3_client(self):
+    def get_s3_client(self) -> BaseClient:
         return self.s3
 
     def get_csv_bucket_name(self):

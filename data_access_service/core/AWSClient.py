@@ -1,9 +1,14 @@
 import os
+import zipfile
+from io import BytesIO
 
 import boto3
+import dask.dataframe
+import dask.dataframe as dd
 
 from data_access_service import init_log
-from data_access_service.config.config import Config
+from data_access_service.config.config import Config, IntTestConfig
+from tests.core.test_with_s3 import AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
 
 
 class AWSClient:
@@ -15,6 +20,43 @@ class AWSClient:
         self.s3 = self.config.get_s3_client()
         self.ses = boto3.client("ses")
         self.batch = boto3.client("batch")
+
+    def __get_storage_options(self):
+        # Special handle for testing
+        if isinstance(self.config, IntTestConfig):
+            # We need to point it to the test s3
+            return {
+                "client_kwargs": {
+                    "endpoint_url": self.s3.meta.endpoint_url,
+                    "region_name": self.s3.meta.region_name,
+                },
+                "key": AWS_ACCESS_KEY_ID,
+                "secret": AWS_SECRET_ACCESS_KEY,
+            }
+        else:
+            return None
+
+    def write_csv_to_s3(
+        self, data: dask.dataframe.DataFrame, bucket_name: str, key: str
+    ) -> str:
+        target = data.drop("PARTITION_KEY", axis=1)
+        target.to_csv(
+            f"s3://{bucket_name}/{key}",
+            single_file=True,
+            compression="zip",
+            storage_options=self.__get_storage_options(),
+            index=False,
+        )
+
+        region = self.s3.meta.region_name
+        return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
+
+    def read_parquet_from_s3(self, file_path: str):
+        return dd.read_parquet(
+            file_path,
+            engine="pyarrow",
+            storage_options=self.__get_storage_options(),
+        )
 
     def upload_file_to_s3(self, file_path: str, s3_bucket: str, s3_key: str) -> str:
         """
@@ -164,3 +206,32 @@ class AWSClient:
         except self.s3.exceptions.NoSuchKey:
             self.log.error(f"Object {s3_key} not found in bucket {bucket_name}.")
             return None
+
+    # List top-level folders
+    def list_s3_folders(self, bucket_name: str, prefix="", delimiter="/") -> list[str]:
+        prefix = prefix.rstrip("/") + "/" if prefix else ""
+        folders = []
+        paginator = self.s3.get_paginator("list_objects_v2")
+        pages = paginator.paginate(
+            Bucket=bucket_name, Prefix=prefix, Delimiter=delimiter
+        )
+        for page in pages:
+            if "CommonPrefixes" in page:
+                for common_prefix in page["CommonPrefixes"]:
+                    folder = (
+                        common_prefix["Prefix"]
+                        .removeprefix(prefix)
+                        .replace(delimiter, "")
+                    )
+                    folders.append(folder)
+        return folders
+
+    def extract_zip_from_s3(self, bucket_name: str, zip_key: str, output_path: str):
+        # Retrieve the ZIP file from S3
+        zip_obj = self.s3.get_object(bucket_name, zip_key)
+        zip_data = BytesIO(zip_obj["Body"].read())
+
+        # Calculate the total uncompressed size
+        total_size = 0
+        with zipfile.ZipFile(zip_data, "r") as zip_ref:
+            zip_ref.extractall(output_path)

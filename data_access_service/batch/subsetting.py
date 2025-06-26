@@ -14,11 +14,13 @@ from data_access_service.utils.date_time_utils import (
 
 
 def _get_key(parameters) -> list[str]:
-    return (
-        ["*"]
-        if parameters[Parameters.KEY.value] is None
-        else [item.strip() for item in parameters[Parameters.KEY.value].split(",")]
-    )
+    if (
+        Parameters.KEY.value in parameters
+        and parameters[Parameters.KEY.value] is not None
+    ):
+        return [item.strip() for item in parameters[Parameters.KEY.value].split(",")]
+    else:
+        return ["*"]
 
 
 def _get_uuid(parameters) -> str:
@@ -78,7 +80,7 @@ def init(job_id_of_init, parameters):
     )
 
 
-def prepare_data(parameters, job_index):
+def prepare_data(job_index: str | None, parameters):
     config = Config.get_config()
     logger = init_log(config)
 
@@ -110,6 +112,7 @@ def prepare_data(parameters, job_index):
 
     process_data_files(
         master_job_id,
+        job_index,
         intermediate_output_folder,
         uuid,
         key,

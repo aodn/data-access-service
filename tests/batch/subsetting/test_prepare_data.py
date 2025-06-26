@@ -1,121 +1,131 @@
+import shutil
 import zipfile
+import pytest
+import os
+
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from aodn_cloud_optimised.lib import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import Metadata
 
+from data_access_service import init_log
 from data_access_service.batch.subsetting import prepare_data
-from data_access_service.config.config import Config
+from data_access_service.config.config import Config, EnvType
+from data_access_service.core.AWSClient import AWSClient
 from data_access_service.tasks.data_collection import collect_data_files
-from tests.batch.batch_test_consts import PREPARATION_PARAMETERS
-from tests.core.test_with_s3 import TestWithS3
+from tests.batch.batch_test_consts import PREPARATION_PARAMETERS, INIT_JOB_ID
+from tests.core.test_with_s3 import TestWithS3, REGION
 
 
 class TestDataGeneration(TestWithS3):
 
-    def test_data_preparation_and_collection(
-        self, setup_resources, mock_boto3_client, monkeypatch
+    @pytest.fixture(autouse=True, scope="class")
+    def setup(self):
+        """Set environment variable for testing profile."""
+        os.environ["PROFILE"] = EnvType.TESTING.value
+        yield
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_parquet_preparation_and_collection(
+        self, setup, setup_resources, aws_clients
     ):
-        s3 = mock_boto3_client("s3")
+        s3_client, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+        log = init_log(config)
+        helper = AWSClient()
 
-        mock_send_email = MagicMock()
-        monkeypatch.setattr(
-            "data_access_service.tasks.data_collection.AWSClient.send_email",
-            mock_send_email,
-        )
-
-        try:
-            # Upload folder to create test data
-            TestWithS3.upload_to_s3(
-                s3,
-                DataQuery.BUCKET_OPTIMISED_DEFAULT,
-                Path(__file__).parent.parent.parent / "canned/s3_sample1",
-            )
-
-            # List objects in S3
-            response = s3.list_objects_v2(
-                Bucket=DataQuery.BUCKET_OPTIMISED_DEFAULT,
-                Prefix=DataQuery.ROOT_PREFIX_CLOUD_OPTIMISED_PATH,
-                Delimiter="/",
-            )
-
-            folders = [
-                prefix["Prefix"][len(prefix) - 1 :]
-                for prefix in response.get("CommonPrefixes", [])
-                if prefix["Prefix"].endswith(".parquet/")
-            ]
-
-            assert len(folders) == 2
-            assert folders[0] == "animal_acoustic_tracking_delayed_qc.parquet/"
-
-            # Verify DataQuery functionality
-            aodn = DataQuery.GetAodn()
-            metadata: Metadata = aodn.get_metadata()
-            assert (
-                metadata.metadata_catalog().get(
-                    "animal_acoustic_tracking_delayed_qc.parquet"
+        with patch.object(AWSClient, "send_email") as mock_send_email:
+            try:
+                # Upload folder to create test data
+                TestWithS3.upload_to_s3(
+                    s3_client,
+                    DataQuery.BUCKET_OPTIMISED_DEFAULT,
+                    Path(__file__).parent.parent.parent / "canned/s3_sample1",
                 )
-                is not None
-            )
 
-            # prepare data according to the test parameters
-            for i in range(5):
-                prepare_data(job_index=i, parameters=PREPARATION_PARAMETERS)
+                # List objects in S3
+                response = s3_client.list_objects_v2(
+                    Bucket=DataQuery.BUCKET_OPTIMISED_DEFAULT,
+                    Prefix=DataQuery.ROOT_PREFIX_CLOUD_OPTIMISED_PATH,
+                    Delimiter="/",
+                )
 
-            bucket_name = Config.get_config().get_csv_bucket_name()
-            response = s3.list_objects_v2(Bucket=bucket_name)
+                folders = [
+                    prefix["Prefix"][len(prefix) - 1 :]
+                    for prefix in response.get("CommonPrefixes", [])
+                    if prefix["Prefix"].endswith(".parquet/")
+                ]
 
-            objects = []
-            if "Contents" in response:
-                for obj in response["Contents"]:
-                    objects.append(obj["Key"])
-            #  in test parquet, only 1 data csv for the provided range
-            assert len(objects) == 1
-            assert (
-                objects[0]
-                == "init-job-id/temp/date_2010-11-17_2010-11-30_bbox_-180_-90_180_90.csv"
-            )
+                assert len(folders) == 2
+                assert folders[0] == "animal_acoustic_tracking_delayed_qc.parquet/"
 
-            # Check if the files are compressed and uploaded correctly
-            compressed_s3_key = "init-job-id/data.zip"
-            collect_data_files(
-                master_job_id="init-job-id",
-                dataset_uuid="test-dataset-uuid",
-                recipient="test@example.com",
-            )
-            response2 = s3.list_objects_v2(Bucket=bucket_name, Prefix=compressed_s3_key)
-            assert "Contents" in response2
-            assert len(response2["Contents"]) == 1
-            assert response2["Contents"][0]["Key"] == compressed_s3_key
+                # Verify DataQuery functionality
+                aodn = DataQuery.GetAodn()
+                metadata: Metadata = aodn.get_metadata()
+                assert (
+                    metadata.metadata_catalog().get(
+                        "animal_acoustic_tracking_delayed_qc.parquet"
+                    )
+                    is not None
+                )
 
-            # Check if the email was sent correctly
-            mock_send_email.assert_called_once_with(
-                recipient="test@example.com",
-                subject="Finish processing data file whose uuid is:  test-dataset-uuid",
-                body_text="You can download the data file from the following link: https://test-bucket.s3.us-east-1.amazonaws.com/init-job-id/data.zip",
-            )
+                # prepare data according to the test parameters
+                for i in range(5):
+                    prepare_data(job_index=str(i), parameters=PREPARATION_PARAMETERS)
 
-            # Check if the uncompressed size matches the sum of the individual file sizes
-            uncompressed_size = get_uncompressed_zip_size_from_s3(
-                bucket_name, compressed_s3_key, s3
-            )
-            obj_sum_size = 0
-            for obj in objects:
-                obj_size = get_object_size_from_s3(bucket_name, obj, s3)
-                if obj_size is not None:
-                    obj_sum_size += obj_size
+                bucket_name = config.get_csv_bucket_name()
+                response = s3_client.list_objects_v2(Bucket=bucket_name)
 
-            assert (
-                uncompressed_size == obj_sum_size
-            ), "The size of the extracted files does not match the downloaded files."
+                objects = []
+                if "Contents" in response:
+                    for obj in response["Contents"]:
+                        objects.append(obj["Key"])
+                #  in test parquet, only 1 data csv for the provided range
+                assert len(objects) == 1
+                assert (
+                    objects[0]
+                    == "999/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11-17/part.0.parquet"
+                )
 
-        finally:
-            TestWithS3.delete_object_in_s3(s3, DataQuery.BUCKET_OPTIMISED_DEFAULT)
-            TestWithS3.delete_object_in_s3(
-                s3, Config.get_config().get_csv_bucket_name()
-            )
+                # Check if the files are compressed and uploaded correctly
+                compressed_s3_key = "999/autonomous_underwater_vehicle.zip"
+                collect_data_files(
+                    master_job_id="999",
+                    dataset_uuid="test-dataset-uuid",
+                    recipient="test@example.com",
+                )
+                response2 = s3_client.list_objects_v2(
+                    Bucket=bucket_name, Prefix=compressed_s3_key
+                )
+                assert "Contents" in response2
+                assert len(response2["Contents"]) == 1
+                assert response2["Contents"][0]["Key"] == compressed_s3_key
+
+                # Check if the email was sent correctly
+                mock_send_email.assert_called_once_with(
+                    recipient="test@example.com",
+                    subject="Finish processing data file whose uuid is:  test-dataset-uuid",
+                    body_text="You can download the data file from the following link: https://test-bucket.s3.us-east-1.amazonaws.com/999/autonomous_underwater_vehicle.zip",
+                )
+
+                # Download the zip file and check the content
+                helper.extract_zip_from_s3(bucket_name, compressed_s3_key, "/tmp")
+
+            except Exception as ex:
+                log.error(ex)
+                raise ex
+            finally:
+                TestWithS3.delete_object_in_s3(
+                    s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT
+                )
+                TestWithS3.delete_object_in_s3(
+                    s3_client, Config.get_config().get_csv_bucket_name()
+                )
+                # Delete temp output folder as the name always same for testing
+                shutil.rmtree(config.get_temp_folder(INIT_JOB_ID))
 
     def test_data_preparation_without_index(self, mock_boto3_client):
         # Test the prepare_data function without a job index
@@ -124,22 +134,9 @@ class TestDataGeneration(TestWithS3):
         parameters["start_date"] = "02-2010"
         parameters["end_date"] = "04-2011"
         try:
-            prepare_data(parameters, job_index=None)
+            prepare_data(job_index=None, parameters=parameters)
         except Exception as e:
             assert False, f"prepare_data raised an exception: {e}"
-
-
-def get_uncompressed_zip_size_from_s3(bucket_name, zip_key, s3_client):
-    # Retrieve the ZIP file from S3
-    zip_obj = s3_client.get_object(Bucket=bucket_name, Key=zip_key)
-    zip_data = BytesIO(zip_obj["Body"].read())
-
-    # Calculate the total uncompressed size
-    total_size = 0
-    with zipfile.ZipFile(zip_data, "r") as zip_ref:
-        for file_info in zip_ref.infolist():
-            total_size += file_info.file_size
-    return total_size
 
 
 def get_object_size_from_s3(bucket_name, object_key, s3_client):
