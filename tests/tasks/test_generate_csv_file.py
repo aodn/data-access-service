@@ -3,7 +3,7 @@ import pytest
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-from data_access_service.core.AWSClient import AWSClient
+from data_access_service.core.AWSHelper import AWSHelper
 from aodn_cloud_optimised.lib import DataQuery
 
 from data_access_service import Config
@@ -117,7 +117,7 @@ class TestGenerateCSVFile(TestWithS3):
         # This uuid contains two dataset in the canned data
         # uuid 28f8bfed-ca6a-472a-84e4-42563ce4df3f name vessel_satellite_radiance_delayed_qc.zarr
         # uuid 28f8bfed-ca6a-472a-84e4-42563ce4df3f name vessel_satellite_radiance_derived_product.zarr
-        with patch.object(AWSClient, "send_email") as mock_send_email:
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
             try:
                 test_job_id = "10"
                 process_data_files(

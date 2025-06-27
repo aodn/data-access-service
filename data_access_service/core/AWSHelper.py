@@ -11,7 +11,7 @@ from data_access_service.config.config import Config, IntTestConfig
 from tests.core.test_with_s3 import AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
 
 
-class AWSClient:
+class AWSHelper:
 
     def __init__(self):
         self.config: Config = Config.get_config()
@@ -226,12 +226,17 @@ class AWSClient:
                     folders.append(folder)
         return folders
 
-    def extract_zip_from_s3(self, bucket_name: str, zip_key: str, output_path: str):
+    def extract_zip_from_s3(
+        self, bucket_name: str, zip_key: str, output_path: str
+    ) -> list[str]:
         # Retrieve the ZIP file from S3
-        zip_obj = self.s3.get_object(bucket_name, zip_key)
+        zip_obj = self.s3.get_object(Bucket=bucket_name, Key=zip_key)
         zip_data = BytesIO(zip_obj["Body"].read())
 
         # Calculate the total uncompressed size
-        total_size = 0
         with zipfile.ZipFile(zip_data, "r") as zip_ref:
+            extracted_files = [
+                name for name in zip_ref.namelist() if not name.endswith("/")
+            ]
             zip_ref.extractall(output_path)
+            return extracted_files

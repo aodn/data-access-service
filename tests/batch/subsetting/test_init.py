@@ -7,7 +7,7 @@ from unittest.mock import patch, call
 from data_access_service import API
 from data_access_service.batch.subsetting import init
 from data_access_service.config.config import EnvType, Config
-from data_access_service.core.AWSClient import AWSClient
+from data_access_service.core.AWSHelper import AWSHelper
 from tests.batch.batch_test_consts import (
     INIT_JOB_ID,
     INIT_PARAMETERS,
@@ -26,7 +26,7 @@ class TestInit:
 
     def test_init(self, setup):
         with patch.object(Config, "get_month_count_per_job") as get_month_count_per_job:
-            with patch.object(AWSClient, "submit_a_job") as submit_a_job:
+            with patch.object(AWSHelper, "submit_a_job") as submit_a_job:
                 get_month_count_per_job.return_value = 3
                 submit_a_job.return_value = "test-job-id-returned"
 
@@ -61,7 +61,7 @@ class TestInit:
     def test_init_with_very_narrow_date_range(self, setup):
         with patch.object(Config, "get_month_count_per_job") as get_month_count_per_job:
             with patch.object(API, "get_temporal_extent") as get_temporal_extent:
-                with patch.object(AWSClient, "submit_a_job") as submit_a_job:
+                with patch.object(AWSHelper, "submit_a_job") as submit_a_job:
                     get_month_count_per_job.return_value = 1200  # Set a very high month count to ensure no splitting occurs
                     # Mock the get_temporal_extent method to return a fixed value
                     get_temporal_extent.return_value = (

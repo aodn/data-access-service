@@ -10,7 +10,7 @@ from aodn_cloud_optimised.lib import DataQuery
 from data_access_service import Config
 from data_access_service.server import app, api_setup
 from tests.core.test_with_s3 import TestWithS3, REGION
-from data_access_service.core.AWSClient import AWSClient
+from data_access_service.core.AWSHelper import AWSHelper
 from starlette.status import HTTP_200_OK, HTTP_403_FORBIDDEN, HTTP_401_UNAUTHORIZED
 from unittest.mock import patch
 
@@ -42,7 +42,7 @@ class TestApiWithS3(TestWithS3):
         s3_client, _ = aws_clients
         config = Config.get_config()
 
-        with patch.object(AWSClient, "send_email") as mock_send_email:
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
             # Test with range, this dataset field is different, it called detection_timestamp
             param = {
                 "start_date": "1999-11-07",
@@ -104,7 +104,7 @@ class TestApiWithS3(TestWithS3):
         s3_client, _ = aws_clients
         config = Config.get_config()
 
-        with patch.object(AWSClient, "send_email") as mock_send_email:
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
             # Test with range, this dataset field is different, dataset without DEPTH
             param = {
                 "start_date": "2009-11-07",
@@ -149,7 +149,7 @@ class TestApiWithS3(TestWithS3):
         config = Config.get_config()
 
         # We only verify the zarr data where two zarr have same UUID
-        with patch.object(AWSClient, "send_email") as mock_send_email:
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
             # Test with range, this dataset field is different, dataset without DEPTH
             param = {
                 "start_date": "2024-02-01",

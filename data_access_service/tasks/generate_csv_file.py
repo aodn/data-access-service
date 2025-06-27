@@ -8,7 +8,7 @@ from typing import List, Dict, Optional
 from numcodecs import Zstd
 
 from data_access_service import API, init_log, Config
-from data_access_service.core.AWSClient import AWSClient
+from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.descriptor import Descriptor
 from data_access_service.tasks.data_file_upload import (
     upload_all_files_in_folder_to_temp_s3,
@@ -56,7 +56,7 @@ def process_data_files(
     else:
         dataset = keys
 
-    aws = AWSClient()
+    aws = AWSHelper()
 
     for datum in dataset:
         try:

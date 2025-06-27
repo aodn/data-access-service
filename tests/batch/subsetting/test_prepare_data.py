@@ -1,5 +1,7 @@
 import shutil
 import zipfile
+
+import pandas as pd
 import pytest
 import os
 
@@ -13,7 +15,7 @@ from aodn_cloud_optimised.lib.DataQuery import Metadata
 from data_access_service import init_log
 from data_access_service.batch.subsetting import prepare_data
 from data_access_service.config.config import Config, EnvType
-from data_access_service.core.AWSClient import AWSClient
+from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.tasks.data_collection import collect_data_files
 from tests.batch.batch_test_consts import PREPARATION_PARAMETERS, INIT_JOB_ID
 from tests.core.test_with_s3 import TestWithS3, REGION
@@ -35,9 +37,9 @@ class TestDataGeneration(TestWithS3):
         config = Config.get_config()
         config.set_s3_client(s3_client)
         log = init_log(config)
-        helper = AWSClient()
+        helper = AWSHelper()
 
-        with patch.object(AWSClient, "send_email") as mock_send_email:
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
             try:
                 # Upload folder to create test data
                 TestWithS3.upload_to_s3(
@@ -112,7 +114,16 @@ class TestDataGeneration(TestWithS3):
                 )
 
                 # Download the zip file and check the content
-                helper.extract_zip_from_s3(bucket_name, compressed_s3_key, "/tmp")
+                names: list[str] = helper.extract_zip_from_s3(
+                    bucket_name, compressed_s3_key, "/tmp"
+                )
+
+                # Expect a csv in this case so we can load it back with panda
+                assert len(names) == 1, "contain single file"
+
+                # Check values
+                csv = pd.read_csv(f"/tmp/{names[0]}")
+                assert len(csv) == 16703, "line contain correct"
 
             except Exception as ex:
                 log.error(ex)
@@ -126,6 +137,7 @@ class TestDataGeneration(TestWithS3):
                 )
                 # Delete temp output folder as the name always same for testing
                 shutil.rmtree(config.get_temp_folder(INIT_JOB_ID))
+                os.remove(f"/tmp/{names[0]}")
 
     def test_data_preparation_without_index(self, mock_boto3_client):
         # Test the prepare_data function without a job index

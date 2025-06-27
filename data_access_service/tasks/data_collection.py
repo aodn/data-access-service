@@ -6,12 +6,12 @@ from io import BytesIO
 from typing import List
 
 from data_access_service import Config
-from data_access_service.core.AWSClient import AWSClient
+from data_access_service.core.AWSHelper import AWSHelper
 
 
 def collect_data_files(master_job_id: str, dataset_uuid: str, recipient: str):
 
-    aws = AWSClient()
+    aws = AWSHelper()
     config = Config.get_config()
     bucket_name = config.get_csv_bucket_name()
     dataset: list[str] = aws.list_s3_folders(
@@ -38,7 +38,7 @@ def collect_data_files(master_job_id: str, dataset_uuid: str, recipient: str):
 
 
 class ZipStreamingBody:
-    def __init__(self, bucket: str, s3_keys: List[str], aws: AWSClient):
+    def __init__(self, bucket: str, s3_keys: List[str], aws: AWSHelper):
         self._zip_stream = None
         self._bucket_name = bucket
         self._s3_keys = s3_keys
