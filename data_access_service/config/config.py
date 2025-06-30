@@ -127,6 +127,14 @@ class IntTestConfig(Config):
         return "testing"
 
     @staticmethod
+    def get_s3_test_key():
+        return "test"
+
+    @staticmethod
+    def get_s3_secret():
+        return "test"
+
+    @staticmethod
     def get_temp_folder(job_id: str) -> str:
         return f"/tmp/tmp{job_id}"
 

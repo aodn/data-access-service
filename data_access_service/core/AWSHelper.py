@@ -8,7 +8,6 @@ import dask.dataframe as dd
 
 from data_access_service import init_log
 from data_access_service.config.config import Config, IntTestConfig
-from tests.core.test_with_s3 import AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
 
 
 class AWSHelper:
@@ -30,8 +29,8 @@ class AWSHelper:
                     "endpoint_url": self.s3.meta.endpoint_url,
                     "region_name": self.s3.meta.region_name,
                 },
-                "key": AWS_ACCESS_KEY_ID,
-                "secret": AWS_SECRET_ACCESS_KEY,
+                "key": IntTestConfig.get_s3_test_key(),
+                "secret": IntTestConfig.get_s3_secret(),
             }
         else:
             return None

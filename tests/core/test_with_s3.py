@@ -15,8 +15,6 @@ from botocore import UNSIGNED
 
 # Default region for Localstack
 REGION = "us-east-1"
-AWS_ACCESS_KEY_ID = "test"
-AWS_SECRET_ACCESS_KEY = "test"
 
 # A polygon covering the whole world
 WORLD_POLYGON = """{
@@ -71,15 +69,15 @@ class TestWithS3:
         s3_client = boto3.client(
             "s3",
             endpoint_url=localstack.get_url(),
-            aws_access_key_id=AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            aws_access_key_id=IntTestConfig.get_s3_test_key(),
+            aws_secret_access_key=IntTestConfig.get_s3_secret(),
             region_name=REGION,
         )
         sqs_client = boto3.client(
             "sqs",
             endpoint_url=localstack.get_url(),
-            aws_access_key_id=AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            aws_access_key_id=IntTestConfig.get_s3_test_key(),
+            aws_secret_access_key=IntTestConfig.get_s3_secret(),
             region_name=REGION,
         )
         yield s3_client, sqs_client

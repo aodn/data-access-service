@@ -139,16 +139,29 @@ class TestDataGeneration(TestWithS3):
                 shutil.rmtree(config.get_temp_folder(INIT_JOB_ID))
                 os.remove(f"/tmp/{names[0]}")
 
-    def test_data_preparation_without_index(self, mock_boto3_client):
+    def test_data_preparation_without_index(self, setup, setup_resources, aws_clients):
         # Test the prepare_data function without a job index
         parameters = PREPARATION_PARAMETERS.copy()
         parameters["job_index"] = None
         parameters["start_date"] = "02-2010"
         parameters["end_date"] = "04-2011"
-        try:
-            prepare_data(job_index=None, parameters=parameters)
-        except Exception as e:
-            assert False, f"prepare_data raised an exception: {e}"
+
+        s3_client, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
+            # Upload folder to create test data
+            TestWithS3.upload_to_s3(
+                s3_client,
+                DataQuery.BUCKET_OPTIMISED_DEFAULT,
+                Path(__file__).parent.parent.parent / "canned/s3_sample1",
+            )
+
+            try:
+                prepare_data(job_index=None, parameters=parameters)
+            except Exception as e:
+                assert False, f"prepare_data raised an exception: {e}"
 
 
 def get_object_size_from_s3(bucket_name, object_key, s3_client):
