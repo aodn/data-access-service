@@ -6,7 +6,6 @@ import xarray
 from datetime import datetime
 from typing import List, Dict, Optional
 from numcodecs import Zstd
-from tqdm import tqdm
 
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
@@ -121,62 +120,55 @@ def _generate_partition_output(
             start_date=start_date, end_date=end_date
         )
         need_append = False
-        # Initialize progress bar
-        with tqdm(
-            total=len(date_ranges), desc="Query and write partition file"
-        ) as pbar:
-            for date_range in date_ranges:
-                result: Optional[ddf.DataFrame | xarray.Dataset] = query_data(
-                    api,
-                    uuid,
-                    key,
-                    date_range["start_date"],
-                    date_range["end_date"],
-                    min_lat,
-                    max_lat,
-                    min_lon,
-                    max_lon,
-                )
-                if result is not None:
-                    if key.endswith("parquet"):
-                        # With parquet we can write on each result because of the partition by TIME
-                        # create different directory
-                        output_path = f"{root_folder_path}/{key}/part-{job_index}/"
+        for date_range in date_ranges:
+            result: Optional[ddf.DataFrame | xarray.Dataset] = query_data(
+                api,
+                uuid,
+                key,
+                date_range["start_date"],
+                date_range["end_date"],
+                min_lat,
+                max_lat,
+                min_lon,
+                max_lon,
+            )
+            if result is not None:
+                if key.endswith("parquet"):
+                    # With parquet we can write on each result because of the partition by TIME
+                    # create different directory
+                    output_path = f"{root_folder_path}/{key}/part-{job_index}/"
 
-                        # Derive partition key without time
-                        result["PARTITION_KEY"] = result["TIME"].dt.strftime("%Y-%m-%d")
+                    # Derive partition key without time
+                    result["PARTITION_KEY"] = result["TIME"].dt.strftime("%Y-%m-%d")
 
-                        result.to_parquet(
-                            output_path,
-                            partition_on=[
-                                "PARTITION_KEY"
-                            ],  # Partition by region column
-                            compression="zstd",  # Use Zstd for small file size
-                            engine="pyarrow",  # Use pyarrow for performance
-                            write_index=False,  # Exclude index to save space
+                    result.to_parquet(
+                        output_path,
+                        partition_on=["PARTITION_KEY"],  # Partition by region column
+                        compression="zstd",  # Use Zstd for small file size
+                        engine="pyarrow",  # Use pyarrow for performance
+                        write_index=False,  # Exclude index to save space
+                    )
+                else:
+                    # Zarr do not support directory partition hence we need to consolidate
+                    # it before write to disk.
+                    output_path = f"{root_folder_path}/{key}/part-{job_index}.zarr"
+                    if not need_append:
+                        # Get all data variable names
+                        variables = list(result.data_vars)
+                        encoding = {
+                            var: {"compressor": Zstd(level=1)} for var in variables
+                        }
+                        result.to_zarr(
+                            output_path, mode="w", encoding=encoding, compute=True
                         )
+                        need_append = True
                     else:
-                        # Zarr do not support directory partition hence we need to consolidate
-                        # it before write to disk.
-                        output_path = f"{root_folder_path}/{key}/part-{job_index}.zarr"
-                        if not need_append:
-                            # Get all data variable names
-                            variables = list(result.data_vars)
-                            encoding = {
-                                var: {"compressor": Zstd(level=1)} for var in variables
-                            }
-                            result.to_zarr(
-                                output_path, mode="w", encoding=encoding, compute=True
-                            )
-                            need_append = True
-                        else:
-                            result.to_zarr(
-                                output_path, mode="a", append_dim="TIME", compute=True
-                            )
+                        result.to_zarr(
+                            output_path, mode="a", append_dim="TIME", compute=True
+                        )
 
-                    # Either parquet or zarr save correct and no exception
-                    has_data = True
-                pbar.update(1)
+                # Either parquet or zarr save correct and no exception
+                has_data = True
 
     return has_data
 

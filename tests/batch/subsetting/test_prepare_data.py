@@ -170,8 +170,7 @@ class TestDataGeneration(TestWithS3):
                     s3_client, Config.get_config().get_csv_bucket_name()
                 )
                 # Delete temp output folder as the name always same for testing
-                shutil.rmtree(config.get_temp_folder(INIT_JOB_ID))
-                os.remove(f"/tmp/{names[0]}")
+                shutil.rmtree(config.get_temp_folder(INIT_JOB_ID), ignore_errors=True)
 
 
 def get_object_size_from_s3(bucket_name, object_key, s3_client):
