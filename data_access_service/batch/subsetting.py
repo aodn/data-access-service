@@ -6,7 +6,6 @@ from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.tasks.generate_csv_file import process_data_files
 from data_access_service.utils.date_time_utils import (
-    trim_date_range,
     supply_day,
     split_date_range,
     parse_date,

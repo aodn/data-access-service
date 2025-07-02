@@ -28,6 +28,7 @@ class Config:
         load_dotenv()
         self.config = None
         self.s3 = boto3.client("s3")
+        self.ses = boto3.client("ses")
 
     @staticmethod
     def load_config(file_path: str):
@@ -66,6 +67,9 @@ class Config:
 
     def get_s3_client(self) -> BaseClient:
         return self.s3
+
+    def get_ses_client(self) -> BaseClient:
+        return self.ses
 
     def get_csv_bucket_name(self):
         return (
@@ -119,6 +123,7 @@ class IntTestConfig(Config):
     def __init__(self):
         super().__init__()
         self.config = Config.load_config("tests/config/config-test.yaml")
+        self.ses = None
 
     def set_s3_client(self, s3_client):
         self.s3 = s3_client

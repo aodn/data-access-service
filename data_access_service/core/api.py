@@ -70,12 +70,13 @@ class BaseAPI:
         dataset: xarray.Dataset, columns: Optional[List[str]] = None
     ) -> ddf.DataFrame | None:
         """
-        Filter an xarray.Dataset to specific columns (variables) and convert to a Pandas DataFrame.
+        This function is useful when you want to convert a xarray to a dask dataframe
+        with selected columns and partition it, all operation will not load any data and
+        therefore it should be good to handle large dataset
 
         Args:
             dataset: xarray.Dataset, potentially Zarr-backed.
             columns: List of variable names to select (default: all variables).
-            npartitions: size
 
         Returns:
             pandas.DataFrame: DataFrame containing the specified columns.

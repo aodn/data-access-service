@@ -119,6 +119,7 @@ class TestGenerateCSVFile(TestWithS3):
         # uuid 28f8bfed-ca6a-472a-84e4-42563ce4df3f name vessel_satellite_radiance_delayed_qc.zarr
         # uuid 28f8bfed-ca6a-472a-84e4-42563ce4df3f name vessel_satellite_radiance_derived_product.zarr
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
+            # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
             with patch.object(AWSHelper, "send_email") as mock_send_email:
                 try:
                     test_job_id = "10"
