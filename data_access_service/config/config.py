@@ -28,7 +28,7 @@ class Config:
         load_dotenv()
         self.config = None
         self.s3 = boto3.client("s3")
-        self.ses = boto3.client("ses")
+        self.ses = None
 
     @staticmethod
     def load_config(file_path: str):
@@ -123,7 +123,6 @@ class IntTestConfig(Config):
     def __init__(self):
         super().__init__()
         self.config = Config.load_config("tests/config/config-test.yaml")
-        self.ses = None
 
     def set_s3_client(self, s3_client):
         self.s3 = s3_client
@@ -148,12 +147,14 @@ class DevConfig(Config):
     def __init__(self):
         super().__init__()
         self.config = Config.load_config("data_access_service/config/config-dev.yaml")
+        self.ses = boto3.client("ses")
 
 
 class EdgeConfig(Config):
     def __init__(self):
         super().__init__()
         self.config = Config.load_config("data_access_service/config/config-edge.yaml")
+        self.ses = boto3.client("ses")
 
 
 class StagingConfig(Config):
@@ -165,6 +166,7 @@ class StagingConfig(Config):
         self.config = Config.load_config(
             "data_access_service/config/config-staging.yaml"
         )
+        self.ses = boto3.client("ses")
 
 
 class ProdConfig(Config):
@@ -174,3 +176,4 @@ class ProdConfig(Config):
     def __init__(self):
         super().__init__()
         self.config = Config.load_config("data_access_service/config/config-prod.yaml")
+        self.ses = boto3.client("ses")
