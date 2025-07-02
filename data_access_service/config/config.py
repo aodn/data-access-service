@@ -29,6 +29,7 @@ class Config:
         self.config = None
         self.s3 = boto3.client("s3")
         self.ses = None
+        self.batch = None
 
     @staticmethod
     def load_config(file_path: str):
@@ -70,6 +71,9 @@ class Config:
 
     def get_ses_client(self) -> BaseClient:
         return self.ses
+
+    def get_batch_client(self) -> BaseClient:
+        return self.batch
 
     def get_csv_bucket_name(self):
         return (
@@ -148,6 +152,7 @@ class DevConfig(Config):
         super().__init__()
         self.config = Config.load_config("data_access_service/config/config-dev.yaml")
         self.ses = boto3.client("ses")
+        self.batch = boto3.client("batch")
 
 
 class EdgeConfig(Config):
@@ -155,6 +160,7 @@ class EdgeConfig(Config):
         super().__init__()
         self.config = Config.load_config("data_access_service/config/config-edge.yaml")
         self.ses = boto3.client("ses")
+        self.batch = boto3.client("batch")
 
 
 class StagingConfig(Config):
@@ -167,6 +173,7 @@ class StagingConfig(Config):
             "data_access_service/config/config-staging.yaml"
         )
         self.ses = boto3.client("ses")
+        self.batch = boto3.client("batch")
 
 
 class ProdConfig(Config):
@@ -177,3 +184,4 @@ class ProdConfig(Config):
         super().__init__()
         self.config = Config.load_config("data_access_service/config/config-prod.yaml")
         self.ses = boto3.client("ses")
+        self.batch = boto3.client("batch")

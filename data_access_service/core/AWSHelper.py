@@ -18,7 +18,7 @@ class AWSHelper:
         self.log.info("Init AWS class")
         self.s3 = self.config.get_s3_client()
         self.ses = self.config.get_ses_client()
-        self.batch = boto3.client("batch")
+        self.batch = self.config.get_batch_client()
 
     def get_storage_options(self):
         # Special handle for testing
