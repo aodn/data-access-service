@@ -162,6 +162,16 @@ class TestDataGeneration(TestWithS3):
                 prepare_data(job_index=None, parameters=parameters)
             except Exception as e:
                 assert False, f"prepare_data raised an exception: {e}"
+            finally:
+                TestWithS3.delete_object_in_s3(
+                    s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT
+                )
+                TestWithS3.delete_object_in_s3(
+                    s3_client, Config.get_config().get_csv_bucket_name()
+                )
+                # Delete temp output folder as the name always same for testing
+                shutil.rmtree(config.get_temp_folder(INIT_JOB_ID))
+                os.remove(f"/tmp/{names[0]}")
 
 
 def get_object_size_from_s3(bucket_name, object_key, s3_client):

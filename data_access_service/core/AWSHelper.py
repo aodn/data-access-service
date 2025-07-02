@@ -1,13 +1,13 @@
 import os
 import zipfile
-from io import BytesIO
-
 import boto3
 import dask.dataframe
 import dask.dataframe as dd
+import xarray
 
 from data_access_service import init_log
 from data_access_service.config.config import Config, IntTestConfig
+from io import BytesIO
 
 
 class AWSHelper:
@@ -20,7 +20,7 @@ class AWSHelper:
         self.ses = boto3.client("ses")
         self.batch = boto3.client("batch")
 
-    def __get_storage_options(self):
+    def get_storage_options(self):
         # Special handle for testing
         if isinstance(self.config, IntTestConfig):
             # We need to point it to the test s3
@@ -35,6 +35,14 @@ class AWSHelper:
         else:
             return None
 
+    def read_multipart_zarr_from_s3(self, file_path: str) -> xarray.Dataset:
+        return xarray.open_mfdataset(
+            file_path,
+            engine="zarr",
+            consolidated=False,  # Must be false as the file is not consolidated_metadata()
+            parallel=False,
+        )
+
     def write_csv_to_s3(
         self, data: dask.dataframe.DataFrame, bucket_name: str, key: str
     ) -> str:
@@ -43,7 +51,7 @@ class AWSHelper:
             f"s3://{bucket_name}/{key}",
             single_file=True,
             compression="zip",
-            storage_options=self.__get_storage_options(),
+            storage_options=self.get_storage_options(),
             index=False,
         )
 
@@ -54,7 +62,7 @@ class AWSHelper:
         return dd.read_parquet(
             file_path,
             engine="pyarrow",
-            storage_options=self.__get_storage_options(),
+            storage_options=self.get_storage_options(),
         )
 
     def upload_file_to_s3(self, file_path: str, s3_bucket: str, s3_key: str) -> str:

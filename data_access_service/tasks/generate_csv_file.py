@@ -1,11 +1,12 @@
 import json
 import os
-import dask.dataframe as dd
+import dask.dataframe as ddf
+import xarray
 
 from datetime import datetime
 from typing import List, Dict, Optional
-
 from numcodecs import Zstd
+from tqdm import tqdm
 
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
@@ -85,7 +86,7 @@ def process_data_files(
         except MemoryError as e:
             # If you try to convert a zarr to CSV, it will be too big to fit into memory or file due to multiple dimension
             # hence it is not something we can support
-            raise MemoryError(f"Data file {datum} too big to convert to CSV : {e}")
+            raise MemoryError(f"Data file {datum} too big to convert subset : {e}")
         except Exception as e:
             log.error(f"Error: {e}")
             raise e
@@ -104,6 +105,7 @@ def _generate_partition_output(
     min_lon,
     max_lon,
 ):
+    has_data = False
     # We need to split it smaller due to fact that the lib return data with to_parquet internally
     # which use a lot of memory.
     start_date, end_date = trim_date_range(
@@ -118,53 +120,65 @@ def _generate_partition_output(
         date_ranges = get_monthly_date_range_array_from_(
             start_date=start_date, end_date=end_date
         )
-        # Use only for Zarr data
-        consolidate_zarr = None
+        need_append = False
+        # Initialize progress bar
+        with tqdm(
+            total=len(date_ranges), desc="Query and write partition file"
+        ) as pbar:
+            for date_range in date_ranges:
+                result: Optional[ddf.DataFrame | xarray.Dataset] = query_data(
+                    api,
+                    uuid,
+                    key,
+                    date_range["start_date"],
+                    date_range["end_date"],
+                    min_lat,
+                    max_lat,
+                    min_lon,
+                    max_lon,
+                )
+                if result is not None:
+                    if key.endswith("parquet"):
+                        # With parquet we can write on each result because of the partition by TIME
+                        # create different directory
+                        output_path = f"{root_folder_path}/{key}/part-{job_index}/"
 
-        for date_range in date_ranges:
-            result: Optional[dd.DataFrame] = query_data(
-                api,
-                uuid,
-                key,
-                date_range["start_date"],
-                date_range["end_date"],
-                min_lat,
-                max_lat,
-                min_lon,
-                max_lon,
-            )
-            if result is not None:
-                if key.endswith("parquet"):
-                    # With parquet we can write on each result because of the partition by TIME
-                    # create different directory
-                    output_path = f"{root_folder_path}/{key}/part-{job_index}/"
+                        # Derive partition key without time
+                        result["PARTITION_KEY"] = result["TIME"].dt.strftime("%Y-%m-%d")
 
-                    # Derive partition key without time
-                    result["PARTITION_KEY"] = result["TIME"].dt.strftime("%Y-%m-%d")
-
-                    result.to_parquet(
-                        output_path,
-                        partition_on=["PARTITION_KEY"],  # Partition by region column
-                        compression="zstd",  # Use Zstd for small file size
-                        engine="pyarrow",  # Use pyarrow for performance
-                        write_index=False,  # Exclude index to save space
-                    )
-                else:
-                    # Zarr do not support directory partition hence we need to consolidate
-                    # it before write to disk.
-                    if consolidate_zarr is None:
-                        consolidate_zarr = result
+                        result.to_parquet(
+                            output_path,
+                            partition_on=[
+                                "PARTITION_KEY"
+                            ],  # Partition by region column
+                            compression="zstd",  # Use Zstd for small file size
+                            engine="pyarrow",  # Use pyarrow for performance
+                            write_index=False,  # Exclude index to save space
+                        )
                     else:
-                        consolidate_zarr = dd.concat([consolidate_zarr, result], axis=0)
+                        # Zarr do not support directory partition hence we need to consolidate
+                        # it before write to disk.
+                        output_path = f"{root_folder_path}/{key}/part-{job_index}.zarr"
+                        if not need_append:
+                            # Get all data variable names
+                            variables = list(result.data_vars)
+                            encoding = {
+                                var: {"compressor": Zstd(level=1)} for var in variables
+                            }
+                            result.to_zarr(
+                                output_path, mode="w", encoding=encoding, compute=True
+                            )
+                            need_append = True
+                        else:
+                            result.to_zarr(
+                                output_path, mode="a", append_dim="TIME", compute=True
+                            )
 
-        if consolidate_zarr is not None:
-            output_path = f"{root_folder_path}/{key}/part-{job_index}.zarr"
-            consolidate_zarr.to_zarr(
-                output_path,
-                mode="w",  # Overwrite if exists
-                encoding={"value": {"compressor": Zstd(level=1)}},
-                compute=True,  # Compute immediately
-            )
+                    # Either parquet or zarr save correct and no exception
+                    has_data = True
+                pbar.update(1)
+
+    return has_data
 
 
 def _generate_partition_output_with_polygon(
@@ -235,7 +249,7 @@ def query_data(
     max_lat,
     min_lon,
     max_lon,
-):
+) -> Optional[ddf.DataFrame | xarray.Dataset]:
     log.info(
         f"Querying data for uuid={uuid}, key={key}, start_date={start_date}, end_date={end_date}, "
     )
@@ -243,9 +257,8 @@ def query_data(
         f"lat_min={min_lat}, lat_max={max_lat}, lon_min={min_lon}, lon_max={max_lon}"
     )
 
-    df = None
     try:
-        df = api.get_dataset_data(
+        df: Optional[ddf.DataFrame | xarray.Dataset] = api.get_dataset_data(
             uuid=uuid,
             key=key,
             date_start=start_date,
@@ -255,18 +268,17 @@ def query_data(
             lon_min=min_lon,
             lon_max=max_lon,
         )
+        if df is not None:
+            return df
+        else:
+            log.info("No data found for the given parameters")
+            return None
     except ValueError as e:
         log.info(f"seems like no data for this polygon. Error: {e}")
         raise e
     except Exception as e:
         log.error(f"Error: {e}")
         raise e
-
-    if df is not None:
-        return df
-    else:
-        log.info("No data found for the given parameters")
-        return None
 
 
 def get_lat_lon_from_(polygon: List[List[List[float]]]) -> Dict[str, float]:

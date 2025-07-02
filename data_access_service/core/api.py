@@ -2,7 +2,7 @@ import asyncio
 import gzip
 from concurrent.futures import ThreadPoolExecutor
 
-import dask.dataframe as dd
+import dask.dataframe as ddf
 import pandas as pd
 import logging
 
@@ -59,7 +59,7 @@ class BaseAPI:
         lon_max=None,
         scalar_filter=None,
         columns: list[str] = None,
-    ) -> Optional[pd.DataFrame]:
+    ) -> Optional[ddf.DataFrame]:
         pass
 
     def get_api_status(self) -> bool:
@@ -68,7 +68,7 @@ class BaseAPI:
     @staticmethod
     def zarr_to_dask_dataframe(
         dataset: xarray.Dataset, columns: Optional[List[str]] = None
-    ) -> dd.DataFrame | None:
+    ) -> ddf.DataFrame | None:
         """
         Filter an xarray.Dataset to specific columns (variables) and convert to a Pandas DataFrame.
 
@@ -115,15 +115,15 @@ class BaseAPI:
         filtered_dataset = xarray.Dataset(selected_data)
 
         # Convert to Dask DataFrame
-        ddf = filtered_dataset.to_dask_dataframe()
+        df = filtered_dataset.to_dask_dataframe()
 
         # Reset index to include coordinates as columns
-        ddf = ddf.reset_index()
+        df = df.reset_index()
 
         # Filter to requested columns
-        ddf = ddf[columns]
+        df = df[columns]
 
-        return ddf
+        return df
 
 
 class API(BaseAPI):
@@ -288,7 +288,7 @@ class API(BaseAPI):
         lon_max=None,
         scalar_filter=None,
         columns: list[str] = None,
-    ) -> Optional[dd.DataFrame]:
+    ) -> Optional[ddf.DataFrame | xarray.Dataset]:
         mds: Dict[str, Descriptor] = self._cached.get(uuid)
 
         if mds is not None and key in mds:
@@ -340,12 +340,12 @@ class API(BaseAPI):
                             self.map_column_names(uuid, key, columns),
                         )
 
-                        return dd.from_pandas(
+                        return ddf.from_pandas(
                             result, npartitions=None, chunksize=None, sort=True
                         )
                     elif isinstance(ds, ZarrDataSource):
                         # Lib slightly different for Zar file
-                        result = ds.get_data(
+                        return ds.get_data(
                             str(date_start),
                             str(date_end),
                             lat_min,
@@ -354,11 +354,6 @@ class API(BaseAPI):
                             lon_max,
                             scalar_filter,
                         )
-
-                        return API.zarr_to_dask_dataframe(
-                            result, self.map_column_names(uuid, key, columns)
-                        )
-
                 except ValueError as e:
                     log.error(f"Error when query ds.get_data: {e}")
                     raise e
