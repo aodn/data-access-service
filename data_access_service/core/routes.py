@@ -293,7 +293,7 @@ async def _fetch_data(
     columns: List[str],
 ) -> AsyncGenerator[dict, None]:
     try:
-        result: Optional[dd.DataFrame] = api_instance.get_dataset_data(
+        result: Optional[dd.DataFrame | xr.Dataset] = api_instance.get_dataset_data(
             uuid=uuid,
             key=key,
             date_start=start_date,
@@ -308,6 +308,12 @@ async def _fetch_data(
         # TODO If error return empty response. This maybe hard to debug
         return
     else:
+        # Now we need to change the xarray if type match to 2D dataframe for processing
+        if isinstance(result, xr.Dataset):
+            result = api_instance.zarr_to_dask_dataframe(
+                result, api_instance.map_column_names(uuid, key, columns)
+            )
+
         start_depth = _verify_depth_param("start_depth", start_depth)
         end_depth = _verify_depth_param("end_depth", end_depth)
 
@@ -326,7 +332,7 @@ async def _fetch_data(
         else:
             filtered = result
 
-        logger.info("Record number return %s for query", len(filtered.index))
+        logger.info("Num of rows", len(filtered.index))
         logger.info("Memory usage: %s", get_memory_usage_percentage())
 
         for record in _generate_partial_json_array(filtered):

@@ -142,7 +142,7 @@ class TestApiWithS3(TestWithS3):
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_same_uuid_map_two_dataset_correct(
-        self, setup_resources, localstack, aws_clients, client
+        self, setup, setup_resources, localstack, aws_clients, client
     ):
         """Test subsetting with valid and invalid time ranges."""
         s3_client, _ = aws_clients
