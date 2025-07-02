@@ -1,22 +1,69 @@
-import io
 import os
 import zipfile
-
 import boto3
+import dask.dataframe
+import dask.dataframe as dd
+import xarray
 
 from data_access_service import init_log
-from data_access_service.config.config import Config
+from data_access_service.config.config import Config, IntTestConfig
+from io import BytesIO
 
 
-class AWSClient:
+class AWSHelper:
 
     def __init__(self):
         self.config: Config = Config.get_config()
         self.log = init_log(self.config)
         self.log.info("Init AWS class")
         self.s3 = self.config.get_s3_client()
-        self.ses = boto3.client("ses")
-        self.batch = boto3.client("batch")
+        self.ses = self.config.get_ses_client()
+        self.batch = self.config.get_batch_client()
+
+    def get_storage_options(self):
+        # Special handle for testing
+        if isinstance(self.config, IntTestConfig):
+            # We need to point it to the test s3
+            return {
+                "client_kwargs": {
+                    "endpoint_url": self.s3.meta.endpoint_url,
+                    "region_name": self.s3.meta.region_name,
+                },
+                "key": IntTestConfig.get_s3_test_key(),
+                "secret": IntTestConfig.get_s3_secret(),
+            }
+        else:
+            return None
+
+    def read_multipart_zarr_from_s3(self, file_path: str) -> xarray.Dataset:
+        return xarray.open_mfdataset(
+            file_path,
+            engine="zarr",
+            consolidated=False,  # Must be false as the file is not consolidated_metadata()
+            parallel=False,
+        )
+
+    def write_csv_to_s3(
+        self, data: dask.dataframe.DataFrame, bucket_name: str, key: str
+    ) -> str:
+        target = data.drop("PARTITION_KEY", axis=1)
+        target.to_csv(
+            f"s3://{bucket_name}/{key}",
+            single_file=True,
+            compression="zip",
+            storage_options=self.get_storage_options(),
+            index=False,
+        )
+
+        region = self.s3.meta.region_name
+        return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
+
+    def read_parquet_from_s3(self, file_path: str):
+        return dd.read_parquet(
+            file_path,
+            engine="pyarrow",
+            storage_options=self.get_storage_options(),
+        )
 
     def upload_file_to_s3(self, file_path: str, s3_bucket: str, s3_key: str) -> str:
         """
@@ -166,3 +213,37 @@ class AWSClient:
         except self.s3.exceptions.NoSuchKey:
             self.log.error(f"Object {s3_key} not found in bucket {bucket_name}.")
             return None
+
+    # List top-level folders
+    def list_s3_folders(self, bucket_name: str, prefix="", delimiter="/") -> list[str]:
+        prefix = prefix.rstrip("/") + "/" if prefix else ""
+        folders = []
+        paginator = self.s3.get_paginator("list_objects_v2")
+        pages = paginator.paginate(
+            Bucket=bucket_name, Prefix=prefix, Delimiter=delimiter
+        )
+        for page in pages:
+            if "CommonPrefixes" in page:
+                for common_prefix in page["CommonPrefixes"]:
+                    folder = (
+                        common_prefix["Prefix"]
+                        .removeprefix(prefix)
+                        .replace(delimiter, "")
+                    )
+                    folders.append(folder)
+        return folders
+
+    def extract_zip_from_s3(
+        self, bucket_name: str, zip_key: str, output_path: str
+    ) -> list[str]:
+        # Retrieve the ZIP file from S3
+        zip_obj = self.s3.get_object(Bucket=bucket_name, Key=zip_key)
+        zip_data = BytesIO(zip_obj["Body"].read())
+
+        # Calculate the total uncompressed size
+        with zipfile.ZipFile(zip_data, "r") as zip_ref:
+            extracted_files = [
+                name for name in zip_ref.namelist() if not name.endswith("/")
+            ]
+            zip_ref.extractall(output_path)
+            return extracted_files

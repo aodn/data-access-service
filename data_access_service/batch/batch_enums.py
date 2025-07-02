@@ -11,3 +11,4 @@ class Parameters(Enum):
     DATE_RANGES = "date_ranges"
     TYPE = "type"
     MASTER_JOB_ID = "master_job_id"
+    INTERMEDIATE_OUTPUT_FOLDER = "intermediate_output_folder"

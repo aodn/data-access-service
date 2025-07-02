@@ -4,3 +4,6 @@ aws:
       csv: test-bucket
   ses:
     sender_email: no.reply@aodn.org.au
+  batch:
+    job_queue: generate-csv-data-file-test
+    job_definition: generate-csv-data-file-test

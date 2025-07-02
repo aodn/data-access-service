@@ -6,6 +6,8 @@ import boto3
 import os
 import tempfile
 from enum import Enum
+
+from botocore.client import BaseClient
 from dotenv import load_dotenv
 
 
@@ -26,6 +28,8 @@ class Config:
         load_dotenv()
         self.config = None
         self.s3 = boto3.client("s3")
+        self.ses = None
+        self.batch = None
 
     @staticmethod
     def load_config(file_path: str):
@@ -60,10 +64,16 @@ class Config:
 
     @staticmethod
     def get_temp_folder(job_id: str) -> str:
-        return tempfile.mkdtemp(prefix=job_id)
+        return tempfile.mkdtemp(suffix=job_id)
 
-    def get_s3_client(self):
+    def get_s3_client(self) -> BaseClient:
         return self.s3
+
+    def get_ses_client(self) -> BaseClient:
+        return self.ses
+
+    def get_batch_client(self) -> BaseClient:
+        return self.batch
 
     def get_csv_bucket_name(self):
         return (
@@ -124,17 +134,33 @@ class IntTestConfig(Config):
     def get_api_key(self):
         return "testing"
 
+    @staticmethod
+    def get_s3_test_key():
+        return "test"
+
+    @staticmethod
+    def get_s3_secret():
+        return "test"
+
+    @staticmethod
+    def get_temp_folder(job_id: str) -> str:
+        return f"/tmp/tmp{job_id}"
+
 
 class DevConfig(Config):
     def __init__(self):
         super().__init__()
         self.config = Config.load_config("data_access_service/config/config-dev.yaml")
+        self.ses = boto3.client("ses")
+        self.batch = boto3.client("batch")
 
 
 class EdgeConfig(Config):
     def __init__(self):
         super().__init__()
         self.config = Config.load_config("data_access_service/config/config-edge.yaml")
+        self.ses = boto3.client("ses")
+        self.batch = boto3.client("batch")
 
 
 class StagingConfig(Config):
@@ -146,6 +172,8 @@ class StagingConfig(Config):
         self.config = Config.load_config(
             "data_access_service/config/config-staging.yaml"
         )
+        self.ses = boto3.client("ses")
+        self.batch = boto3.client("batch")
 
 
 class ProdConfig(Config):
@@ -155,3 +183,5 @@ class ProdConfig(Config):
     def __init__(self):
         super().__init__()
         self.config = Config.load_config("data_access_service/config/config-prod.yaml")
+        self.ses = boto3.client("ses")
+        self.batch = boto3.client("batch")

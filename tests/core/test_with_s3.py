@@ -12,6 +12,9 @@ from aodn_cloud_optimised.lib import DataQuery
 from testcontainers.localstack import LocalStackContainer
 from botocore.config import Config as BotoConfig
 from botocore import UNSIGNED
+from fsspec.core import get_fs_token_paths as original_get_fs_token_paths
+
+from data_access_service.core.AWSHelper import AWSHelper
 
 # Default region for Localstack
 REGION = "us-east-1"
@@ -69,15 +72,15 @@ class TestWithS3:
         s3_client = boto3.client(
             "s3",
             endpoint_url=localstack.get_url(),
-            aws_access_key_id="test",
-            aws_secret_access_key="test",
+            aws_access_key_id=IntTestConfig.get_s3_test_key(),
+            aws_secret_access_key=IntTestConfig.get_s3_secret(),
             region_name=REGION,
         )
         sqs_client = boto3.client(
             "sqs",
             endpoint_url=localstack.get_url(),
-            aws_access_key_id="test",
-            aws_secret_access_key="test",
+            aws_access_key_id=IntTestConfig.get_s3_test_key(),
+            aws_secret_access_key=IntTestConfig.get_s3_secret(),
             region_name=REGION,
         )
         yield s3_client, sqs_client
@@ -122,6 +125,24 @@ class TestWithS3:
         response = sqs_client.create_queue(QueueName="job-queue")
         queue_url = response["QueueUrl"]
         yield queue_url
+
+    @pytest.fixture(scope="class")
+    def mock_get_fs_token_paths(self, setup):
+        """
+        This mock is used to override a call to get_fs_token_paths in xarray
+        where the storage_options is pass correctly causing test fail to scan
+        the director of the localstack s3
+        :param setup:
+        :return:
+        """
+        helper = AWSHelper()
+
+        def mock_fs(paths, mode="rb", **kwargs):
+            # override this option
+            kwargs["storage_options"] = helper.get_storage_options()
+            return original_get_fs_token_paths(paths, mode, **kwargs)
+
+        return mock_fs
 
     # Util function to upload canned test data to localstack s3 or any s3
     @staticmethod
