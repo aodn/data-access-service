@@ -100,7 +100,7 @@ class TestGenerateCSVFile(TestWithS3):
         assert result is not None
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    def test_generate_csv_with_zarr(
+    def test_generate_csv_with_zarr_single(
         self,
         setup,
         setup_resources,
@@ -109,7 +109,10 @@ class TestGenerateCSVFile(TestWithS3):
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
     ):
-        """Test subsetting with valid and invalid time ranges."""
+        """
+        Test the process_data_files function by doing a single job index 10, this make sure
+        we can process zarr file by writing to and single partition, that is part-10.zarr in this case
+        """
         s3_client, _ = aws_clients
         config = Config.get_config()
         config.set_s3_client(s3_client)
@@ -122,15 +125,14 @@ class TestGenerateCSVFile(TestWithS3):
             # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
             with patch.object(AWSHelper, "send_email") as mock_send_email:
                 try:
-                    test_job_id = "10"
                     process_data_files(
                         job_id_of_init=INIT_JOB_ID,
-                        job_index=test_job_id,
+                        job_index="10",
                         intermediate_output_folder=config.get_temp_folder(INIT_JOB_ID),
                         uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
                         keys=["*"],
                         start_date=datetime.strptime(
-                            "2011-01-01 00:00:00", "%Y-%m-%d %H:%M:%S"
+                            "2011-07-01 00:00:00", "%Y-%m-%d %H:%M:%S"
                         ),
                         end_date=datetime.strptime(
                             "2011-09-01 00:00:00", "%Y-%m-%d %H:%M:%S"
@@ -141,8 +143,102 @@ class TestGenerateCSVFile(TestWithS3):
                     target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name(INIT_JOB_ID)}vessel_satellite_radiance_delayed_qc.zarr/part-*.zarr"
                     data = helper.read_multipart_zarr_from_s3(target_path)
                     assert len(data["TIME"]) == 155927, "file have enough data"
-                except Exception as ex:
-                    pass
+                finally:
+                    TestWithS3.delete_object_in_s3(
+                        s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT
+                    )
+                    TestWithS3.delete_object_in_s3(
+                        s3_client, Config.get_config().get_csv_bucket_name()
+                    )
+                    # Delete temp output folder as the name always same for testing
+                    shutil.rmtree(
+                        config.get_temp_folder(INIT_JOB_ID), ignore_errors=True
+                    )
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_generate_csv_with_zarr_multiple(
+        self,
+        setup,
+        setup_resources,
+        localstack,
+        aws_clients,
+        upload_test_case_to_s3,
+        mock_get_fs_token_paths,
+    ):
+        """
+        Test the process_data_files function and submit three job index 1, 2, 3, this make sure
+        we can process zarr file by writing to multiple partition and read it at the end, this will spot the edge case
+        during two part aggregation
+        """
+        s3_client, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+        helper = AWSHelper()
+
+        # This uuid contains two dataset in the canned data
+        # uuid 28f8bfed-ca6a-472a-84e4-42563ce4df3f name vessel_satellite_radiance_delayed_qc.zarr
+        # uuid 28f8bfed-ca6a-472a-84e4-42563ce4df3f name vessel_satellite_radiance_derived_product.zarr
+        with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
+            # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
+            with patch.object(AWSHelper, "send_email") as mock_send_email:
+                try:
+                    # Job 1
+                    process_data_files(
+                        job_id_of_init=INIT_JOB_ID,
+                        job_index="1",
+                        intermediate_output_folder=config.get_temp_folder(INIT_JOB_ID),
+                        uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                        keys=["*"],
+                        start_date=datetime.strptime(
+                            "2011-07-01 00:00:00", "%Y-%m-%d %H:%M:%S"
+                        ),
+                        end_date=datetime.strptime(
+                            "2011-07-31 23:59:59", "%Y-%m-%d %H:%M:%S"
+                        ),
+                        multi_polygon=None,
+                    )
+                    # Job 2
+                    process_data_files(
+                        job_id_of_init=INIT_JOB_ID,
+                        job_index="2",
+                        intermediate_output_folder=config.get_temp_folder(INIT_JOB_ID),
+                        uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                        keys=["*"],
+                        start_date=datetime.strptime(
+                            "2011-08-01 00:00:00", "%Y-%m-%d %H:%M:%S"
+                        ),
+                        end_date=datetime.strptime(
+                            "2011-08-15 23:59:59", "%Y-%m-%d %H:%M:%S"
+                        ),
+                        multi_polygon=None,
+                    )
+                    process_data_files(
+                        job_id_of_init=INIT_JOB_ID,
+                        job_index="3",
+                        intermediate_output_folder=config.get_temp_folder(INIT_JOB_ID),
+                        uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                        keys=["*"],
+                        start_date=datetime.strptime(
+                            "2011-08-16 00:00:00", "%Y-%m-%d %H:%M:%S"
+                        ),
+                        end_date=datetime.strptime(
+                            "2011-09-01 00:00:00", "%Y-%m-%d %H:%M:%S"
+                        ),
+                        multi_polygon=None,
+                    )
+                    # This is a zarr file, we should be able to read the result from S3, should have part-1, part2 and part-3
+                    names = helper.list_s3_folders(
+                        config.get_csv_bucket_name(),
+                        f"{config.get_s3_temp_folder_name(INIT_JOB_ID)}vessel_satellite_radiance_delayed_qc.zarr",
+                    )
+                    assert "part-1.zarr" in names, "part-1.zarr not exit!"
+                    assert "part-2.zarr" in names, "part-2.zarr not exit!"
+                    assert "part-3.zarr" in names, "part-3.zarr not exit!"
+
+                    # This will aggregate to the same row count as above
+                    target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name(INIT_JOB_ID)}vessel_satellite_radiance_delayed_qc.zarr/part-*.zarr"
+                    data = helper.read_multipart_zarr_from_s3(target_path)
+                    assert len(data["TIME"]) == 155927, "file have enough data"
                 finally:
                     TestWithS3.delete_object_in_s3(
                         s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT

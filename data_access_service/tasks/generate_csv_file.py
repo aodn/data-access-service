@@ -1,9 +1,9 @@
 import json
 import os
 import dask.dataframe as ddf
+import pandas as pd
 import xarray
 
-from datetime import datetime
 from typing import List, Dict, Optional
 from numcodecs import Zstd
 
@@ -32,8 +32,8 @@ def process_data_files(
     intermediate_output_folder: str,
     uuid: str,
     keys: List[str],
-    start_date: datetime,
-    end_date: datetime,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
     multi_polygon: str | None,
 ) -> str | None:
     if multi_polygon is not None:
@@ -97,8 +97,8 @@ def _generate_partition_output(
     job_index: str,
     uuid: str,
     key: str,
-    start_date: datetime,
-    end_date: datetime,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
     min_lat,
     max_lat,
     min_lon,
@@ -178,8 +178,8 @@ def _generate_partition_output_with_polygon(
     array_index: str,
     uuid: str,
     key: str,
-    start_date: datetime,
-    end_date: datetime,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
     multi_polygon: dict | None,
 ) -> bool:
     # Use sync init, it does not matter the load is slow as we run in batch
@@ -235,8 +235,8 @@ def query_data(
     api,
     uuid: str,
     key: str,
-    start_date: datetime,
-    end_date: datetime,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
     min_lat,
     max_lat,
     min_lon,

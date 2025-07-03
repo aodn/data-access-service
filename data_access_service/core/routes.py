@@ -6,6 +6,7 @@ import os
 import tempfile
 
 import psutil
+import pytz
 import xarray as xr
 import numpy
 import pandas as pd
@@ -151,14 +152,14 @@ def _round_5_decimal(value: float) -> float:
     return round(value, 5)
 
 
-def _verify_datatime_param(name: str, req_date: str) -> datetime:
+def _verify_datatime_param(name: str, req_date: str) -> pd.Timestamp:
     _date = None
 
     try:
         if req_date is not None:
-            _date = parser.isoparse(req_date)
-            if _date.tzinfo is None:
-                _date = _date.replace(tzinfo=timezone.utc)
+            _date = pd.Timestamp(req_date)
+            if _date.tz is None:
+                _date = _date.tz_localize(pytz.UTC)
 
     except (ValueError, TypeError) as e:
         error_message = ErrorResponse(
@@ -286,8 +287,8 @@ async def _fetch_data(
     api_instance: API,
     uuid: str,
     key: str,
-    start_date: datetime,
-    end_date: datetime,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
     start_depth: float | None,
     end_depth: float | None,
     columns: List[str],

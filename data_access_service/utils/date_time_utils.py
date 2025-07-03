@@ -1,15 +1,12 @@
 import re
-from typing import Tuple
-
 import pandas as pd
-from datetime import datetime, timedelta, time
-
 import pytz
+
+from typing import Tuple
+from datetime import datetime, timedelta, time
 from dateutil import parser
-
-from data_access_service import API, init_log, Config
+from data_access_service import init_log, Config
 from dateutil.relativedelta import relativedelta
-
 from data_access_service.core.api import BaseAPI
 
 YEAR_MONTH_DAY = "%Y-%m-%d"
@@ -27,30 +24,28 @@ log = init_log(config)
 
 # parse all common format of date string into given format, such as "%Y-%m-%d"
 def parse_date(
-    date_string: str,
-    time_value=time(00, 00, 00),
-    format_to_convert: str = YEAR_MONTH_DAY,
-) -> datetime:
-    return datetime.combine(
-        datetime.strptime(date_string, format_to_convert), time_value
-    )
+    date_string: str, format_to_convert: str = YEAR_MONTH_DAY, time_zone: str = pytz.UTC
+) -> pd.Timestamp:
+    return pd.to_datetime(date_string, format=format_to_convert).tz_localize(time_zone)
 
 
-def get_final_day_of_month_(date: datetime) -> datetime:
-    next_month = date.replace(day=28) + timedelta(days=4)
-    last_day_of_month = next_month - timedelta(days=next_month.day)
-    return last_day_of_month
+def get_final_day_of_month_(date: pd.Timestamp) -> pd.Timestamp:
+    last_day = date + pd.offsets.MonthEnd(0)
+    return last_day.replace(
+        hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
+    ).tz_convert(pytz.UTC)
 
 
-def get_first_day_of_month(date: datetime) -> datetime:
-    return date.replace(day=1)
+def get_first_day_of_month(date: pd.Timestamp) -> pd.Timestamp:
+    first_day = date + pd.offsets.MonthBegin(-1)
+    return first_day.normalize().tz_convert(pytz.UTC)  # Set time to 00:00:00
 
 
-def next_month_first_day(date: datetime) -> datetime:
-    return (date + relativedelta(months=1)).replace(day=1)
+def next_month_first_day(date: pd.Timestamp) -> pd.Timestamp:
+    return get_final_day_of_month_(date) + pd.offsets.Day(1)
 
 
-def ensure_timezone(dt: datetime) -> datetime:
+def ensure_timezone(dt: pd.Timestamp) -> pd.Timestamp:
     """
     Check if datetime has timezone info; if not, assume UTC.
 
@@ -60,20 +55,20 @@ def ensure_timezone(dt: datetime) -> datetime:
     Returns:
         Datetime object with timezone info (UTC if none was present)
     """
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=pytz.UTC)
+    if dt.tz is None:
+        return dt.tz_localize(pytz.UTC)
     return dt
 
 
 def get_monthly_date_range_array_from_(
-    start_date: datetime, end_date: datetime
+    start_date: pd.Timestamp, end_date: pd.Timestamp
 ) -> list[dict]:
     """
     Split a date range into monthly intervals, returning start and end dates per month.
 
     Args:
-        start_date (datetime): Start date of the range.
-        end_date (datetime): End date of the range.
+        start_date (datetime): Start date of the range, need to use panda timestamp for nanosecond precision
+        end_date (datetime): End date of the range, need to use panda timestamp for nanosecond precision
 
     Returns:
         list[dict]: List of dictionaries with 'start_date' and 'end_date' (as strings in 'YYYY-MM-DD').
@@ -92,9 +87,19 @@ def get_monthly_date_range_array_from_(
     # Create result list
     return [
         {
-            "start_date": group["date"].min().round("us").to_pydatetime(),
-            "end_date": datetime.combine(
-                group["date"].max().round("us").to_pydatetime(), time(23, 59, 59)
+            "start_date": (
+                group["date"].min().round("us").tz_localize(pytz.UTC)
+                if start_date.tz is None
+                else group["date"].min().round("us").tz_convert(pytz.UTC)
+            ),
+            "end_date": (
+                (
+                    group["date"].max() + pd.offsets.Day(1) - pd.offsets.Nano(1)
+                ).tz_localize(pytz.UTC)
+                if end_date.tz is None
+                else (
+                    group["date"].max() + pd.offsets.Day(1) - pd.offsets.Nano(1)
+                ).tz_convert(pytz.UTC)
             ),
         }
         for _, group in monthly_groups
@@ -105,9 +110,9 @@ def trim_date_range(
     api: BaseAPI,
     uuid: str,
     key: str,
-    requested_start_date: datetime,
-    requested_end_date: datetime,
-) -> (datetime | None, datetime | None):
+    requested_start_date: pd.Timestamp,
+    requested_end_date: pd.Timestamp,
+) -> (pd.Timestamp | None, pd.Timestamp | None):
 
     log.info(f"Original date range: {requested_start_date} to {requested_end_date}")
     metadata_temporal_extent = api.get_temporal_extent(uuid=uuid, key=key)
@@ -117,18 +122,16 @@ def trim_date_range(
 
     metadata_start_date, metadata_end_date = metadata_temporal_extent
 
-    metadata_start_date = metadata_start_date.replace(tzinfo=None)
-    metadata_end_date = metadata_end_date.replace(tzinfo=None)
+    metadata_start_date = metadata_start_date.tz_localize(None)
+    metadata_end_date = metadata_end_date.tz_localize(None)
 
-    if requested_start_date.tzinfo is not None:
-        requested_start_date = requested_start_date.astimezone(pytz.UTC).replace(
-            tzinfo=None
+    if requested_start_date.tz is not None:
+        requested_start_date = requested_start_date.tz_convert(pytz.UTC).tz_localize(
+            None
         )
 
     if requested_end_date.tzinfo is not None:
-        requested_end_date = requested_end_date.astimezone(pytz.UTC).replace(
-            tzinfo=None
-        )
+        requested_end_date = requested_end_date.tz_convert(pytz.UTC).tz_localize(None)
 
     # Check if start and end date have overlap with the metadata time range
     if (metadata_start_date <= requested_start_date <= metadata_end_date) or (

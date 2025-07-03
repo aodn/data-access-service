@@ -1,13 +1,11 @@
 import shutil
-import zipfile
 
 import pandas as pd
 import pytest
 import os
 
-from io import BytesIO
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from aodn_cloud_optimised.lib import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import Metadata
@@ -171,11 +169,3 @@ class TestDataGeneration(TestWithS3):
                 )
                 # Delete temp output folder as the name always same for testing
                 shutil.rmtree(config.get_temp_folder(INIT_JOB_ID), ignore_errors=True)
-
-
-def get_object_size_from_s3(bucket_name, object_key, s3_client):
-    try:
-        response = s3_client.head_object(Bucket=bucket_name, Key=object_key)
-        return response["ContentLength"]
-    except s3_client.exceptions.ClientError as e:
-        raise ValueError(f"Error retrieving object size for {object_key}: {e}") from e

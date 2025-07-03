@@ -38,21 +38,23 @@ def gzip_compress(data):
 
 
 class BaseAPI:
-    def get_temporal_extent(self, uuid: str, key: str) -> (datetime, datetime):
+    def get_temporal_extent(self, uuid: str, key: str) -> (pd.Timestamp, pd.Timestamp):
         pass
 
     def get_mapped_meta_data(self, uuid: str | None) -> Dict[str, Descriptor]:
         pass
 
-    def has_data(self, uuid: str, key: str, start_date: datetime, end_date: datetime):
+    def has_data(
+        self, uuid: str, key: str, start_date: pd.Timestamp, end_date: pd.Timestamp
+    ):
         pass
 
     def get_dataset_data(
         self,
         uuid: str,
         key: str,
-        date_start: datetime = None,
-        date_end: datetime = None,
+        date_start: pd.Timestamp = None,
+        date_end: pd.Timestamp = None,
         lat_min=None,
         lat_max=None,
         lon_min=None,
@@ -211,15 +213,17 @@ class API(BaseAPI):
     Given a time range, we find if this uuid temporal cover the whole range
     """
 
-    def has_data(self, uuid: str, key: str, start_date: datetime, end_date: datetime):
+    def has_data(
+        self, uuid: str, key: str, start_date: pd.Timestamp, end_date: pd.Timestamp
+    ):
         md: Dict[str, Descriptor] = self._cached.get(uuid)
         if md is not None and md[key] is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
-            te = ds.get_temporal_extent()
-            return start_date <= te[0] and te[1] <= end_date
+            tes, tee = ds.get_temporal_extent()
+            return start_date <= tes and tee <= end_date
         return False
 
-    def get_temporal_extent(self, uuid: str, key: str) -> (datetime, datetime):
+    def get_temporal_extent(self, uuid: str, key: str) -> (pd.Timestamp, pd.Timestamp):
         md: Dict[str, Descriptor] = self._cached.get(uuid)
         if md is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
@@ -281,8 +285,8 @@ class API(BaseAPI):
         self,
         uuid: str,
         key: str,
-        date_start: datetime = None,
-        date_end: datetime = None,
+        date_start: pd.Timestamp = None,
+        date_end: pd.Timestamp = None,
         lat_min=None,
         lat_max=None,
         lon_min=None,
@@ -299,40 +303,42 @@ class API(BaseAPI):
 
                 # Default get 10 days of data
                 if date_start is None:
-                    date_start = datetime.now(timezone.utc) - timedelta(days=10)
+                    date_start = (pd.Timestamp.now() - timedelta(days=10)).tz_convert(
+                        "UTC"
+                    )
                 else:
-                    if date_start.tzinfo is None:
-                        date_start = pd.to_datetime(date_start).tz_localize(
-                            timezone.utc
-                        )
+                    if date_start.tz is None:
+                        raise ValueError("Missing timezone info in date_start")
                     else:
                         date_start = pd.to_datetime(date_start).tz_convert(timezone.utc)
 
                 if date_end is None:
-                    date_end = datetime.now(timezone.utc)
+                    date_end = (
+                        pd.Timestamp.now() + pd.offsets.Day(1) - pd.offsets.Nano(1)
+                    ).tz_convert("UTC")
                 else:
                     if date_end.tzinfo is None:
-                        date_end = pd.to_datetime(date_end).tz_localize(timezone.utc)
+                        raise ValueError("Missing timezone info in date_end")
                     else:
-                        date_end = pd.to_datetime(date_end).tz_convert(timezone.utc)
+                        date_end = date_end.tz_convert(timezone.utc)
 
                 # The get_data call the pyarrow and compare only works with non timezone datetime
                 # now make sure the timezone is correctly convert to utc then remove it.
                 # As get_date datetime are all utc, but the pyarrow do not support compare of datetime vs
                 # datetime with timezone.
-                if date_start.tzinfo is not None:
-                    date_start = date_start.astimezone(timezone.utc).replace(
-                        tzinfo=None
-                    )
+                if date_start.tz is not None:
+                    date_start = date_start.tz_localize(None)
 
-                if date_end.tzinfo is not None:
-                    date_end = date_end.astimezone(timezone.utc).replace(tzinfo=None)
+                if date_end.tz is not None:
+                    date_end = date_end.tz_localize(None)
 
                 try:
+                    # All precision to nanosecond
                     if isinstance(ds, ParquetDataSource):
+                        # Accuracy to nanoseconds
                         result = ds.get_data(
-                            str(date_start),
-                            str(date_end),
+                            f"{date_start.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_start.nanosecond:03d}",
+                            f"{date_end.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_end.nanosecond:03d}",
                             lat_min,
                             lat_max,
                             lon_min,
@@ -347,8 +353,8 @@ class API(BaseAPI):
                     elif isinstance(ds, ZarrDataSource):
                         # Lib slightly different for Zar file
                         return ds.get_data(
-                            str(date_start),
-                            str(date_end),
+                            f"{date_start.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_start.nanosecond:03d}",
+                            f"{date_end.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_end.nanosecond:03d}",
                             lat_min,
                             lat_max,
                             lon_min,

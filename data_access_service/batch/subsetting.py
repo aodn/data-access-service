@@ -98,9 +98,9 @@ def prepare_data(job_index: str | None, parameters):
     if job_index is None:
         job_index = 0
 
-    date_range = date_ranges_dict[str(job_index)]
-    start_date = parse_date(date_range[0])
-    end_date = parse_date(date_range[1])
+    start_date_str, end_date_str = date_ranges_dict[str(job_index)]
+    start_date = parse_date(start_date_str)
+    end_date = parse_date(end_date_str)
 
     logger.info(f"UUID: {uuid}")
     logger.info(f"KEY: {key}")

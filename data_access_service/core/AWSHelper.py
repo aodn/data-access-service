@@ -35,14 +35,6 @@ class AWSHelper:
         else:
             return None
 
-    def read_multipart_zarr_from_s3(self, file_path: str) -> xarray.Dataset:
-        return xarray.open_mfdataset(
-            file_path,
-            engine="zarr",
-            consolidated=False,  # Must be false as the file is not consolidated_metadata()
-            parallel=False,
-        )
-
     def write_csv_to_s3(
         self, data: dask.dataframe.DataFrame, bucket_name: str, key: str
     ) -> str:
@@ -247,3 +239,21 @@ class AWSHelper:
             ]
             zip_ref.extractall(output_path)
             return extracted_files
+
+    def get_object_size_from_s3(self, bucket_name, object_key):
+        try:
+            response = self.s3.head_object(Bucket=bucket_name, Key=object_key)
+            return response["ContentLength"]
+        except self.s3.exceptions.ClientError as e:
+            raise ValueError(
+                f"Error retrieving object size for {object_key}: {e}"
+            ) from e
+
+    @staticmethod
+    def read_multipart_zarr_from_s3(file_path: str) -> xarray.Dataset:
+        return xarray.open_mfdataset(
+            file_path,
+            engine="zarr",
+            consolidated=False,  # Must be false as the file is not consolidated_metadata()
+            parallel=False,
+        )
