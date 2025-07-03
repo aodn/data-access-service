@@ -30,10 +30,18 @@ def parse_date(
 
 
 def get_final_day_of_month_(date: pd.Timestamp) -> pd.Timestamp:
+    if date.tz is None:
+        date = date.tz_localize(pytz.UTC)
+
     last_day = date + pd.offsets.MonthEnd(0)
-    return last_day.replace(
-        hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
-    ).tz_convert(pytz.UTC)
+    # Replace do not set nano sec correctly
+    last_day = last_day.replace(
+        hour=23,
+        minute=59,
+        second=59,
+        microsecond=999999,
+    )
+    return last_day + pd.offsets.Nano(999)
 
 
 def get_first_day_of_month(date: pd.Timestamp) -> pd.Timestamp:
@@ -197,11 +205,13 @@ def get_boundary_of_year_month(
     Returns:
         Tuple[datetime, datetime]: First and last day of the month.
     """
-    year_month = parser.parse(year_month_str)
+    try:
+        year_month = parse_date(year_month_str, "%Y-%m")
+    except Exception as ex:
+        year_month = parse_date(year_month_str, "%m-%Y")
+
     start_date = year_month.replace(day=1, hour=0, minute=0, second=0)
-    end_date = get_final_day_of_month_(start_date).replace(
-        hour=23, minute=59, second=59
-    )
+    end_date = get_final_day_of_month_(start_date)
 
     return start_date, end_date
 

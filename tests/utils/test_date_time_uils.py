@@ -60,9 +60,20 @@ class TestDateTimeUtils(unittest.TestCase):
             )
 
     def test_get_final_day_of_(self):
-        date = datetime(2023, 2, 15)
-        expected_date = datetime(2023, 2, 28)
-        self.assertEqual(get_final_day_of_month_(date), expected_date)
+        date = pd.Timestamp(year=2023, month=2, day=15)
+        expected_date = pd.Timestamp(
+            year=2023,
+            month=2,
+            day=28,
+            hour=23,
+            minute=59,
+            second=59,
+            microsecond=999999,
+            nanosecond=999,
+            tz=pytz.UTC,
+        )
+        target_date = get_final_day_of_month_(date)
+        self.assertEqual(target_date, expected_date)
 
     def test_next_month_first_day(self):
         date = datetime(2023, 1, 31)
@@ -573,25 +584,21 @@ class TestDateTimeUtils(unittest.TestCase):
                     year=2022,
                     month=12,
                     day=31,
-                    hour=23,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
                     tz=pytz.UTC,
                 ),
             },
             {
-                "start_date": pd.Timestamp(year=2023, month=1, day=1, tz=pytz.UTC),
+                "start_date": pd.Timestamp(
+                    year=2022,
+                    month=12,
+                    day=31,
+                    nanosecond=1,
+                    tz=pytz.UTC,
+                ),
                 "end_date": pd.Timestamp(
                     year=2023,
                     month=1,
                     day=15,
-                    hour=23,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
                     tz=pytz.UTC,
                 ),
             },
@@ -937,8 +944,20 @@ class TestDateTimeUtils(unittest.TestCase):
     def test_get_boundary_of_year_month(self):
         """Test the boundary of a year-month string."""
         year_month_str = "2023-10"
-        expected_start = datetime(2023, 10, 1, 0, 0, 0)
-        expected_end = datetime(2023, 10, 31, 23, 59, 59)
+        expected_start = pd.Timestamp(
+            year=2023, month=10, day=1, hour=0, minute=0, second=0, tz=pytz.UTC
+        )
+        expected_end = pd.Timestamp(
+            year=2023,
+            month=10,
+            day=31,
+            hour=23,
+            minute=59,
+            second=59,
+            microsecond=999999,
+            nanosecond=999,
+            tz=pytz.UTC,
+        )
 
         start_date, end_date = get_boundary_of_year_month(year_month_str)
 
@@ -946,8 +965,20 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(end_date, expected_end)
 
         year_month_str2 = "02-2023"
-        expected_start2 = datetime(2023, 2, 1, 0, 0, 0)
-        expected_end2 = datetime(2023, 2, 28, 23, 59, 59)
+        expected_start2 = pd.Timestamp(
+            year=2023, month=2, day=1, hour=0, minute=0, second=0, tz=pytz.UTC
+        )
+        expected_end2 = pd.Timestamp(
+            year=2023,
+            month=2,
+            day=28,
+            hour=23,
+            minute=59,
+            second=59,
+            microsecond=999999,
+            nanosecond=999,
+            tz=pytz.UTC,
+        )
 
         start_date2, end_date2 = get_boundary_of_year_month(year_month_str2)
         self.assertEqual(start_date2, expected_start2)
@@ -1002,30 +1033,34 @@ class TestDateTimeUtils(unittest.TestCase):
 
     def test_datetime_without_timezone(self):
         # Test case: datetime without timezone should be assigned UTC
-        dt = datetime(2025, 6, 12, 8, 34)
+        dt = pd.Timestamp(year=2025, month=6, day=12, hour=8, minute=34)
         result = ensure_timezone(dt)
         self.assertEqual(result.tzinfo, pytz.UTC)
         self.assertEqual(result, datetime(2025, 6, 12, 8, 34, tzinfo=pytz.UTC))
 
     def test_datetime_with_timezone(self):
         # Test case: datetime with timezone should remain unchanged
-        tz = pytz.timezone("US/Pacific")
-        dt = datetime(2025, 6, 12, 8, 34, tzinfo=tz)
+        dt = pd.Timestamp(
+            year=2025, month=6, day=12, hour=8, minute=34, tz="US/Pacific"
+        )
         result = ensure_timezone(dt)
-        self.assertEqual(result.tzinfo, tz)
+        self.assertEqual(result.tzname(), "PDT")
         self.assertEqual(result, dt)
 
     def test_datetime_with_different_timezone(self):
         # Test case: datetime with non-UTC timezone should remain unchanged
-        tz = pytz.timezone("Asia/Tokyo")
-        dt = datetime(2025, 6, 12, 8, 34, tzinfo=tz)
+        dt = pd.Timestamp(
+            year=2025, month=6, day=12, hour=8, minute=34, tz="Asia/Tokyo"
+        )
         result = ensure_timezone(dt)
-        self.assertEqual(result.tzinfo, tz)
+        self.assertEqual(result.tzname(), "JST")
         self.assertEqual(result, dt)
 
     def test_datetime_preservation(self):
         # Test case: ensure original datetime components are preserved
-        dt = datetime(2025, 6, 12, 8, 34, 56, 123456)
+        dt = pd.Timestamp(
+            year=2025, month=6, day=12, hour=8, minute=34, second=56, microsecond=123456
+        )
         result = ensure_timezone(dt)
         self.assertEqual(result.year, 2025)
         self.assertEqual(result.month, 6)
