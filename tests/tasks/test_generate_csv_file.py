@@ -1,4 +1,6 @@
 import shutil
+import pytz
+import pandas as pd
 import pytest
 
 from datetime import datetime
@@ -6,7 +8,6 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 from data_access_service.core.AWSHelper import AWSHelper
 from aodn_cloud_optimised.lib import DataQuery
-
 from data_access_service import Config, init_log
 from data_access_service.tasks.generate_csv_file import (
     trim_date_range,
@@ -39,33 +40,33 @@ class TestGenerateCSVFile(TestWithS3):
 
     def test_trim_date_range_within_bounds(self, mock_api):
         mock_api.get_temporal_extent.return_value = [
-            datetime(2020, 1, 1),
-            datetime(2022, 12, 31),
+            pd.Timestamp(year=2020, month=1, day=1, tz=pytz.UTC),
+            pd.Timestamp(year=2022, month=12, day=31, tz=pytz.UTC),
         ]
         start_date, end_date = trim_date_range(
             api=mock_api,
             uuid="test-uuid",
             key="test-key",
-            requested_start_date=datetime(2021, 1, 1),
-            requested_end_date=datetime(2021, 12, 31),
+            requested_start_date=pd.Timestamp(year=2021, month=1, day=1),
+            requested_end_date=pd.Timestamp(year=2021, month=12, day=31),
         )
-        assert start_date == datetime(2021, 1, 1)
-        assert end_date == datetime(2021, 12, 31)
+        assert start_date == pd.Timestamp(year=2021, month=1, day=1)
+        assert end_date == pd.Timestamp(year=2021, month=12, day=31)
 
     def test_trim_date_range_out_of_bounds(self, mock_api):
         mock_api.get_temporal_extent.return_value = [
-            datetime(2020, 1, 1),
-            datetime(2022, 12, 31),
+            pd.Timestamp(year=2020, month=1, day=1, tz=pytz.UTC),
+            pd.Timestamp(year=2022, month=12, day=31, tz=pytz.UTC),
         ]
         start_date, end_date = trim_date_range(
             api=mock_api,
             uuid="test-uuid",
             key="test-key",
-            requested_start_date=datetime(2019, 1, 1),
-            requested_end_date=datetime(2023, 1, 1),
+            requested_start_date=pd.Timestamp(year=2019, month=1, day=1),
+            requested_end_date=pd.Timestamp(year=2023, month=1, day=1),
         )
-        assert start_date == datetime(2020, 1, 1)
-        assert end_date == datetime(2022, 12, 31)
+        assert start_date == pd.Timestamp(year=2020, month=1, day=1)
+        assert end_date == pd.Timestamp(year=2022, month=12, day=31)
 
     @patch("data_access_service.tasks.generate_csv_file.API")
     def test_query_data_no_data(self, mock_api):
@@ -74,8 +75,8 @@ class TestGenerateCSVFile(TestWithS3):
             api=mock_api,
             uuid="test-uuid",
             key="test-key",
-            start_date=datetime(2021, 1, 1),
-            end_date=datetime(2021, 12, 31),
+            start_date=pd.Timestamp(year=2021, month=1, day=1),
+            end_date=pd.Timestamp(year=2021, month=12, day=31),
             min_lat=-10,
             max_lat=10,
             min_lon=-20,
@@ -90,8 +91,8 @@ class TestGenerateCSVFile(TestWithS3):
             api=mock_api,
             uuid="test-uuid",
             key="test-key",
-            start_date=datetime(2021, 1, 1),
-            end_date=datetime(2021, 12, 31),
+            start_date=pd.Timestamp(year=2021, month=1, day=1),
+            end_date=pd.Timestamp(year=2021, month=12, day=31),
             min_lat=-10,
             max_lat=10,
             min_lon=-20,
@@ -131,18 +132,14 @@ class TestGenerateCSVFile(TestWithS3):
                         intermediate_output_folder=config.get_temp_folder(INIT_JOB_ID),
                         uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
                         keys=["*"],
-                        start_date=datetime.strptime(
-                            "2011-07-01 00:00:00", "%Y-%m-%d %H:%M:%S"
-                        ),
-                        end_date=datetime.strptime(
-                            "2011-09-01 00:00:00", "%Y-%m-%d %H:%M:%S"
-                        ),
+                        start_date=pd.Timestamp("2011-07-01 00:00:00"),
+                        end_date=pd.Timestamp("2011-09-01 00:00:00"),
                         multi_polygon=None,
                     )
                     # This is a zarr file, we should be able to read the result from S3
                     target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name(INIT_JOB_ID)}vessel_satellite_radiance_delayed_qc.zarr/part-*.zarr"
                     data = helper.read_multipart_zarr_from_s3(target_path)
-                    assert len(data["TIME"]) == 155927, "file have enough data"
+                    assert len(data["TIME"]) == 167472, "file have enough data"
                 finally:
                     TestWithS3.delete_object_in_s3(
                         s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT
@@ -189,12 +186,8 @@ class TestGenerateCSVFile(TestWithS3):
                         intermediate_output_folder=config.get_temp_folder(INIT_JOB_ID),
                         uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
                         keys=["*"],
-                        start_date=datetime.strptime(
-                            "2011-07-01 00:00:00", "%Y-%m-%d %H:%M:%S"
-                        ),
-                        end_date=datetime.strptime(
-                            "2011-07-31 23:59:59", "%Y-%m-%d %H:%M:%S"
-                        ),
+                        start_date=pd.Timestamp("2011-07-01 00:00:00"),
+                        end_date=pd.Timestamp("2011-07-31 23:59:59"),
                         multi_polygon=None,
                     )
                     # Job 2
@@ -204,12 +197,8 @@ class TestGenerateCSVFile(TestWithS3):
                         intermediate_output_folder=config.get_temp_folder(INIT_JOB_ID),
                         uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
                         keys=["*"],
-                        start_date=datetime.strptime(
-                            "2011-08-01 00:00:00", "%Y-%m-%d %H:%M:%S"
-                        ),
-                        end_date=datetime.strptime(
-                            "2011-08-15 23:59:59", "%Y-%m-%d %H:%M:%S"
-                        ),
+                        start_date=pd.Timestamp("2011-08-01 00:00:00"),
+                        end_date=pd.Timestamp("2011-08-15 23:59:59"),
                         multi_polygon=None,
                     )
                     process_data_files(
@@ -218,15 +207,11 @@ class TestGenerateCSVFile(TestWithS3):
                         intermediate_output_folder=config.get_temp_folder(INIT_JOB_ID),
                         uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
                         keys=["*"],
-                        start_date=datetime.strptime(
-                            "2011-08-16 00:00:00", "%Y-%m-%d %H:%M:%S"
-                        ),
-                        end_date=datetime.strptime(
-                            "2011-09-01 00:00:00", "%Y-%m-%d %H:%M:%S"
-                        ),
+                        start_date=pd.Timestamp("2011-08-16 00:00:00"),
+                        end_date=pd.Timestamp("2011-09-01 00:00:00"),
                         multi_polygon=None,
                     )
-                    # This is a zarr file, we should be able to read the result from S3, should have part-1, part2 and part-3
+                    # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
                     names = helper.list_s3_folders(
                         config.get_csv_bucket_name(),
                         f"{config.get_s3_temp_folder_name(INIT_JOB_ID)}vessel_satellite_radiance_delayed_qc.zarr",
@@ -238,7 +223,10 @@ class TestGenerateCSVFile(TestWithS3):
                     # This will aggregate to the same row count as above
                     target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name(INIT_JOB_ID)}vessel_satellite_radiance_delayed_qc.zarr/part-*.zarr"
                     data = helper.read_multipart_zarr_from_s3(target_path)
-                    assert len(data["TIME"]) == 155927, "file have enough data"
+                    assert len(data["TIME"]) == 167472, "file have enough data"
+                except Exception as ex:
+                    # Should not land here
+                    assert False, f"{ex}"
                 finally:
                     TestWithS3.delete_object_in_s3(
                         s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT

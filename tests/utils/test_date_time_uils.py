@@ -70,72 +70,218 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(next_month_first_day(date), expected_date)
 
     def test_get_monthly_date_range_array_from_(self):
-        """Test a typical date range spanning multiple months with partial months."""
-        start = pd.Timestamp(year=2023, month=1, day=15, tz="Asia/Tokyo")
-        end = pd.Timestamp(year=2023, month=4, day=10, tz="Asia/Tokyo")
+        """
+        Test a typical date range spanning multiple months with partial months. With edge case fall on nanoseconds
+        """
+        start = pd.Timestamp(
+            year=2023,
+            month=1,
+            day=15,
+            hour=5,
+            minute=53,
+            second=1,
+            microsecond=80043,
+            nanosecond=8,
+            tz="Asia/Tokyo",
+        )
+        end = pd.Timestamp(year=2023, month=4, day=10, nanosecond=1, tz="Asia/Tokyo")
         expected = [
             {
                 "start_date": pd.Timestamp(
-                    year=2023, month=1, day=14, hour=15, tz=pytz.UTC
+                    year=2023,
+                    month=1,
+                    day=14,
+                    hour=20,
+                    minute=53,
+                    second=1,
+                    microsecond=80043,
+                    nanosecond=8,
+                    tz=pytz.UTC,
                 ),
                 "end_date": pd.Timestamp(
                     year=2023,
                     month=1,
                     day=31,
-                    hour=14,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
+                    hour=20,
+                    minute=53,
+                    second=1,
+                    microsecond=80043,
+                    nanosecond=8,
                     tz=pytz.UTC,
                 ),
             },
             {
                 "start_date": pd.Timestamp(
-                    year=2023, month=1, day=31, hour=15, tz=pytz.UTC
+                    year=2023,
+                    month=1,
+                    day=31,
+                    hour=20,
+                    minute=53,
+                    second=1,
+                    microsecond=80043,
+                    nanosecond=9,
+                    tz=pytz.UTC,
                 ),
                 "end_date": pd.Timestamp(
                     year=2023,
                     month=2,
                     day=28,
-                    hour=14,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
+                    hour=20,
+                    minute=53,
+                    second=1,
+                    microsecond=80043,
+                    nanosecond=8,
                     tz=pytz.UTC,
                 ),
             },
             {
                 "start_date": pd.Timestamp(
-                    year=2023, month=2, day=28, hour=15, tz=pytz.UTC
+                    year=2023,
+                    month=2,
+                    day=28,
+                    hour=20,
+                    minute=53,
+                    second=1,
+                    microsecond=80043,
+                    nanosecond=9,
+                    tz=pytz.UTC,
                 ),
                 "end_date": pd.Timestamp(
                     year=2023,
                     month=3,
                     day=31,
-                    hour=14,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
+                    hour=20,
+                    minute=53,
+                    second=1,
+                    microsecond=80043,
+                    nanosecond=8,
                     tz=pytz.UTC,
                 ),
             },
             {
                 "start_date": pd.Timestamp(
-                    year=2023, month=3, day=31, hour=15, tz=pytz.UTC
+                    year=2023,
+                    month=3,
+                    day=31,
+                    hour=20,
+                    minute=53,
+                    second=1,
+                    microsecond=80043,
+                    nanosecond=9,
+                    tz=pytz.UTC,
                 ),
                 "end_date": pd.Timestamp(
                     year=2023,
                     month=4,
-                    day=10,
-                    hour=14,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
+                    day=9,
+                    hour=15,
+                    minute=0,
+                    second=0,
+                    microsecond=0,
+                    nanosecond=1,
                     tz=pytz.UTC,
+                ),
+            },
+        ]
+        result = get_monthly_date_range_array_from_(start, end)
+        self.assertListEqual(
+            result, expected, "Monthly ranges do not match expected output"
+        )
+
+    def test_get_monthly_date_range_array_from_2_(self):
+        """
+        Test an edge case where two day are very close to month end
+        """
+        start = pd.Timestamp(
+            year=2023,
+            month=1,
+            day=31,
+            hour=5,
+            minute=53,
+            second=1,
+            microsecond=80043,
+            nanosecond=8,
+            tz=pytz.UTC,
+        )
+        end = pd.Timestamp(year=2023, month=2, day=1, nanosecond=1, tz=pytz.UTC)
+        expected = [
+            {
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=1,
+                    day=31,
+                    hour=5,
+                    minute=53,
+                    second=1,
+                    microsecond=80043,
+                    nanosecond=8,
+                    tz=pytz.UTC,
+                ),
+                "end_date": pd.Timestamp(
+                    year=2023, month=2, day=1, nanosecond=1, tz=pytz.UTC
+                ),
+            },
+        ]
+        result = get_monthly_date_range_array_from_(start, end)
+        self.assertListEqual(
+            result, expected, "Monthly ranges do not match expected output"
+        )
+
+    def test_get_monthly_date_range_array_from_3_(self):
+        """
+        Test an edge case where two day are very close to month end
+        """
+        start = pd.Timestamp(
+            year=2023,
+            month=1,
+            day=30,
+            hour=5,
+            minute=53,
+            second=1,
+            microsecond=80043,
+            nanosecond=8,
+            tz=pytz.UTC,
+        )
+        end = pd.Timestamp(year=2023, month=2, day=1, nanosecond=1, tz=pytz.UTC)
+        expected = [
+            {
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=1,
+                    day=30,
+                    hour=5,
+                    minute=53,
+                    second=1,
+                    microsecond=80043,
+                    nanosecond=8,
+                    tz=pytz.UTC,
+                ),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=1,
+                    day=31,
+                    hour=5,
+                    minute=53,
+                    second=1,
+                    microsecond=80043,
+                    nanosecond=8,
+                    tz=pytz.UTC,
+                ),
+            },
+            {
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=1,
+                    day=31,
+                    hour=5,
+                    minute=53,
+                    second=1,
+                    microsecond=80043,
+                    nanosecond=9,
+                    tz=pytz.UTC,
+                ),
+                "end_date": pd.Timestamp(
+                    year=2023, month=2, day=1, nanosecond=1, tz=pytz.UTC
                 ),
             },
         ]

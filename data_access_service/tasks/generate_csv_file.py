@@ -186,6 +186,7 @@ def _generate_partition_output_with_polygon(
     if not api.get_api_status():
         api.initialize_metadata()
 
+    had_data = False
     if multi_polygon is not None:
         # TODO: currently, assume polygons are all rectangles. when cloud-optimized library is upgraded,
         #  we can change to use the polygon coordinates directly
@@ -196,7 +197,7 @@ def _generate_partition_output_with_polygon(
             min_lon = lats_lons["min_lon"]
             max_lon = lats_lons["max_lon"]
 
-            _generate_partition_output(
+            had_data = had_data or _generate_partition_output(
                 folder_path,
                 array_index,
                 uuid,
@@ -209,7 +210,7 @@ def _generate_partition_output_with_polygon(
                 max_lon,
             )
     else:
-        _generate_partition_output(
+        had_data = _generate_partition_output(
             folder_path,
             array_index,
             uuid,
@@ -222,7 +223,7 @@ def _generate_partition_output_with_polygon(
             None,
         )
 
-    if not os.path.isdir(folder_path):
+    if not had_data:
         log.info(
             f" No data found for uuid={uuid}, start_date={start_date}, end_date={end_date}, multi_polygon={multi_polygon}"
         )

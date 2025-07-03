@@ -64,46 +64,70 @@ def get_monthly_date_range_array_from_(
     start_date: pd.Timestamp, end_date: pd.Timestamp
 ) -> list[dict]:
     """
-    Split a date range into monthly intervals, returning start and end dates per month.
+    Split a date range into monthly intervals, preserving start_date and using exact end_date for the last month.
 
     Args:
-        start_date (datetime): Start date of the range, need to use panda timestamp for nanosecond precision
-        end_date (datetime): End date of the range, need to use panda timestamp for nanosecond precision
+        start_date (pd.Timestamp): Start date with nanosecond precision.
+        end_date (pd.Timestamp): End date with nanosecond precision.
 
     Returns:
-        list[dict]: List of dictionaries with 'start_date' and 'end_date' (as strings in 'YYYY-MM-DD').
+        list[dict]: List of dictionaries with 'start_date' and 'end_date' as UTC strings in
+                    'YYYY-MM-DD HH:MM:SS.fffffffff+00:00' format.
     """
     # Check if start_date > end_date
     if start_date > end_date:
-        raise ValueError("start_date should not greater then end_date")
+        raise ValueError("start_date should not be greater than end_date")
 
-    # Generate date range
-    date_range = pd.date_range(start=start_date, end=end_date, freq="D")
+    # Ensure naive timestamps for consistency
+    start_date = (
+        start_date.tz_convert(pytz.UTC)
+        if start_date.tz is not None
+        else start_date.tz_localize(pytz.UTC)
+    )
+    end_date = (
+        end_date.tz_convert(pytz.UTC)
+        if end_date.tz is not None
+        else end_date.tz_localize(pytz.UTC)
+    )
 
-    # Group by year and month, get start and end dates
-    df = pd.DataFrame(date_range, columns=["date"])
-    monthly_groups = df.groupby([df["date"].dt.year, df["date"].dt.month])
+    # Generate date range, excluding end_date
+    date_range = pd.date_range(
+        start=start_date, end=end_date, freq="D", inclusive="left"
+    )
+    if not date_range.is_monotonic_increasing:
+        raise ValueError("Generated date range is not monotonic")
 
-    # Create result list
-    return [
-        {
-            "start_date": (
-                group["date"].min().round("us").tz_localize(pytz.UTC)
-                if start_date.tz is None
-                else group["date"].min().round("us").tz_convert(pytz.UTC)
-            ),
-            "end_date": (
-                (
-                    group["date"].max() + pd.offsets.Day(1) - pd.offsets.Nano(1)
-                ).tz_localize(pytz.UTC)
-                if end_date.tz is None
-                else (
-                    group["date"].max() + pd.offsets.Day(1) - pd.offsets.Nano(1)
-                ).tz_convert(pytz.UTC)
-            ),
-        }
-        for _, group in monthly_groups
-    ]
+    # Create DataFrame and group by year and month
+    df = pd.DataFrame({"date": date_range}).sort_values(by="date")
+
+    # Initialize result
+    result = []
+
+    # Iterate over months from start_date to end_date
+    start = None
+    for d in df["date"]:
+        if start is None:
+            # This the first start day
+            start = d
+        elif d.is_month_end:
+            result.append(
+                {
+                    "start_date": start,
+                    "end_date": d,
+                }
+            )
+            # The next start time will be 1 nanosecond more than the end_date
+            start = d + pd.offsets.Nano(1)
+
+    # Edge case where you have start but no end
+    if start < end_date:
+        result.append(
+            {
+                "start_date": start,
+                "end_date": end_date,
+            }
+        )
+    return result
 
 
 def trim_date_range(
@@ -112,7 +136,7 @@ def trim_date_range(
     key: str,
     requested_start_date: pd.Timestamp,
     requested_end_date: pd.Timestamp,
-) -> (pd.Timestamp | None, pd.Timestamp | None):
+) -> Tuple[pd.Timestamp | None, pd.Timestamp | None]:
 
     log.info(f"Original date range: {requested_start_date} to {requested_end_date}")
     metadata_temporal_extent = api.get_temporal_extent(uuid=uuid, key=key)

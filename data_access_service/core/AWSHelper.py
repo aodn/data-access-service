@@ -254,6 +254,8 @@ class AWSHelper:
         return xarray.open_mfdataset(
             file_path,
             engine="zarr",
+            combine="nested",
+            concat_dim="TIME",
             consolidated=False,  # Must be false as the file is not consolidated_metadata()
             parallel=False,
         )
