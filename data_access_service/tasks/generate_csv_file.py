@@ -14,7 +14,7 @@ from data_access_service.tasks.data_file_upload import (
     upload_all_files_in_folder_to_temp_s3,
 )
 from data_access_service.utils.date_time_utils import (
-    get_monthly_date_range_array_from_,
+    get_monthly_utc_date_range_array_from_,
     trim_date_range,
 )
 
@@ -116,7 +116,7 @@ def _generate_partition_output(
     )
 
     if start_date is not None and end_date is not None:
-        date_ranges = get_monthly_date_range_array_from_(
+        date_ranges = get_monthly_utc_date_range_array_from_(
             start_date=start_date, end_date=end_date
         )
         need_append = False

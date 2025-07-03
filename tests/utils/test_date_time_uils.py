@@ -13,7 +13,7 @@ from data_access_service.utils.date_time_utils import (
     get_final_day_of_month_,
     next_month_first_day,
     trim_date_range,
-    get_monthly_date_range_array_from_,
+    get_monthly_utc_date_range_array_from_,
     get_boundary_of_year_month,
     transfer_date_range_into_yearmonth,
     split_yearmonths_into_dict,
@@ -76,8 +76,12 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(target_date, expected_date)
 
     def test_next_month_first_day(self):
-        date = datetime(2023, 1, 31)
-        expected_date = datetime(2023, 2, 1)
+        date = pd.Timestamp(year=2023, month=1, day=31)
+        expected_date = pd.Timestamp(year=2023, month=2, day=1, tz=pytz.UTC)
+        self.assertEqual(next_month_first_day(date), expected_date)
+
+        date = pd.Timestamp(year=2023, month=1, day=31, tz="Asia/Tokyo")
+        expected_date = pd.Timestamp(year=2023, month=2, day=1, tz="Asia/Tokyo")
         self.assertEqual(next_month_first_day(date), expected_date)
 
     def test_get_monthly_date_range_array_from_(self):
@@ -194,7 +198,7 @@ class TestDateTimeUtils(unittest.TestCase):
                 ),
             },
         ]
-        result = get_monthly_date_range_array_from_(start, end)
+        result = get_monthly_utc_date_range_array_from_(start, end)
         self.assertListEqual(
             result, expected, "Monthly ranges do not match expected output"
         )
@@ -233,7 +237,7 @@ class TestDateTimeUtils(unittest.TestCase):
                 ),
             },
         ]
-        result = get_monthly_date_range_array_from_(start, end)
+        result = get_monthly_utc_date_range_array_from_(start, end)
         self.assertListEqual(
             result, expected, "Monthly ranges do not match expected output"
         )
@@ -296,7 +300,7 @@ class TestDateTimeUtils(unittest.TestCase):
                 ),
             },
         ]
-        result = get_monthly_date_range_array_from_(start, end)
+        result = get_monthly_utc_date_range_array_from_(start, end)
         self.assertListEqual(
             result, expected, "Monthly ranges do not match expected output"
         )
@@ -313,17 +317,13 @@ class TestDateTimeUtils(unittest.TestCase):
                 "end_date": pd.Timestamp(
                     year=2023,
                     month=2,
-                    day=15,
-                    hour=12,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
+                    day=14,
+                    hour=13,
                     tz=pytz.UTC,
                 ),
             }
         ]
-        result = get_monthly_date_range_array_from_(start, end)
+        result = get_monthly_utc_date_range_array_from_(start, end)
         self.assertListEqual(
             result, expected, "Single month range does not match expected output"
         )
@@ -331,26 +331,18 @@ class TestDateTimeUtils(unittest.TestCase):
     def test_single_day(self):
         """Test a date range of a single day."""
         start = pd.Timestamp(year=2023, month=3, day=5, tz="Australia/Sydney")
-        end = pd.Timestamp(year=2023, month=3, day=5, tz="Australia/Sydney")
+        end = pd.Timestamp(year=2023, month=3, day=5, hour=10, tz="Australia/Sydney")
         expected = [
             {
                 "start_date": pd.Timestamp(
                     year=2023, month=3, day=4, hour=13, tz=pytz.UTC
                 ),
                 "end_date": pd.Timestamp(
-                    year=2023,
-                    month=3,
-                    day=5,
-                    hour=12,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
-                    tz=pytz.UTC,
+                    year=2023, month=3, day=4, hour=23, tz=pytz.UTC
                 ),
             }
         ]
-        result = get_monthly_date_range_array_from_(start, end)
+        result = get_monthly_utc_date_range_array_from_(start, end)
         self.assertListEqual(
             result, expected, "Single day range does not match expected output"
         )
@@ -366,170 +358,176 @@ class TestDateTimeUtils(unittest.TestCase):
                     year=2023,
                     month=1,
                     day=31,
-                    hour=23,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
                     tz=pytz.UTC,
                 ),
             },
             {
-                "start_date": pd.Timestamp(year=2023, month=2, day=1, tz=pytz.UTC),
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=1,
+                    day=31,
+                    nanosecond=1,
+                    tz=pytz.UTC,
+                ),
                 "end_date": pd.Timestamp(
                     year=2023,
                     month=2,
                     day=28,
-                    hour=23,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
                     tz=pytz.UTC,
                 ),
             },
             {
-                "start_date": pd.Timestamp(year=2023, month=3, day=1, tz=pytz.UTC),
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=2,
+                    day=28,
+                    nanosecond=1,
+                    tz=pytz.UTC,
+                ),
                 "end_date": pd.Timestamp(
                     year=2023,
                     month=3,
                     day=31,
-                    hour=23,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
                     tz=pytz.UTC,
                 ),
             },
             {
-                "start_date": pd.Timestamp(year=2023, month=4, day=1, tz=pytz.UTC),
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=3,
+                    day=31,
+                    nanosecond=1,
+                    tz=pytz.UTC,
+                ),
                 "end_date": pd.Timestamp(
                     year=2023,
                     month=4,
                     day=30,
-                    hour=23,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
                     tz=pytz.UTC,
                 ),
             },
             {
-                "start_date": pd.Timestamp(year=2023, month=5, day=1, tz=pytz.UTC),
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=4,
+                    day=30,
+                    nanosecond=1,
+                    tz=pytz.UTC,
+                ),
                 "end_date": pd.Timestamp(
                     year=2023,
                     month=5,
                     day=31,
-                    hour=23,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
                     tz=pytz.UTC,
                 ),
             },
             {
-                "start_date": pd.Timestamp(year=2023, month=6, day=1, tz=pytz.UTC),
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=5,
+                    day=31,
+                    nanosecond=1,
+                    tz=pytz.UTC,
+                ),
                 "end_date": pd.Timestamp(
                     year=2023,
                     month=6,
                     day=30,
-                    hour=23,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
                     tz=pytz.UTC,
                 ),
             },
             {
-                "start_date": pd.Timestamp(year=2023, month=7, day=1, tz=pytz.UTC),
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=6,
+                    day=30,
+                    nanosecond=1,
+                    tz=pytz.UTC,
+                ),
                 "end_date": pd.Timestamp(
                     year=2023,
                     month=7,
                     day=31,
-                    hour=23,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
                     tz=pytz.UTC,
                 ),
             },
             {
-                "start_date": pd.Timestamp(year=2023, month=8, day=1, tz=pytz.UTC),
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=7,
+                    day=31,
+                    nanosecond=1,
+                    tz=pytz.UTC,
+                ),
                 "end_date": pd.Timestamp(
                     year=2023,
                     month=8,
                     day=31,
-                    hour=23,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
                     tz=pytz.UTC,
                 ),
             },
             {
-                "start_date": pd.Timestamp(year=2023, month=9, day=1, tz=pytz.UTC),
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=8,
+                    day=31,
+                    nanosecond=1,
+                    tz=pytz.UTC,
+                ),
                 "end_date": pd.Timestamp(
                     year=2023,
                     month=9,
                     day=30,
-                    hour=23,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
                     tz=pytz.UTC,
                 ),
             },
             {
-                "start_date": pd.Timestamp(year=2023, month=10, day=1, tz=pytz.UTC),
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=9,
+                    day=30,
+                    nanosecond=1,
+                    tz=pytz.UTC,
+                ),
                 "end_date": pd.Timestamp(
                     year=2023,
                     month=10,
                     day=31,
-                    hour=23,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
                     tz=pytz.UTC,
                 ),
             },
             {
-                "start_date": pd.Timestamp(year=2023, month=11, day=1, tz=pytz.UTC),
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=10,
+                    day=31,
+                    nanosecond=1,
+                    tz=pytz.UTC,
+                ),
                 "end_date": pd.Timestamp(
                     year=2023,
                     month=11,
                     day=30,
-                    hour=23,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
                     tz=pytz.UTC,
                 ),
             },
             {
-                "start_date": pd.Timestamp(year=2023, month=12, day=1, tz=pytz.UTC),
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=11,
+                    day=30,
+                    nanosecond=1,
+                    tz=pytz.UTC,
+                ),
                 "end_date": pd.Timestamp(
                     year=2023,
                     month=12,
                     day=31,
-                    hour=23,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
                     tz=pytz.UTC,
                 ),
             },
         ]
-        result = get_monthly_date_range_array_from_(start, end)
+        result = get_monthly_utc_date_range_array_from_(start, end)
         self.assertListEqual(
             result, expected, "Full year range does not match expected output"
         )
@@ -545,30 +543,22 @@ class TestDateTimeUtils(unittest.TestCase):
                     year=2024,
                     month=2,
                     day=29,
-                    hour=23,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
                     tz=pytz.UTC,
                 ),
             },
             {
-                "start_date": pd.Timestamp(year=2024, month=3, day=1, tz=pytz.UTC),
+                "start_date": pd.Timestamp(
+                    year=2024, month=2, day=29, nanosecond=1, tz=pytz.UTC
+                ),
                 "end_date": pd.Timestamp(
                     year=2024,
                     month=3,
                     day=31,
-                    hour=23,
-                    minute=59,
-                    second=59,
-                    microsecond=999999,
-                    nanosecond=999,
                     tz=pytz.UTC,
                 ),
             },
         ]
-        result = get_monthly_date_range_array_from_(start, end)
+        result = get_monthly_utc_date_range_array_from_(start, end)
         self.assertListEqual(
             result, expected, "Leap year range does not match expected output"
         )
@@ -603,7 +593,7 @@ class TestDateTimeUtils(unittest.TestCase):
                 ),
             },
         ]
-        result = get_monthly_date_range_array_from_(start, end)
+        result = get_monthly_utc_date_range_array_from_(start, end)
         self.assertListEqual(
             result, expected, "Cross-year range does not match expected output"
         )
@@ -615,13 +605,13 @@ class TestDateTimeUtils(unittest.TestCase):
         with self.assertRaises(
             ValueError, msg="Expected ValueError for end_date before start_date"
         ):
-            get_monthly_date_range_array_from_(start, end)
+            get_monthly_utc_date_range_array_from_(start, end)
 
     def test_output_type(self):
         """Test that start_date and end_date are datetime objects."""
         start = pd.Timestamp(year=2023, month=1, day=15)
         end = pd.Timestamp(year=2023, month=2, day=15)
-        result = get_monthly_date_range_array_from_(start, end)
+        result = get_monthly_utc_date_range_array_from_(start, end)
         for item in result:
             self.assertIsInstance(
                 item["start_date"], type(start), "start_date is not datetime"

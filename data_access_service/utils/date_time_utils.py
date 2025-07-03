@@ -45,12 +45,20 @@ def get_final_day_of_month_(date: pd.Timestamp) -> pd.Timestamp:
 
 
 def get_first_day_of_month(date: pd.Timestamp) -> pd.Timestamp:
+    """
+    Find first day of month, do not care about the timezone and time
+    :param date:
+    :return:
+    """
     first_day = date + pd.offsets.MonthBegin(0)
-    return first_day.normalize().tz_convert(pytz.UTC)  # Set time to 00:00:00
+    return first_day.normalize()
 
 
 def next_month_first_day(date: pd.Timestamp) -> pd.Timestamp:
-    return get_final_day_of_month_(date) + pd.offsets.Day(1)
+    first_day = get_final_day_of_month_(date) + pd.offsets.Day(1)
+    return pd.Timestamp(
+        year=first_day.year, month=first_day.month, day=first_day.day, tz=first_day.tz
+    )
 
 
 def ensure_timezone(dt: pd.Timestamp) -> pd.Timestamp:
@@ -68,7 +76,7 @@ def ensure_timezone(dt: pd.Timestamp) -> pd.Timestamp:
     return dt
 
 
-def get_monthly_date_range_array_from_(
+def get_monthly_utc_date_range_array_from_(
     start_date: pd.Timestamp, end_date: pd.Timestamp
 ) -> list[dict]:
     """
