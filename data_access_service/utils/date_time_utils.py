@@ -37,7 +37,7 @@ def get_final_day_of_month_(date: pd.Timestamp) -> pd.Timestamp:
 
 
 def get_first_day_of_month(date: pd.Timestamp) -> pd.Timestamp:
-    first_day = date + pd.offsets.MonthBegin(-1)
+    first_day = date + pd.offsets.MonthBegin(0)
     return first_day.normalize().tz_convert(pytz.UTC)  # Set time to 00:00:00
 
 
@@ -222,7 +222,9 @@ def split_yearmonths_into_dict(yearmonths, chunk_size: int):
     return result
 
 
-def supply_day(start_date_str: str, end_date_str: str) -> Tuple[datetime, datetime]:
+def supply_day(
+    start_date_str: str, end_date_str: str
+) -> Tuple[pd.Timestamp, pd.Timestamp]:
     """
     Supply the day to the start and end date strings. if the date string is not in this format: "MM-yyyy", don't use this function
 
@@ -235,14 +237,14 @@ def supply_day(start_date_str: str, end_date_str: str) -> Tuple[datetime, dateti
     """
     pattern = r"^(0[1-9]|1[0-2])-\d{4}$"
     if (not re.match(pattern, start_date_str)) or (not re.match(pattern, end_date_str)):
-        # currently, the if no date ranges selected in frontend, the start_date & end_date will be in this format: "yyyy-MM-dd",
+        # currently, if no date ranges selected in frontend, the start_date & end_date will be in this format: "yyyy-MM-dd",
         # so for this case, we don't need to supply the day
-        return parser.parse(start_date_str), parser.parse(end_date_str)
+        return parse_date(start_date_str), parse_date(end_date_str)
 
-    start_date = parser.parse(start_date_str)
-    end_date = parser.parse(end_date_str)
+    start_date = parse_date(start_date_str, format_to_convert="%m-%Y")
+    end_date = parse_date(end_date_str, format_to_convert="%m-%Y")
 
-    start_date = start_date.replace(day=1, hour=0, minute=0, second=0)
+    start_date = get_first_day_of_month(start_date)
     end_date = get_final_day_of_month_(end_date).replace(hour=23, minute=59, second=59)
 
     return start_date, end_date
