@@ -18,6 +18,8 @@ from data_access_service.utils.date_time_utils import (
     transfer_date_range_into_yearmonth,
     split_yearmonths_into_dict,
     ensure_timezone,
+    split_date_range,
+    YEAR_MONTH_DAY_TIME_NANO,
 )
 
 
@@ -47,17 +49,27 @@ class TestDateTimeUtils(unittest.TestCase):
         )
 
     def test_parse_date4(self):
-        date_string = "10-2023"
-        expected_date = pd.Timestamp(year=2023, month=10, day=1, tz=pytz.UTC)
+        date_string = "2010-04-30 23:59:59.999999999"
+        expected_date = pd.Timestamp(
+            year=2010,
+            month=4,
+            day=30,
+            hour=23,
+            minute=59,
+            second=59,
+            microsecond=999999,
+            nanosecond=999,
+            tz=pytz.UTC,
+        )
 
-        with self.assertRaises(ValueError) as cm:
-            self.assertEqual(
-                parse_date(date_string, format_to_convert="%d-%m-%Y"), expected_date
-            )
-            self.assertEqual(
-                str(cm.exception),
-                "time data '10-2023' does not match format '%d-%m-%Y'",
-            )
+        self.assertEqual(parse_date(date_string), expected_date)
+
+    def test_parse_date5(self):
+        date_string = "2023-10-01"
+        expected_date = pd.Timestamp(year=2023, month=10, day=1, tz=pytz.UTC)
+        self.assertEqual(
+            parse_date(date_string, format_to_convert="%Y-%m-%d"), expected_date
+        )
 
     def test_get_final_day_of_(self):
         date = pd.Timestamp(year=2023, month=2, day=15)
@@ -1036,3 +1048,32 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(result.second, 56)
         self.assertEqual(result.microsecond, 123456)
         self.assertEqual(result.tzinfo, pytz.UTC)
+
+    def test_split_date_range(self):
+        date_ranges = split_date_range(
+            pd.Timestamp("2010-02-01"), pd.Timestamp("2011-04-30"), 3
+        )
+        expected_result = {
+            0: [
+                "2010-02-01 00:00:00.000000000",
+                "2010-04-30 23:59:59.999999999",
+            ],
+            1: [
+                "2010-05-01 00:00:00.000000000",
+                "2010-07-31 23:59:59.999999999",
+            ],
+            2: [
+                "2010-08-01 00:00:00.000000000",
+                "2010-10-31 23:59:59.999999999",
+            ],
+            3: [
+                "2010-11-01 00:00:00.000000000",
+                "2011-01-31 23:59:59.999999999",
+            ],
+            4: [
+                "2011-02-01 00:00:00.000000000",
+                "2011-04-30 00:00:00.000000000",
+            ],
+        }
+        self.assertEqual(len(date_ranges), 5)
+        self.assertEqual(date_ranges, expected_result)

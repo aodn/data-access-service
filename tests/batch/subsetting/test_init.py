@@ -1,3 +1,4 @@
+import pandas as pd
 import pytest
 import os
 
@@ -55,8 +56,12 @@ class TestInit:
                 # Assert that submit_a_job was called twice
                 assert submit_a_job.call_count == 2
                 # Assert that the expected calls were made
-                assert expected_call_1 in submit_a_job.call_args_list, "call arg list 1"
-                assert expected_call_2 in submit_a_job.call_args_list, "call arg list 2"
+                assert (
+                    expected_call_1 == submit_a_job.call_args_list[0]
+                ), "call arg list 1"
+                assert (
+                    expected_call_2 == submit_a_job.call_args_list[1]
+                ), "call arg list 2"
 
     def test_init_with_very_narrow_date_range(self, setup):
         with patch.object(Config, "get_month_count_per_job") as get_month_count_per_job:
@@ -65,8 +70,8 @@ class TestInit:
                     get_month_count_per_job.return_value = 1200  # Set a very high month count to ensure no splitting occurs
                     # Mock the get_temporal_extent method to return a fixed value
                     get_temporal_extent.return_value = (
-                        datetime(1970, 1, 1),
-                        datetime(2024, 12, 31),
+                        pd.Timestamp(year=1970, month=1, day=1),
+                        pd.Timestamp(year=2024, month=12, day=31),
                     )
 
                     submit_a_job.return_value = "test-job-id-returned"
@@ -83,7 +88,7 @@ class TestInit:
                         # parameters=PREPARATION_JOB_SUBMISSION_ARGS["parameters"],
                         parameters={
                             **PREPARATION_JOB_SUBMISSION_ARGS["parameters"],
-                            "date_ranges": '{"0": ["2010-02-01", "2011-04-30"]}',
+                            "date_ranges": '{"0": ["2010-02-01 00:00:00.000000000", "2011-04-30 23:59:59.999999999"]}',
                         },
                         array_size=1,
                         dependency_job_id=INIT_JOB_ID,
@@ -95,7 +100,7 @@ class TestInit:
                         job_definition=COLLECTION_JOB_SUBMISSION_ARGS["job_definition"],
                         parameters={
                             **COLLECTION_JOB_SUBMISSION_ARGS["parameters"],
-                            "date_ranges": '{"0": ["2010-02-01", "2011-04-30"]}',
+                            "date_ranges": '{"0": ["2010-02-01 00:00:00.000000000", "2011-04-30 23:59:59.999999999"]}',
                         },
                         dependency_job_id=COLLECTION_JOB_SUBMISSION_ARGS[
                             "dependency_job_id"

@@ -4,12 +4,12 @@ import pytz
 
 from typing import Tuple
 from datetime import datetime, timedelta, time
-from dateutil import parser
 from data_access_service import init_log, Config
 from dateutil.relativedelta import relativedelta
 from data_access_service.core.api import BaseAPI
 
 YEAR_MONTH_DAY = "%Y-%m-%d"
+YEAR_MONTH_DAY_TIME_NANO = "%Y-%m-%d %H:%M:%S.fffffffff"
 
 # %z do not produce Z for +0000, %z just add the offset value which is fine
 # for client, however if you prefer to have Z the please replace the string
@@ -24,9 +24,21 @@ log = init_log(config)
 
 # parse all common format of date string into given format, such as "%Y-%m-%d"
 def parse_date(
-    date_string: str, format_to_convert: str = YEAR_MONTH_DAY, time_zone: str = pytz.UTC
+    date_string: str, format_to_convert: str = None, time_zone: str = pytz.UTC
 ) -> pd.Timestamp:
-    return pd.to_datetime(date_string, format=format_to_convert).tz_localize(time_zone)
+    if format_to_convert is None:
+        return pd.Timestamp(date_string).tz_localize(time_zone)
+    else:
+        # Custom format
+        ts = pd.to_datetime(date_string, format=format_to_convert)
+        # Extract nanoseconds if present
+        if "%f" in format_to_convert:
+            frac_part = date_string.split(".")[-1].split("+")[0]
+            if len(frac_part) > 6:
+                nano_str = frac_part[6:9]
+                nanosec = int(nano_str) if nano_str else 0
+                ts = ts + pd.Timedelta(nanoseconds=nanosec)
+        return ts.tz_localize(time_zone)
 
 
 def get_final_day_of_month_(date: pd.Timestamp) -> pd.Timestamp:
@@ -306,26 +318,35 @@ def supply_day(
 
 
 def split_date_range(
-    start_date: datetime,
-    end_date: datetime,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
     month_count_per_job: int,
 ) -> dict:
     date_ranges = {}
     index = 0
-    # to make sure the start date is at the very beginning of the month
-    current_start_date = start_date.replace(hour=0, minute=0, second=0)
-    while current_start_date <= end_date:
-        current_end_date = get_final_day_of_month_(
-            current_start_date + relativedelta(months=(month_count_per_job - 1))
-        ).replace(hour=23, minute=59, second=59)
 
-        # Check if the end date exceeds the original end date
-        if current_end_date > end_date:
-            current_end_date = end_date.replace(hour=23, minute=59, second=59)
-        date_ranges[index] = [
-            current_start_date.strftime("%Y-%m-%d"),
-            current_end_date.strftime("%Y-%m-%d"),
+    months: list[dict] = get_monthly_utc_date_range_array_from_(start_date, end_date)
+
+    # Special case, if your split is too high and cannot be split we just return the start end date
+    if len(months) < month_count_per_job:
+        date_ranges[0] = [
+            f"{months[0]['start_date'].strftime('%Y-%m-%d %H:%M:%S.%f')}{months[0]['start_date'].nanosecond:03d}",
+            f"{months[-1]['end_date'].strftime('%Y-%m-%d %H:%M:%S.%f')}{months[-1]['end_date'].nanosecond:03d}",
         ]
-        index += 1
-        current_start_date = current_end_date + relativedelta(seconds=1)
+    else:
+        for i in range(0, len(months) - month_count_per_job + 1, month_count_per_job):
+            window = months[i : i + month_count_per_job]
+            if len(window) < month_count_per_job:
+                date_ranges[index] = [
+                    f"{window[0]['start_date'].strftime('%Y-%m-%d %H:%M:%S.%f')}{window[0]['start_date'].nanosecond:03d}",
+                    f"{window[-1]['end_date'].strftime('%Y-%m-%d %H:%M:%S.%f')}{window[-1]['end_date'].nanosecond:03d}",
+                ]
+                break  # Skip incomplete windows
+
+            date_ranges[index] = [
+                f"{window[0]['start_date'].strftime('%Y-%m-%d %H:%M:%S.%f')}{window[0]['start_date'].nanosecond:03d}",
+                f"{window[-1]['end_date'].strftime('%Y-%m-%d %H:%M:%S.%f')}{window[-1]['end_date'].nanosecond:03d}",
+            ]
+            index = index + 1
+
     return date_ranges
