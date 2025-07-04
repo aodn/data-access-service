@@ -1,19 +1,14 @@
-import shutil
 import pytz
 import pandas as pd
 import pytest
 
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-from data_access_service.core.AWSHelper import AWSHelper
 from aodn_cloud_optimised.lib import DataQuery
-from data_access_service import Config, init_log
 from data_access_service.tasks.generate_csv_file import (
     trim_date_range,
     query_data,
-    process_data_files,
 )
-from tests.batch.batch_test_consts import INIT_JOB_ID
 from tests.core.test_with_s3 import TestWithS3, REGION
 
 
@@ -27,8 +22,10 @@ class TestGenerateCSVFile(TestWithS3):
     def mock_aws(self):
         return MagicMock()
 
-    @pytest.fixture(scope="class")
-    def upload_test_case_to_s3(self, aws_clients, localstack, mock_boto3_client):
+    @pytest.fixture(scope="session")
+    def upload_test_case_to_s3(
+        self, aws_clients, localstack, mock_boto3_client, setup_resources
+    ):
         """
         This will call only once, so you should not delete any update in any test case
         :param aws_clients:

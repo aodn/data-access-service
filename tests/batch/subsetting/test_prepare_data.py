@@ -21,12 +21,6 @@ from tests.core.test_with_s3 import TestWithS3, REGION
 
 class TestDataGeneration(TestWithS3):
 
-    @pytest.fixture(autouse=True, scope="class")
-    def setup(self):
-        """Set environment variable for testing profile."""
-        os.environ["PROFILE"] = EnvType.TESTING.value
-        yield
-
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_parquet_preparation_and_collection(
         self, setup, setup_resources, aws_clients

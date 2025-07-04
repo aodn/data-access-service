@@ -9,7 +9,7 @@ from data_access_service.core.api import API
 from data_access_service.core.routes import router as api_router
 
 
-def api_setup(application: FastAPI):
+def api_setup(application: FastAPI) -> API:
     """
     This function is not async which can be use in test, the lifespan however
     expect async function which is not good for testing
@@ -26,6 +26,7 @@ def api_setup(application: FastAPI):
         api.initialize_metadata()
 
     application.include_router(api_router)
+    return api
 
 
 @asynccontextmanager

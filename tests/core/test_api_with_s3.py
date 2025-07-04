@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 class TestApiWithS3(TestWithS3):
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture(scope="session")
     def upload_test_case_to_s3(self, aws_clients, localstack, mock_boto3_client):
         s3_client, _ = aws_clients
         # Upload test data
@@ -27,20 +27,21 @@ class TestApiWithS3(TestWithS3):
             Path(__file__).parent.parent / "canned/s3_sample2",
         )
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture(scope="session")
     def client(self, upload_test_case_to_s3):
         # Use LifespanManager to ensure lifespan events are triggered
         # Make sure file uploaded before init the app
-        api_setup(app)
+        api = api_setup(app)
         return TestClient(app)
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_auth_fetch_data_correct(
-        self, setup_resources, localstack, aws_clients, client
+        self, setup, setup_resources, localstack, aws_clients, client
     ):
         """Test subsetting with valid and invalid time ranges."""
         s3_client, _ = aws_clients
         config = Config.get_config()
+        config.set_s3_client(s3_client)
 
         with patch.object(AWSHelper, "send_email") as mock_send_email:
             # Test with range, this dataset field is different, it called detection_timestamp
@@ -82,7 +83,9 @@ class TestApiWithS3(TestWithS3):
 
             try:
                 parsed = json.loads(response.content.decode("utf-8"))
-                assert len(parsed) == 22, "Size not match"
+                assert (
+                    len(parsed) == 22
+                ), f"Size not match, return size is {len(parsed)} and X-API-Key is {config.get_api_key()}"
                 assert parsed[0] == {
                     "latitude": -27.7,
                     "longitude": 153.3,
@@ -98,11 +101,12 @@ class TestApiWithS3(TestWithS3):
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_fetch_data_correct_without_depth(
-        self, setup_resources, localstack, aws_clients, client
+        self, setup, setup_resources, localstack, aws_clients, client
     ):
         """Test subsetting with valid and invalid time ranges."""
         s3_client, _ = aws_clients
         config = Config.get_config()
+        config.set_s3_client(s3_client)
 
         with patch.object(AWSHelper, "send_email") as mock_send_email:
             # Test with range, this dataset field is different, dataset without DEPTH
@@ -147,6 +151,7 @@ class TestApiWithS3(TestWithS3):
         """Test subsetting with valid and invalid time ranges."""
         s3_client, _ = aws_clients
         config = Config.get_config()
+        config.set_s3_client(s3_client)
 
         # We only verify the zarr data where two zarr have same UUID
         with patch.object(AWSHelper, "send_email") as mock_send_email:
@@ -218,8 +223,3 @@ class TestApiWithS3(TestWithS3):
 
             except json.JSONDecodeError as e:
                 assert False, "Fail to parse to JSON"
-
-    @pytest.fixture(scope="class")
-    def cleanup(self, localstack):
-        # Setup code
-        localstack.stop()

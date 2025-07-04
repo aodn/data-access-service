@@ -2,9 +2,7 @@ import pandas as pd
 import pytest
 import os
 
-from datetime import datetime
 from unittest.mock import patch, call
-
 from data_access_service import API
 from data_access_service.batch.subsetting import init
 from data_access_service.config.config import EnvType, Config
