@@ -126,20 +126,33 @@ def get_monthly_utc_date_range_array_from_(
             # This the first start day
             start = d
         elif d.is_month_end:
+            v = pd.Timestamp(
+                year=d.year,
+                month=d.month,
+                day=d.day,
+                hour=23,
+                minute=59,
+                second=59,
+                microsecond=999999,
+                nanosecond=999,
+                tz=pytz.UTC,
+            )
             result.append(
                 {
                     "start_date": start,
-                    "end_date": d,
+                    # Must set to end of time of that day
+                    "end_date": v,
                 }
             )
             # The next start time will be 1 nanosecond more than the end_date
-            start = d + pd.offsets.Nano(1)
+            start = (v + pd.offsets.MonthBegin(1)).normalize()
 
     # Edge case where you have start but no end
     if start < end_date:
         result.append(
             {
                 "start_date": start,
+                # This one needs to follow the one from the incoming request
                 "end_date": end_date,
             }
         )

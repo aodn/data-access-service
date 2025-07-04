@@ -55,8 +55,8 @@ class TestInit:
                 # Assert that submit_a_job was called twice
                 assert submit_a_job.call_count == 2
                 # Assert that the expected calls were made
-                assert expected_call_1 in submit_a_job.call_args_list
-                assert expected_call_2 in submit_a_job.call_args_list
+                assert expected_call_1 in submit_a_job.call_args_list, "call arg list 1"
+                assert expected_call_2 in submit_a_job.call_args_list, "call arg list 2"
 
     def test_init_with_very_narrow_date_range(self, setup):
         with patch.object(Config, "get_month_count_per_job") as get_month_count_per_job:
