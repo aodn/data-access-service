@@ -16,7 +16,7 @@ from tests.core.test_with_s3 import TestWithS3, REGION
 
 class TestGenerateZarrFile(TestWithS3):
 
-    @pytest.fixture(scope="session")
+    @pytest.fixture(scope="function")
     def upload_test_case_to_s3(self, aws_clients, localstack, mock_boto3_client):
         """
         This will call only once, so you should not delete any update in any test case
@@ -159,8 +159,3 @@ class TestGenerateZarrFile(TestWithS3):
                 finally:
                     # Delete temp output folder as the name always same for testing
                     shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
-
-    @pytest.fixture(scope="session")
-    def cleanup(self, localstack):
-        # Setup code
-        localstack.stop()

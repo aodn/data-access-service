@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 class TestApiWithS3(TestWithS3):
 
-    @pytest.fixture(scope="session")
+    @pytest.fixture(scope="function")
     def upload_test_case_to_s3(self, aws_clients, localstack, mock_boto3_client):
         s3_client, _ = aws_clients
         # Upload test data
@@ -27,7 +27,7 @@ class TestApiWithS3(TestWithS3):
             Path(__file__).parent.parent / "canned/s3_sample2",
         )
 
-    @pytest.fixture(scope="session")
+    @pytest.fixture(scope="function")
     def client(self, upload_test_case_to_s3):
         # Use LifespanManager to ensure lifespan events are triggered
         # Make sure file uploaded before init the app
@@ -36,7 +36,7 @@ class TestApiWithS3(TestWithS3):
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_auth_fetch_data_correct(
-        self, setup, setup_resources, localstack, aws_clients, client
+        self, setup, localstack, aws_clients, setup_resources, client
     ):
         """Test subsetting with valid and invalid time ranges."""
         s3_client, _ = aws_clients
@@ -101,7 +101,7 @@ class TestApiWithS3(TestWithS3):
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_fetch_data_correct_without_depth(
-        self, setup, setup_resources, localstack, aws_clients, client
+        self, setup, localstack, aws_clients, setup_resources, client
     ):
         """Test subsetting with valid and invalid time ranges."""
         s3_client, _ = aws_clients
@@ -146,7 +146,7 @@ class TestApiWithS3(TestWithS3):
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_same_uuid_map_two_dataset_correct(
-        self, setup, setup_resources, localstack, aws_clients, client
+        self, setup, localstack, aws_clients, setup_resources, client
     ):
         """Test subsetting with valid and invalid time ranges."""
         s3_client, _ = aws_clients

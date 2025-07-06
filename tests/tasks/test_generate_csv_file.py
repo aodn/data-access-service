@@ -22,7 +22,7 @@ class TestGenerateCSVFile(TestWithS3):
     def mock_aws(self):
         return MagicMock()
 
-    @pytest.fixture(scope="session")
+    @pytest.fixture(scope="function")
     def upload_test_case_to_s3(
         self, aws_clients, localstack, mock_boto3_client, setup_resources
     ):
