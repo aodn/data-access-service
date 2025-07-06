@@ -17,7 +17,9 @@ from tests.core.test_with_s3 import TestWithS3, REGION
 class TestGenerateZarrFile(TestWithS3):
 
     @pytest.fixture(scope="function")
-    def upload_test_case_to_s3(self, aws_clients, localstack, mock_boto3_client):
+    def upload_test_case_to_s3(
+        self, setup, aws_clients, localstack, setup_resources, mock_boto3_client
+    ):
         """
         This will call only once, so you should not delete any update in any test case
         :param aws_clients:
@@ -36,9 +38,6 @@ class TestGenerateZarrFile(TestWithS3):
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_partition_processing_with_single_zarr(
         self,
-        setup,
-        setup_resources,
-        localstack,
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
@@ -82,9 +81,6 @@ class TestGenerateZarrFile(TestWithS3):
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_partition_processing_with_multiple_zarr(
         self,
-        setup,
-        setup_resources,
-        localstack,
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
