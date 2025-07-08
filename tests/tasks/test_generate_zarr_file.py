@@ -3,10 +3,11 @@ import pandas as pd
 import pytest
 
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from data_access_service.core.AWSHelper import AWSHelper
 from aodn_cloud_optimised.lib import DataQuery
-from data_access_service import Config, init_log
+from data_access_service import Config
+from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.tasks.generate_csv_file import (
     process_data_files,
 )
@@ -69,6 +70,9 @@ class TestGenerateZarrFile(TestWithS3):
                     target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name(INIT_JOB_ID)}vessel_satellite_radiance_delayed_qc.zarr/part-*.zarr"
                     data = helper.read_multipart_zarr_from_s3(target_path)
                     assert len(data["TIME"]) == 158902, "file have enough data"
+
+                    # At least we can convert it to netcdf
+                    # collect_data_files(INIT_JOB_ID, "28f8bfed-ca6a-472a-84e4-42563ce4df3f", "testreceipt@something.com")
                 finally:
                     # Delete temp output folder as the name always same for testing
                     shutil.rmtree(

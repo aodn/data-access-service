@@ -50,6 +50,16 @@ class AWSHelper:
         region = self.s3.meta.region_name
         return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
 
+    def write_zarr_from_s3(self, data: xarray.Dataset, bucket_name: str, key: str):
+        data.to_netcdf(
+            f"s3://{bucket_name}/{key}",
+            engine="netcdf4",
+            storage_options={"s3": AWSHelper().get_storage_options()},
+        )
+
+        region = self.s3.meta.region_name
+        return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
+
     def read_parquet_from_s3(self, file_path: str):
         return dd.read_parquet(
             file_path,
@@ -251,6 +261,13 @@ class AWSHelper:
 
     @staticmethod
     def read_multipart_zarr_from_s3(file_path: str) -> xarray.Dataset:
+        """
+        The s3 connection need to set via mock because the mfdataset call the
+        get_fs_token_paths where argument cannot be pass via s3_client. Hence, it is
+        expect you call the mock_get_fs_token_paths because call this function
+        :param file_path:
+        :return:
+        """
         return xarray.open_mfdataset(
             file_path,
             engine="zarr",
