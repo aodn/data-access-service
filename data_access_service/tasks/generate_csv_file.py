@@ -4,7 +4,7 @@ import pandas as pd
 import xarray
 
 from typing import List, Dict, Optional
-from numcodecs import Zstd
+from numcodecs import Zlib
 
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
@@ -155,7 +155,9 @@ def _generate_partition_output(
                         # Get all data variable names
                         variables = list(result.data_vars)
                         encoding = {
-                            var: {"compressor": Zstd(level=1)} for var in variables
+                            # Must use Zlib for now as netcdf do not support other compression
+                            var: {"compressor": Zlib(level=9)}
+                            for var in variables
                         }
                         result.to_zarr(
                             output_path, mode="w", encoding=encoding, compute=True

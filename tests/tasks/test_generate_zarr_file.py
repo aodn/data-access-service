@@ -72,7 +72,13 @@ class TestGenerateZarrFile(TestWithS3):
                     assert len(data["TIME"]) == 158902, "file have enough data"
 
                     # At least we can convert it to netcdf
-                    # collect_data_files(INIT_JOB_ID, "28f8bfed-ca6a-472a-84e4-42563ce4df3f", "testreceipt@something.com")
+                    collect_data_files(
+                        INIT_JOB_ID,
+                        "28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                        "testreceipt@something.com",
+                    )
+                except Exception as ex:
+                    raise ex
                 finally:
                     # Delete temp output folder as the name always same for testing
                     shutil.rmtree(

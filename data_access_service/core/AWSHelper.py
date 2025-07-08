@@ -1,9 +1,11 @@
 import os
+import tempfile
 import zipfile
 import boto3
 import dask.dataframe
 import dask.dataframe as dd
 import xarray
+from numcodecs import Zstd
 
 from data_access_service import init_log
 from data_access_service.config.config import Config, IntTestConfig
@@ -51,14 +53,17 @@ class AWSHelper:
         return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
 
     def write_zarr_from_s3(self, data: xarray.Dataset, bucket_name: str, key: str):
-        data.to_netcdf(
-            f"s3://{bucket_name}/{key}",
-            engine="netcdf4",
-            storage_options={"s3": AWSHelper().get_storage_options()},
-        )
+        # Save to temporary local file
+        with tempfile.NamedTemporaryFile(suffix=".nc", delete=True) as temp_file:
+            data.to_netcdf(
+                temp_file.name,
+                engine="netcdf4",
+            )
+            helper = AWSHelper()
+            helper.upload_file_to_s3(temp_file.name, bucket_name, key)
 
-        region = self.s3.meta.region_name
-        return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
+            region = self.s3.meta.region_name
+            return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
 
     def read_parquet_from_s3(self, file_path: str):
         return dd.read_parquet(
