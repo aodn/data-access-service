@@ -17,14 +17,12 @@ from tests.core.test_with_s3 import TestWithS3, REGION
 class TestGenerateZarrFile(TestWithS3):
 
     @pytest.fixture(scope="function")
-    def upload_test_case_to_s3(
-        self, setup, aws_clients, localstack, setup_resources, mock_boto3_client
-    ):
+    def upload_test_case_to_s3(self, aws_clients, setup_resources, mock_boto3_client):
         """
         This will call only once, so you should not delete any update in any test case
-        :param aws_clients:
-        :param localstack:
         :param mock_boto3_client:
+        :param setup_resources:
+        :param aws_clients:
         :return:
         """
         s3_client, _ = aws_clients
@@ -48,7 +46,6 @@ class TestGenerateZarrFile(TestWithS3):
         """
         s3_client, _ = aws_clients
         config = Config.get_config()
-        config.set_s3_client(s3_client)
         helper = AWSHelper()
 
         # This uuid contains two dataset in the canned data
@@ -92,7 +89,6 @@ class TestGenerateZarrFile(TestWithS3):
         """
         s3_client, _ = aws_clients
         config = Config.get_config()
-        config.set_s3_client(s3_client)
         helper = AWSHelper()
 
         # This uuid contains two dataset in the canned data

@@ -21,25 +21,33 @@ from tests.core.test_with_s3 import TestWithS3, REGION
 
 class TestDataGeneration(TestWithS3):
 
+    @pytest.fixture(scope="function")
+    def upload_test_case_to_s3(self, aws_clients, setup_resources, mock_boto3_client):
+        """
+        This will call only once, so you should not delete any update in any test case
+        :param mock_boto3_client:
+        :param setup_resources:
+        :param aws_clients:
+        :return:
+        """
+        s3_client, _ = aws_clients
+        # Upload test data
+        TestWithS3.upload_to_s3(
+            s3_client,
+            DataQuery.BUCKET_OPTIMISED_DEFAULT,
+            Path(__file__).parent.parent.parent / "canned/s3_sample1",
+        )
+
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_parquet_preparation_and_collection(
-        self, setup, setup_resources, aws_clients
+        self, aws_clients, setup_resources, upload_test_case_to_s3
     ):
         s3_client, _ = aws_clients
         config = Config.get_config()
-        config.set_s3_client(s3_client)
-        log = init_log(config)
         helper = AWSHelper()
 
         with patch.object(AWSHelper, "send_email") as mock_send_email:
             try:
-                # Upload folder to create test data
-                TestWithS3.upload_to_s3(
-                    s3_client,
-                    DataQuery.BUCKET_OPTIMISED_DEFAULT,
-                    Path(__file__).parent.parent.parent / "canned/s3_sample1",
-                )
-
                 # List objects in S3
                 response = s3_client.list_objects_v2(
                     Bucket=DataQuery.BUCKET_OPTIMISED_DEFAULT,
@@ -118,20 +126,14 @@ class TestDataGeneration(TestWithS3):
                 assert len(csv) == 16703, "line contain correct"
 
             except Exception as ex:
-                log.error(ex)
                 raise ex
             finally:
-                TestWithS3.delete_object_in_s3(
-                    s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT
-                )
-                TestWithS3.delete_object_in_s3(
-                    s3_client, Config.get_config().get_csv_bucket_name()
-                )
                 # Delete temp output folder as the name always same for testing
-                shutil.rmtree(config.get_temp_folder(INIT_JOB_ID))
-                os.remove(f"/tmp/{names[0]}")
+                shutil.rmtree(config.get_temp_folder(INIT_JOB_ID), ignore_errors=True)
 
-    def test_data_preparation_without_index(self, setup, setup_resources, aws_clients):
+    def test_data_preparation_without_index(
+        self, aws_clients, setup_resources, upload_test_case_to_s3
+    ):
         # Test the prepare_data function without a job index
         parameters = PREPARATION_PARAMETERS.copy()
         parameters["job_index"] = None
@@ -143,23 +145,10 @@ class TestDataGeneration(TestWithS3):
         config.set_s3_client(s3_client)
 
         with patch.object(AWSHelper, "send_email") as mock_send_email:
-            # Upload folder to create test data
-            TestWithS3.upload_to_s3(
-                s3_client,
-                DataQuery.BUCKET_OPTIMISED_DEFAULT,
-                Path(__file__).parent.parent.parent / "canned/s3_sample1",
-            )
-
             try:
                 prepare_data(job_index=None, parameters=parameters)
             except Exception as e:
                 assert False, f"prepare_data raised an exception: {e}"
             finally:
-                TestWithS3.delete_object_in_s3(
-                    s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT
-                )
-                TestWithS3.delete_object_in_s3(
-                    s3_client, Config.get_config().get_csv_bucket_name()
-                )
                 # Delete temp output folder as the name always same for testing
                 shutil.rmtree(config.get_temp_folder(INIT_JOB_ID), ignore_errors=True)

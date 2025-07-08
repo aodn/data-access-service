@@ -1,5 +1,4 @@
 import json
-import os
 import dask.dataframe as ddf
 import pandas as pd
 import xarray
@@ -10,6 +9,7 @@ from numcodecs import Zstd
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.descriptor import Descriptor
+from data_access_service.server import api_setup, app
 from data_access_service.tasks.data_file_upload import (
     upload_all_files_in_folder_to_temp_s3,
 )
@@ -22,8 +22,6 @@ efs_mount_point = "/mount/efs/"
 
 config: Config = Config.get_config()
 log = init_log(config)
-
-api = API()
 
 
 def process_data_files(
@@ -42,8 +40,7 @@ def process_data_files(
         multi_polygon_dict = None
 
     # Use sync init, it does not matter the load is slow as we run in batch
-    if not api.get_api_status():
-        api.initialize_metadata()
+    api = api_setup(app)
 
     if None in [uuid, keys, start_date, end_date, intermediate_output_folder]:
         raise ValueError("One or more required arguments are None")
@@ -62,6 +59,7 @@ def process_data_files(
         try:
             log.info(f"Start prepare {uuid}-{datum}")
             has_result = _generate_partition_output_with_polygon(
+                api,
                 intermediate_output_folder,
                 job_index,
                 uuid,
@@ -93,6 +91,7 @@ def process_data_files(
 
 
 def _generate_partition_output(
+    api: API,
     root_folder_path: str,
     job_index: str,
     uuid: str,
@@ -174,6 +173,7 @@ def _generate_partition_output(
 
 
 def _generate_partition_output_with_polygon(
+    api: API,
     folder_path: str,
     array_index: str,
     uuid: str,
@@ -182,9 +182,6 @@ def _generate_partition_output_with_polygon(
     end_date: pd.Timestamp,
     multi_polygon: dict | None,
 ) -> bool:
-    # Use sync init, it does not matter the load is slow as we run in batch
-    if not api.get_api_status():
-        api.initialize_metadata()
 
     had_data = False
     if multi_polygon is not None:
@@ -198,6 +195,7 @@ def _generate_partition_output_with_polygon(
             max_lon = lats_lons["max_lon"]
 
             had_data = had_data or _generate_partition_output(
+                api,
                 folder_path,
                 array_index,
                 uuid,
@@ -211,6 +209,7 @@ def _generate_partition_output_with_polygon(
             )
     else:
         had_data = _generate_partition_output(
+            api,
             folder_path,
             array_index,
             uuid,

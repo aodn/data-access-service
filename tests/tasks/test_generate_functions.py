@@ -2,17 +2,14 @@ import pytz
 import pandas as pd
 import pytest
 
-from pathlib import Path
 from unittest.mock import patch, MagicMock
-from aodn_cloud_optimised.lib import DataQuery
 from data_access_service.tasks.generate_csv_file import (
     trim_date_range,
     query_data,
 )
-from tests.core.test_with_s3 import TestWithS3, REGION
 
 
-class TestGenerateCSVFile(TestWithS3):
+class TestGenerateFunctions:
 
     @pytest.fixture
     def mock_api(self):
@@ -21,25 +18,6 @@ class TestGenerateCSVFile(TestWithS3):
     @pytest.fixture
     def mock_aws(self):
         return MagicMock()
-
-    @pytest.fixture(scope="function")
-    def upload_test_case_to_s3(
-        self, aws_clients, localstack, mock_boto3_client, setup_resources
-    ):
-        """
-        This will call only once, so you should not delete any update in any test case
-        :param aws_clients:
-        :param localstack:
-        :param mock_boto3_client:
-        :return:
-        """
-        s3_client, _ = aws_clients
-        # Upload test data
-        TestWithS3.upload_to_s3(
-            s3_client,
-            DataQuery.BUCKET_OPTIMISED_DEFAULT,
-            Path(__file__).parent.parent / "canned/s3_sample2",
-        )
 
     def test_trim_date_range_within_bounds(self, mock_api):
         mock_api.get_temporal_extent.return_value = [

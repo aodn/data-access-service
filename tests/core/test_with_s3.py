@@ -54,19 +54,22 @@ WORLD_POLYGON = """{
 
 class TestWithS3:
 
-    @pytest.fixture(autouse=True, scope="function")
+    @pytest.fixture(autouse=True, scope="session")
     def setup(self):
         """Set environment variable for testing profile."""
         os.environ["PROFILE"] = EnvType.TESTING.value
 
     @pytest.fixture(scope="function")
     def localstack(self) -> Generator[LocalStackContainer, Any, None]:
-        """Start LocalStack container with SQS and S3 services."""
+        """
+        Start LocalStack container with SQS and S3 services.
+        using with scope cause the call to localstack.stop() happen
+        automatically
+        """
         with LocalStackContainer(image="localstack/localstack:4.3.0") as localstack:
+            localstack.start()
             time = wait_for_logs(localstack, "Ready.")
-            print(
-                f"Create localstack S3 at port {localstack.get_url()} start using {time}"
-            )
+            print(f"Create localstack S3 at port {localstack.get_url()}, time = {time}")
             yield localstack
 
     @pytest.fixture(scope="function")
@@ -115,7 +118,7 @@ class TestWithS3:
         monkeypatch.undo()
 
     @pytest.fixture(scope="function")
-    def setup_resources(self, aws_clients, mock_boto3_client):
+    def setup_resources(self, aws_clients):
         """Set up S3 buckets and SQS queue for testing."""
         s3_client, sqs_client = aws_clients
         config: IntTestConfig = Config.get_config()
@@ -129,14 +132,18 @@ class TestWithS3:
         response = sqs_client.create_queue(QueueName="job-queue")
         queue_url = response["QueueUrl"]
         yield queue_url
+        # Make sure it removed
+        TestWithS3.delete_object_in_s3(s3_client, config.get_csv_bucket_name())
+        TestWithS3.delete_object_in_s3(s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT)
 
     @pytest.fixture(scope="function")
-    def mock_get_fs_token_paths(self, setup):
+    def mock_get_fs_token_paths(self, setup, setup_resources):
         """
         This mock is used to override a call to get_fs_token_paths in xarray
         where the storage_options is pass correctly causing test fail to scan
         the director of the localstack s3
         :param setup:
+        :param setup_resources:
         :return:
         """
         helper = AWSHelper()
