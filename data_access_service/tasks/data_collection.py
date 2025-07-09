@@ -5,7 +5,7 @@ import dask.dataframe as dd
 from io import BytesIO
 from typing import List
 
-from data_access_service import Config
+from data_access_service import Config, init_log
 from data_access_service.core.AWSHelper import AWSHelper
 
 
@@ -13,6 +13,7 @@ def collect_data_files(master_job_id: str, dataset_uuid: str, recipient: str):
 
     aws = AWSHelper()
     config = Config.get_config()
+    log = init_log(config)
     bucket_name = config.get_csv_bucket_name()
     dataset: list[str] = aws.list_s3_folders(
         bucket_name=bucket_name, prefix=config.get_s3_temp_folder_name(master_job_id)
@@ -42,6 +43,7 @@ def collect_data_files(master_job_id: str, dataset_uuid: str, recipient: str):
         f"You can download the data file from the following link: {download_url}"
     )
     aws.send_email(recipient=recipient, subject=subject, body_text=body_text)
+    log.info("Finish aggregation and send email")
 
 
 class ZipStreamingBody:

@@ -5,7 +5,7 @@ import xarray
 
 from typing import List, Dict, Optional
 from numcodecs import Zlib
-
+from data_access_service.core.constants import PARTITION_KEY
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.descriptor import Descriptor
@@ -138,11 +138,11 @@ def _generate_partition_output(
                     output_path = f"{root_folder_path}/{key}/part-{job_index}/"
 
                     # Derive partition key without time
-                    result["PARTITION_KEY"] = result["TIME"].dt.strftime("%Y-%m-%d")
+                    result[PARTITION_KEY] = result["TIME"].dt.strftime("%Y-%m")
 
                     result.to_parquet(
                         output_path,
-                        partition_on=["PARTITION_KEY"],  # Partition by region column
+                        partition_on=[PARTITION_KEY],  # Partition by region column
                         compression="zstd",  # Use Zstd for small file size
                         engine="pyarrow",  # Use pyarrow for performance
                         write_index=False,  # Exclude index to save space

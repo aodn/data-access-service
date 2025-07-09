@@ -89,7 +89,7 @@ class TestDataGeneration(TestWithS3):
                 assert len(objects) == 1
                 assert (
                     objects[0]
-                    == "999/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11-17/part.0.parquet"
+                    == "999/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11/part.0.parquet"
                 )
 
                 # Check if the files are compressed and uploaded correctly

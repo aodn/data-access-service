@@ -1,15 +1,18 @@
+import csv
+import io
 import os
 import tempfile
 import zipfile
-import boto3
+from pathlib import Path
+
 import dask.dataframe
 import dask.dataframe as dd
 import xarray
-from numcodecs import Zstd
 
 from data_access_service import init_log
 from data_access_service.config.config import Config, IntTestConfig
 from io import BytesIO
+from data_access_service.core.constants import PARTITION_KEY
 
 
 class AWSHelper:
@@ -40,14 +43,50 @@ class AWSHelper:
     def write_csv_to_s3(
         self, data: dask.dataframe.DataFrame, bucket_name: str, key: str
     ) -> str:
-        target = data.drop("PARTITION_KEY", axis=1)
-        target.to_csv(
-            f"s3://{bucket_name}/{key}",
-            single_file=True,
-            compression="zip",
-            storage_options=self.get_storage_options(),
-            index=False,
-        )
+        target = data.drop(PARTITION_KEY, axis=1)
+        # Create temporary directory with tempfile
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_dir_path = Path(temp_dir)
+            zip_path = temp_dir_path / "output.zip"
+
+            # Create ZIP file and write partitions directly as CSV entries
+            try:
+                with zipfile.ZipFile(
+                    zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+                ) as zf:
+                    for i, partition in enumerate(target.to_delayed()):
+                        try:
+                            # Compute one partition
+                            partition_df = partition.compute()
+
+                            # Convert to CSV string in memory
+                            csv_buffer = io.StringIO()
+                            partition_df.to_csv(
+                                csv_buffer,
+                                escapechar="\\",  # Escape special characters
+                                quoting=csv.QUOTE_NONNUMERIC,  # Quote non-numeric fields
+                                index=False,
+                            )
+                            csv_content = csv_buffer.getvalue()
+                            csv_buffer.close()
+
+                            # Write to ZIP stream as uncompressed .csv
+                            zf.writestr(f"part_{i:09d}.csv", csv_content)
+                            print(f"Added part_{i:09d}.csv to ZIP")
+
+                            # Discard partition
+                            del partition_df
+                            del csv_content
+
+                        except Exception as e:
+                            print(f"Error processing partition {i}: {e}")
+                            raise
+
+                self.upload_file_to_s3(str(zip_path), bucket_name, key)
+
+            except Exception as e:
+                print(f"Error creating ZIP: {e}")
+                raise
 
         region = self.s3.meta.region_name
         return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
@@ -69,6 +108,7 @@ class AWSHelper:
         return dd.read_parquet(
             file_path,
             engine="pyarrow",
+            blocksize="512M",
             storage_options=self.get_storage_options(),
         )
 
