@@ -89,8 +89,15 @@ class TestWithS3:
             aws_secret_access_key=IntTestConfig.get_s3_secret(),
             region_name=REGION,
         )
+        ses_client = boto3.client(
+            "ses",
+            endpoint_url=localstack.get_url(),
+            aws_access_key_id=IntTestConfig.get_s3_test_key(),
+            aws_secret_access_key=IntTestConfig.get_s3_secret(),
+            region_name=REGION,
+        )
         print(f"Bind S3 client to {localstack.get_url()}")
-        yield s3_client, sqs_client
+        yield s3_client, sqs_client, ses_client
 
     @pytest.fixture(scope="function")
     def mock_boto3_client(self, localstack):
@@ -120,7 +127,7 @@ class TestWithS3:
     @pytest.fixture(scope="function")
     def setup_resources(self, aws_clients):
         """Set up S3 buckets and SQS queue for testing."""
-        s3_client, sqs_client = aws_clients
+        s3_client, sqs_client, _ = aws_clients
         config: IntTestConfig = Config.get_config()
         config.set_s3_client(s3_client)
 

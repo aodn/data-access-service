@@ -19,7 +19,7 @@ class TestApiWithS3(TestWithS3):
 
     @pytest.fixture(scope="function")
     def upload_test_case_to_s3(self, aws_clients, localstack, mock_boto3_client):
-        s3_client, _ = aws_clients
+        s3_client, _, _ = aws_clients
         # Upload test data
         TestWithS3.upload_to_s3(
             s3_client,
@@ -39,7 +39,7 @@ class TestApiWithS3(TestWithS3):
         self, setup, localstack, aws_clients, setup_resources, client
     ):
         """Test subsetting with valid and invalid time ranges."""
-        s3_client, _ = aws_clients
+        s3_client, _, _ = aws_clients
         config = Config.get_config()
         config.set_s3_client(s3_client)
 
@@ -104,7 +104,7 @@ class TestApiWithS3(TestWithS3):
         self, setup, localstack, aws_clients, setup_resources, client
     ):
         """Test subsetting with valid and invalid time ranges."""
-        s3_client, _ = aws_clients
+        s3_client, _, _ = aws_clients
         config = Config.get_config()
         config.set_s3_client(s3_client)
 
@@ -149,7 +149,7 @@ class TestApiWithS3(TestWithS3):
         self, setup, localstack, aws_clients, setup_resources, client
     ):
         """Test subsetting with valid and invalid time ranges."""
-        s3_client, _ = aws_clients
+        s3_client, _, _ = aws_clients
         config = Config.get_config()
         config.set_s3_client(s3_client)
 

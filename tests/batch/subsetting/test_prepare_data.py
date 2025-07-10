@@ -30,7 +30,7 @@ class TestDataGeneration(TestWithS3):
         :param aws_clients:
         :return:
         """
-        s3_client, _ = aws_clients
+        s3_client, _, _ = aws_clients
         # Upload test data
         TestWithS3.upload_to_s3(
             s3_client,
@@ -42,7 +42,7 @@ class TestDataGeneration(TestWithS3):
     def test_parquet_preparation_and_collection(
         self, aws_clients, setup_resources, upload_test_case_to_s3
     ):
-        s3_client, _ = aws_clients
+        s3_client, _, _ = aws_clients
         config = Config.get_config()
         helper = AWSHelper()
 
@@ -110,7 +110,9 @@ class TestDataGeneration(TestWithS3):
                 mock_send_email.assert_called_once_with(
                     recipient="test@example.com",
                     subject="Finish processing data file whose uuid is:  test-dataset-uuid",
-                    body_text="You can download the data file from the following link: https://test-bucket.s3.us-east-1.amazonaws.com/999/autonomous_underwater_vehicle.zip",
+                    download_urls=[
+                        "https://test-bucket.s3.us-east-1.amazonaws.com/999/autonomous_underwater_vehicle.zip"
+                    ],
                 )
 
                 # Download the zip file and check the content
@@ -140,7 +142,7 @@ class TestDataGeneration(TestWithS3):
         parameters["start_date"] = "02-2010"
         parameters["end_date"] = "04-2011"
 
-        s3_client, _ = aws_clients
+        s3_client, _, _ = aws_clients
         config = Config.get_config()
         config.set_s3_client(s3_client)
 

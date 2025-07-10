@@ -206,9 +206,7 @@ def trim_date_range(
         if requested_start_date < metadata_start_date:
             requested_start_date = metadata_start_date
         if metadata_end_date < requested_end_date:
-            requested_end_date = datetime.combine(
-                metadata_end_date, requested_end_date.time()
-            )
+            requested_end_date = metadata_end_date
 
         log.info(f"Trimmed date range: {requested_start_date} to {requested_end_date}")
         return requested_start_date, requested_end_date

@@ -8,7 +8,7 @@ import logging
 
 from datetime import timedelta, datetime, timezone
 from io import BytesIO
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 import xarray
 from aodn_cloud_optimised import DataQuery
@@ -38,7 +38,9 @@ def gzip_compress(data):
 
 
 class BaseAPI:
-    def get_temporal_extent(self, uuid: str, key: str) -> (pd.Timestamp, pd.Timestamp):
+    def get_temporal_extent(
+        self, uuid: str, key: str
+    ) -> Tuple[pd.Timestamp | None, pd.Timestamp | None]:
         pass
 
     def get_mapped_meta_data(self, uuid: str | None) -> Dict[str, Descriptor]:
@@ -223,13 +225,15 @@ class API(BaseAPI):
             return start_date <= tes and tee <= end_date
         return False
 
-    def get_temporal_extent(self, uuid: str, key: str) -> (pd.Timestamp, pd.Timestamp):
+    def get_temporal_extent(
+        self, uuid: str, key: str
+    ) -> Tuple[pd.Timestamp | None, pd.Timestamp | None]:
         md: Dict[str, Descriptor] = self._cached.get(uuid)
         if md is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
             return ds.get_temporal_extent()
         else:
-            return ()
+            return None, None
 
     def map_column_names(
         self, uuid: str, key: str, columns: list[str] | None

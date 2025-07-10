@@ -3,12 +3,12 @@ import io
 import os
 import tempfile
 import zipfile
-from pathlib import Path
-
 import dask.dataframe
 import dask.dataframe as dd
 import xarray
 
+from pathlib import Path
+from typing import List
 from data_access_service import init_log
 from data_access_service.config.config import Config, IntTestConfig
 from io import BytesIO
@@ -150,21 +150,34 @@ class AWSHelper:
             self.log.error(f"Error uploading file object to S3: {e}")
             raise e
 
-    def send_email(self, recipient, subject, body_text):
-        sender = self.config.get_sender_email()
+    def send_email(self, recipient: str, subject: str, download_urls: List[str]):
+
+        # Text and HTML parts
+        text_part = "Hello, User!\nPlease use the link below to download the files"
+        html_part = f"""
+        <html>
+        <body>
+            {['<a href="' + l + '">' + l + '</a>' for l in download_urls]}
+        </body>
+        </html>
+        """
 
         try:
             response = self.ses.send_email(
-                Source=sender,
+                Source=self.config.get_sender_email(),
                 Destination={"ToAddresses": [recipient]},
                 Message={
-                    "Subject": {"Data": subject},
-                    "Body": {"Text": {"Data": body_text}},
+                    "Subject": {"Data": subject, "Charset": "UTF-8"},
+                    "Body": {
+                        "Text": {"Data": text_part, "Charset": "UTF-8"},
+                        "Html": {"Data": html_part, "Charset": "UTF-8"},
+                    },
                 },
             )
             self.log.info(
                 f"Email sent to {recipient} with message ID: {response['MessageId']}"
             )
+            return response
         except Exception as e:
             self.log.info(f"Error sending email to {recipient}: {e}")
             raise e

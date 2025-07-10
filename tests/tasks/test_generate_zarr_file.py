@@ -26,7 +26,7 @@ class TestGenerateZarrFile(TestWithS3):
         :param aws_clients:
         :return:
         """
-        s3_client, _ = aws_clients
+        s3_client, _, _ = aws_clients
         # Upload test data
         TestWithS3.upload_to_s3(
             s3_client,
@@ -45,7 +45,7 @@ class TestGenerateZarrFile(TestWithS3):
         Test the process_data_files function by doing a single job index 10, this make sure
         we can process zarr file by writing to and single partition, that is part-10.zarr in this case
         """
-        s3_client, _ = aws_clients
+        s3_client, _, _ = aws_clients
         config = Config.get_config()
         helper = AWSHelper()
 
@@ -97,7 +97,7 @@ class TestGenerateZarrFile(TestWithS3):
         we can process zarr file by writing to multiple partition and read it at the end, this will spot the edge case
         during two part aggregation
         """
-        s3_client, _ = aws_clients
+        s3_client, _, _ = aws_clients
         config = Config.get_config()
         helper = AWSHelper()
 
