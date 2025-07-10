@@ -44,6 +44,7 @@ class TestDataGeneration(TestWithS3):
     ):
         s3_client, _, _ = aws_clients
         config = Config.get_config()
+        config.set_s3_client(s3_client)
         helper = AWSHelper()
 
         with patch.object(AWSHelper, "send_email") as mock_send_email:
