@@ -1,5 +1,6 @@
 import asyncio
 import gzip
+import math
 from concurrent.futures import ThreadPoolExecutor
 
 import dask.dataframe as ddf
@@ -9,10 +10,13 @@ import xarray
 
 from datetime import timedelta, timezone
 from io import BytesIO
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Hashable
 from aodn_cloud_optimised import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, ZarrDataSource
 from aodn_cloud_optimised.lib.config import get_notebook_url
+from bokeh.server.tornado import psutil
+from xarray.core.utils import Frozen
+
 from data_access_service.core.constants import RECORD_PER_PARTITION
 from data_access_service.core.descriptor import Depth, Descriptor
 
@@ -69,6 +73,69 @@ class BaseAPI:
         return False
 
     @staticmethod
+    def _calculate_chunk_sizes(
+        sizes: Frozen[Hashable, int],
+        dtype_size: int = 8,
+        target_chunk_size_mb: float = 50,
+    ) -> dict:
+        """
+        Calculate chunk sizes for each dimension to achieve a target chunk size in MB.
+
+        Args:
+            sizes: Dictionary of dimension names and their sizes (e.g., {'dim0': 388, 'dim1': 500, 'dim2': 500}).
+            dtype_size: Size of the data type in bytes (e.g., 8 for float64, 4 for float32).
+            target_chunk_size_mb: Target chunk size in MB (default: 50 MB).
+
+        Returns:
+            Dictionary of dimension names and their chunk sizes.
+        """
+        # Convert target chunk size to bytes
+        target_chunk_size_bytes = target_chunk_size_mb * 1024 * 1024
+
+        # Estimate available memory (use 50% of available RAM as a conservative limit)
+        available_memory = psutil.virtual_memory().available * 0.5
+        if target_chunk_size_bytes > available_memory:
+            target_chunk_size_bytes = (
+                available_memory / 10
+            )  # Use 10% of available memory
+
+        # Calculate total elements per chunk
+        elements_per_chunk = target_chunk_size_bytes // dtype_size
+
+        # Distribute elements across dimensions
+        num_dims = len(sizes)
+        if num_dims == 0:
+            return {}
+
+        # Start with equal distribution across dimensions
+        dim_sizes = list(sizes.values())
+        total_size = math.prod(dim_sizes)
+
+        # Initialize chunk sizes
+        chunk_sizes = {dim: size for dim, size in sizes.items()}
+
+        if total_size <= elements_per_chunk:
+            return chunk_sizes  # No chunking needed if dataset is small
+
+        # Calculate chunk size per dimension (approximate equal split)
+        elements_per_dim = int(elements_per_chunk ** (1 / num_dims))
+
+        for dim, size in sizes.items():
+            # Set chunk size to min of dimension size and calculated size
+            chunk_sizes[dim] = min(size, max(1, elements_per_dim))
+
+        # Adjust to ensure total chunk size is close to target
+        current_elements = math.prod(chunk_sizes.values())
+        if current_elements > elements_per_chunk:
+            # Scale down largest dimension
+            max_dim = max(sizes, key=lambda d: sizes[d])
+            chunk_sizes[max_dim] = max(
+                1, int(chunk_sizes[max_dim] * (elements_per_chunk / current_elements))
+            )
+
+        return chunk_sizes
+
+    @staticmethod
     def zarr_to_dask_dataframe(
         dataset: xarray.Dataset,
         columns: Optional[List[str]] = None,
@@ -111,6 +178,12 @@ class BaseAPI:
         if not all(col in available_columns for col in columns):
             raise KeyError(f"Some columns {columns} not found in {available_columns}")
 
+        # Apply chunking if specified, otherwise use existing chunks or auto-chunk
+        if chunks is not None:
+            dataset = dataset.chunk(chunks)
+        elif not dataset.chunks:
+            dataset = dataset.chunk(API._calculate_chunk_sizes(dataset.sizes))
+
         # Create a new Dataset with selected variables and promote coordinates if needed
         selected_data = {}
         for col in columns:
@@ -119,18 +192,6 @@ class BaseAPI:
 
         # Select specified variables (returns a new Dataset)
         filtered_dataset = xarray.Dataset(selected_data)
-
-        # Apply chunking if specified, otherwise use existing chunks or auto-chunk
-        if chunks is not None:
-            filtered_dataset = filtered_dataset.chunk(chunks)
-        elif not dataset.chunks:
-            # Auto-chunk if no chunks are defined (use reasonable defaults based on dataset size)
-            if "time" in columns:
-                filtered_dataset = filtered_dataset.chunk(
-                    {"time": RECORD_PER_PARTITION}
-                )
-            else:
-                filtered_dataset = filtered_dataset.chunk("auto")
 
         # Convert to Dask DataFrame
         df = filtered_dataset.to_dask_dataframe()
