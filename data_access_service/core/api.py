@@ -16,8 +16,6 @@ from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, ZarrDataSource
 from aodn_cloud_optimised.lib.config import get_notebook_url
 from bokeh.server.tornado import psutil
 from xarray.core.utils import Frozen
-
-from data_access_service.core.constants import RECORD_PER_PARTITION
 from data_access_service.core.descriptor import Depth, Descriptor
 
 log = logging.getLogger(__name__)
