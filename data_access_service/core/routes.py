@@ -24,6 +24,7 @@ from data_access_service.core.api import gzip_compress
 from data_access_service.core.constants import (
     COORDINATE_INDEX_PRECISION,
     DEPTH_INDEX_PRECISION,
+    RECORD_PER_PARTITION,
 )
 from data_access_service.core.error import ErrorResponse
 from data_access_service.config.config import Config
@@ -42,8 +43,6 @@ from data_access_service.utils.date_time_utils import (
     DATE_FORMAT,
 )
 from data_access_service.utils.sse_wrapper import sse_wrapper
-
-RECORD_PER_PARTITION: Optional[int] = 500
 
 router = APIRouter(prefix=Config.BASE_URL)
 logger = init_log(Config.get_config())

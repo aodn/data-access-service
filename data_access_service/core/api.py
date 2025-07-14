@@ -5,16 +5,15 @@ from concurrent.futures import ThreadPoolExecutor
 import dask.dataframe as ddf
 import pandas as pd
 import logging
+import xarray
 
-from datetime import timedelta, datetime, timezone
+from datetime import timedelta, timezone
 from io import BytesIO
 from typing import Optional, Dict, Any, List, Tuple
-
-import xarray
 from aodn_cloud_optimised import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, ZarrDataSource
 from aodn_cloud_optimised.lib.config import get_notebook_url
-
+from data_access_service.core.constants import RECORD_PER_PARTITION
 from data_access_service.core.descriptor import Depth, Descriptor
 
 log = logging.getLogger(__name__)
@@ -126,7 +125,12 @@ class BaseAPI:
             filtered_dataset = filtered_dataset.chunk(chunks)
         elif not dataset.chunks:
             # Auto-chunk if no chunks are defined (use reasonable defaults based on dataset size)
-            filtered_dataset = filtered_dataset.chunk("auto")
+            if "time" in columns:
+                filtered_dataset = filtered_dataset.chunk(
+                    {"time": RECORD_PER_PARTITION}
+                )
+            else:
+                filtered_dataset = filtered_dataset.chunk("auto")
 
         # Convert to Dask DataFrame
         df = filtered_dataset.to_dask_dataframe()
