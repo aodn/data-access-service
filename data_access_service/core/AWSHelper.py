@@ -72,14 +72,14 @@ class AWSHelper:
 
                             # Write to ZIP stream as uncompressed .csv
                             zf.writestr(f"part_{i:09d}.csv", csv_content)
-                            self.log(f"Added part_{i:09d}.csv to ZIP")
+                            self.log.info(f"Added part_{i:09d}.csv to ZIP")
 
                             # Discard partition
                             del partition_df
                             del csv_content
 
                         except Exception as e:
-                            self.log(f"Error processing partition {i}: {e}")
+                            self.log.error(f"Error processing partition {i}: {e}")
                             raise
 
                 self.upload_file_to_s3(str(zip_path), bucket_name, key)

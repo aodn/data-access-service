@@ -71,7 +71,9 @@ class BaseAPI:
 
     @staticmethod
     def zarr_to_dask_dataframe(
-        dataset: xarray.Dataset, columns: Optional[List[str]] = None
+        dataset: xarray.Dataset,
+        columns: Optional[List[str]] = None,
+        chunks: Optional[dict] = None,
     ) -> ddf.DataFrame | None:
         """
         This function is useful when you want to convert a xarray to a dask dataframe
@@ -119,11 +121,20 @@ class BaseAPI:
         # Select specified variables (returns a new Dataset)
         filtered_dataset = xarray.Dataset(selected_data)
 
+        # Apply chunking if specified, otherwise use existing chunks or auto-chunk
+        if chunks is not None:
+            filtered_dataset = filtered_dataset.chunk(chunks)
+        elif not dataset.chunks:
+            # Auto-chunk if no chunks are defined (use reasonable defaults based on dataset size)
+            filtered_dataset = filtered_dataset.chunk("auto")
+
         # Convert to Dask DataFrame
         df = filtered_dataset.to_dask_dataframe()
 
-        # Reset index to include coordinates as columns
-        df = df.reset_index()
+        # Reset index only if necessary (e.g., to include coordinates as columns)
+        # Note: This can be memory-intensive, so use sparingly
+        if any(dim in dataset.coords for dim in dataset.dims):
+            df = df.reset_index()
 
         # Filter to requested columns
         df = df[columns]

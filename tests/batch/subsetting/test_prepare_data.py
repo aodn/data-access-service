@@ -10,7 +10,6 @@ from unittest.mock import patch
 from aodn_cloud_optimised.lib import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import Metadata
 
-from data_access_service import init_log
 from data_access_service.batch.subsetting import prepare_data
 from data_access_service.config.config import Config, EnvType
 from data_access_service.core.AWSHelper import AWSHelper

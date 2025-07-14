@@ -88,7 +88,7 @@ class TestApi(unittest.TestCase):
         pandas_df = ddf.from_pandas(pd.DataFrame(data))
 
         # Call the function
-        result = _generate_partial_json_array(pandas_df)
+        result = _generate_partial_json_array(pandas_df, 10)
 
         # Parse the JSON result but need to get it back to object so that compare
         # of null in json string is converted back to None in object

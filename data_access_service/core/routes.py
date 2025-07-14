@@ -43,7 +43,7 @@ from data_access_service.utils.date_time_utils import (
 )
 from data_access_service.utils.sse_wrapper import sse_wrapper
 
-RECORD_PER_PARTITION: Optional[int] = 1000
+RECORD_PER_PARTITION: Optional[int] = 500
 
 router = APIRouter(prefix=Config.BASE_URL)
 logger = init_log(Config.get_config())
@@ -331,7 +331,7 @@ async def _fetch_data(
         if isinstance(result, xr.Dataset):
             # A way to get row count without compute and load all for xarray,
             # for xarray, the row count is the multiplication of all dimension
-            count = reduce(mul, [result.sizes[v] for v in list(result.dims.keys())])
+            count = reduce(mul, [result.sizes[v] for v in list(result.sizes.keys())])
             result = api_instance.zarr_to_dask_dataframe(
                 result,
                 api_instance.map_column_names(
