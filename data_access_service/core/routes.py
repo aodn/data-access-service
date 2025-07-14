@@ -333,6 +333,9 @@ async def _fetch_data(
         if isinstance(result, xr.Dataset):
             # A way to get row count without compute and load all for xarray,
             # for xarray, the row count is the multiplication of all dimension
+            # TODO: This is not enough, with multiple dimension, we can have a very
+            # small value for first item, but the other dim can be big, so we
+            # do not have a small enough partition
             count = result.sizes[list(result.sizes.keys())[0]]
             result = api_instance.zarr_to_dask_dataframe(
                 result,
