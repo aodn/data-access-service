@@ -272,6 +272,8 @@ class API(BaseAPI):
                         output.append("latitude")
                     case meta if "LATITUDE" in meta:
                         output.append("LATITUDE")
+                    case meta if "lat" in meta:
+                        output.append("lat")
             elif column.casefold() == "LONGITUDE".casefold() and (
                 "LONGITUDE" not in meta or "longitude" not in meta
             ):
@@ -280,6 +282,8 @@ class API(BaseAPI):
                         output.append("longitude")
                     case meta if "LONGITUDE" in meta:
                         output.append("LONGITUDE")
+                    case meta if "lon" in meta:
+                        output.append("lon")
             else:
                 output.append(column)
 

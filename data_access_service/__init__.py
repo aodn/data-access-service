@@ -22,6 +22,7 @@ def init_log(config: Config):
     logging.getLogger("s3fs").setLevel(logging.WARNING)
     logging.getLogger("s3transfer").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("fsspec").setLevel(logging.WARNING)
 
     logger = logging.getLogger(__name__)
     return logger

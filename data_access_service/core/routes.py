@@ -13,6 +13,8 @@ import pandas as pd
 import dask.dataframe as dd
 
 from queue import Queue
+from functools import reduce
+from operator import mul
 from dask.dataframe import DataFrame
 
 from data_access_service import init_log
@@ -41,10 +43,9 @@ from data_access_service.utils.date_time_utils import (
 )
 from data_access_service.utils.sse_wrapper import sse_wrapper
 
-router = APIRouter(prefix=Config.BASE_URL)
-
 RECORD_PER_PARTITION: Optional[int] = 1000
 
+router = APIRouter(prefix=Config.BASE_URL)
 logger = init_log(Config.get_config())
 
 
@@ -73,10 +74,11 @@ def _generate_json_array(dask_instance, compress: bool = False):
 
 # Use to remap the field name back to column that we pass it, the raw data itself may name the field differently
 # for different dataset
-def _generate_partial_json_array(filtered: dd.DataFrame) -> Generator[dict, None, None]:
-    ddf = filtered.repartition(
-        npartitions=len(filtered.index) // RECORD_PER_PARTITION + 1
-    )
+def _generate_partial_json_array(
+    filtered: dd.DataFrame, partition_size: int
+) -> Generator[dict, None, None]:
+
+    ddf = filtered.repartition(npartitions=partition_size)
 
     for partition in ddf.to_delayed():
         partition_df = convert_non_numeric_to_str(partition.compute())
@@ -87,10 +89,12 @@ def _generate_partial_json_array(filtered: dd.DataFrame) -> Generator[dict, None
 
         for record in partition_df.to_dict(orient="records"):
             filtered_record = {}
-            # Time field is special, there is no stand name and appear diff in raw data,
+            # Time field is special, there is no standard name and appear diff in raw data,
             # here we unify it and call it time
             if "TIME" in record:
                 filtered_record["time"] = _reformat_date(record["TIME"])
+            elif "time" in record:
+                filtered_record["time"] = _reformat_date(record["time"])
             elif "JULD" in record:
                 filtered_record["time"] = _reformat_date(record["JULD"])
             elif "timestamp" in record:
@@ -119,6 +123,13 @@ def _generate_partial_json_array(filtered: dd.DataFrame) -> Generator[dict, None
                     if record["longitude"] is not None
                     else None
                 )
+            elif "lon" in record:
+                filtered_record["longitude"] = (
+                    round(record["lon"], COORDINATE_INDEX_PRECISION)
+                    if record["lon"] is not None
+                    else None
+                )
+
             if "LATITUDE" in record:
                 filtered_record["latitude"] = (
                     round(record["LATITUDE"], COORDINATE_INDEX_PRECISION)
@@ -131,6 +142,13 @@ def _generate_partial_json_array(filtered: dd.DataFrame) -> Generator[dict, None
                     if record["latitude"] is not None
                     else None
                 )
+            elif "lat" in record:
+                filtered_record["latitude"] = (
+                    round(record["lat"], COORDINATE_INDEX_PRECISION)
+                    if record["lat"] is not None
+                    else None
+                )
+
             if "DEPTH" in record:
                 filtered_record["depth"] = (
                     round(record["DEPTH"], DEPTH_INDEX_PRECISION)
@@ -277,7 +295,7 @@ def _response_netcdf(filtered: pd.DataFrame, background_tasks: BackgroundTasks):
             if os.path.exists(file_path):
                 os.remove(file_path)
         except Exception as e:
-            print(f"Error removing file {file_path}: {e}")
+            logger.error(f"Error removing file {file_path}: {e}")
 
     background_tasks.add_task(lambda: _remove_file_if_exists(tmp_file_name))
     return response
@@ -311,9 +329,17 @@ async def _fetch_data(
     else:
         # Now we need to change the xarray if type match to 2D dataframe for processing
         if isinstance(result, xr.Dataset):
+            # A way to get row count without compute and load all for xarray,
+            # for xarray, the row count is the multiplication of all dimension
+            count = reduce(mul, [result.sizes[v] for v in list(result.dims.keys())])
             result = api_instance.zarr_to_dask_dataframe(
-                result, api_instance.map_column_names(uuid, key, columns)
+                result,
+                api_instance.map_column_names(
+                    uuid, key, api_instance.map_column_names(uuid, key, columns)
+                ),
             )
+        else:
+            count = len(result.index)
 
         start_depth = _verify_depth_param("start_depth", start_depth)
         end_depth = _verify_depth_param("end_depth", end_depth)
@@ -333,10 +359,11 @@ async def _fetch_data(
         else:
             filtered = result
 
-        logger.info("Num of rows", len(filtered.index))
         logger.info("Memory usage: %s", get_memory_usage_percentage())
 
-        for record in _generate_partial_json_array(filtered):
+        for record in _generate_partial_json_array(
+            filtered, count // RECORD_PER_PARTITION + 1
+        ):
             yield record
 
 

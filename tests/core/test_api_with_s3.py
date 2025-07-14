@@ -35,6 +35,58 @@ class TestApiWithS3(TestWithS3):
         return TestClient(app)
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_fetch_data_correct(
+        self, setup, localstack, aws_clients, setup_resources, client
+    ):
+        """
+        Test subsetting with valid and invalid time ranges, validate case where
+        app crash on loading this dataset before fix
+        """
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
+            # Test with range, this dataset field is different, it called detection_timestamp
+            param = {
+                "start_date": "2011-11-17",
+                "end_date": "2011-11-18",
+                "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
+            }
+
+            target = (
+                config.BASE_URL
+                + "/data/a4170ca8-0942-4d13-bdb8-ad4718ce14bb/satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
+            )
+
+            response = client.get(
+                target,
+                params=param,
+                headers={"X-API-Key": config.get_api_key()},
+            )
+
+            # The X-API-KEY has typo, it should be X-API-Key
+            assert response.status_code == HTTP_200_OK
+
+            try:
+                parsed = json.loads(response.content.decode("utf-8"))
+                assert (
+                    len(parsed) == 1687441
+                ), f"Size not match, return size is {len(parsed)} and X-API-Key is {config.get_api_key()}"
+                assert parsed[0] == {
+                    "latitude": -70.0,
+                    "longitude": 60.0,
+                    "time": "2011-11-17",
+                }, f"Unexpected JSON content: {parsed[0]}"
+                assert parsed[1687440] == {
+                    "latitude": 20.0,
+                    "longitude": 190.0,
+                    "time": "2011-11-17",
+                }, f"Unexpected JSON content: {parsed[21]}"
+            except json.JSONDecodeError as e:
+                assert False, "Fail to parse to JSON"
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_auth_fetch_data_correct(
         self, setup, localstack, aws_clients, setup_resources, client
     ):
