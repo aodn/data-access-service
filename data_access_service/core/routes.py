@@ -59,16 +59,16 @@ def convert_non_numeric_to_str(df: DataFrame) -> DataFrame:
     return df.map(convert_value)
 
 
-# Function to generate JSON lines from Dask DataFrame
-def _generate_json_array(dask_instance, compress: bool = False):
-
-    async def get_records():
-        for partition in dask_instance.to_delayed():
-            partition_df = convert_non_numeric_to_str(partition.compute())
-            for record in partition_df.to_dict(orient="records"):
-                yield record
-
-    return _async_response_json(get_records(), compress)
+# # Function to generate JSON lines from Dask DataFrame
+# def _generate_json_array(dask_instance, compress: bool = False):
+#
+#     async def get_records():
+#         for partition in dask_instance.to_delayed():
+#             partition_df = convert_non_numeric_to_str(partition.compute())
+#             for record in partition_df.to_dict(orient="records"):
+#                 yield record
+#
+#     return _async_response_json(get_records(), compress)
 
 
 # Use to remap the field name back to column that we pass it, the raw data itself may name the field differently
@@ -76,6 +76,9 @@ def _generate_json_array(dask_instance, compress: bool = False):
 def _generate_partial_json_array(
     filtered: dd.DataFrame, partition_size: int
 ) -> Generator[dict, None, None]:
+
+    if filtered is None:
+        return
 
     ddf = filtered.repartition(npartitions=partition_size)
 
@@ -330,7 +333,7 @@ async def _fetch_data(
         if isinstance(result, xr.Dataset):
             # A way to get row count without compute and load all for xarray,
             # for xarray, the row count is the multiplication of all dimension
-            count = reduce(mul, [result.sizes[v] for v in list(result.sizes.keys())])
+            count = result.sizes[list(result.sizes.keys())[0]]
             result = api_instance.zarr_to_dask_dataframe(
                 result,
                 api_instance.map_column_names(

@@ -76,7 +76,7 @@ class BaseAPI:
     def _calculate_chunk_sizes(
         sizes: Frozen[Hashable, int],
         dtype_size: int = 8,
-        target_chunk_size_mb: float = 50,
+        target_chunk_size_mb: float = 10,
     ) -> dict:
         """
         Calculate chunk sizes for each dimension to achieve a target chunk size in MB.
@@ -178,12 +178,6 @@ class BaseAPI:
         if not all(col in available_columns for col in columns):
             raise KeyError(f"Some columns {columns} not found in {available_columns}")
 
-        # Apply chunking if specified, otherwise use existing chunks or auto-chunk
-        if chunks is not None:
-            dataset = dataset.chunk(chunks)
-        elif not dataset.chunks:
-            dataset = dataset.chunk(API._calculate_chunk_sizes(dataset.sizes))
-
         # Create a new Dataset with selected variables and promote coordinates if needed
         selected_data = {}
         for col in columns:
@@ -193,12 +187,20 @@ class BaseAPI:
         # Select specified variables (returns a new Dataset)
         filtered_dataset = xarray.Dataset(selected_data)
 
+        # Apply chunking if specified, otherwise use existing chunks or auto-chunk,
+        # only chunk the field we need
+        if chunks is not None:
+            filtered_dataset = filtered_dataset.chunk(chunks)
+        elif not dataset.chunks:
+            #    # filtered_dataset = filtered_dataset.chunk(API._calculate_chunk_sizes(filtered_dataset.sizes))
+            filtered_dataset = filtered_dataset.chunk("auto")
+
         # Convert to Dask DataFrame
         df = filtered_dataset.to_dask_dataframe()
 
         # Reset index only if necessary (e.g., to include coordinates as columns)
         # Note: This can be memory-intensive, so use sparingly
-        if any(dim in dataset.coords for dim in dataset.dims):
+        if any(dim in filtered_dataset.coords for dim in filtered_dataset.dims):
             df = df.reset_index()
 
         # Filter to requested columns
