@@ -1,13 +1,13 @@
 [tool.poetry]
 name = "data-access-service"
-version = "0.0.9"
+version = "0.0.10"
 description = ""
 authors = ["utas-raymondng <manfai.ng@utas.edu.au>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
 # Dependency from a GitHub repository, use tag = "v0.1.32" or branch = "xxx"
-aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", tag = "v0.1.46" }
+aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", tag = "v0.1.51" }
 black = "^24.8.0"
 boto3 = "^1.28.0"
 cartopy = "^0.24.1"
