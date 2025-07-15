@@ -1,19 +1,21 @@
 import asyncio
 import gzip
+import math
 from concurrent.futures import ThreadPoolExecutor
 
+import dask.dataframe as ddf
 import pandas as pd
 import logging
-
-from datetime import timedelta, datetime, timezone
-from io import BytesIO
-from typing import Optional, Dict, Any
-
 import xarray
+
+from datetime import timedelta, timezone
+from io import BytesIO
+from typing import Optional, Dict, Any, List, Tuple, Hashable
 from aodn_cloud_optimised import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, ZarrDataSource
 from aodn_cloud_optimised.lib.config import get_notebook_url
-
+from bokeh.server.tornado import psutil
+from xarray.core.utils import Frozen
 from data_access_service.core.descriptor import Depth, Descriptor
 
 log = logging.getLogger(__name__)
@@ -37,37 +39,110 @@ def gzip_compress(data):
 
 
 class BaseAPI:
-    def get_temporal_extent(self, uuid: str, key: str) -> (datetime, datetime):
+    def get_temporal_extent(
+        self, uuid: str, key: str
+    ) -> Tuple[pd.Timestamp | None, pd.Timestamp | None]:
         pass
 
     def get_mapped_meta_data(self, uuid: str | None) -> Dict[str, Descriptor]:
         pass
 
-    def has_data(self, uuid: str, key: str, start_date: datetime, end_date: datetime):
+    def has_data(
+        self, uuid: str, key: str, start_date: pd.Timestamp, end_date: pd.Timestamp
+    ):
         pass
 
     def get_dataset_data(
         self,
         uuid: str,
         key: str,
-        date_start: datetime = None,
-        date_end: datetime = None,
+        date_start: pd.Timestamp = None,
+        date_end: pd.Timestamp = None,
         lat_min=None,
         lat_max=None,
         lon_min=None,
         lon_max=None,
         scalar_filter=None,
         columns: list[str] = None,
-    ) -> Optional[pd.DataFrame]:
+    ) -> Optional[ddf.DataFrame]:
         pass
 
     def get_api_status(self) -> bool:
         return False
 
     @staticmethod
-    def zarr_to_dataframe(dataset: xarray.Dataset, columns=None):
+    def _calculate_chunk_sizes(
+        sizes: Frozen[Hashable, int],
+        dtype_size: int = 8,
+        target_chunk_size_mb: float = 10,
+    ) -> dict:
         """
-        Filter an xarray.Dataset to specific columns (variables) and convert to a Pandas DataFrame.
+        Calculate chunk sizes for each dimension to achieve a target chunk size in MB.
+
+        Args:
+            sizes: Dictionary of dimension names and their sizes (e.g., {'dim0': 388, 'dim1': 500, 'dim2': 500}).
+            dtype_size: Size of the data type in bytes (e.g., 8 for float64, 4 for float32).
+            target_chunk_size_mb: Target chunk size in MB (default: 50 MB).
+
+        Returns:
+            Dictionary of dimension names and their chunk sizes.
+        """
+        # Convert target chunk size to bytes
+        target_chunk_size_bytes = target_chunk_size_mb * 1024 * 1024
+
+        # Estimate available memory (use 50% of available RAM as a conservative limit)
+        available_memory = psutil.virtual_memory().available * 0.5
+        if target_chunk_size_bytes > available_memory:
+            target_chunk_size_bytes = (
+                available_memory / 10
+            )  # Use 10% of available memory
+
+        # Calculate total elements per chunk
+        elements_per_chunk = target_chunk_size_bytes // dtype_size
+
+        # Distribute elements across dimensions
+        num_dims = len(sizes)
+        if num_dims == 0:
+            return {}
+
+        # Start with equal distribution across dimensions
+        dim_sizes = list(sizes.values())
+        total_size = math.prod(dim_sizes)
+
+        # Initialize chunk sizes
+        chunk_sizes = {dim: size for dim, size in sizes.items()}
+
+        if total_size <= elements_per_chunk:
+            return chunk_sizes  # No chunking needed if dataset is small
+
+        # Calculate chunk size per dimension (approximate equal split)
+        elements_per_dim = int(elements_per_chunk ** (1 / num_dims))
+
+        for dim, size in sizes.items():
+            # Set chunk size to min of dimension size and calculated size
+            chunk_sizes[dim] = min(size, max(1, elements_per_dim))
+
+        # Adjust to ensure total chunk size is close to target
+        current_elements = math.prod(chunk_sizes.values())
+        if current_elements > elements_per_chunk:
+            # Scale down largest dimension
+            max_dim = max(sizes, key=lambda d: sizes[d])
+            chunk_sizes[max_dim] = max(
+                1, int(chunk_sizes[max_dim] * (elements_per_chunk / current_elements))
+            )
+
+        return chunk_sizes
+
+    @staticmethod
+    def zarr_to_dask_dataframe(
+        dataset: xarray.Dataset,
+        columns: Optional[List[str]] = None,
+        chunks: Optional[dict] = None,
+    ) -> ddf.DataFrame | None:
+        """
+        This function is useful when you want to convert a xarray to a dask dataframe
+        with selected columns and partition it, all operation will not load any data and
+        therefore it should be good to handle large dataset
 
         Args:
             dataset: xarray.Dataset, potentially Zarr-backed.
@@ -84,8 +159,15 @@ class BaseAPI:
         if dataset is None:
             raise RuntimeError("Dataset not initialized")
 
+        # Short circuit here, it is much memory efficient to check size before
+        # convert it to dask. After convert to dask, if you want to check size
+        # it force data load and in most case takes all memory can result in
+        # MemoryError exception
+        if not dataset.sizes or any(size == 0 for size in dataset.sizes.values()):
+            return None
+
         # Get available variables
-        available_columns = list(dataset.data_vars) + list(dataset.coords)
+        available_columns = list(dataset.variables)
 
         # Use all variables if none specified
         columns = columns or available_columns
@@ -97,23 +179,32 @@ class BaseAPI:
         # Create a new Dataset with selected variables and promote coordinates if needed
         selected_data = {}
         for col in columns:
-            if col in dataset.data_vars:
+            if col in dataset.variables:
                 selected_data[col] = dataset[col]
-            elif col in dataset.coords:
-                # Promote coordinate to data variable
-                selected_data[col] = dataset.coords[col]
 
         # Select specified variables (returns a new Dataset)
         filtered_dataset = xarray.Dataset(selected_data)
 
-        # Convert to Pandas DataFrame
-        df = filtered_dataset.to_dataframe()
+        # Apply chunking if specified, otherwise use existing chunks or auto-chunk,
+        # only chunk the field we need
+        if chunks is not None:
+            filtered_dataset = filtered_dataset.chunk(chunks)
+        elif not dataset.chunks:
+            #    # filtered_dataset = filtered_dataset.chunk(API._calculate_chunk_sizes(filtered_dataset.sizes))
+            filtered_dataset = filtered_dataset.chunk("auto")
 
-        # Reset index if needed to include coordinates as columns
-        if isinstance(df.index, pd.MultiIndex) or df.index.name is not None:
+        # Convert to Dask DataFrame
+        df = filtered_dataset.to_dask_dataframe()
+
+        # Reset index only if necessary (e.g., to include coordinates as columns)
+        # Note: This can be memory-intensive, so use sparingly
+        if any(dim in filtered_dataset.coords for dim in filtered_dataset.dims):
             df = df.reset_index()
 
-        return df[columns]
+        # Filter to requested columns
+        df = df[columns]
+
+        return df
 
 
 class API(BaseAPI):
@@ -200,21 +291,25 @@ class API(BaseAPI):
     Given a time range, we find if this uuid temporal cover the whole range
     """
 
-    def has_data(self, uuid: str, key: str, start_date: datetime, end_date: datetime):
+    def has_data(
+        self, uuid: str, key: str, start_date: pd.Timestamp, end_date: pd.Timestamp
+    ):
         md: Dict[str, Descriptor] = self._cached.get(uuid)
         if md is not None and md[key] is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
-            te = ds.get_temporal_extent()
-            return start_date <= te[0] and te[1] <= end_date
+            tes, tee = ds.get_temporal_extent()
+            return start_date <= tes and tee <= end_date
         return False
 
-    def get_temporal_extent(self, uuid: str, key: str) -> (datetime, datetime):
+    def get_temporal_extent(
+        self, uuid: str, key: str
+    ) -> Tuple[pd.Timestamp | None, pd.Timestamp | None]:
         md: Dict[str, Descriptor] = self._cached.get(uuid)
         if md is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
             return ds.get_temporal_extent()
         else:
-            return ()
+            return None, None
 
     def map_column_names(
         self, uuid: str, key: str, columns: list[str] | None
@@ -253,6 +348,8 @@ class API(BaseAPI):
                         output.append("latitude")
                     case meta if "LATITUDE" in meta:
                         output.append("LATITUDE")
+                    case meta if "lat" in meta:
+                        output.append("lat")
             elif column.casefold() == "LONGITUDE".casefold() and (
                 "LONGITUDE" not in meta or "longitude" not in meta
             ):
@@ -261,6 +358,8 @@ class API(BaseAPI):
                         output.append("longitude")
                     case meta if "LONGITUDE" in meta:
                         output.append("LONGITUDE")
+                    case meta if "lon" in meta:
+                        output.append("lon")
             else:
                 output.append(column)
 
@@ -270,15 +369,15 @@ class API(BaseAPI):
         self,
         uuid: str,
         key: str,
-        date_start: datetime = None,
-        date_end: datetime = None,
+        date_start: pd.Timestamp = None,
+        date_end: pd.Timestamp = None,
         lat_min=None,
         lat_max=None,
         lon_min=None,
         lon_max=None,
         scalar_filter=None,
         columns: list[str] = None,
-    ) -> Optional[pd.DataFrame]:
+    ) -> Optional[ddf.DataFrame | xarray.Dataset]:
         mds: Dict[str, Descriptor] = self._cached.get(uuid)
 
         if mds is not None and key in mds:
@@ -288,40 +387,42 @@ class API(BaseAPI):
 
                 # Default get 10 days of data
                 if date_start is None:
-                    date_start = datetime.now(timezone.utc) - timedelta(days=10)
+                    date_start = (pd.Timestamp.now() - timedelta(days=10)).tz_convert(
+                        "UTC"
+                    )
                 else:
-                    if date_start.tzinfo is None:
-                        date_start = pd.to_datetime(date_start).tz_localize(
-                            timezone.utc
-                        )
+                    if date_start.tz is None:
+                        raise ValueError("Missing timezone info in date_start")
                     else:
                         date_start = pd.to_datetime(date_start).tz_convert(timezone.utc)
 
                 if date_end is None:
-                    date_end = datetime.now(timezone.utc)
+                    date_end = (
+                        pd.Timestamp.now() + pd.offsets.Day(1) - pd.offsets.Nano(1)
+                    ).tz_convert("UTC")
                 else:
                     if date_end.tzinfo is None:
-                        date_end = pd.to_datetime(date_end).tz_localize(timezone.utc)
+                        raise ValueError("Missing timezone info in date_end")
                     else:
-                        date_end = pd.to_datetime(date_end).tz_convert(timezone.utc)
+                        date_end = date_end.tz_convert(timezone.utc)
 
                 # The get_data call the pyarrow and compare only works with non timezone datetime
                 # now make sure the timezone is correctly convert to utc then remove it.
                 # As get_date datetime are all utc, but the pyarrow do not support compare of datetime vs
                 # datetime with timezone.
-                if date_start.tzinfo is not None:
-                    date_start = date_start.astimezone(timezone.utc).replace(
-                        tzinfo=None
-                    )
+                if date_start.tz is not None:
+                    date_start = date_start.tz_localize(None)
 
-                if date_end.tzinfo is not None:
-                    date_end = date_end.astimezone(timezone.utc).replace(tzinfo=None)
+                if date_end.tz is not None:
+                    date_end = date_end.tz_localize(None)
 
                 try:
+                    # All precision to nanosecond
                     if isinstance(ds, ParquetDataSource):
-                        return ds.get_data(
-                            str(date_start),
-                            str(date_end),
+                        # Accuracy to nanoseconds
+                        result = ds.get_data(
+                            f"{date_start.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_start.nanosecond:03d}",
+                            f"{date_end.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_end.nanosecond:03d}",
                             lat_min,
                             lat_max,
                             lon_min,
@@ -329,22 +430,21 @@ class API(BaseAPI):
                             scalar_filter,
                             self.map_column_names(uuid, key, columns),
                         )
+
+                        return ddf.from_pandas(
+                            result, npartitions=None, chunksize=None, sort=True
+                        )
                     elif isinstance(ds, ZarrDataSource):
                         # Lib slightly different for Zar file
-                        result = ds.get_data(
-                            str(date_start),
-                            str(date_end),
+                        return ds.get_data(
+                            f"{date_start.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_start.nanosecond:03d}",
+                            f"{date_end.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_end.nanosecond:03d}",
                             lat_min,
                             lat_max,
                             lon_min,
                             lon_max,
                             scalar_filter,
                         )
-
-                        return API.zarr_to_dataframe(
-                            result, self.map_column_names(uuid, key, columns)
-                        )
-
                 except ValueError as e:
                     log.error(f"Error when query ds.get_data: {e}")
                     raise e

@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any, Generator
 
 import pytest
 import boto3
@@ -12,6 +13,9 @@ from aodn_cloud_optimised.lib import DataQuery
 from testcontainers.localstack import LocalStackContainer
 from botocore.config import Config as BotoConfig
 from botocore import UNSIGNED
+from fsspec.core import get_fs_token_paths as original_get_fs_token_paths
+
+from data_access_service.core.AWSHelper import AWSHelper
 
 # Default region for Localstack
 REGION = "us-east-1"
@@ -50,39 +54,52 @@ WORLD_POLYGON = """{
 
 class TestWithS3:
 
-    @pytest.fixture(autouse=True, scope="class")
+    @pytest.fixture(autouse=True, scope="session")
     def setup(self):
         """Set environment variable for testing profile."""
         os.environ["PROFILE"] = EnvType.TESTING.value
-        yield
 
-    @pytest.fixture(scope="class")
-    def localstack(self):
-        """Start LocalStack container with SQS and S3 services."""
+    @pytest.fixture(scope="function")
+    def localstack(self) -> Generator[LocalStackContainer, Any, None]:
+        """
+        Start LocalStack container with SQS and S3 services.
+        using with scope cause the call to localstack.stop() happen
+        automatically
+        """
         with LocalStackContainer(image="localstack/localstack:4.3.0") as localstack:
-            wait_for_logs(localstack, "Ready")
+            localstack.start()
+            time = wait_for_logs(localstack, "Ready.")
+            print(f"Create localstack S3 at port {localstack.get_url()}, time = {time}")
             yield localstack
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture(scope="function")
     def aws_clients(self, localstack):
         """Initialize AWS S3 and SQS clients pointing to LocalStack."""
         s3_client = boto3.client(
             "s3",
             endpoint_url=localstack.get_url(),
-            aws_access_key_id="test",
-            aws_secret_access_key="test",
+            aws_access_key_id=IntTestConfig.get_s3_test_key(),
+            aws_secret_access_key=IntTestConfig.get_s3_secret(),
             region_name=REGION,
         )
         sqs_client = boto3.client(
             "sqs",
             endpoint_url=localstack.get_url(),
-            aws_access_key_id="test",
-            aws_secret_access_key="test",
+            aws_access_key_id=IntTestConfig.get_s3_test_key(),
+            aws_secret_access_key=IntTestConfig.get_s3_secret(),
             region_name=REGION,
         )
-        yield s3_client, sqs_client
+        ses_client = boto3.client(
+            "ses",
+            endpoint_url=localstack.get_url(),
+            aws_access_key_id=IntTestConfig.get_s3_test_key(),
+            aws_secret_access_key=IntTestConfig.get_s3_secret(),
+            region_name=REGION,
+        )
+        print(f"Bind S3 client to {localstack.get_url()}")
+        yield s3_client, sqs_client, ses_client
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture(scope="function")
     def mock_boto3_client(self, localstack):
         """Mock boto3.client to use LocalStack endpoint for S3 and SES."""
         monkeypatch = MonkeyPatch()  # Create manual MonkeyPatch instance
@@ -107,10 +124,10 @@ class TestWithS3:
         yield wrapped_client
         monkeypatch.undo()
 
-    @pytest.fixture(scope="class")
-    def setup_resources(self, aws_clients, mock_boto3_client):
+    @pytest.fixture(scope="function")
+    def setup_resources(self, aws_clients):
         """Set up S3 buckets and SQS queue for testing."""
-        s3_client, sqs_client = aws_clients
+        s3_client, sqs_client, _ = aws_clients
         config: IntTestConfig = Config.get_config()
         config.set_s3_client(s3_client)
 
@@ -122,6 +139,28 @@ class TestWithS3:
         response = sqs_client.create_queue(QueueName="job-queue")
         queue_url = response["QueueUrl"]
         yield queue_url
+        # Make sure it removed
+        TestWithS3.delete_object_in_s3(s3_client, config.get_csv_bucket_name())
+        TestWithS3.delete_object_in_s3(s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT)
+
+    @pytest.fixture(scope="function")
+    def mock_get_fs_token_paths(self, setup, setup_resources):
+        """
+        This mock is used to override a call to get_fs_token_paths in xarray
+        where the storage_options is pass correctly causing test fail to scan
+        the director of the localstack s3
+        :param setup:
+        :param setup_resources:
+        :return:
+        """
+        helper = AWSHelper()
+
+        def mock_fs(paths, mode="rb", **kwargs):
+            # override this option
+            kwargs["storage_options"] = helper.get_storage_options()
+            return original_get_fs_token_paths(paths, mode, **kwargs)
+
+        return mock_fs
 
     # Util function to upload canned test data to localstack s3 or any s3
     @staticmethod
@@ -143,4 +182,3 @@ class TestWithS3:
         if "Contents" in response:
             objects = [{"Key": obj["Key"]} for obj in response["Contents"]]
             s3_client.delete_objects(Bucket=bucket_name, Delete={"Objects": objects})
-            print(f"Deleted {len(objects)} objects from s3://{bucket_name}")

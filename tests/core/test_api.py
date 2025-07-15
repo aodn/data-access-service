@@ -2,6 +2,7 @@ import json
 import unittest
 from typing import Dict, Any
 
+import dask.dataframe as ddf
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -10,7 +11,6 @@ from unittest.mock import patch
 from aodn_cloud_optimised import DataQuery
 
 from data_access_service import API
-from data_access_service.core.descriptor import Descriptor
 from data_access_service.core.routes import _generate_partial_json_array, _response_json
 
 
@@ -85,10 +85,10 @@ class TestApi(unittest.TestCase):
             "LATITUDE": [np.nan, 20.5],
             "DEPTH": [100.0, np.nan],
         }
-        pandas_df = pd.DataFrame(data)
+        pandas_df = ddf.from_pandas(pd.DataFrame(data))
 
         # Call the function
-        result = _generate_partial_json_array(pandas_df)
+        result = _generate_partial_json_array(pandas_df, 10)
 
         # Parse the JSON result but need to get it back to object so that compare
         # of null in json string is converted back to None in object

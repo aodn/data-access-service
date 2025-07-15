@@ -13,11 +13,13 @@ from data_access_service.utils.date_time_utils import (
     get_final_day_of_month_,
     next_month_first_day,
     trim_date_range,
-    get_monthly_date_range_array_from_,
+    get_monthly_utc_date_range_array_from_,
     get_boundary_of_year_month,
     transfer_date_range_into_yearmonth,
     split_yearmonths_into_dict,
     ensure_timezone,
+    split_date_range,
+    YEAR_MONTH_DAY_TIME_NANO,
 )
 
 
@@ -27,216 +29,577 @@ class TestDateTimeUtils(unittest.TestCase):
 
     def test_parse_date(self):
         date_string = "2023-10-01"
-        expected_date = datetime(2023, 10, 1)
+        expected_date = pd.Timestamp(year=2023, month=10, day=1, tz=pytz.UTC)
         self.assertEqual(
             parse_date(date_string, format_to_convert="%Y-%m-%d"), expected_date
         )
 
     def test_parse_date2(self):
         date_string = "2023/10/01"
-        expected_date = datetime(2023, 10, 1)
+        expected_date = pd.Timestamp(year=2023, month=10, day=1, tz=pytz.UTC)
         self.assertEqual(
             parse_date(date_string, format_to_convert="%Y/%m/%d"), expected_date
         )
 
     def test_parse_date3(self):
         date_string = "2023.10.01"
-        expected_date = datetime(2023, 10, 1)
+        expected_date = pd.Timestamp(2023, 10, 1, tz=pytz.UTC)
         self.assertEqual(
             parse_date(date_string, format_to_convert="%Y.%m.%d"), expected_date
         )
 
     def test_parse_date4(self):
-        date_string = "10-2023"
-        expected_date = datetime(2023, 10, 1)
+        date_string = "2010-04-30 23:59:59.999999999"
+        expected_date = pd.Timestamp(
+            year=2010,
+            month=4,
+            day=30,
+            hour=23,
+            minute=59,
+            second=59,
+            microsecond=999999,
+            nanosecond=999,
+            tz=pytz.UTC,
+        )
 
-        with self.assertRaises(ValueError) as cm:
-            self.assertEqual(
-                parse_date(date_string, format_to_convert="%d-%m-%Y"), expected_date
-            )
-            self.assertEqual(
-                str(cm.exception),
-                "time data '10-2023' does not match format '%d-%m-%Y'",
-            )
+        self.assertEqual(parse_date(date_string), expected_date)
+
+    def test_parse_date5(self):
+        date_string = "2023-10-01"
+        expected_date = pd.Timestamp(year=2023, month=10, day=1, tz=pytz.UTC)
+        self.assertEqual(
+            parse_date(date_string, format_to_convert="%Y-%m-%d"), expected_date
+        )
 
     def test_get_final_day_of_(self):
-        date = datetime(2023, 2, 15)
-        expected_date = datetime(2023, 2, 28)
-        self.assertEqual(get_final_day_of_month_(date), expected_date)
+        date = pd.Timestamp(year=2023, month=2, day=15)
+        expected_date = pd.Timestamp(
+            year=2023,
+            month=2,
+            day=28,
+            hour=23,
+            minute=59,
+            second=59,
+            microsecond=999999,
+            nanosecond=999,
+            tz=pytz.UTC,
+        )
+        target_date = get_final_day_of_month_(date)
+        self.assertEqual(target_date, expected_date)
 
     def test_next_month_first_day(self):
-        date = datetime(2023, 1, 31)
-        expected_date = datetime(2023, 2, 1)
+        date = pd.Timestamp(year=2023, month=1, day=31)
+        expected_date = pd.Timestamp(year=2023, month=2, day=1, tz=pytz.UTC)
+        self.assertEqual(next_month_first_day(date), expected_date)
+
+        date = pd.Timestamp(year=2023, month=1, day=31, tz="Asia/Tokyo")
+        expected_date = pd.Timestamp(year=2023, month=2, day=1, tz="Asia/Tokyo")
         self.assertEqual(next_month_first_day(date), expected_date)
 
     def test_get_monthly_date_range_array_from_(self):
-        """Test a typical date range spanning multiple months with partial months."""
-        start = datetime(2023, 1, 15)
-        end = datetime(2023, 4, 10)
+        """
+        Test a typical date range spanning multiple months with partial months. With edge case fall on nanoseconds
+        """
+        start = pd.Timestamp(
+            year=2023,
+            month=1,
+            day=15,
+            hour=5,
+            minute=53,
+            second=1,
+            microsecond=80043,
+            nanosecond=8,
+            tz="Asia/Tokyo",
+        )
+        end = pd.Timestamp(year=2023, month=4, day=10, nanosecond=1, tz="Asia/Tokyo")
         expected = [
             {
-                "start_date": datetime(2023, 1, 15),
-                "end_date": datetime(2023, 1, 31, 23, 59, 59),
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=1,
+                    day=14,
+                    hour=20,
+                    minute=53,
+                    second=1,
+                    microsecond=80043,
+                    nanosecond=8,
+                    tz=pytz.UTC,
+                ),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=1,
+                    day=31,
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=999999,
+                    nanosecond=999,
+                    tz=pytz.UTC,
+                ),
             },
             {
-                "start_date": datetime(2023, 2, 1),
-                "end_date": datetime(2023, 2, 28, 23, 59, 59),
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=2,
+                    day=1,
+                    tz=pytz.UTC,
+                ),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=2,
+                    day=28,
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=999999,
+                    nanosecond=999,
+                    tz=pytz.UTC,
+                ),
             },
             {
-                "start_date": datetime(2023, 3, 1),
-                "end_date": datetime(2023, 3, 31, 23, 59, 59),
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=3,
+                    day=1,
+                    tz=pytz.UTC,
+                ),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=3,
+                    day=31,
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=999999,
+                    nanosecond=999,
+                    tz=pytz.UTC,
+                ),
             },
             {
-                "start_date": datetime(2023, 4, 1),
-                "end_date": datetime(2023, 4, 10, 23, 59, 59),
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=4,
+                    day=1,
+                    tz=pytz.UTC,
+                ),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=4,
+                    day=9,
+                    hour=15,
+                    minute=0,
+                    second=0,
+                    microsecond=0,
+                    nanosecond=1,
+                    tz=pytz.UTC,
+                ),
             },
         ]
-        result = get_monthly_date_range_array_from_(start, end)
+        result = get_monthly_utc_date_range_array_from_(start, end)
+        self.assertListEqual(
+            result, expected, "Monthly ranges do not match expected output"
+        )
+
+    def test_get_monthly_date_range_array_from_2_(self):
+        """
+        Test an edge case where two day are very close to month end
+        """
+        start = pd.Timestamp(
+            year=2023,
+            month=1,
+            day=31,
+            hour=5,
+            minute=53,
+            second=1,
+            microsecond=80043,
+            nanosecond=8,
+            tz=pytz.UTC,
+        )
+        end = pd.Timestamp(year=2023, month=2, day=1, nanosecond=1, tz=pytz.UTC)
+        expected = [
+            {
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=1,
+                    day=31,
+                    hour=5,
+                    minute=53,
+                    second=1,
+                    microsecond=80043,
+                    nanosecond=8,
+                    tz=pytz.UTC,
+                ),
+                "end_date": pd.Timestamp(
+                    year=2023, month=2, day=1, nanosecond=1, tz=pytz.UTC
+                ),
+            },
+        ]
+        result = get_monthly_utc_date_range_array_from_(start, end)
+        self.assertListEqual(
+            result, expected, "Monthly ranges do not match expected output"
+        )
+
+    def test_get_monthly_date_range_array_from_3_(self):
+        """
+        Test an edge case where two day are very close to month end
+        """
+        start = pd.Timestamp(
+            year=2023,
+            month=1,
+            day=30,
+            hour=5,
+            minute=53,
+            second=1,
+            microsecond=80043,
+            nanosecond=8,
+            tz=pytz.UTC,
+        )
+        end = pd.Timestamp(year=2023, month=2, day=1, nanosecond=1, tz=pytz.UTC)
+        expected = [
+            {
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=1,
+                    day=30,
+                    hour=5,
+                    minute=53,
+                    second=1,
+                    microsecond=80043,
+                    nanosecond=8,
+                    tz=pytz.UTC,
+                ),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=1,
+                    day=31,
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=999999,
+                    nanosecond=999,
+                    tz=pytz.UTC,
+                ),
+            },
+            {
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=2,
+                    day=1,
+                    tz=pytz.UTC,
+                ),
+                "end_date": pd.Timestamp(
+                    year=2023, month=2, day=1, nanosecond=1, tz=pytz.UTC
+                ),
+            },
+        ]
+        result = get_monthly_utc_date_range_array_from_(start, end)
         self.assertListEqual(
             result, expected, "Monthly ranges do not match expected output"
         )
 
     def test_single_month(self):
         """Test a date range within a single month."""
-        start = datetime(2023, 2, 1)
-        end = datetime(2023, 2, 15)
+        start = pd.Timestamp(year=2023, month=2, day=1, tz="Australia/Sydney")
+        end = pd.Timestamp(year=2023, month=2, day=15, tz="Australia/Sydney")
         expected = [
             {
-                "start_date": datetime(2023, 2, 1),
-                "end_date": datetime(2023, 2, 15, 23, 59, 59),
+                "start_date": pd.Timestamp(
+                    year=2023, month=1, day=31, hour=13, tz=pytz.UTC
+                ),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=2,
+                    day=14,
+                    hour=13,
+                    tz=pytz.UTC,
+                ),
             }
         ]
-        result = get_monthly_date_range_array_from_(start, end)
+        result = get_monthly_utc_date_range_array_from_(start, end)
         self.assertListEqual(
             result, expected, "Single month range does not match expected output"
         )
 
     def test_single_day(self):
         """Test a date range of a single day."""
-        start = datetime(2023, 3, 5)
-        end = datetime(2023, 3, 5)
+        start = pd.Timestamp(year=2023, month=3, day=5, tz="Australia/Sydney")
+        end = pd.Timestamp(year=2023, month=3, day=5, hour=10, tz="Australia/Sydney")
         expected = [
             {
-                "start_date": datetime(2023, 3, 5),
-                "end_date": datetime(2023, 3, 5, 23, 59, 59),
+                "start_date": pd.Timestamp(
+                    year=2023, month=3, day=4, hour=13, tz=pytz.UTC
+                ),
+                "end_date": pd.Timestamp(
+                    year=2023, month=3, day=5, hour=10, tz="Australia/Sydney"
+                ),
             }
         ]
-        result = get_monthly_date_range_array_from_(start, end)
+        result = get_monthly_utc_date_range_array_from_(start, end)
         self.assertListEqual(
             result, expected, "Single day range does not match expected output"
         )
 
     def test_full_year(self):
         """Test a date range spanning a full year."""
-        start = datetime(2023, 1, 1)
-        end = datetime(2023, 12, 31)
+        start = pd.Timestamp(year=2023, month=1, day=1)
+        end = pd.Timestamp(year=2023, month=12, day=31)
         expected = [
             {
-                "start_date": datetime(2023, 1, 1),
-                "end_date": datetime(2023, 1, 31, 23, 59, 59),
+                "start_date": pd.Timestamp(year=2023, month=1, day=1, tz=pytz.UTC),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=1,
+                    day=31,
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=999999,
+                    nanosecond=999,
+                    tz=pytz.UTC,
+                ),
             },
             {
-                "start_date": datetime(2023, 2, 1),
-                "end_date": datetime(2023, 2, 28, 23, 59, 59),
+                "start_date": pd.Timestamp(year=2023, month=2, day=1, tz=pytz.UTC),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=2,
+                    day=28,
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=999999,
+                    nanosecond=999,
+                    tz=pytz.UTC,
+                ),
             },
             {
-                "start_date": datetime(2023, 3, 1),
-                "end_date": datetime(2023, 3, 31, 23, 59, 59),
+                "start_date": pd.Timestamp(year=2023, month=3, day=1, tz=pytz.UTC),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=3,
+                    day=31,
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=999999,
+                    nanosecond=999,
+                    tz=pytz.UTC,
+                ),
             },
             {
-                "start_date": datetime(2023, 4, 1),
-                "end_date": datetime(2023, 4, 30, 23, 59, 59),
+                "start_date": pd.Timestamp(year=2023, month=4, day=1, tz=pytz.UTC),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=4,
+                    day=30,
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=999999,
+                    nanosecond=999,
+                    tz=pytz.UTC,
+                ),
             },
             {
-                "start_date": datetime(2023, 5, 1),
-                "end_date": datetime(2023, 5, 31, 23, 59, 59),
+                "start_date": pd.Timestamp(year=2023, month=5, day=1, tz=pytz.UTC),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=5,
+                    day=31,
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=999999,
+                    nanosecond=999,
+                    tz=pytz.UTC,
+                ),
             },
             {
-                "start_date": datetime(2023, 6, 1),
-                "end_date": datetime(2023, 6, 30, 23, 59, 59),
+                "start_date": pd.Timestamp(year=2023, month=6, day=1, tz=pytz.UTC),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=6,
+                    day=30,
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=999999,
+                    nanosecond=999,
+                    tz=pytz.UTC,
+                ),
             },
             {
-                "start_date": datetime(2023, 7, 1),
-                "end_date": datetime(2023, 7, 31, 23, 59, 59),
+                "start_date": pd.Timestamp(year=2023, month=7, day=1, tz=pytz.UTC),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=7,
+                    day=31,
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=999999,
+                    nanosecond=999,
+                    tz=pytz.UTC,
+                ),
             },
             {
-                "start_date": datetime(2023, 8, 1),
-                "end_date": datetime(2023, 8, 31, 23, 59, 59),
+                "start_date": pd.Timestamp(year=2023, month=8, day=1, tz=pytz.UTC),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=8,
+                    day=31,
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=999999,
+                    nanosecond=999,
+                    tz=pytz.UTC,
+                ),
             },
             {
-                "start_date": datetime(2023, 9, 1),
-                "end_date": datetime(2023, 9, 30, 23, 59, 59),
+                "start_date": pd.Timestamp(year=2023, month=9, day=1, tz=pytz.UTC),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=9,
+                    day=30,
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=999999,
+                    nanosecond=999,
+                    tz=pytz.UTC,
+                ),
             },
             {
-                "start_date": datetime(2023, 10, 1),
-                "end_date": datetime(2023, 10, 31, 23, 59, 59),
+                "start_date": pd.Timestamp(year=2023, month=10, day=1, tz=pytz.UTC),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=10,
+                    day=31,
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=999999,
+                    nanosecond=999,
+                    tz=pytz.UTC,
+                ),
             },
             {
-                "start_date": datetime(2023, 11, 1),
-                "end_date": datetime(2023, 11, 30, 23, 59, 59),
+                "start_date": pd.Timestamp(year=2023, month=11, day=1, tz=pytz.UTC),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=11,
+                    day=30,
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=999999,
+                    nanosecond=999,
+                    tz=pytz.UTC,
+                ),
             },
             {
-                "start_date": datetime(2023, 12, 1),
-                "end_date": datetime(2023, 12, 31, 23, 59, 59),
+                "start_date": pd.Timestamp(year=2023, month=12, day=1, tz=pytz.UTC),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=12,
+                    day=31,
+                    tz=pytz.UTC,
+                ),
             },
         ]
-        result = get_monthly_date_range_array_from_(start, end)
+        result = get_monthly_utc_date_range_array_from_(start, end)
         self.assertListEqual(
             result, expected, "Full year range does not match expected output"
         )
 
     def test_leap_year(self):
         """Test a date range including February in a leap year."""
-        start = datetime(2024, 2, 1)
-        end = datetime(2024, 3, 31)
+        start = pd.Timestamp(year=2024, month=2, day=1)
+        end = pd.Timestamp(year=2024, month=3, day=31)
         expected = [
             {
-                "start_date": datetime(2024, 2, 1),
-                "end_date": datetime(2024, 2, 29, 23, 59, 59),
+                "start_date": pd.Timestamp(year=2024, month=2, day=1, tz=pytz.UTC),
+                "end_date": pd.Timestamp(
+                    year=2024,
+                    month=2,
+                    day=29,
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=999999,
+                    nanosecond=999,
+                    tz=pytz.UTC,
+                ),
             },
             {
-                "start_date": datetime(2024, 3, 1),
-                "end_date": datetime(2024, 3, 31, 23, 59, 59),
+                "start_date": pd.Timestamp(year=2024, month=3, day=1, tz=pytz.UTC),
+                "end_date": pd.Timestamp(
+                    year=2024,
+                    month=3,
+                    day=31,
+                    tz=pytz.UTC,
+                ),
             },
         ]
-        result = get_monthly_date_range_array_from_(start, end)
+        result = get_monthly_utc_date_range_array_from_(start, end)
         self.assertListEqual(
             result, expected, "Leap year range does not match expected output"
         )
 
     def test_cross_year(self):
         """Test a date range spanning multiple years."""
-        start = datetime(2022, 12, 15)
-        end = datetime(2023, 1, 15)
+        start = pd.Timestamp(year=2022, month=12, day=15, tz=pytz.UTC)
+        end = pd.Timestamp(year=2023, month=1, day=15, tz=pytz.UTC)
         expected = [
             {
-                "start_date": datetime(2022, 12, 15),
-                "end_date": datetime(2022, 12, 31, 23, 59, 59),
+                "start_date": pd.Timestamp(year=2022, month=12, day=15, tz=pytz.UTC),
+                "end_date": pd.Timestamp(
+                    year=2022,
+                    month=12,
+                    day=31,
+                    hour=23,
+                    minute=59,
+                    second=59,
+                    microsecond=999999,
+                    nanosecond=999,
+                    tz=pytz.UTC,
+                ),
             },
             {
-                "start_date": datetime(2023, 1, 1),
-                "end_date": datetime(2023, 1, 15, 23, 59, 59),
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=1,
+                    day=1,
+                    tz=pytz.UTC,
+                ),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=1,
+                    day=15,
+                    tz=pytz.UTC,
+                ),
             },
         ]
-        result = get_monthly_date_range_array_from_(start, end)
+        result = get_monthly_utc_date_range_array_from_(start, end)
         self.assertListEqual(
             result, expected, "Cross-year range does not match expected output"
         )
 
     def test_invalid_date_range(self):
         """Test when end_date is before start_date."""
-        start = datetime(2023, 1, 15)
-        end = datetime(2023, 1, 14)
+        start = pd.Timestamp(year=2023, month=1, day=15)
+        end = pd.Timestamp(year=2023, month=1, day=14)
         with self.assertRaises(
             ValueError, msg="Expected ValueError for end_date before start_date"
         ):
-            get_monthly_date_range_array_from_(start, end)
+            get_monthly_utc_date_range_array_from_(start, end)
 
     def test_output_type(self):
         """Test that start_date and end_date are datetime objects."""
-        start = datetime(2023, 1, 15)
-        end = datetime(2023, 2, 15)
-        result = get_monthly_date_range_array_from_(start, end)
+        start = pd.Timestamp(year=2023, month=1, day=15)
+        end = pd.Timestamp(year=2023, month=2, day=15)
+        result = get_monthly_utc_date_range_array_from_(start, end)
         for item in result:
             self.assertIsInstance(
                 item["start_date"], type(start), "start_date is not datetime"
@@ -244,29 +607,19 @@ class TestDateTimeUtils(unittest.TestCase):
             self.assertIsInstance(
                 item["end_date"], type(end), "end_date is not datetime"
             )
-            self.assertNotIsInstance(
-                item["start_date"],
-                pd.Timestamp,
-                "start_date should not be pandas.Timestamp",
-            )
-            self.assertNotIsInstance(
-                item["end_date"],
-                pd.Timestamp,
-                "end_date should not be pandas.Timestamp",
-            )
             self.assertTrue(
                 "start_date" in item and "end_date" in item, "Dictionary keys missing"
             )
 
     def test_fully_within_metadata_range(self):
         """Test when requested range is fully within metadata range."""
-        metadata_start = datetime(2023, 1, 1)
-        metadata_end = datetime(2023, 12, 31)
+        metadata_start = pd.Timestamp(year=2023, month=1, day=1)
+        metadata_end = pd.Timestamp(year=2023, month=12, day=31)
         self.api.get_temporal_extent = MagicMock(
             return_value=(metadata_start, metadata_end)
         )
-        requested_start = datetime(2023, 6, 1)
-        requested_end = datetime(2023, 6, 30)
+        requested_start = pd.Timestamp(year=2023, month=6, day=1)
+        requested_end = pd.Timestamp(year=2023, month=6, day=30)
 
         result = trim_date_range(
             self.api, "test-uuid", "test-key", requested_start, requested_end
@@ -279,13 +632,13 @@ class TestDateTimeUtils(unittest.TestCase):
 
     def test_partial_overlap_start_before(self):
         """Test when requested start is before metadata start."""
-        metadata_start = datetime(2023, 1, 1)
-        metadata_end = datetime(2023, 12, 31)
+        metadata_start = pd.Timestamp(year=2023, month=1, day=1)
+        metadata_end = pd.Timestamp(year=2023, month=12, day=31)
         self.api.get_temporal_extent = MagicMock(
             return_value=(metadata_start, metadata_end)
         )
-        requested_start = datetime(2022, 12, 1)
-        requested_end = datetime(2023, 6, 30)
+        requested_start = pd.Timestamp(year=2022, month=12, day=1)
+        requested_end = pd.Timestamp(year=2023, month=6, day=30)
 
         result = trim_date_range(
             self.api, "test-uuid", "test-key", requested_start, requested_end
@@ -298,13 +651,13 @@ class TestDateTimeUtils(unittest.TestCase):
 
     def test_partial_overlap_end_after(self):
         """Test when requested end is after metadata end."""
-        metadata_start = datetime(2023, 1, 1)
-        metadata_end = datetime(2023, 12, 31)
+        metadata_start = pd.Timestamp(year=2023, month=1, day=1)
+        metadata_end = pd.Timestamp(year=2023, month=12, day=31)
         self.api.get_temporal_extent = MagicMock(
             return_value=(metadata_start, metadata_end)
         )
-        requested_start = datetime(2023, 6, 1)
-        requested_end = datetime(2024, 1, 31)
+        requested_start = pd.Timestamp(year=2023, month=6, day=1)
+        requested_end = pd.Timestamp(year=2024, month=1, day=31)
 
         result = trim_date_range(
             self.api, "test-uuid", "test-key", requested_start, requested_end
@@ -317,13 +670,13 @@ class TestDateTimeUtils(unittest.TestCase):
 
     def test_partial_overlap_both_outside(self):
         """Test when requested range spans metadata range."""
-        metadata_start = datetime(2023, 1, 1)
-        metadata_end = datetime(2023, 12, 31)
+        metadata_start = pd.Timestamp(year=2023, month=1, day=1)
+        metadata_end = pd.Timestamp(year=2023, month=12, day=31)
         self.api.get_temporal_extent = MagicMock(
             return_value=(metadata_start, metadata_end)
         )
-        requested_start = datetime(2022, 12, 1)
-        requested_end = datetime(2024, 1, 31)
+        requested_start = pd.Timestamp(year=2022, month=12, day=1)
+        requested_end = pd.Timestamp(year=2024, month=1, day=31)
 
         result = trim_date_range(
             self.api, "test-uuid", "test-key", requested_start, requested_end
@@ -336,13 +689,13 @@ class TestDateTimeUtils(unittest.TestCase):
 
     def test_exactly_matches_metadata_range(self):
         """Test when requested range exactly matches metadata range."""
-        metadata_start = datetime(2023, 1, 1)
-        metadata_end = datetime(2023, 12, 31)
+        metadata_start = pd.Timestamp(year=2023, month=1, day=1)
+        metadata_end = pd.Timestamp(year=2023, month=12, day=31)
         self.api.get_temporal_extent = MagicMock(
             return_value=(metadata_start, metadata_end)
         )
-        requested_start = datetime(2023, 1, 1)
-        requested_end = datetime(2023, 12, 31)
+        requested_start = pd.Timestamp(year=2023, month=1, day=1)
+        requested_end = pd.Timestamp(year=2023, month=12, day=31)
 
         result = trim_date_range(
             self.api, "test-uuid", "test-key", requested_start, requested_end
@@ -355,13 +708,13 @@ class TestDateTimeUtils(unittest.TestCase):
 
     def test_no_overlap_before_metadata(self):
         """Test when requested range is entirely before metadata range."""
-        metadata_start = datetime(2023, 1, 1)
-        metadata_end = datetime(2023, 12, 31)
+        metadata_start = pd.Timestamp(year=2023, month=1, day=1)
+        metadata_end = pd.Timestamp(year=2023, month=12, day=31)
         self.api.get_temporal_extent = MagicMock(
             return_value=(metadata_start, metadata_end)
         )
-        requested_start = datetime(2022, 1, 1)
-        requested_end = datetime(2022, 12, 31)
+        requested_start = pd.Timestamp(year=2022, month=1, day=1)
+        requested_end = pd.Timestamp(year=2022, month=12, day=31)
 
         result = trim_date_range(
             self.api, "test-uuid", "test-key", requested_start, requested_end
@@ -374,13 +727,13 @@ class TestDateTimeUtils(unittest.TestCase):
 
     def test_no_overlap_after_metadata(self):
         """Test when requested range is entirely after metadata range."""
-        metadata_start = datetime(2023, 1, 1)
-        metadata_end = datetime(2023, 12, 31)
+        metadata_start = pd.Timestamp(year=2023, month=1, day=1)
+        metadata_end = pd.Timestamp(year=2023, month=12, day=31)
         self.api.get_temporal_extent = MagicMock(
             return_value=(metadata_start, metadata_end)
         )
-        requested_start = datetime(2024, 1, 1)
-        requested_end = datetime(2024, 12, 31)
+        requested_start = pd.Timestamp(year=2024, month=1, day=1)
+        requested_end = pd.Timestamp(year=2024, month=12, day=31)
 
         result = trim_date_range(
             self.api, "test-uuid", "test-key", requested_start, requested_end
@@ -393,13 +746,13 @@ class TestDateTimeUtils(unittest.TestCase):
 
     def test_same_requested_dates_within_metadata(self):
         """Test when requested start and end dates are the same (within metadata)."""
-        metadata_start = datetime(2023, 1, 1)
-        metadata_end = datetime(2023, 12, 31)
+        metadata_start = pd.Timestamp(year=2023, month=1, day=1)
+        metadata_end = pd.Timestamp(year=2023, month=12, day=31)
         self.api.get_temporal_extent = MagicMock(
             return_value=(metadata_start, metadata_end)
         )
-        requested_start = datetime(2023, 6, 1)
-        requested_end = datetime(2023, 6, 1)
+        requested_start = pd.Timestamp(year=2023, month=6, day=1)
+        requested_end = pd.Timestamp(year=2023, month=6, day=1)
 
         result = trim_date_range(
             self.api, "test-uuid", "test-key", requested_start, requested_end
@@ -412,13 +765,13 @@ class TestDateTimeUtils(unittest.TestCase):
 
     def test_requested_matches_metadata_start(self):
         """Test when requested range starts at metadata start."""
-        metadata_start = datetime(2023, 1, 1)
-        metadata_end = datetime(2023, 12, 31)
+        metadata_start = pd.Timestamp(year=2023, month=1, day=1)
+        metadata_end = pd.Timestamp(year=2023, month=12, day=31)
         self.api.get_temporal_extent = MagicMock(
             return_value=(metadata_start, metadata_end)
         )
-        requested_start = datetime(2023, 1, 1)
-        requested_end = datetime(2023, 6, 30)
+        requested_start = pd.Timestamp(year=2023, month=1, day=1)
+        requested_end = pd.Timestamp(year=2023, month=6, day=30)
 
         result = trim_date_range(
             self.api, "test-uuid", "test-key", requested_start, requested_end
@@ -431,13 +784,13 @@ class TestDateTimeUtils(unittest.TestCase):
 
     def test_same_metadata_dates(self):
         """Test when metadata start and end dates are the same."""
-        metadata_start = datetime(2023, 1, 1)
-        metadata_end = datetime(2023, 1, 1)
+        metadata_start = pd.Timestamp(year=2023, month=1, day=1)
+        metadata_end = pd.Timestamp(year=2023, month=1, day=1)
         self.api.get_temporal_extent = MagicMock(
             return_value=(metadata_start, metadata_end)
         )
-        requested_start = datetime(2023, 1, 1)
-        requested_end = datetime(2023, 1, 1)
+        requested_start = pd.Timestamp(year=2023, month=1, day=1)
+        requested_end = pd.Timestamp(year=2023, month=1, day=1)
 
         result = trim_date_range(
             self.api, "test-uuid", "test-key", requested_start, requested_end
@@ -452,8 +805,8 @@ class TestDateTimeUtils(unittest.TestCase):
         """Test when metadata temporal extent is empty. The original start & end dates should be returned."""
         self.api.get_temporal_extent = MagicMock(return_value=())
 
-        requested_start = datetime(2023, 1, 1)
-        requested_end = datetime(2023, 12, 31)
+        requested_start = pd.Timestamp(year=2023, month=1, day=1)
+        requested_end = pd.Timestamp(year=2023, month=12, day=31)
 
         result = trim_date_range(
             self.api, "test-uuid", "test-key", requested_start, requested_end
@@ -468,8 +821,8 @@ class TestDateTimeUtils(unittest.TestCase):
         """Test when metadata temporal extent has one element. just return the original start & end dates."""
         self.api.get_temporal_extent = MagicMock(return_value=(datetime(2023, 1, 1),))
 
-        requested_start = datetime(2023, 1, 1)
-        requested_end = datetime(2023, 12, 31)
+        requested_start = pd.Timestamp(year=2023, month=1, day=1)
+        requested_end = pd.Timestamp(year=2023, month=12, day=31)
 
         result = trim_date_range(
             self.api, "test-uuid", "test-key", requested_start, requested_end
@@ -484,14 +837,14 @@ class TestDateTimeUtils(unittest.TestCase):
         """Test when metadata temporal extent has more than two elements. just return the original start & end dates."""
         self.api.get_temporal_extent = MagicMock(
             return_value=(
-                datetime(2023, 1, 1),
-                datetime(2023, 12, 31),
-                datetime(2024, 1, 1),
+                pd.Timestamp(year=2023, month=1, day=1),
+                pd.Timestamp(year=2023, month=12, day=31),
+                pd.Timestamp(year=2024, month=1, day=1),
             )
         )
 
-        requested_start = datetime(2023, 1, 1)
-        requested_end = datetime(2023, 12, 31)
+        requested_start = pd.Timestamp(year=2023, month=1, day=1)
+        requested_end = pd.Timestamp(year=2023, month=12, day=31)
 
         result = trim_date_range(
             self.api, "test-uuid", "test-key", requested_start, requested_end
@@ -504,17 +857,13 @@ class TestDateTimeUtils(unittest.TestCase):
 
     def test_timezone_stripped_metadata(self):
         """Test when metadata dates have timezone info (should be stripped)."""
-        from datetime import timezone
-
-        metadata_start = datetime(2023, 1, 1, tzinfo=timezone.utc)
-        metadata_end = datetime(2023, 12, 31, tzinfo=timezone.utc)
-        metadata_start_naive = metadata_start.replace(tzinfo=None)
-        metadata_end_naive = metadata_end.replace(tzinfo=None)
+        metadata_start = pd.Timestamp(year=2023, month=1, day=1, tz=pytz.UTC)
+        metadata_end = pd.Timestamp(year=2023, month=12, day=31, tz=pytz.UTC)
         self.api.get_temporal_extent = MagicMock(
             return_value=(metadata_start, metadata_end)
         )
-        requested_start = datetime(2023, 6, 1)
-        requested_end = datetime(2023, 6, 30)
+        requested_start = pd.Timestamp(year=2023, month=6, day=1)
+        requested_end = pd.Timestamp(year=2023, month=6, day=30)
 
         result = trim_date_range(
             self.api, "test-uuid", "test-key", requested_start, requested_end
@@ -529,16 +878,14 @@ class TestDateTimeUtils(unittest.TestCase):
 
     def test_timezone_stripped_requested(self):
         """Test when requested dates have timezone info (should be preserved in logic but naive in output)."""
-        from datetime import timezone
-
-        metadata_start = datetime(2023, 1, 1)
-        metadata_end = datetime(2023, 12, 31)
+        metadata_start = pd.Timestamp(year=2023, month=1, day=1)
+        metadata_end = pd.Timestamp(year=2023, month=12, day=31)
         self.api.get_temporal_extent = MagicMock(
             return_value=(metadata_start, metadata_end)
         )
 
-        requested_start = datetime(2023, 6, 1, tzinfo=timezone.utc)
-        requested_end = datetime(2023, 6, 30, tzinfo=timezone.utc)
+        requested_start = pd.Timestamp(year=2023, month=6, day=1, tz=pytz.UTC)
+        requested_end = pd.Timestamp(year=2023, month=6, day=30, tz=pytz.UTC)
 
         result = trim_date_range(
             self.api, "test-uuid", "test-key", requested_start, requested_end
@@ -548,8 +895,8 @@ class TestDateTimeUtils(unittest.TestCase):
         requested_end_naive = requested_end.replace(tzinfo=None)
 
         self.assertEqual(result, (requested_start_naive, requested_end_naive))
-        self.assertIsNone(result[0].tzinfo)
-        self.assertIsNone(result[1].tzinfo)
+        self.assertIsNone(result[0].tz)
+        self.assertIsNone(result[1].tz)
         self.api.get_temporal_extent.assert_called_with(
             uuid="test-uuid", key="test-key"
         )
@@ -575,8 +922,20 @@ class TestDateTimeUtils(unittest.TestCase):
     def test_get_boundary_of_year_month(self):
         """Test the boundary of a year-month string."""
         year_month_str = "2023-10"
-        expected_start = datetime(2023, 10, 1, 0, 0, 0)
-        expected_end = datetime(2023, 10, 31, 23, 59, 59)
+        expected_start = pd.Timestamp(
+            year=2023, month=10, day=1, hour=0, minute=0, second=0, tz=pytz.UTC
+        )
+        expected_end = pd.Timestamp(
+            year=2023,
+            month=10,
+            day=31,
+            hour=23,
+            minute=59,
+            second=59,
+            microsecond=999999,
+            nanosecond=999,
+            tz=pytz.UTC,
+        )
 
         start_date, end_date = get_boundary_of_year_month(year_month_str)
 
@@ -584,8 +943,20 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(end_date, expected_end)
 
         year_month_str2 = "02-2023"
-        expected_start2 = datetime(2023, 2, 1, 0, 0, 0)
-        expected_end2 = datetime(2023, 2, 28, 23, 59, 59)
+        expected_start2 = pd.Timestamp(
+            year=2023, month=2, day=1, hour=0, minute=0, second=0, tz=pytz.UTC
+        )
+        expected_end2 = pd.Timestamp(
+            year=2023,
+            month=2,
+            day=28,
+            hour=23,
+            minute=59,
+            second=59,
+            microsecond=999999,
+            nanosecond=999,
+            tz=pytz.UTC,
+        )
 
         start_date2, end_date2 = get_boundary_of_year_month(year_month_str2)
         self.assertEqual(start_date2, expected_start2)
@@ -640,30 +1011,34 @@ class TestDateTimeUtils(unittest.TestCase):
 
     def test_datetime_without_timezone(self):
         # Test case: datetime without timezone should be assigned UTC
-        dt = datetime(2025, 6, 12, 8, 34)
+        dt = pd.Timestamp(year=2025, month=6, day=12, hour=8, minute=34)
         result = ensure_timezone(dt)
         self.assertEqual(result.tzinfo, pytz.UTC)
         self.assertEqual(result, datetime(2025, 6, 12, 8, 34, tzinfo=pytz.UTC))
 
     def test_datetime_with_timezone(self):
         # Test case: datetime with timezone should remain unchanged
-        tz = pytz.timezone("US/Pacific")
-        dt = datetime(2025, 6, 12, 8, 34, tzinfo=tz)
+        dt = pd.Timestamp(
+            year=2025, month=6, day=12, hour=8, minute=34, tz="US/Pacific"
+        )
         result = ensure_timezone(dt)
-        self.assertEqual(result.tzinfo, tz)
+        self.assertEqual(result.tzname(), "PDT")
         self.assertEqual(result, dt)
 
     def test_datetime_with_different_timezone(self):
         # Test case: datetime with non-UTC timezone should remain unchanged
-        tz = pytz.timezone("Asia/Tokyo")
-        dt = datetime(2025, 6, 12, 8, 34, tzinfo=tz)
+        dt = pd.Timestamp(
+            year=2025, month=6, day=12, hour=8, minute=34, tz="Asia/Tokyo"
+        )
         result = ensure_timezone(dt)
-        self.assertEqual(result.tzinfo, tz)
+        self.assertEqual(result.tzname(), "JST")
         self.assertEqual(result, dt)
 
     def test_datetime_preservation(self):
         # Test case: ensure original datetime components are preserved
-        dt = datetime(2025, 6, 12, 8, 34, 56, 123456)
+        dt = pd.Timestamp(
+            year=2025, month=6, day=12, hour=8, minute=34, second=56, microsecond=123456
+        )
         result = ensure_timezone(dt)
         self.assertEqual(result.year, 2025)
         self.assertEqual(result.month, 6)
@@ -673,3 +1048,32 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(result.second, 56)
         self.assertEqual(result.microsecond, 123456)
         self.assertEqual(result.tzinfo, pytz.UTC)
+
+    def test_split_date_range(self):
+        date_ranges = split_date_range(
+            pd.Timestamp("2010-02-01"), pd.Timestamp("2011-04-30"), 3
+        )
+        expected_result = {
+            0: [
+                "2010-02-01 00:00:00.000000000",
+                "2010-04-30 23:59:59.999999999",
+            ],
+            1: [
+                "2010-05-01 00:00:00.000000000",
+                "2010-07-31 23:59:59.999999999",
+            ],
+            2: [
+                "2010-08-01 00:00:00.000000000",
+                "2010-10-31 23:59:59.999999999",
+            ],
+            3: [
+                "2010-11-01 00:00:00.000000000",
+                "2011-01-31 23:59:59.999999999",
+            ],
+            4: [
+                "2011-02-01 00:00:00.000000000",
+                "2011-04-30 00:00:00.000000000",
+            ],
+        }
+        self.assertEqual(len(date_ranges), 5)
+        self.assertEqual(date_ranges, expected_result)

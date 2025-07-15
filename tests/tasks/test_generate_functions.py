@@ -1,16 +1,15 @@
-from datetime import datetime
-from unittest.mock import patch, MagicMock
-
+import pytz
+import pandas as pd
 import pytest
 
+from unittest.mock import patch, MagicMock
 from data_access_service.tasks.generate_csv_file import (
     trim_date_range,
     query_data,
-    generate_zip_name,
 )
 
 
-class TestGenerateCSVFile:
+class TestGenerateFunctions:
 
     @pytest.fixture
     def mock_api(self):
@@ -22,33 +21,33 @@ class TestGenerateCSVFile:
 
     def test_trim_date_range_within_bounds(self, mock_api):
         mock_api.get_temporal_extent.return_value = [
-            datetime(2020, 1, 1),
-            datetime(2022, 12, 31),
+            pd.Timestamp(year=2020, month=1, day=1, tz=pytz.UTC),
+            pd.Timestamp(year=2022, month=12, day=31, tz=pytz.UTC),
         ]
         start_date, end_date = trim_date_range(
             api=mock_api,
             uuid="test-uuid",
             key="test-key",
-            requested_start_date=datetime(2021, 1, 1),
-            requested_end_date=datetime(2021, 12, 31),
+            requested_start_date=pd.Timestamp(year=2021, month=1, day=1),
+            requested_end_date=pd.Timestamp(year=2021, month=12, day=31),
         )
-        assert start_date == datetime(2021, 1, 1)
-        assert end_date == datetime(2021, 12, 31)
+        assert start_date == pd.Timestamp(year=2021, month=1, day=1)
+        assert end_date == pd.Timestamp(year=2021, month=12, day=31)
 
     def test_trim_date_range_out_of_bounds(self, mock_api):
         mock_api.get_temporal_extent.return_value = [
-            datetime(2020, 1, 1),
-            datetime(2022, 12, 31),
+            pd.Timestamp(year=2020, month=1, day=1, tz=pytz.UTC),
+            pd.Timestamp(year=2022, month=12, day=31, tz=pytz.UTC),
         ]
         start_date, end_date = trim_date_range(
             api=mock_api,
             uuid="test-uuid",
             key="test-key",
-            requested_start_date=datetime(2019, 1, 1),
-            requested_end_date=datetime(2023, 1, 1),
+            requested_start_date=pd.Timestamp(year=2019, month=1, day=1),
+            requested_end_date=pd.Timestamp(year=2023, month=1, day=1),
         )
-        assert start_date == datetime(2020, 1, 1)
-        assert end_date == datetime(2022, 12, 31)
+        assert start_date == pd.Timestamp(year=2020, month=1, day=1)
+        assert end_date == pd.Timestamp(year=2022, month=12, day=31)
 
     @patch("data_access_service.tasks.generate_csv_file.API")
     def test_query_data_no_data(self, mock_api):
@@ -57,8 +56,8 @@ class TestGenerateCSVFile:
             api=mock_api,
             uuid="test-uuid",
             key="test-key",
-            start_date=datetime(2021, 1, 1),
-            end_date=datetime(2021, 12, 31),
+            start_date=pd.Timestamp(year=2021, month=1, day=1),
+            end_date=pd.Timestamp(year=2021, month=12, day=31),
             min_lat=-10,
             max_lat=10,
             min_lon=-20,
@@ -73,18 +72,11 @@ class TestGenerateCSVFile:
             api=mock_api,
             uuid="test-uuid",
             key="test-key",
-            start_date=datetime(2021, 1, 1),
-            end_date=datetime(2021, 12, 31),
+            start_date=pd.Timestamp(year=2021, month=1, day=1),
+            end_date=pd.Timestamp(year=2021, month=12, day=31),
             min_lat=-10,
             max_lat=10,
             min_lon=-20,
             max_lon=20,
         )
         assert result is not None
-
-    def test_generate_zip_name(self):
-        uuid = "test-uuid"
-        start_date = datetime(2021, 1, 1)
-        end_date = datetime(2021, 12, 31)
-        zip_name = generate_zip_name(uuid, start_date, end_date)
-        assert zip_name == "test-uuid_2021-01-01_2021-12-31"

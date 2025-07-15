@@ -1,11 +1,13 @@
 import logging
-from pathlib import Path
-
 import yaml
 import boto3
 import os
 import tempfile
+
+from threading import Lock
+from pathlib import Path
 from enum import Enum
+from botocore.client import BaseClient
 from dotenv import load_dotenv
 
 
@@ -22,10 +24,16 @@ class Config:
     LOGLEVEL = logging.DEBUG
     BASE_URL = "/api/v1/das"
 
+    # Singleton storage and lock
+    _instances = {}  # Dictionary to store single instances per EnvType
+    _lock = Lock()  # Thread-safe lock for singleton initialization
+
     def __init__(self):
         load_dotenv()
         self.config = None
-        self.s3 = boto3.client("s3")
+        self.s3 = None
+        self.ses = None
+        self.batch = None
 
     @staticmethod
     def load_config(file_path: str):
@@ -42,28 +50,35 @@ class Config:
 
         print(f"Env profile is : {profile}")
 
-        match profile:
-            case EnvType.PRODUCTION:
-                return ProdConfig()
-
-            case EnvType.EDGE:
-                return EdgeConfig()
-
-            case EnvType.STAGING:
-                return StagingConfig()
-
-            case EnvType.TESTING:
-                return IntTestConfig()
-
-            case _:
-                return DevConfig()
+        # Use lock to ensure thread-safe singleton instantiation
+        with Config._lock:
+            # Check if instance exists for the given profile
+            if profile not in Config._instances:
+                match profile:
+                    case EnvType.PRODUCTION:
+                        Config._instances[profile] = ProdConfig()
+                    case EnvType.EDGE:
+                        Config._instances[profile] = EdgeConfig()
+                    case EnvType.STAGING:
+                        Config._instances[profile] = StagingConfig()
+                    case EnvType.TESTING:
+                        Config._instances[profile] = IntTestConfig()
+                    case _:
+                        Config._instances[profile] = DevConfig()
+            return Config._instances[profile]
 
     @staticmethod
     def get_temp_folder(job_id: str) -> str:
-        return tempfile.mkdtemp(prefix=job_id)
+        return tempfile.mkdtemp(suffix=job_id)
 
-    def get_s3_client(self):
+    def get_s3_client(self) -> BaseClient:
         return self.s3
+
+    def get_ses_client(self) -> BaseClient:
+        return self.ses
+
+    def get_batch_client(self) -> BaseClient:
+        return self.batch
 
     def get_csv_bucket_name(self):
         return (
@@ -121,20 +136,41 @@ class IntTestConfig(Config):
     def set_s3_client(self, s3_client):
         self.s3 = s3_client
 
+    def set_ses_client(self, ses_client):
+        self.ses = ses_client
+
     def get_api_key(self):
         return "testing"
+
+    @staticmethod
+    def get_s3_test_key():
+        return "test"
+
+    @staticmethod
+    def get_s3_secret():
+        return "test"
+
+    @staticmethod
+    def get_temp_folder(job_id: str) -> str:
+        return f"/tmp/tmp{job_id}"
 
 
 class DevConfig(Config):
     def __init__(self):
         super().__init__()
         self.config = Config.load_config("data_access_service/config/config-dev.yaml")
+        self.batch = boto3.client("batch")
+        self.s3 = boto3.client("s3")
+        self.ses = boto3.client("ses")
 
 
 class EdgeConfig(Config):
     def __init__(self):
         super().__init__()
         self.config = Config.load_config("data_access_service/config/config-edge.yaml")
+        self.batch = boto3.client("batch")
+        self.s3 = boto3.client("s3")
+        self.ses = boto3.client("ses")
 
 
 class StagingConfig(Config):
@@ -146,6 +182,9 @@ class StagingConfig(Config):
         self.config = Config.load_config(
             "data_access_service/config/config-staging.yaml"
         )
+        self.batch = boto3.client("batch")
+        self.s3 = boto3.client("s3")
+        self.ses = boto3.client("ses")
 
 
 class ProdConfig(Config):
@@ -155,3 +194,6 @@ class ProdConfig(Config):
     def __init__(self):
         super().__init__()
         self.config = Config.load_config("data_access_service/config/config-prod.yaml")
+        self.batch = boto3.client("batch")
+        self.s3 = boto3.client("s3")
+        self.ses = boto3.client("ses")
