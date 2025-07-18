@@ -59,28 +59,24 @@ def convert_non_numeric_to_str(df: DataFrame) -> DataFrame:
     return df.map(convert_value)
 
 
-# # Function to generate JSON lines from Dask DataFrame
-# def _generate_json_array(dask_instance, compress: bool = False):
-#
-#     async def get_records():
-#         for partition in dask_instance.to_delayed():
-#             partition_df = convert_non_numeric_to_str(partition.compute())
-#             for record in partition_df.to_dict(orient="records"):
-#                 yield record
-#
-#     return _async_response_json(get_records(), compress)
+def lazy_to_records_fast(df):
+    for row in df.itertuples(index=False):
+        yield row._asdict()  # Returns an OrderedDict; use dict(row._asdict()) if plain dict needed
 
 
 # Use to remap the field name back to column that we pass it, the raw data itself may name the field differently
 # for different dataset
 def _generate_partial_json_array(
-    filtered: dd.DataFrame, partition_size: int
+    filtered: dd.DataFrame, partition_size: int | None
 ) -> Generator[dict, None, None]:
 
     if filtered is None:
         return
 
-    ddf = filtered.repartition(npartitions=partition_size)
+    if partition_size is not None:
+        ddf = filtered.repartition(npartitions=partition_size)
+    else:
+        ddf = filtered
 
     for partition in ddf.to_delayed():
         partition_df = convert_non_numeric_to_str(partition.compute())
@@ -89,7 +85,7 @@ def _generate_partial_json_array(
         # will become null for None value
         partition_df = partition_df.replace({numpy.nan: None})
 
-        for record in partition_df.to_dict(orient="records"):
+        for record in lazy_to_records_fast(partition_df):
             filtered_record = {}
             # Time field is special, there is no standard name and appear diff in raw data,
             # here we unify it and call it time
@@ -336,7 +332,7 @@ async def _fetch_data(
             # TODO: This is not enough, with multiple dimension, we can have a very
             # small value for first item, but the other dim can be big, so we
             # do not have a small enough partition
-            count = result.sizes[list(result.sizes.keys())[0]]
+            count = None
             result = api_instance.zarr_to_dask_dataframe(
                 result,
                 api_instance.map_column_names(
@@ -367,7 +363,7 @@ async def _fetch_data(
         logger.info("Memory usage: %s", get_memory_usage_percentage())
 
         for record in _generate_partial_json_array(
-            filtered, count // RECORD_PER_PARTITION + 1
+            filtered, None if count is None else count // RECORD_PER_PARTITION + 1
         ):
             yield record
 

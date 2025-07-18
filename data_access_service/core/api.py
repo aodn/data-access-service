@@ -137,32 +137,38 @@ class BaseAPI:
     def zarr_to_dask_dataframe(
         dataset: xarray.Dataset,
         columns: Optional[List[str]] = None,
-        chunks: Optional[dict] = None,
+        chunks: Optional[Dict[str, int]] = None,
+        target_chunk_size_mb: float = 200.0,
     ) -> ddf.DataFrame | None:
         """
-        This function is useful when you want to convert a xarray to a dask dataframe
-        with selected columns and partition it, all operation will not load any data and
-        therefore it should be good to handle large dataset
+        Convert an xarray Dataset to a Dask DataFrame with selected columns and adaptive chunking.
+
+        This function handles large datasets efficiently by applying dynamic chunking based on
+        the dimensions associated with the selected columns and automatically determining the
+        number of partitions for the Dask DataFrame. Memory usage is kept within a target range
+        (default: 200 MB per chunk). It works for any dataset with one or more dimensions in the
+        selected columns, considering only the relevant dimensions for chunking and partitioning.
+        All operations are lazy to avoid loading data into memory.
 
         Args:
             dataset: xarray.Dataset, potentially Zarr-backed.
             columns: List of variable names to select (default: all variables).
+            chunks: Dictionary specifying chunk sizes for dimensions (e.g., {'dim1': 100}).
+                    If None, chunk sizes are calculated automatically for dimensions in selected columns.
+            target_chunk_size_mb: Target size for chunks in MB (default: 200 MB).
 
         Returns:
-            pandas.DataFrame: DataFrame containing the specified columns.
+            dask.dataframe.DataFrame: DataFrame containing the specified columns, or None if dataset is empty.
 
         Raises:
             RuntimeError: If the dataset is not initialized.
-            KeyError: If requested columns are not found.
+            KeyError: If requested columns are not found in the dataset.
         """
         # Check if dataset is initialized
         if dataset is None:
             raise RuntimeError("Dataset not initialized")
 
-        # Short circuit here, it is much memory efficient to check size before
-        # convert it to dask. After convert to dask, if you want to check size
-        # it force data load and in most case takes all memory can result in
-        # MemoryError exception
+        # Check if dataset is empty
         if not dataset.sizes or any(size == 0 for size in dataset.sizes.values()):
             return None
 
@@ -174,35 +180,81 @@ class BaseAPI:
 
         # Validate requested columns
         if not all(col in available_columns for col in columns):
-            raise KeyError(f"Some columns {columns} not found in {available_columns}")
+            missing_cols = [col for col in columns if col not in available_columns]
+            raise KeyError(f"Columns {missing_cols} not found in {available_columns}")
 
-        # Create a new Dataset with selected variables and promote coordinates if needed
-        selected_data = {}
-        for col in columns:
-            if col in dataset.variables:
-                selected_data[col] = dataset[col]
-
-        # Select specified variables (returns a new Dataset)
+        # Create a new Dataset with selected variables
+        selected_data = {col: dataset[col] for col in columns}
         filtered_dataset = xarray.Dataset(selected_data)
 
-        # Apply chunking if specified, otherwise use existing chunks or auto-chunk,
-        # only chunk the field we need
-        if chunks is not None:
-            filtered_dataset = filtered_dataset.chunk(chunks)
-        elif not dataset.chunks:
-            #    # filtered_dataset = filtered_dataset.chunk(API._calculate_chunk_sizes(filtered_dataset.sizes))
-            filtered_dataset = filtered_dataset.chunk("auto")
+        # Get dimensions associated with selected columns
+        relevant_dims = set()
+        for col in columns:
+            relevant_dims.update(dataset[col].dims)
+        relevant_dims = list(relevant_dims)
+
+        # Get sizes of relevant dimensions
+        dim_sizes = {dim: filtered_dataset.sizes.get(dim, 1) for dim in relevant_dims}
+
+        # Apply chunking
+        if chunks is None:
+            # Estimate total size in bytes for selected data
+            total_size_bytes = filtered_dataset.nbytes
+            bytes_per_element = 8  # Assume float64 for estimation
+            target_chunk_size_bytes = target_chunk_size_mb * 1e6
+            target_elements = target_chunk_size_bytes // bytes_per_element
+
+            # Calculate total elements
+            total_elements = 1
+            for size in dim_sizes.values():
+                total_elements *= size
+
+            # Calculate chunk sizes for relevant dimensions
+            chunk_sizes = {}
+            elements_per_chunk = min(target_elements, total_elements)
+            if relevant_dims:
+                # Distribute elements roughly evenly across relevant dimensions
+                elements_per_dim = max(
+                    1, int(elements_per_chunk ** (1 / len(relevant_dims)))
+                )
+                for dim in relevant_dims:
+                    chunk_sizes[dim] = min(dim_sizes[dim], elements_per_dim)
+            else:
+                # Handle case where no dimensions are associated with selected columns
+                chunk_sizes = {}
+        else:
+            # Apply user-specified chunks, but only for relevant dimensions
+            chunk_sizes = {
+                dim: size for dim, size in chunks.items() if dim in relevant_dims
+            }
+
+        filtered_dataset = filtered_dataset.chunk(chunk_sizes)
+
+        # Estimate number of partitions based on chunking
+        if relevant_dims:
+            # Use the number of chunks along the first relevant dimension as a proxy
+            first_dim = relevant_dims[0]
+            dim_size = dim_sizes[first_dim]
+            chunk_size = chunk_sizes.get(first_dim, dim_size)
+            partition_size = max(1, dim_size // chunk_size)
+        else:
+            # For scalar variables, use a single partition
+            partition_size = 1
 
         # Convert to Dask DataFrame
         df = filtered_dataset.to_dask_dataframe()
 
-        # Reset index only if necessary (e.g., to include coordinates as columns)
-        # Note: This can be memory-intensive, so use sparingly
+        # Reset index if coordinates are dimensions (to include them as columns)
         if any(dim in filtered_dataset.coords for dim in filtered_dataset.dims):
             df = df.reset_index()
 
         # Filter to requested columns
         df = df[columns]
+
+        # Repartition the DataFrame to the estimated number of partitions
+        # To cope with very restrict env, multiple partition by 2 to lower the memory
+        if df.npartitions != partition_size:
+            df = df.repartition(npartitions=partition_size * 2)
 
         return df
 
