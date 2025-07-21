@@ -1,5 +1,6 @@
 import json
 import time
+from asyncio import CancelledError
 from typing import AsyncGenerator, Callable, Generator, Any
 
 from fastapi.responses import StreamingResponse
@@ -91,6 +92,9 @@ async def sse_wrapper(
                         },
                         "result",
                     )
+
+        except CancelledError as ge:
+            raise
 
         except Exception as e:
             yield format_sse({"status": "error", "message": str(e)}, "error")

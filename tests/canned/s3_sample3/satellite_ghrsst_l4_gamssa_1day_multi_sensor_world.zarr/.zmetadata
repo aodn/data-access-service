@@ -1,0 +1,360 @@
+{
+    "metadata": {
+        ".zattrs": {
+            "Conventions": "CF-1.6, ACDD-1.3, ISO 8601",
+            "Metadata_Link": "https://podaac.jpl.nasa.gov/ws/metadata/dataset/?format=iso&shortName=GAMSSA_28km-ABOM-L4-GLOB-v01",
+            "acknowledgment": "Any use of these data requires the following acknowledgment: Experimental near real-time sea surface temperature analysis produced by the Australian Bureau of Meteorology and provided in GHRSST GDS2.0 format as a contribution to the Integrated Marine Observing System \udce2\udc80\udc93 IMOS is a national collaborative research infrastructure, supported by the Australian Government.",
+            "cdm_data_type": "Grid",
+            "comment": "This is a Bureau of Meteorology experimental research product originally developed for the BLUElink> Ocean Forecasting Australia Project. WARNING: some applications are unable to properly handle signed byte values. If byte values >127 are encountered, subtract 256 from this reported value.",
+            "contributor_name": "Helen Beggs",
+            "contributor_role": "IMOS PI",
+            "creator_email": "ghrsst@bom.gov.au",
+            "creator_institution": "Australian Bureau of Meteorology",
+            "creator_name": "Australian Bureau of Meteorology",
+            "creator_type": "Institution",
+            "creator_url": "http://www.bom.gov.au",
+            "date_issued": "20250717T120000Z",
+            "date_metadata_modified": "20250717T120000Z",
+            "date_modified": "20250717T120000Z",
+            "easternmost_longitude": 179.875,
+            "file_quality_level": 3,
+            "gds_version_id": "2.0r5",
+            "geospatial_bounds": "POLYGON(-89.875 179.875, 89.875 179.875, 89.875 -179.875, -89.875 -179.875,-89.875 179.875)",
+            "geospatial_bounds_crs": "EPSG:4326",
+            "geospatial_lat_max": 89.875,
+            "geospatial_lat_min": -89.875,
+            "geospatial_lat_resolution": 0.25,
+            "geospatial_lat_units": "degrees_north",
+            "geospatial_lon_max": 179.875,
+            "geospatial_lon_min": -179.875,
+            "geospatial_lon_resolution": 0.25,
+            "geospatial_lon_units": "degrees_east",
+            "history": "Modified format and attributes of 20250716-ABOM-L4LRfnd-GLOB-v01-fv01.nc using file_convert_GAMSSA,version 1.0 to match the GDS2.0 rev 5 specification",
+            "id": "GAMSSA_28km-ABOM-L4-GLOB-v01",
+            "institution": "ABOM",
+            "keywords": "Oceans > Ocean Temperature > Sea Surface Temperature",
+            "keywords_vocabulary": "NASA Global Change Master Directory (GCMD) Science Keywords",
+            "license": "GHRSST protocol describes data use as free and open",
+            "metadata_uuid": "2d496463-600c-465a-84a1-8a4ab76bd505",
+            "naming_authority": "org.ghrsst",
+            "netcdf_version_id": "4.3",
+            "northernmost_latitude": 89.875,
+            "platform": "GCOM-W,MetOpB,N20,NPP",
+            "platform_vocabulary": "GHRSST Data Specification (GDS)2.0, https://www.ghrsst.org/documents/q/category/gds-documents/operational/",
+            "processing_level": "L4",
+            "product_version": "1.0",
+            "program": "IMOS",
+            "project": "Integrated Marine Observing System",
+            "publisher_email": "ghrsst@bom.gov.au",
+            "publisher_institution": "Australian Bureau of Meteorology",
+            "publisher_name": "Australian Bureau of Meteorology",
+            "publisher_type": "Institution",
+            "publisher_url": "http://www.bom.gov.au",
+            "references": "Zhong, Aihong and Helen Beggs (2008) Analysis and Prediction Operations Bulletin No. 77 - Operational Implementation of Global Australian Multi-Sensor Sea Surface Temperature Analysis, Web Document, 2 October 2008.  http://www.bom.gov.au/australia/charts/bulletins/apob77.pdf.  Algorithms and method described in: Beggs H., A. Zhong, G. Warren, O. Alves, G. Brassington and T. Pugh (2011)  RAMSSA  An Operational, High-Resolution, Multi-Sensor Sea Surface Temperature Analysis over the Australian Region, Australian Meteorological and Oceanographic Journal, 61, 1-22.  http://www.bom.gov.au/jshess/papers.php?year=2011",
+            "sensor": "AMSR2,AVHRR_GAC,VIIRS",
+            "source": "AMSR2-JAXA,AVHRRMTB_G-NAVO,AVHRR_METOPC_G-NAVO,VIIRS_NPP_OSPO,VIIRS_N20_OSPO,IN_SITU-GTS_BUOYS,IN_SITU-GTS_SHIP,ACCESS-G-WSP, NCEP-ICE",
+            "southernmost_latitude": -89.875,
+            "spatial_resolution": "1/4 degree",
+            "standard_name_vocabulary": "NetCDF Climate and Forecast (CF) Metadata Convention",
+            "start_time": "20250716T000000Z",
+            "stop_time": "20250717T000000Z",
+            "summary": "AMSR2-JAXA nobs=582591 obsesd: avg=0.697 min=0.700 max= 0.700, AVHRRMTB_G-NAVO nobs=149450 obsesd: avg=0.550 min=0.550 max= 0.550, AVHRR_METOPC_G-NAVO nobs=146872 obsesd: avg=0.550 min=0.550 max= 0.550, VIIRS_NPP_OSPO nobs= 64396 obsesd: avg=0.400 min=0.400 max= 0.400, VIIRS_N20_OSPO nobs= 68702 obsesd: avg=0.380 min=0.380 max= 0.380, IN_SITU-GTS_BUOYS nobs= 31106 obsesd: avg=0.400 min=0.400 max= 0.400, IN_SITU-GTS_SHIP nobs= 15426 obsesd: avg=1.200 min=1.200 max= 1.200, Univariate Statistical Interpolation Package, SIANAL v13, background correlation length scale = 80 km, observation correlation length scale = 20 km, observation correlation time scale = 0.5 days",
+            "time_coverage_duration": "P1D",
+            "time_coverage_end": "20250717T000000Z",
+            "time_coverage_resolution": "P1D",
+            "time_coverage_start": "20250716T000000Z",
+            "title": "FILL UP MANUALLY - CHECK DOCUMENTATION",
+            "uuid": "7ba15c4d-65d3-4d28-8307-b928e18b6a8a",
+            "westernmost_longitude": -179.875
+        },
+        ".zgroup": {
+            "zarr_format": 2
+        },
+        "analysed_sst/.zarray": {
+            "chunks": [
+                3,
+                360,
+                720
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                62,
+                720,
+                1440
+            ],
+            "zarr_format": 2
+        },
+        "analysed_sst/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "lat",
+                "lon"
+            ],
+            "comment": "Optimally interpolated analysis of SST observations.",
+            "coverage_content_type": "physicalMeasurement",
+            "grid_mapping": "crs",
+            "long_name": "analysed sea surface temperature",
+            "source": "ATS_MET_2P-ESA,AMSRE-REMSS,AVHRR17_G-NAVO,AVHRR18_G-NAVO,AVHRRMTA_G-NAVO,IN_SITU-GTS_BUOYS,IN_SITU-GTS_SHIP,GASP-WSP, NCEP-ICE",
+            "standard_name": "sea_surface_foundation_temperature",
+            "units": "kelvin",
+            "valid_max": 4500,
+            "valid_min": -300
+        },
+        "analysis_error/.zarray": {
+            "chunks": [
+                3,
+                360,
+                720
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                62,
+                720,
+                1440
+            ],
+            "zarr_format": 2
+        },
+        "analysis_error/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "lat",
+                "lon"
+            ],
+            "comment": "Calculated as analysis field error in OI analysis system and a function of the age and estimated standard deviation of all observations used to form analysed_sst value. See Beggs et al (2011) in http://www.bom.gov.au/jshess/papers.php?year=2011.",
+            "coverage_content_type": "auxiliaryInformation",
+            "grid_mapping": "crs",
+            "long_name": "estimated error standard deviation of analysed_sst",
+            "units": "kelvin",
+            "valid_max": 32765,
+            "valid_min": 0
+        },
+        "filename/.zarray": {
+            "chunks": [
+                3
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<U70",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                62
+            ],
+            "zarr_format": 2
+        },
+        "filename/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time"
+            ]
+        },
+        "lat/.zarray": {
+            "chunks": [
+                720
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": 9.969209968386869e+36,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                720
+            ],
+            "zarr_format": 2
+        },
+        "lat/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "lat"
+            ],
+            "axis": "Y",
+            "comment": "Latitudes for locating data",
+            "coverage_content_type": "coordinate",
+            "long_name": "latitude",
+            "standard_name": "latitude",
+            "units": "degrees_north",
+            "valid_max": 90.0,
+            "valid_min": -90.0
+        },
+        "lon/.zarray": {
+            "chunks": [
+                1440
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": 9.969209968386869e+36,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1440
+            ],
+            "zarr_format": 2
+        },
+        "lon/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "lon"
+            ],
+            "axis": "X",
+            "comment": "Longitudes for locating data",
+            "coverage_content_type": "coordinate",
+            "long_name": "longitude",
+            "standard_name": "longitude",
+            "units": "degrees_east",
+            "valid_max": 180.0,
+            "valid_min": -180.0
+        },
+        "mask/.zarray": {
+            "chunks": [
+                3,
+                360,
+                720
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                62,
+                720,
+                1440
+            ],
+            "zarr_format": 2
+        },
+        "mask/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "lat",
+                "lon"
+            ],
+            "comment": "b0: 1 = grid cell is open sea water, b1: 1 = land is present in this grid cell, b2: 1 = lake surface is present in this grid cell, b3: 1 = sea ice is present in this grid cell, b4-b7: reserved for future grid mask data",
+            "flag_masks": [
+                1,
+                2,
+                4,
+                8
+            ],
+            "flag_meanings": "water land optional_lake_surface sea-ice",
+            "grid_mapping": "crs",
+            "long_name": "sea/land/lake/ice field composite mask",
+            "source": "Bureau of Meteorology's legacy 1/12 degree resolution topography (glbtopog) file.",
+            "valid_max": 8,
+            "valid_min": 1
+        },
+        "sea_ice_fraction/.zarray": {
+            "chunks": [
+                3,
+                360,
+                720
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                62,
+                720,
+                1440
+            ],
+            "zarr_format": 2
+        },
+        "sea_ice_fraction/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "lat",
+                "lon"
+            ],
+            "comment": "Fractional sea ice cover from NCEP-ICE product (Grumbine, 1996) .",
+            "coverage_content_type": "auxiliaryInformation",
+            "grid_mapping": "crs",
+            "long_name": "sea ice area fraction",
+            "source": "SSMI-NCEP-Analysis-ICE-5min",
+            "standard_name": "sea_ice_area_fraction",
+            "units": "1",
+            "valid_max": 100,
+            "valid_min": 0
+        },
+        "time/.zarray": {
+            "chunks": [
+                300
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<i4",
+            "fill_value": -2147483647,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                62
+            ],
+            "zarr_format": 2
+        },
+        "time/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time"
+            ],
+            "axis": "T",
+            "calendar": "Standard",
+            "comment": "Nominal time because observations are from different sources and are made at different times of the day",
+            "coverage_content_type": "coordinate",
+            "long_name": "reference time of SST field",
+            "standard_name": "time",
+            "units": "seconds since 1981-01-01"
+        }
+    },
+    "zarr_consolidated_format": 1
+}

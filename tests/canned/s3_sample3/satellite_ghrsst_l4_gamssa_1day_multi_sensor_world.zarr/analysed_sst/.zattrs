@@ -1,0 +1,16 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "time",
+        "lat",
+        "lon"
+    ],
+    "comment": "Optimally interpolated analysis of SST observations.",
+    "coverage_content_type": "physicalMeasurement",
+    "grid_mapping": "crs",
+    "long_name": "analysed sea surface temperature",
+    "source": "ATS_MET_2P-ESA,AMSRE-REMSS,AVHRR17_G-NAVO,AVHRR18_G-NAVO,AVHRRMTA_G-NAVO,IN_SITU-GTS_BUOYS,IN_SITU-GTS_SHIP,GASP-WSP, NCEP-ICE",
+    "standard_name": "sea_surface_foundation_temperature",
+    "units": "kelvin",
+    "valid_max": 4500,
+    "valid_min": -300
+}
