@@ -49,7 +49,7 @@ class TestGenerateFunctions:
         assert start_date == pd.Timestamp(year=2020, month=1, day=1)
         assert end_date == pd.Timestamp(year=2022, month=12, day=31)
 
-    @patch("data_access_service.tasks.generate_csv_file.API")
+    @patch("data_access_service.tasks.generate_dataset.API")
     def test_query_data_no_data(self, mock_api):
         mock_api.get_dataset_data.return_value = None
         result = query_data(
@@ -65,7 +65,7 @@ class TestGenerateFunctions:
         )
         assert result is None
 
-    @patch("data_access_service.tasks.generate_csv_file.API")
+    @patch("data_access_service.tasks.generate_dataset.API")
     def test_query_data_with_data(self, mock_api):
         mock_api.get_dataset_data.return_value = MagicMock(empty=False)
         result = query_data(
