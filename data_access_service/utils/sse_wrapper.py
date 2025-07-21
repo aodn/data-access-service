@@ -6,7 +6,7 @@ from typing import AsyncGenerator, Callable, Generator, Any
 from fastapi.responses import StreamingResponse
 from data_access_service.core.constants import STATUS, MESSAGE, DATA
 
-DEFAULT_CHUNK_SIZE: int = 10000
+DEFAULT_CHUNK_SIZE: int = 5000
 
 
 # Helper function to format SSE messages
@@ -43,8 +43,8 @@ async def sse_wrapper(
         # Processing interval for periodic messages
         processing_interval: float = 20.0  # Send processing message every 20 seconds
         chunk_size: int = (
-            DEFAULT_CHUNK_SIZE  # Number of records per chunk, matching split_list
-        )
+            DEFAULT_CHUNK_SIZE * 2
+        )  # Number of records consume before chunks
 
         try:
             # Send initial processing message
