@@ -13,8 +13,6 @@ import pandas as pd
 import dask.dataframe as dd
 
 from queue import Queue
-from functools import reduce
-from operator import mul
 from dask.dataframe import DataFrame
 
 from data_access_service import init_log
@@ -25,6 +23,11 @@ from data_access_service.core.constants import (
     COORDINATE_INDEX_PRECISION,
     DEPTH_INDEX_PRECISION,
     RECORD_PER_PARTITION,
+    STR_TIME,
+    STR_TIME_LOWER_CASE,
+    STR_LONGITUDE_LOWER_CASE,
+    STR_LATITUDE_LOWER_CASE,
+    STR_DEPTH_LOWER_CASE,
 )
 from data_access_service.core.error import ErrorResponse
 from data_access_service.config.config import Config
@@ -89,20 +92,24 @@ def _generate_partial_json_array(
             filtered_record = {}
             # Time field is special, there is no standard name and appear diff in raw data,
             # here we unify it and call it time
-            if "TIME" in record:
-                filtered_record["time"] = _reformat_date(record["TIME"])
-            elif "time" in record:
-                filtered_record["time"] = _reformat_date(record["time"])
+            #
+            # Use sys.intern to compress string usage to reduce memory
+            if STR_TIME in record:
+                filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(record[STR_TIME])
+            elif STR_TIME_LOWER_CASE in record:
+                filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
+                    record[STR_TIME_LOWER_CASE]
+                )
             elif "JULD" in record:
-                filtered_record["time"] = _reformat_date(record["JULD"])
+                filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(record["JULD"])
             elif "timestamp" in record:
-                filtered_record["time"] = _reformat_date(
+                filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
                     datetime.fromtimestamp(
                         record["timestamp"], tz=timezone.utc
                     ).strftime(DATE_FORMAT)
                 )
             elif "detection_timestamp" in record:
-                filtered_record["time"] = _reformat_date(
+                filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
                     datetime.fromtimestamp(
                         record["detection_timestamp"], tz=timezone.utc
                     ).strftime(DATE_FORMAT)
@@ -110,45 +117,45 @@ def _generate_partial_json_array(
 
             #  may need to add more field here
             if "LONGITUDE" in record:
-                filtered_record["longitude"] = (
+                filtered_record[STR_LONGITUDE_LOWER_CASE] = (
                     round(record["LONGITUDE"], COORDINATE_INDEX_PRECISION)
                     if record["LONGITUDE"] is not None
                     else None
                 )
             elif "longitude" in record:
-                filtered_record["longitude"] = (
+                filtered_record[STR_LONGITUDE_LOWER_CASE] = (
                     round(record["longitude"], COORDINATE_INDEX_PRECISION)
                     if record["longitude"] is not None
                     else None
                 )
             elif "lon" in record:
-                filtered_record["longitude"] = (
+                filtered_record[STR_LONGITUDE_LOWER_CASE] = (
                     round(record["lon"], COORDINATE_INDEX_PRECISION)
                     if record["lon"] is not None
                     else None
                 )
 
             if "LATITUDE" in record:
-                filtered_record["latitude"] = (
+                filtered_record[STR_LATITUDE_LOWER_CASE] = (
                     round(record["LATITUDE"], COORDINATE_INDEX_PRECISION)
                     if record["LATITUDE"] is not None
                     else None
                 )
             elif "latitude" in record:
-                filtered_record["latitude"] = (
+                filtered_record[STR_LATITUDE_LOWER_CASE] = (
                     round(record["latitude"], COORDINATE_INDEX_PRECISION)
                     if record["latitude"] is not None
                     else None
                 )
             elif "lat" in record:
-                filtered_record["latitude"] = (
+                filtered_record[STR_LATITUDE_LOWER_CASE] = (
                     round(record["lat"], COORDINATE_INDEX_PRECISION)
                     if record["lat"] is not None
                     else None
                 )
 
             if "DEPTH" in record:
-                filtered_record["depth"] = (
+                filtered_record[STR_DEPTH_LOWER_CASE] = (
                     round(record["DEPTH"], DEPTH_INDEX_PRECISION)
                     if record["DEPTH"] is not None
                     else None

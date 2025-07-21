@@ -1,7 +1,4 @@
-from typing import Dict, Any
-
 import pytest
-import json
 
 from pathlib import Path
 from aodn_cloud_optimised.lib import DataQuery

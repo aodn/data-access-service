@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from unittest.mock import patch, MagicMock
-from data_access_service.tasks.generate_csv_file import (
+from data_access_service.tasks.generate_dataset import (
     trim_date_range,
     query_data,
 )

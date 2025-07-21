@@ -8,7 +8,7 @@ from data_access_service.core.AWSHelper import AWSHelper
 from aodn_cloud_optimised.lib import DataQuery
 from data_access_service import Config
 from data_access_service.tasks.data_collection import collect_data_files
-from data_access_service.tasks.generate_csv_file import (
+from data_access_service.tasks.generate_dataset import (
     process_data_files,
 )
 from tests.batch.batch_test_consts import INIT_JOB_ID
