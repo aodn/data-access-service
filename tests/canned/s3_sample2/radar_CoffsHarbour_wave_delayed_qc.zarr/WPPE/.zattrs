@@ -1,0 +1,14 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "TIME",
+        "LATITUDE",
+        "LONGITUDE"
+    ],
+    "ancillary_variables": "WPPE_quality_control",
+    "cell_methods": "TIME: mean",
+    "long_name": "sea_surface_wave_period_at_variance_spectral_density_maximum",
+    "standard_name": "sea_surface_wave_period_at_variance_spectral_density_maximum",
+    "units": "Second",
+    "valid_max": 100.0,
+    "valid_min": 0.0
+}
