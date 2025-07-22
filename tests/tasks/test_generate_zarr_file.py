@@ -161,3 +161,53 @@ class TestGenerateZarrFile(TestWithS3):
                 finally:
                     # Delete temp output folder as the name always same for testing
                     shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_zarr_to_netcdf_is_not_empty(
+        self,
+        aws_clients,
+        upload_test_case_to_s3,
+        mock_get_fs_token_paths,
+    ):
+        """
+        We hit a case where this dataset result in empty netcdf, we want to make sure it
+        does not happens
+        """
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        helper = AWSHelper()
+
+        with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
+            # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
+            with patch.object(AWSHelper, "send_email") as mock_send_email:
+                try:
+                    # Job 1, use different job id to avoid read same folder
+                    process_data_files(
+                        job_id_of_init="888",
+                        job_index="1",
+                        intermediate_output_folder=config.get_temp_folder("888"),
+                        uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
+                        keys=["radar_CoffsHarbour_wind_delayed_qc.zarr"],
+                        start_date=pd.Timestamp("2014-01-01 00:00:00"),
+                        end_date=pd.Timestamp("2014-11-10 23:59:59.999999999"),
+                        multi_polygon=None,
+                    )
+                    # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
+                    names = helper.list_s3_folders(
+                        config.get_csv_bucket_name(),
+                        f"{config.get_s3_temp_folder_name('888')}radar_CoffsHarbour_wind_delayed_qc.zarr",
+                    )
+                    assert "part-1.zarr" in names, "part-1.zarr not exit!"
+
+                    # This will aggregate to the same row count as above
+                    target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name('888')}radar_CoffsHarbour_wind_delayed_qc.zarr/part-*.zarr"
+                    data = helper.read_multipart_zarr_from_s3(target_path)
+                    assert (
+                        len(data["TIME"]) == 158902
+                    ), "file have enough data and same as single file"
+                except Exception as ex:
+                    # Should not land here
+                    assert False, f"{ex}"
+                finally:
+                    # Delete temp output folder as the name always same for testing
+                    shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
