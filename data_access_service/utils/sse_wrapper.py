@@ -1,8 +1,12 @@
 import json
 import time
+from asyncio import CancelledError
 from typing import AsyncGenerator, Callable, Generator, Any
 
 from fastapi.responses import StreamingResponse
+from data_access_service.core.constants import STATUS, MESSAGE, DATA
+
+DEFAULT_CHUNK_SIZE: int = 5000
 
 
 # Helper function to format SSE messages
@@ -10,7 +14,7 @@ def format_sse(data: dict, event: str = "message") -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-def split_list(lst, chunk_size=50000) -> Generator[Any, Any, None]:
+def split_list(lst, chunk_size=DEFAULT_CHUNK_SIZE) -> Generator[Any, Any, None]:
     """
     Split a list into chunks of specified size.
     :return: Generator to reduce memory usage.
@@ -38,12 +42,14 @@ async def sse_wrapper(
     async def sse_stream():
         # Processing interval for periodic messages
         processing_interval: float = 20.0  # Send processing message every 20 seconds
-        chunk_size: int = 50000  # Number of records per chunk, matching split_list
+        chunk_size: int = (
+            DEFAULT_CHUNK_SIZE * 2
+        )  # Number of records consume before chunks
 
         try:
             # Send initial processing message
             yield format_sse(
-                {"status": "processing", "message": "Processing your request..."},
+                {STATUS: "processing", MESSAGE: "Processing your request..."},
                 "processing",
             )
             start_time = time.time()
@@ -62,9 +68,9 @@ async def sse_wrapper(
                         chunk_count += 1
                         yield format_sse(
                             {
-                                "status": "completed",
-                                "message": f"chunk {chunk_count}",
-                                "data": small_chunk,
+                                STATUS: "completed",
+                                MESSAGE: f"chunk {chunk_count}",
+                                DATA: small_chunk,
                             },
                             "result",
                         )
@@ -73,7 +79,7 @@ async def sse_wrapper(
                 # Send periodic processing message
                 if time.time() - start_time >= processing_interval:
                     yield format_sse(
-                        {"status": "processing", "message": "Still processing..."},
+                        {STATUS: "processing", MESSAGE: "Still processing..."},
                         "processing",
                     )
                     start_time = time.time()
@@ -85,15 +91,18 @@ async def sse_wrapper(
                     chunk_count += 1
                     yield format_sse(
                         {
-                            "status": "completed",
-                            "message": f"chunk {chunk_count}/end",
-                            "data": small_chunk,
+                            STATUS: "completed",
+                            MESSAGE: f"chunk {chunk_count}/end",
+                            DATA: small_chunk,
                         },
                         "result",
                     )
 
+        except CancelledError as ge:
+            raise
+
         except Exception as e:
-            yield format_sse({"status": "error", "message": str(e)}, "error")
+            yield format_sse({STATUS: "error", MESSAGE: str(e)}, "error")
 
     return StreamingResponse(
         sse_stream(),

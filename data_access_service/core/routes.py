@@ -13,8 +13,6 @@ import pandas as pd
 import dask.dataframe as dd
 
 from queue import Queue
-from functools import reduce
-from operator import mul
 from dask.dataframe import DataFrame
 
 from data_access_service import init_log
@@ -25,6 +23,11 @@ from data_access_service.core.constants import (
     COORDINATE_INDEX_PRECISION,
     DEPTH_INDEX_PRECISION,
     RECORD_PER_PARTITION,
+    STR_TIME,
+    STR_TIME_LOWER_CASE,
+    STR_LONGITUDE_LOWER_CASE,
+    STR_LATITUDE_LOWER_CASE,
+    STR_DEPTH_LOWER_CASE,
 )
 from data_access_service.core.error import ErrorResponse
 from data_access_service.config.config import Config
@@ -59,28 +62,24 @@ def convert_non_numeric_to_str(df: DataFrame) -> DataFrame:
     return df.map(convert_value)
 
 
-# # Function to generate JSON lines from Dask DataFrame
-# def _generate_json_array(dask_instance, compress: bool = False):
-#
-#     async def get_records():
-#         for partition in dask_instance.to_delayed():
-#             partition_df = convert_non_numeric_to_str(partition.compute())
-#             for record in partition_df.to_dict(orient="records"):
-#                 yield record
-#
-#     return _async_response_json(get_records(), compress)
+def lazy_to_records_fast(df):
+    for row in df.itertuples(index=False):
+        yield row._asdict()  # Returns an OrderedDict; use dict(row._asdict()) if plain dict needed
 
 
 # Use to remap the field name back to column that we pass it, the raw data itself may name the field differently
 # for different dataset
 def _generate_partial_json_array(
-    filtered: dd.DataFrame, partition_size: int
+    filtered: dd.DataFrame, partition_size: int | None
 ) -> Generator[dict, None, None]:
 
     if filtered is None:
         return
 
-    ddf = filtered.repartition(npartitions=partition_size)
+    if partition_size is not None:
+        ddf = filtered.repartition(npartitions=partition_size)
+    else:
+        ddf = filtered
 
     for partition in ddf.to_delayed():
         partition_df = convert_non_numeric_to_str(partition.compute())
@@ -89,24 +88,28 @@ def _generate_partial_json_array(
         # will become null for None value
         partition_df = partition_df.replace({numpy.nan: None})
 
-        for record in partition_df.to_dict(orient="records"):
+        for record in lazy_to_records_fast(partition_df):
             filtered_record = {}
             # Time field is special, there is no standard name and appear diff in raw data,
             # here we unify it and call it time
-            if "TIME" in record:
-                filtered_record["time"] = _reformat_date(record["TIME"])
-            elif "time" in record:
-                filtered_record["time"] = _reformat_date(record["time"])
+            #
+            # Use sys.intern to compress string usage to reduce memory
+            if STR_TIME in record:
+                filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(record[STR_TIME])
+            elif STR_TIME_LOWER_CASE in record:
+                filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
+                    record[STR_TIME_LOWER_CASE]
+                )
             elif "JULD" in record:
-                filtered_record["time"] = _reformat_date(record["JULD"])
+                filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(record["JULD"])
             elif "timestamp" in record:
-                filtered_record["time"] = _reformat_date(
+                filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
                     datetime.fromtimestamp(
                         record["timestamp"], tz=timezone.utc
                     ).strftime(DATE_FORMAT)
                 )
             elif "detection_timestamp" in record:
-                filtered_record["time"] = _reformat_date(
+                filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
                     datetime.fromtimestamp(
                         record["detection_timestamp"], tz=timezone.utc
                     ).strftime(DATE_FORMAT)
@@ -114,45 +117,45 @@ def _generate_partial_json_array(
 
             #  may need to add more field here
             if "LONGITUDE" in record:
-                filtered_record["longitude"] = (
+                filtered_record[STR_LONGITUDE_LOWER_CASE] = (
                     round(record["LONGITUDE"], COORDINATE_INDEX_PRECISION)
                     if record["LONGITUDE"] is not None
                     else None
                 )
             elif "longitude" in record:
-                filtered_record["longitude"] = (
+                filtered_record[STR_LONGITUDE_LOWER_CASE] = (
                     round(record["longitude"], COORDINATE_INDEX_PRECISION)
                     if record["longitude"] is not None
                     else None
                 )
             elif "lon" in record:
-                filtered_record["longitude"] = (
+                filtered_record[STR_LONGITUDE_LOWER_CASE] = (
                     round(record["lon"], COORDINATE_INDEX_PRECISION)
                     if record["lon"] is not None
                     else None
                 )
 
             if "LATITUDE" in record:
-                filtered_record["latitude"] = (
+                filtered_record[STR_LATITUDE_LOWER_CASE] = (
                     round(record["LATITUDE"], COORDINATE_INDEX_PRECISION)
                     if record["LATITUDE"] is not None
                     else None
                 )
             elif "latitude" in record:
-                filtered_record["latitude"] = (
+                filtered_record[STR_LATITUDE_LOWER_CASE] = (
                     round(record["latitude"], COORDINATE_INDEX_PRECISION)
                     if record["latitude"] is not None
                     else None
                 )
             elif "lat" in record:
-                filtered_record["latitude"] = (
+                filtered_record[STR_LATITUDE_LOWER_CASE] = (
                     round(record["lat"], COORDINATE_INDEX_PRECISION)
                     if record["lat"] is not None
                     else None
                 )
 
             if "DEPTH" in record:
-                filtered_record["depth"] = (
+                filtered_record[STR_DEPTH_LOWER_CASE] = (
                     round(record["DEPTH"], DEPTH_INDEX_PRECISION)
                     if record["DEPTH"] is not None
                     else None
@@ -336,7 +339,7 @@ async def _fetch_data(
             # TODO: This is not enough, with multiple dimension, we can have a very
             # small value for first item, but the other dim can be big, so we
             # do not have a small enough partition
-            count = result.sizes[list(result.sizes.keys())[0]]
+            count = None
             result = api_instance.zarr_to_dask_dataframe(
                 result,
                 api_instance.map_column_names(
@@ -367,7 +370,7 @@ async def _fetch_data(
         logger.info("Memory usage: %s", get_memory_usage_percentage())
 
         for record in _generate_partial_json_array(
-            filtered, count // RECORD_PER_PARTITION + 1
+            filtered, None if count is None else count // RECORD_PER_PARTITION + 1
         ):
             yield record
 
