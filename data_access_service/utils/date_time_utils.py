@@ -118,6 +118,10 @@ def get_monthly_utc_date_range_array_from_(
         else end_date.tz_localize(pytz.UTC)
     )
 
+    # Handle the case where start_date == end_date
+    if start_date == end_date:
+        return [{"start_date": start_date, "end_date": end_date}]
+
     # Generate date range, excluding end_date
     date_range = pd.date_range(
         start=start_date, end=end_date, freq="D", inclusive="left"
