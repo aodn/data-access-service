@@ -257,7 +257,6 @@ class TestDateTimeUtils(unittest.TestCase):
             result, expected, "Monthly ranges do not match expected output"
         )
 
-
     def test_get_monthly_date_range_array_from_2_(self):
         """
         Test an edge case where two day are very close to month end
