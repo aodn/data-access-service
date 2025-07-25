@@ -170,6 +170,10 @@ def _generate_partition_output(
 
                 # Either parquet or zarr save correct and no exception
                 has_data = True
+            else:
+                log.info(
+                    f"No data found for uuid={uuid}, key={key}, date_range={date_range}"
+                )
 
     return has_data
 

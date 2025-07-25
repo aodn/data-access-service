@@ -200,6 +200,63 @@ class TestDateTimeUtils(unittest.TestCase):
             result, expected, "Monthly ranges do not match expected output"
         )
 
+    def test_get_monthly_date_range_array_from_same_start_end(self):
+        """
+        Test a date range where start and end are the same. the precision of timestamp is nanoseconds.
+        """
+        start = pd.Timestamp(
+            year=2023,
+            month=4,
+            day=9,
+            hour=15,
+            minute=0,
+            second=0,
+            microsecond=0,
+            nanosecond=1,
+            tz=pytz.UTC,
+        )
+        end = pd.Timestamp(
+            year=2023,
+            month=4,
+            day=9,
+            hour=15,
+            minute=0,
+            second=0,
+            microsecond=0,
+            nanosecond=1,
+            tz=pytz.UTC,
+        )
+        expected = [
+            {
+                "start_date": pd.Timestamp(
+                    year=2023,
+                    month=4,
+                    day=9,
+                    hour=15,
+                    minute=0,
+                    second=0,
+                    microsecond=0,
+                    nanosecond=1,
+                    tz=pytz.UTC,
+                ),
+                "end_date": pd.Timestamp(
+                    year=2023,
+                    month=4,
+                    day=9,
+                    hour=15,
+                    minute=0,
+                    second=0,
+                    microsecond=0,
+                    nanosecond=1,
+                    tz=pytz.UTC,
+                ),
+            }
+        ]
+        result = get_monthly_utc_date_range_array_from_(start, end)
+        self.assertListEqual(
+            result, expected, "Monthly ranges do not match expected output"
+        )
+
     def test_get_monthly_date_range_array_from_2_(self):
         """
         Test an edge case where two day are very close to month end

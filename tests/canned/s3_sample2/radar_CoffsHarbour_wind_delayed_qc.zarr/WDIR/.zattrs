@@ -1,0 +1,13 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "TIME",
+        "LATITUDE",
+        "LONGITUDE"
+    ],
+    "ancillary_variables": "WDIR_quality_control",
+    "long_name": "Direction towards which the wind is blowing based on short wave direction",
+    "standard_name": "wind_to_direction",
+    "units": "degrees clockwise from true north",
+    "valid_max": 360.0,
+    "valid_min": 0.0
+}

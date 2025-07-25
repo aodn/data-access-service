@@ -118,6 +118,10 @@ def get_monthly_utc_date_range_array_from_(
         else end_date.tz_localize(pytz.UTC)
     )
 
+    # Handle the case where start_date == end_date
+    if start_date == end_date:
+        return [{"start_date": start_date, "end_date": end_date}]
+
     # Generate date range, excluding end_date
     date_range = pd.date_range(
         start=start_date, end=end_date, freq="D", inclusive="left"
@@ -181,10 +185,13 @@ def trim_date_range(
 
     log.info(f"Original date range: {requested_start_date} to {requested_end_date}")
     metadata_temporal_extent = api.get_temporal_extent(uuid=uuid, key=key)
-    if len(metadata_temporal_extent) != 2:
+    if (
+        len(metadata_temporal_extent) != 2
+        or metadata_temporal_extent[0] is None
+        or metadata_temporal_extent[1] is None
+    ):
         log.warning(f"Invalid metadata temporal extent: {metadata_temporal_extent}")
         return requested_start_date, requested_end_date
-
     metadata_start_date, metadata_end_date = metadata_temporal_extent
 
     metadata_start_date = metadata_start_date.tz_localize(None)
