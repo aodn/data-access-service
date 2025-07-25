@@ -1,0 +1,435 @@
+{
+    "metadata": {
+        ".zattrs": {
+            "Conventions": "CF-1.5,IMOS-1.2",
+            "abstract": "The ACORN facility is producing NetCDF files with wind direction and short wave direction and spread  data for each site every hour. These are obtained using software supplied by Seaview Sensing Ltd which applies the method described in Wyatt et al, 1996, Maximum Likelihood estimation of the directional distribution of 0.53Hz ocean waves, Journal of Atmospheric and Oceanic Technology, 14, 591-603, 1996. Directions are all towards which the wave is propagating or the wind is blowing.  Each value has a corresponding quality control flag where a value of 0 means that the data have passed all the standard Seaview Sensing QC procedures and a values of 1 means the data have passed additional experimental Seavew Sensing QC procedures. ",
+            "acknowledgment": "Data was sourced from the Integrated Marine Observing System (IMOS) - IMOS is supported by the Australian Government through the National Collaborative Research Infrastructure Strategy (NCRIS) and the Super Science Initiative (SSI).",
+            "author": "Wyatt, Lucy",
+            "author_email": "lucy.wyatt@jcu.edu.au",
+            "citation": "The citation in a list of references is: IMOS, [year-of-data-download], [Title], [data-access-URL], accessed [date-of-access]",
+            "comment": "This NetCDF file has been created using the IMOS NetCDF User Manual v1.2. A copy of the document is available at http://imos.org.au/facility_manuals.html",
+            "data_centre": "eMarine Information Infrastructure (eMII)",
+            "data_centre_email": "info@emii.org.au",
+            "date_created": "2014-12-02T00:00:00Z",
+            "distribution_statement": "Data, products and services from IMOS are provided \"as is\" without any warranty as to fitness for a particular purpose",
+            "file_version": "Level 1 - Quality Controlled data",
+            "file_version_quality_control": "Data in this file has been through the IMOS quality control procedure (Reference Table C).\udcc2\udca0 Every data point in this file has an associated quality flag",
+            "geospatial_lat_max": -29.363513,
+            "geospatial_lat_min": -31.609578,
+            "geospatial_lat_units": "degrees_north",
+            "geospatial_lon_max": 154.775963,
+            "geospatial_lon_min": 153.010561,
+            "geospatial_lon_units": "degrees_east",
+            "geospatial_vertical_max": 0.0,
+            "geospatial_vertical_min": 0.0,
+            "geospatial_vertical_units": "m",
+            "institution": "Australian Coastal Ocean Radar Network (ACORN)",
+            "institution_references": "http://www.imos.org.au/acorn.html",
+            "instrument": "WERA Oceanographic HF Radar/Helzel Messtechnik, GmbH using Seaview Sensing Ltd software",
+            "keywords": "Oceans",
+            "local_time_zone": 10.0,
+            "metadata_uuid": "ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
+            "naming_authority": "IMOS",
+            "netcdf_version": "4.1.3",
+            "principal_investigator": "Wyatt, Lucy",
+            "project": "Integrated Marine Observing System (IMOS)",
+            "quality_control_set": "1",
+            "site_code": "COF, Coffs Harbour",
+            "source": "Terrestrial HF radar",
+            "ssr_Stations": "Red Rock (RRK), NNB (NNB)",
+            "time_coverage_end": "2012-04-01T00:30:00Z",
+            "time_coverage_start": "2012-04-01T00:30:00Z",
+            "title": ""
+        },
+        ".zgroup": {
+            "zarr_format": 2
+        },
+        "LATITUDE/.zarray": {
+            "chunks": [
+                167
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                167
+            ],
+            "zarr_format": 2
+        },
+        "LATITUDE/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "LATITUDE"
+            ],
+            "axis": "Y",
+            "long_name": "latitude",
+            "reference_datum": "geographical coordinates, WGS84 datum",
+            "standard_name": "latitude",
+            "units": "degree_north",
+            "valid_max": 90.0,
+            "valid_min": -90.0
+        },
+        "LONGITUDE/.zarray": {
+            "chunks": [
+                114
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                114
+            ],
+            "zarr_format": 2
+        },
+        "LONGITUDE/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "LONGITUDE"
+            ],
+            "axis": "X",
+            "long_name": "longitude",
+            "reference_datum": "geographical coordinates, WGS84 datum",
+            "standard_name": "longitude",
+            "units": "degree_east",
+            "valid_max": 180.0,
+            "valid_min": -180.0
+        },
+        "TIME/.zarray": {
+            "chunks": [
+                1
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1
+            ],
+            "zarr_format": 2
+        },
+        "TIME/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ],
+            "axis": "T",
+            "calendar": "gregorian",
+            "comment": "Given time lies at the middle of the 1 hour averaging period.",
+            "local_time_zone": 8.0,
+            "long_name": "time",
+            "standard_name": "time",
+            "units": "days since 1950-01-01T00:00:00+00:00",
+            "valid_max": 999999.0,
+            "valid_min": 0.0
+        },
+        "WDIR/.zarray": {
+            "chunks": [
+                1,
+                167,
+                114
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                167,
+                114
+            ],
+            "zarr_format": 2
+        },
+        "WDIR/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME",
+                "LATITUDE",
+                "LONGITUDE"
+            ],
+            "ancillary_variables": "WDIR_quality_control",
+            "long_name": "Direction towards which the wind is blowing based on short wave direction",
+            "standard_name": "wind_to_direction",
+            "units": "degrees clockwise from true north",
+            "valid_max": 360.0,
+            "valid_min": 0.0
+        },
+        "WDIR_quality_control/.zarray": {
+            "chunks": [
+                1,
+                167,
+                114
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                167,
+                114
+            ],
+            "zarr_format": 2
+        },
+        "WDIR_quality_control/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME",
+                "LATITUDE",
+                "LONGITUDE"
+            ],
+            "flag_meanings": "no_qc_performed good_data probably_good_data probably_bad_data bad_data value_changed value_below_detection value_in_excess interpolated_value missing_value uncertain_phenomenon",
+            "flag_values": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+            ],
+            "long_name": "quality flag for Direction towards which the wind is blowing based on short wave direction",
+            "quality_control_conventions": "IMOS standard set using the IODE flags",
+            "quality_control_indicator": 1,
+            "quality_control_set": 1,
+            "valid_max": 10,
+            "valid_min": 0
+        },
+        "WWAV/.zarray": {
+            "chunks": [
+                1,
+                167,
+                114
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                167,
+                114
+            ],
+            "zarr_format": 2
+        },
+        "WWAV/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME",
+                "LATITUDE",
+                "LONGITUDE"
+            ],
+            "ancillary_variables": "WWAV_quality_control",
+            "long_name": "Short wave direction towards which the wave is propagating",
+            "standard_name": "sea_surface_wind_wave_to_direction",
+            "units": "degrees clockwise from true north",
+            "valid_max": 360.0,
+            "valid_min": 0.0
+        },
+        "WWAV_quality_control/.zarray": {
+            "chunks": [
+                1,
+                167,
+                114
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                167,
+                114
+            ],
+            "zarr_format": 2
+        },
+        "WWAV_quality_control/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME",
+                "LATITUDE",
+                "LONGITUDE"
+            ],
+            "flag_meanings": "no_qc_performed good_data probably_good_data probably_bad_data bad_data value_changed value_below_detection value_in_excess interpolated_value missing_value uncertain_phenomenon",
+            "flag_values": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+            ],
+            "long_name": "quality flag for short wave direction towards which the wave is propagating",
+            "quality_control_conventions": "IMOS standard set using the IODE flags",
+            "quality_control_indicator": 1,
+            "quality_control_set": 1,
+            "valid_max": 10,
+            "valid_min": 0
+        },
+        "WWDS/.zarray": {
+            "chunks": [
+                1,
+                167,
+                114
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                167,
+                114
+            ],
+            "zarr_format": 2
+        },
+        "WWDS/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME",
+                "LATITUDE",
+                "LONGITUDE"
+            ],
+            "ancillary_variables": "WWDS_quality_control",
+            "long_name": "Short wave directional spreading using Donelan model",
+            "units": "degrees",
+            "valid_max": 90.0,
+            "valid_min": 0.0
+        },
+        "WWDS_quality_control/.zarray": {
+            "chunks": [
+                1,
+                167,
+                114
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                167,
+                114
+            ],
+            "zarr_format": 2
+        },
+        "WWDS_quality_control/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME",
+                "LATITUDE",
+                "LONGITUDE"
+            ],
+            "flag_meanings": "no_qc_performed good_data probably_good_data probably_bad_data bad_data value_changed value_below_detection value_in_excess interpolated_value missing_value uncertain_phenomenon",
+            "flag_values": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+            ],
+            "long_name": "quality flag for short wave spread",
+            "quality_control_conventions": "IMOS standard set using the IODE flags",
+            "quality_control_indicator": 1,
+            "quality_control_set": 1,
+            "valid_max": 10,
+            "valid_min": 0
+        },
+        "filename/.zarray": {
+            "chunks": [
+                1
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<U49",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1
+            ],
+            "zarr_format": 2
+        },
+        "filename/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "TIME"
+            ]
+        }
+    },
+    "zarr_consolidated_format": 1
+}
