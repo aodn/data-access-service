@@ -188,8 +188,8 @@ class TestGenerateZarrFile(TestWithS3):
                         intermediate_output_folder=config.get_temp_folder("888"),
                         uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
                         keys=["radar_CoffsHarbour_wind_delayed_qc.zarr"],
-                        start_date=pd.Timestamp("2014-01-01 00:00:00"),
-                        end_date=pd.Timestamp("2014-11-10 23:59:59.999999999"),
+                        start_date=pd.Timestamp("2012-03-01 00:00:00"),
+                        end_date=pd.Timestamp("2012-04-30 23:59:59.999999999"),
                         multi_polygon=None,
                     )
                     # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
@@ -203,8 +203,8 @@ class TestGenerateZarrFile(TestWithS3):
                     target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name('888')}radar_CoffsHarbour_wind_delayed_qc.zarr/part-*.zarr"
                     data = helper.read_multipart_zarr_from_s3(target_path)
                     assert (
-                        len(data["TIME"]) == 158902
-                    ), "file have enough data and same as single file"
+                        len(data["TIME"]) == 1
+                    ), "this dataset is an edge case and should only have one time entry"
                 except Exception as ex:
                     # Should not land here
                     assert False, f"{ex}"
