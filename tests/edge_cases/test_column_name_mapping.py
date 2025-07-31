@@ -59,21 +59,18 @@ class TestColumnNameMapping(TestWithS3):
                         uuid="4402cb50-e20a-44ee-93e6-4728259250d2",
                         keys=["argo.parquet"],
                         start_date=pd.Timestamp("2000-01-01 00:00:00"),
-                        end_date=pd.Timestamp("2003-01-01 23:59:59.999999999"),
+                        end_date=pd.Timestamp("2013-01-01 23:59:59.999999999"),
                         multi_polygon=None,
                     )
-                    # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
                     names = helper.list_s3_folders(
                         config.get_csv_bucket_name(),
                         f"{config.get_s3_temp_folder_name('888')}argo.parquet",
                     )
                     assert "part-1" in names, "part-1 not exit!"
 
-                    # This will aggregate to the same row count as above
                     target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name('888')}argo.parquet"
-
-                    subset = helper.read_parquet_from_s3(target_path);
-                    assert len(subset) == 52
+                    subset = helper.read_parquet_from_s3(target_path)
+                    assert len(subset) == 44364
                 except Exception as ex:
                     # Should not land here
                     assert False, f"{ex}"

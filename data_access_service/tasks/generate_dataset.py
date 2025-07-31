@@ -276,6 +276,15 @@ def query_data(
             return None
     except ValueError as e:
         log.info(f"seems like no data for this polygon. Error: {e}")
+
+        # sometimes even though we get the temoral extents correctly, the requested date range may still be out of bounds because we want to cover nanoseconds precision.
+        # e.g. ValueError: date_start=2021-02-01 00:00:00.000000000 is out of range of dataset. The maximum date_end is 2021-02-01 00:00:00.
+        # so we need to check the error message and ignore it if the two dates are close.
+        # In summary, this error is not that important so it needs to be reduced the weight, from throwing it to logging it.
+        if "is out of range of dataset" in str(e):
+            log.error(f"The provided date range is out of bounds for the dataset. Error message is: `{e}`. Please check whether it is acceptable.")
+            return None
+
         raise e
     except Exception as e:
         log.error(f"Error: {e}")
