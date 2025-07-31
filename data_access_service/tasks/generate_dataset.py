@@ -1,4 +1,6 @@
 import json
+
+import dask.dataframe
 import dask.dataframe as ddf
 import pandas as pd
 import xarray
@@ -13,6 +15,7 @@ from data_access_service.server import api_setup, app
 from data_access_service.tasks.data_file_upload import (
     upload_all_files_in_folder_to_temp_s3,
 )
+from data_access_service.utils.dataset_column_name_mapping_utils import get_date_from_parquet_dask_dataframe
 from data_access_service.utils.date_time_utils import (
     get_monthly_utc_date_range_array_from_,
     trim_date_range,
@@ -138,7 +141,7 @@ def _generate_partition_output(
                     output_path = f"{root_folder_path}/{key}/part-{job_index}/"
 
                     # Derive partition key without time
-                    result[PARTITION_KEY] = result["TIME"].dt.strftime("%Y-%m")
+                    result[PARTITION_KEY] = get_date_from_parquet_dask_dataframe(result).dt.strftime("%Y-%m")
 
                     result.to_parquet(
                         output_path,
