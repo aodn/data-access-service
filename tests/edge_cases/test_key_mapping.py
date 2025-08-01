@@ -38,10 +38,10 @@ class TestKeyMapping(TestWithS3):
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_special_time_column(
-            self,
-            aws_clients,
-            upload_test_case_to_s3,
-            mock_get_fs_token_paths,
+        self,
+        aws_clients,
+        upload_test_case_to_s3,
+        mock_get_fs_token_paths,
     ):
         s3_client, _, _ = aws_clients
         config = Config.get_config()
@@ -80,10 +80,10 @@ class TestKeyMapping(TestWithS3):
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_special_time_dimension(
-            self,
-            aws_clients,
-            upload_test_case_to_s3,
-            mock_get_fs_token_paths,
+        self,
+        aws_clients,
+        upload_test_case_to_s3,
+        mock_get_fs_token_paths,
     ):
         """
         this dataset has a special TIME dimension

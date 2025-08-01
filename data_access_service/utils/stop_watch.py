@@ -1,9 +1,11 @@
 import time
 
+
 class StopWatch:
     """
     A simple stopwatch utility to measure the time taken for tasks. It is useful for performance monitoring and debugging.
     """
+
     def __init__(self):
         self.__start_time = None
         self.__task_name = None

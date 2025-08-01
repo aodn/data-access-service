@@ -7,7 +7,9 @@ import xarray
 
 from typing import List, Dict, Optional
 
-from data_access_service.utils.dataset_key_name_mapping_utils import get_time_key_from_zarr
+from data_access_service.utils.dataset_key_name_mapping_utils import (
+    get_time_key_from_zarr,
+)
 from numcodecs import Zlib
 from data_access_service.core.constants import PARTITION_KEY
 from data_access_service import API, init_log, Config
@@ -17,7 +19,9 @@ from data_access_service.server import api_setup, app
 from data_access_service.tasks.data_file_upload import (
     upload_all_files_in_folder_to_temp_s3,
 )
-from data_access_service.utils.dataset_key_name_mapping_utils import get_time_key_from_parquet
+from data_access_service.utils.dataset_key_name_mapping_utils import (
+    get_time_key_from_parquet,
+)
 from data_access_service.utils.date_time_utils import (
     get_monthly_utc_date_range_array_from_,
     trim_date_range,
@@ -286,7 +290,9 @@ def query_data(
         # so we need to check the error message and ignore it if the two dates are close.
         # In summary, this error is not that important so it needs to be reduced the weight, from throwing it to logging it.
         if "is out of range of dataset" in str(e):
-            log.error(f"The provided date range is out of bounds for the dataset. Error message is: `{e}`. Please check whether it is acceptable.")
+            log.error(
+                f"The provided date range is out of bounds for the dataset. Error message is: `{e}`. Please check whether it is acceptable."
+            )
             return None
 
         raise e
