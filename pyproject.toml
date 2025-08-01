@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "data-access-service"
-version = "0.0.9"
+version = "0.0.10"
 description = ""
 authors = ["utas-raymondng <manfai.ng@utas.edu.au>"]
 readme = "README.md"

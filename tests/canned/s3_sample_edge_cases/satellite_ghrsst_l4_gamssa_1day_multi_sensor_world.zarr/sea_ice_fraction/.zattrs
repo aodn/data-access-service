@@ -1,0 +1,16 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "time",
+        "lat",
+        "lon"
+    ],
+    "comment": "Fractional sea ice cover from NCEP-ICE product (Grumbine, 1996) .",
+    "coverage_content_type": "auxiliaryInformation",
+    "grid_mapping": "crs",
+    "long_name": "sea ice area fraction",
+    "source": "SSMI-NCEP-Analysis-ICE-5min",
+    "standard_name": "sea_ice_area_fraction",
+    "units": "1",
+    "valid_max": 100,
+    "valid_min": 0
+}

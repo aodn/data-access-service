@@ -1,13 +1,14 @@
 import json
+from typing import List, Dict, Optional
+
 import dask.dataframe as ddf
 import pandas as pd
 import xarray
-
-from typing import List, Dict, Optional
 from numcodecs import Zlib
-from data_access_service.core.constants import PARTITION_KEY
+
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
+from data_access_service.core.constants import PARTITION_KEY
 from data_access_service.core.descriptor import Descriptor
 from data_access_service.server import api_setup, app
 from data_access_service.tasks.data_file_upload import (
@@ -138,7 +139,10 @@ def _generate_partition_output(
                     output_path = f"{root_folder_path}/{key}/part-{job_index}/"
 
                     # Derive partition key without time
-                    result[PARTITION_KEY] = result["TIME"].dt.strftime("%Y-%m")
+                    time_key = api.map_column_names(
+                        uuid=uuid, key=key, columns=["TIME"]
+                    )[0]
+                    result[PARTITION_KEY] = result[time_key].dt.strftime("%Y-%m")
 
                     result.to_parquet(
                         output_path,
@@ -164,8 +168,11 @@ def _generate_partition_output(
                         )
                         need_append = True
                     else:
+                        time_dim = api.map_column_names(
+                            uuid=uuid, key=key, columns=["TIME"]
+                        )[0]
                         result.to_zarr(
-                            output_path, mode="a", append_dim="TIME", compute=True
+                            output_path, mode="a", append_dim=time_dim, compute=True
                         )
 
                 # Either parquet or zarr save correct and no exception
@@ -273,6 +280,17 @@ def query_data(
             return None
     except ValueError as e:
         log.info(f"seems like no data for this polygon. Error: {e}")
+
+        # sometimes even though we get the temoral extents correctly, the requested date range may still be out of bounds because we want to cover nanoseconds precision.
+        # e.g. ValueError: date_start=2021-02-01 00:00:00.000000000 is out of range of dataset. The maximum date_end is 2021-02-01 00:00:00.
+        # so we need to check the error message and ignore it if the two dates are close.
+        # In summary, this error is not that important so it needs to be reduced the weight, from throwing it to logging it.
+        if "is out of range of dataset" in str(e):
+            log.error(
+                f"The provided date range is out of bounds for the dataset. Error message is: `{e}`. Please check whether it is acceptable."
+            )
+            return None
+
         raise e
     except Exception as e:
         log.error(f"Error: {e}")

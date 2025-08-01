@@ -1,0 +1,12 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "time"
+    ],
+    "axis": "T",
+    "calendar": "Standard",
+    "comment": "Nominal time because observations are from different sources and are made at different times of the day",
+    "coverage_content_type": "coordinate",
+    "long_name": "reference time of SST field",
+    "standard_name": "time",
+    "units": "seconds since 1981-01-01"
+}
