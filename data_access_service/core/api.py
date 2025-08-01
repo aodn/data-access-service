@@ -381,6 +381,8 @@ class API(BaseAPI):
                 match meta:
                     case meta if "JULD" in meta:
                         output.append("JULD")
+                    case meta if "detection_timestamp" in meta:
+                        output.append("detection_timestamp")
                     case meta if "TIME" in meta:
                         output.append("TIME")
                     case meta if "time" in meta:
