@@ -139,7 +139,9 @@ def _generate_partition_output(
                     output_path = f"{root_folder_path}/{key}/part-{job_index}/"
 
                     # Derive partition key without time
-                    time_key = api.map_column_names(uuid=uuid, key=key, columns=["TIME"])[0]
+                    time_key = api.map_column_names(
+                        uuid=uuid, key=key, columns=["TIME"]
+                    )[0]
                     result[PARTITION_KEY] = result[time_key].dt.strftime("%Y-%m")
 
                     result.to_parquet(
@@ -166,7 +168,9 @@ def _generate_partition_output(
                         )
                         need_append = True
                     else:
-                        time_dim = api.map_column_names(uuid=uuid, key=key, columns=["TIME"])[0]
+                        time_dim = api.map_column_names(
+                            uuid=uuid, key=key, columns=["TIME"]
+                        )[0]
                         result.to_zarr(
                             output_path, mode="a", append_dim=time_dim, compute=True
                         )
