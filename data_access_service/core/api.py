@@ -388,6 +388,8 @@ class API(BaseAPI):
                     case meta if "time" in meta:
                         output.append("time")
                     case meta if "timestamp" in meta:
+                        log.error(f"For most datasets, timestamp should not be the field to express the accurate time. "
+                                  f"Please check this dataset(uuid: {uuid}) if it is correct.")
                         output.append("timestamp")
 
             # You want depth field, but it is not in data
