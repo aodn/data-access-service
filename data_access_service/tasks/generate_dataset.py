@@ -1,26 +1,18 @@
 import json
+from typing import List, Dict, Optional
 
-import dask.dataframe
 import dask.dataframe as ddf
 import pandas as pd
 import xarray
-
-from typing import List, Dict, Optional
-
-from data_access_service.utils.dataset_key_name_mapping_utils import (
-    get_time_key_from_zarr,
-)
 from numcodecs import Zlib
-from data_access_service.core.constants import PARTITION_KEY
+
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
+from data_access_service.core.constants import PARTITION_KEY
 from data_access_service.core.descriptor import Descriptor
 from data_access_service.server import api_setup, app
 from data_access_service.tasks.data_file_upload import (
     upload_all_files_in_folder_to_temp_s3,
-)
-from data_access_service.utils.dataset_key_name_mapping_utils import (
-    get_time_key_from_parquet,
 )
 from data_access_service.utils.date_time_utils import (
     get_monthly_utc_date_range_array_from_,
@@ -147,7 +139,7 @@ def _generate_partition_output(
                     output_path = f"{root_folder_path}/{key}/part-{job_index}/"
 
                     # Derive partition key without time
-                    time_key = get_time_key_from_parquet(result)
+                    time_key = api.map_column_names(uuid=uuid, key=key, columns=["TIME"])[0]
                     result[PARTITION_KEY] = result[time_key].dt.strftime("%Y-%m")
 
                     result.to_parquet(
@@ -174,7 +166,7 @@ def _generate_partition_output(
                         )
                         need_append = True
                     else:
-                        time_dim = get_time_key_from_zarr(result)
+                        time_dim = api.map_column_names(uuid=uuid, key=key, columns=["TIME"])[0]
                         result.to_zarr(
                             output_path, mode="a", append_dim=time_dim, compute=True
                         )
