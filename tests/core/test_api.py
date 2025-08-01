@@ -54,7 +54,7 @@ class TestApi(unittest.TestCase):
                 ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             )
             self.assertListEqual(
-                col, ["timestamp", "latitude", "longitude"], "TIME mapped"
+                col, ["detection_timestamp", "latitude", "longitude"], "TIME mapped"
             )
 
             # This uuid have time so it will not map
