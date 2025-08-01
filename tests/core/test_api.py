@@ -65,7 +65,7 @@ class TestApi(unittest.TestCase):
             )
             self.assertListEqual(
                 col,
-                ["timestamp", "LATITUDE", "LONGITUDE"],
+                ["TIME", "LATITUDE", "LONGITUDE"],
                 "TIME no need to map",
             )
 
