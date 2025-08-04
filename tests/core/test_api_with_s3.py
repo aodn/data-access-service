@@ -86,7 +86,9 @@ class TestApiWithS3(TestWithS3):
             except json.JSONDecodeError as e:
                 assert False, "Fail to parse to JSON"
 
-    @pytest.mark.skip(reason="After changing column mapping, this test will be stuck until 6hours timeout. should fix it later")
+    @pytest.mark.skip(
+        reason="After changing column mapping, this test will be stuck until 6hours timeout. should fix it later"
+    )
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_auth_fetch_data_correct(
         self, setup, localstack, aws_clients, setup_resources, client
