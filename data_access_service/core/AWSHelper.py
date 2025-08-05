@@ -293,6 +293,24 @@ class AWSHelper:
                     folders.append(folder)
         return folders
 
+    def list_all_s3_objects(self, bucket_name: str, prefix: str = "") -> list[str]:
+        """
+        List all objects in an S3 bucket with a specific prefix.
+        Args:
+            bucket_name: Name of the S3 bucket.
+            prefix: Prefix to filter objects by.
+
+        Returns:
+            A list of object keys in the specified bucket and prefix.
+        """
+        objects = []
+        paginator = self.s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+            if "Contents" in page:
+                for obj in page["Contents"]:
+                    objects.append(obj["Key"])
+        return objects
+
     def extract_zip_from_s3(
         self, bucket_name: str, zip_key: str, output_path: str
     ) -> list[str]:
@@ -330,7 +348,6 @@ class AWSHelper:
             file_path,
             engine="zarr",
             combine="nested",
-            concat_dim="TIME",
             consolidated=False,  # Must be false as the file is not consolidated_metadata()
             parallel=False,
         )

@@ -373,6 +373,7 @@ class API(BaseAPI):
         meta: Dict[str, Any] = self.get_raw_meta_data(uuid)[key]
         output = list()
         for column in columns:
+
             # You want TIME field but not in there, try map to something else
             if column.casefold() == "TIME".casefold() and (
                 "TIME" not in meta or "time" not in meta
@@ -380,12 +381,19 @@ class API(BaseAPI):
                 match meta:
                     case meta if "JULD" in meta:
                         output.append("JULD")
-                    case meta if "timestamp" in meta:
-                        output.append("timestamp")
+                    case meta if "detection_timestamp" in meta:
+                        output.append("detection_timestamp")
                     case meta if "TIME" in meta:
                         output.append("TIME")
                     case meta if "time" in meta:
                         output.append("time")
+                    case meta if "timestamp" in meta:
+                        log.error(
+                            f"For most datasets, timestamp should not be the field to express the accurate time. "
+                            f"Please check this dataset(uuid: {uuid}) if it is correct."
+                        )
+                        output.append("timestamp")
+
             # You want depth field, but it is not in data
             elif column.casefold() == "DEPTH".casefold() and (
                 "DEPTH" not in meta or "depth" not in meta
