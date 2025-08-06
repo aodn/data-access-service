@@ -1,23 +1,34 @@
 import asyncio
-import threading
+import datetime
+import datetime
+import datetime
+import datetime
 import datetime
 import json
 import os
 import tempfile
+import threading
+from datetime import datetime, timezone
+from http import HTTPStatus
+from queue import Queue
+from typing import Optional, List, Generator, AsyncGenerator
 
+import dask.dataframe as dd
+import numpy
+import pandas as pd
 import psutil
 import pytz
 import xarray as xr
-import numpy
-import pandas as pd
-import dask.dataframe as dd
-
-from queue import Queue
+from aodn_cloud_optimised.lib.DataQuery import ZarrDataSource
 from dask.dataframe import DataFrame
+from dateutil import parser
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, BackgroundTasks
+from fastapi.responses import Response, FileResponse
+from pydantic import BaseModel
 
 from data_access_service import init_log
+from data_access_service.config.config import Config
 from data_access_service.core.api import API
-from data_access_service.utils.api_utils import api_key_auth
 from data_access_service.core.api import gzip_compress
 from data_access_service.core.constants import (
     COORDINATE_INDEX_PRECISION,
@@ -30,16 +41,7 @@ from data_access_service.core.constants import (
     STR_DEPTH_LOWER_CASE,
 )
 from data_access_service.core.error import ErrorResponse
-from data_access_service.config.config import Config
-
-from typing import Optional, List, Generator, AsyncGenerator
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Request, Query, BackgroundTasks
-from fastapi.responses import Response, FileResponse
-from pydantic import BaseModel
-from dateutil import parser
-from http import HTTPStatus
-
+from data_access_service.utils.api_utils import api_key_auth
 from data_access_service.utils.date_time_utils import (
     ensure_timezone,
     MIN_DATE,
@@ -451,6 +453,84 @@ async def get_temporal_extent(uuid: str, key: str, request: Request):
         return Response(content=json.dumps(result), media_type="application/json")
     except ValueError:
         raise HTTPException(status_code=404, detail="Temporal extent not found")
+
+
+@router.get("data/{uuid}/{key}/data_count", dependencies=[Depends(api_key_auth)])
+async def get_data_count(
+        request: Request,
+        uuid: str,
+        key: str,
+        date_start: str,
+        date_end: str,
+        lat_min : float,
+        lat_max: float,
+        lon_min: float,
+        lon_max: float,
+):
+    """
+    Get the count of data records for a specific dataset within a given date range and geographical bounds.
+    """
+    # if any parameter is not provided, is a bad request
+    if not all([uuid, key, date_start, date_end, min_lat, min_lon, max_lat, max_lon]):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Missing required parameters",
+        )
+    # the param "key" should contains the extension of the file, .parquet / .zarr.
+    if not key.endswith(('.parquet', '.zarr')):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Invalid file format. Key must end with .parquet or .zarr",
+        )
+
+    # parquet might support in the future, but right now we only support zarr
+    if not key.endswith('.zarr'):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="This endpoint only supports zarr data format",
+        )
+
+    api = get_api_instance(request)
+    dataset = api.get_dataset_data(
+        uuid=uuid,
+        key=key,
+        date_start=_verify_datatime_param("start_date", date_start),
+        date_end=_verify_datatime_param("end_date", date_end),
+        lat_min=lat_min,
+        lat_max= lat_max,
+        lon_min=lon_min,
+        lon_max=lon_max
+    )
+    if dataset is None:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"No data found with provided params for dataset {uuid} with key {key}",
+        )
+
+    if not isinstance(dataset, ZarrDataSource):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=f"Dataset {uuid} with key {key} is not a Zarr dataset. Please doublecheck or contact AODN",
+        )
+
+    data_point_count = math.prod(dataset.sizes.values())
+
+    logger.info(
+        "Data count for dataset %s with key %s: %d, start_date: %s, end_date: %s, lat_min: %f, lat_max: %f, lon_min: %f, lon_max: %f",
+        uuid,
+        key,
+        data_point_count,
+        date_start,
+        date_end,
+        lat_min,
+        lat_max,
+        lon_min,
+        lon_max
+    )
+    return Response(
+        content=json.dumps({"data_count": data_point_count}),
+        media_type="application/json"
+    )
 
 
 @router.get("/data/{uuid}/{key}", dependencies=[Depends(api_key_auth)])
