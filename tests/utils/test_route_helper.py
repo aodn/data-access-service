@@ -54,4 +54,4 @@ def test_generate_feature_collection():
         expected_result = file.read()
 
     actual_result = json.dumps(feature_collection.to_dict())
-    assert actual_result == expected_result
+    assert json.loads(actual_result) == json.loads(expected_result)
