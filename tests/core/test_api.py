@@ -11,7 +11,10 @@ from unittest.mock import patch
 from aodn_cloud_optimised import DataQuery
 
 from data_access_service import API
-from data_access_service.utils.routes_helper import _generate_partial_json_array, _response_json
+from data_access_service.utils.routes_helper import (
+    _generate_partial_json_array,
+    _response_json,
+)
 
 
 class TestApi(unittest.TestCase):
