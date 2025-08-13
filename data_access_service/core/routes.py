@@ -20,17 +20,19 @@ from data_access_service.utils.date_time_utils import (
     MIN_DATE,
     DATE_FORMAT,
 )
-from data_access_service.utils.routes_helper import HealthCheckResponse, get_api_instance, _verify_datatime_param, \
-    _fetch_data, _async_response_json, round_coordinate_list, generate_feature_collection
+from data_access_service.utils.routes_helper import (
+    HealthCheckResponse,
+    get_api_instance,
+    _verify_datatime_param,
+    _fetch_data,
+    _async_response_json,
+    round_coordinate_list,
+    generate_feature_collection,
+)
 from data_access_service.utils.sse_wrapper import sse_wrapper
 
 router = APIRouter(prefix=Config.BASE_URL)
 logger = init_log(Config.get_config())
-
-
-
-
-
 
 
 @router.get("/health", response_model=HealthCheckResponse)
@@ -101,14 +103,9 @@ async def get_temporal_extent(uuid: str, key: str, request: Request):
         raise HTTPException(status_code=404, detail="Temporal extent not found")
 
 
-
 @router.get("data/{uuid}/{key}/indexing_values", dependencies=[Depends(api_key_auth)])
 async def get_indexing_values(
-        request: Request,
-        uuid: str,
-        key: str,
-        date_start: str,
-        date_end: str
+    request: Request, uuid: str, key: str, date_start: str, date_end: str
 ):
     """
     Get the count of data records for a specific dataset within a given date range and geographical bounds.
@@ -120,14 +117,14 @@ async def get_indexing_values(
             detail="Missing required parameters",
         )
     # the param "key" should contains the extension of the file, .parquet / .zarr.
-    if not key.endswith(('.parquet', '.zarr')):
+    if not key.endswith((".parquet", ".zarr")):
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail="Invalid file format. Key must end with .parquet or .zarr",
         )
 
     # parquet might support in the future, but right now we only support zarr
-    if not key.endswith('.zarr'):
+    if not key.endswith(".zarr"):
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail="This endpoint only supports zarr data format",
@@ -156,22 +153,24 @@ async def get_indexing_values(
     lon_key = api.map_column_names(uuid=uuid, key=key, columns=["LONGITUDE"])[0]
     time_key = api.map_column_names(uuid=uuid, key=key, columns=["TIME"])[0]
 
-
     dataset = data_source.zarr_store
 
-    if lat_key not in dataset.coords or lon_key not in dataset.coords or time_key not in dataset.coords:
+    if (
+        lat_key not in dataset.coords
+        or lon_key not in dataset.coords
+        or time_key not in dataset.coords
+    ):
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=f"Dataset {uuid} with key {key} does not contain required coordinates: {lat_key}, {lon_key}, {time_key}",
         )
 
-    feature_collection = generate_feature_collection(dataset=dataset, lat_key=lat_key, lon_key=lon_key, time_key=time_key)
-    return Response(
-        content=json.dumps(feature_collection.to_dict()),
-        media_type="application/json"
+    feature_collection = generate_feature_collection(
+        dataset=dataset, lat_key=lat_key, lon_key=lon_key, time_key=time_key
     )
-
-
+    return Response(
+        content=json.dumps(feature_collection.to_dict()), media_type="application/json"
+    )
 
 
 @router.get("/data/{uuid}/{key}", dependencies=[Depends(api_key_auth)])
@@ -243,5 +242,3 @@ async def get_data(
         # elif f == "netcdf":
         #    return _response_netcdf(filtered, background_tasks)
         return None
-
-

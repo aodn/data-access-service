@@ -7,7 +7,6 @@ class Feature:
         self.geometry = geometry
         self.properties = properties
 
-
     def to_dict(self) -> Dict[str, Any]:
         feature = {
             "type": self.type,

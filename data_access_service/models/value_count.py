@@ -1,4 +1,3 @@
-
 class ValueCount:
 
     def __init__(self, value: any, count: int):

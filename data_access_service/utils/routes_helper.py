@@ -303,7 +303,6 @@ def _response_netcdf(filtered: pd.DataFrame, background_tasks: BackgroundTasks):
     return response
 
 
-
 async def _fetch_data(
     api_instance: API,
     uuid: str,
@@ -373,14 +372,9 @@ async def _fetch_data(
             yield record
 
 
-
-
-
 class HealthCheckResponse(BaseModel):
     status: str
     status_code: int
-
-
 
 
 def get_api_instance(request: Request) -> API:
@@ -390,7 +384,8 @@ def get_api_instance(request: Request) -> API:
 
 def calculate_cell_coordinates(lat_min, lat_max, lon_min, lon_max):
     precision = COORDINATE_INDEX_PRECISION
-    dividing_lats = 10 ** precision
+    dividing_lats = 10**precision
+
 
 def get_memory_usage_percentage():
     process = psutil.Process(os.getpid())
@@ -399,7 +394,8 @@ def get_memory_usage_percentage():
     logger.info("Total memory: %s", total_memory)
     return (memory_info.rss / total_memory) * 100
 
-def round_coordinate_list (coordinate_list: List[float]) -> List[ValueCount] :
+
+def round_coordinate_list(coordinate_list: List[float]) -> List[ValueCount]:
     """
     Round a list of coordinates to according to the precision and return a list of ValueCount objects.
     """
@@ -420,7 +416,8 @@ def round_coordinate_list (coordinate_list: List[float]) -> List[ValueCount] :
 
     return rounded_list
 
-def round_dates (date_list: List[pandas.Timestamp]):
+
+def round_dates(date_list: List[pandas.Timestamp]):
     """
     Round a list of dates to format YYYY-mm
     """
@@ -438,11 +435,12 @@ def round_dates (date_list: List[pandas.Timestamp]):
             rounded_dates.append(ValueCount(value=yyyy_mm_date, count=1))
     return rounded_dates
 
+
 def generate_feature_collection(
-        dataset: xarray.Dataset,
-        lat_key: str,
-        lon_key: str,
-        time_key: str,
+    dataset: xarray.Dataset,
+    lat_key: str,
+    lon_key: str,
+    time_key: str,
 ) -> FeatureCollection:
     """
     Generate a FeatureCollection from an xarray Dataset.
@@ -464,7 +462,6 @@ def generate_feature_collection(
     rounded_lons = round_coordinate_list(lons)
     rounded_times = round_dates(pandas_times)
 
-
     featureCollection = FeatureCollection(features=[])
     for lon in rounded_lons:
         for lat in rounded_lats:
@@ -472,15 +469,13 @@ def generate_feature_collection(
                 yyyy_mm_time = time.value
                 geometry = {
                     "type": "Point",
-                    "coordinates": [str(lon.value), str(lat.value)]
+                    "coordinates": [str(lon.value), str(lat.value)],
                 }
                 properties = {
                     "time": yyyy_mm_time,
-                    "count": lon.count * lat.count * time.count
+                    "count": lon.count * lat.count * time.count,
                 }
                 feature = Feature(geometry=geometry, properties=properties)
                 featureCollection.add_feature(feature)
 
     return featureCollection
-
-
