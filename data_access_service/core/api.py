@@ -67,38 +67,6 @@ class BaseAPI:
     ) -> Optional[ddf.DataFrame]:
         pass
 
-
-
-
-
-    def get_subset_data_count(
-            self,
-            uuid: str,
-            key: str,
-            date_start: pd.Timestamp,
-            date_end: pd.Timestamp,
-            lat_min: float,
-            lat_max: float,
-            lon_min: float,
-            lon_max: float,
-    ) -> int:
-        """
-        Get the count of data points in a subset defined by the given parameters.
-        Args:
-            uuid: Unique identifier for the dataset.
-            key: Key to access specific metadata.
-            date_start: Start date of the subset.
-            date_end: End date of the subset.
-            lat_min: Minimum latitude for the subset.
-            lat_max: Maximum latitude for the subset.
-            lon_min: Minimum longitude for the subset.
-            lon_max: Maximum longitude for the subset.
-
-        Returns:
-            int: Count of data points in the specified subset.
-        """
-        pass
-
     def get_api_status(self) -> bool:
         return False
 
@@ -456,6 +424,7 @@ class API(BaseAPI):
                 output.append(column)
 
         return output
+
 
     def get_dataset_data(
         self,
