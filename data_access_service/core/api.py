@@ -16,7 +16,7 @@ from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, ZarrDataSource
 from aodn_cloud_optimised.lib.config import get_notebook_url
 from bokeh.server.tornado import psutil
 from xarray.core.utils import Frozen
-from data_access_service.models.descriptor import Depth, Descriptor
+from data_access_service.models.descriptor import Depth, Descriptor, Coordinate
 
 log = logging.getLogger(__name__)
 
@@ -30,14 +30,27 @@ def _extract_depth(data: dict):
     else:
         return None
 
-def __extract_coordinate(data: dict, name: str):
-    pass
 
-def __extract_latitude(data: dict):
-    pass
 
-def __extract_longitude(data: dict):
-    pass
+def _extract_latitude(data: dict):
+    lattitude = data.get("LATTITUDE")
+    if lattitude is None:
+        print("no lattitude here")
+    valid_min = lattitude.get("valid_min")
+    valid_max = lattitude.get("valid_max")
+    if not all([valid_min, valid_max]):
+        print("no lattitude min max here")
+    return Coordinate(valid_min=valid_min, valid_max=valid_max)
+
+def _extract_longitude(data: dict):
+    longitude = data.get("LONGITUDE")
+    if longitude is None:
+        print("no longitude here")
+    valid_min = longitude.get("valid_min")
+    valid_max = longitude.get("valid_max")
+    if not all([valid_min, valid_max]):
+        print("no longitude min max here")
+    return Coordinate(valid_min=valid_min, valid_max=valid_max)
 
 def gzip_compress(data):
     buf = BytesIO()
@@ -277,7 +290,7 @@ class API(BaseAPI):
         self._cached_metadata: Dict[str, Dict[str, Descriptor]] = dict()
 
         # UUID to metadata mapper
-        self._instance = DataQuery.GetAodn()
+        self._aodn_instance = DataQuery.GetAodn()
         self._metadata = None
         self._is_ready = False
 
@@ -290,7 +303,7 @@ class API(BaseAPI):
 
     def initialize_metadata(self):
         """Helper method to run blocking initialization tasks."""
-        self._metadata = self._instance.get_metadata()
+        self._metadata = self._aodn_instance.get_metadata()
         self.refresh_uuid_dataset_map()
 
         log.info("Done init")
@@ -356,7 +369,7 @@ class API(BaseAPI):
     ):
         md: Dict[str, Descriptor] = self._cached_metadata.get(uuid)
         if md is not None and md[key] is not None:
-            ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
+            ds: DataQuery.DataSource = self._aodn_instance.get_dataset(md[key].dname)
             tes, tee = ds.get_temporal_extent()
             return start_date <= tes and tee <= end_date
         return False
@@ -366,7 +379,7 @@ class API(BaseAPI):
     ) -> Tuple[pd.Timestamp | None, pd.Timestamp | None]:
         md: Dict[str, Descriptor] = self._cached_metadata.get(uuid)
         if md is not None:
-            ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
+            ds: DataQuery.DataSource = self._aodn_instance.get_dataset(md[key].dname)
             return ds.get_temporal_extent()
         else:
             return None, None
@@ -451,7 +464,7 @@ class API(BaseAPI):
         if mds is not None and key in mds:
             md = mds[key]
             if md is not None:
-                ds: DataQuery.DataSource = self._instance.get_dataset(md.dname)
+                ds: DataQuery.DataSource = self._aodn_instance.get_dataset(md.dname)
 
                 # Default get 10 days of data
                 if date_start is None:
