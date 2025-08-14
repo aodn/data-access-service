@@ -1,12 +1,8 @@
 import json
-import json
-import os
 from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Optional, List
 
-import pandas
-import psutil
 from aodn_cloud_optimised.lib.DataQuery import ZarrDataSource
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import Response
@@ -26,7 +22,6 @@ from data_access_service.utils.routes_helper import (
     _verify_datatime_param,
     _fetch_data,
     _async_response_json,
-    round_coordinate_list,
     generate_feature_collection,
 )
 from data_access_service.utils.sse_wrapper import sse_wrapper
@@ -105,13 +100,14 @@ async def get_temporal_extent(uuid: str, key: str, request: Request):
 
 @router.get("data/{uuid}/{key}/indexing_values", dependencies=[Depends(api_key_auth)])
 async def get_indexing_values(
-    request: Request, uuid: str, key: str, date_start: str, date_end: str
+    request: Request, uuid: str, key: str, start_date: str, end_date: str
 ):
     """
-    Get the count of data records for a specific dataset within a given date range and geographical bounds.
+    Get feature collection for a Zarr dataset with the given UUID and key.
+    This endpoint is an investigation endpoint. Will try to use it later it necessary
     """
     # if any parameter is not provided, is a bad request
-    if not all([uuid, key, date_start, date_end]):
+    if not all([uuid, key, start_date, end_date]):
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail="Missing required parameters",
@@ -134,8 +130,8 @@ async def get_indexing_values(
     data_source = api.get_dataset_data(
         uuid=uuid,
         key=key,
-        date_start=_verify_datatime_param("start_date", date_start),
-        date_end=_verify_datatime_param("end_date", date_end),
+        date_start=_verify_datatime_param("start_date", start_date),
+        date_end=_verify_datatime_param("end_date", end_date),
     )
     if data_source is None:
         raise HTTPException(
