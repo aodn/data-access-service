@@ -14,6 +14,12 @@ class StopWatch:
         self.__start_time = time.time()
         self.__task_name = task_name
 
+    def record(self, record_label: str):
+        if self.__start_time is None:
+            raise ValueError("Stopwatch has not been started.")
+        elapsed_time = time.time() - self.__start_time
+        print(f"Timer result: {record_label} took {elapsed_time:.2f} seconds")
+
     def stop(self):
         if self.__start_time is None:
             raise ValueError("Stopwatch has not been started.")
