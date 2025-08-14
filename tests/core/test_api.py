@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from aodn_cloud_optimised import DataQuery
+from aodn_cloud_optimised.lib.DataQuery import GetAodn
 
 from data_access_service import API
 from data_access_service.utils.routes_helper import (
@@ -122,6 +123,17 @@ class TestApi(unittest.TestCase):
         assert parsed_result[0]["latitude"] is None, "LATITUDE NaN should be None"
         assert parsed_result[1]["longitude"] is None, "LONGITUDE NaN should be None"
         assert parsed_result[1]["depth"] is None, "DEPTH NaN should be None"
+
+
+# def test_extract_latitude():
+#     """
+#     Test the extraction of latitude from a DataFrame.
+#
+#     """
+#     aodn = GetAodn()
+#     catalog = aodn.get_metadata().catalog
+#     for key, value in
+#
 
 
 if __name__ == "__main__":
