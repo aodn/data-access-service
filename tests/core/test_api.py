@@ -12,6 +12,7 @@ from aodn_cloud_optimised import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import GetAodn
 
 from data_access_service import API
+from data_access_service.core.api import  _extract_longitude
 from data_access_service.utils.routes_helper import (
     _generate_partial_json_array,
     _response_json,
@@ -124,16 +125,28 @@ class TestApi(unittest.TestCase):
         assert parsed_result[1]["longitude"] is None, "LONGITUDE NaN should be None"
         assert parsed_result[1]["depth"] is None, "DEPTH NaN should be None"
 
+# TODO: not finished yet
+def test_extract_latitude():
+    """
+    Test the extraction of latitude from a DataFrame.
 
-# def test_extract_latitude():
-#     """
-#     Test the extraction of latitude from a DataFrame.
-#
-#     """
-#     aodn = GetAodn()
-#     catalog = aodn.get_metadata().catalog
-#     for key, value in
-#
+    """
+    aodn = GetAodn()
+    # catalog = aodn.get_metadata().catalog
+    path = Path(__file__).parent.parent / "canned/input_json/raw_metadata.json"
+    with open(path, "r") as f:
+        catalog = json.load(f)
+
+    for key, value in catalog.items():
+        lon = _extract_longitude(value)
+        spatial_extent = aodn.get_dataset(key).get_spatial_extent()
+        # print(f"spatial extent lons: {spatial_extent[1]}, {spatial_extent[3]}")
+        print("spatial extent", spatial_extent)
+        if not lon:
+            print(f"Longitude not found in {key}")
+        else:
+            print(f"Longitude: {lon.valid_min} ~ {lon.valid_max} for key: {key}")
+
 
 
 if __name__ == "__main__":
