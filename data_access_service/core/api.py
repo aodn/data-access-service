@@ -32,25 +32,26 @@ def _extract_depth(data: dict):
 
 
 
-def _extract_latitude(data: dict):
-    lattitude = data.get("LATTITUDE")
-    if lattitude is None:
-        print("no lattitude here")
-    valid_min = lattitude.get("valid_min")
-    valid_max = lattitude.get("valid_max")
-    if not all([valid_min, valid_max]):
-        print("no lattitude min max here")
-    return Coordinate(valid_min=valid_min, valid_max=valid_max)
+
 
 def _extract_longitude(data: dict):
     longitude = data.get("LONGITUDE")
     if longitude is None:
-        print("no longitude here")
-    valid_min = longitude.get("valid_min")
-    valid_max = longitude.get("valid_max")
-    if not all([valid_min, valid_max]):
-        print("no longitude min max here")
-    return Coordinate(valid_min=valid_min, valid_max=valid_max)
+        longitude = data.get("lon")
+    if longitude is None:
+        longitude = data.get("longitude")
+
+    if longitude is not None:
+        valid_min = longitude.get("valid_min")
+        valid_max = longitude.get("valid_max")
+        if valid_min is None or valid_max is None:
+            valid_range = longitude.get("valid_range")
+            if valid_range is not None and len(valid_range) == 2:
+                valid_min = valid_range[0]
+                valid_max = valid_range[1]
+        if valid_min is not None and valid_max is not None:
+            return Coordinate(valid_min=valid_min, valid_max=valid_max)
+    return None
 
 def gzip_compress(data):
     buf = BytesIO()
