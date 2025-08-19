@@ -158,7 +158,7 @@ class AWSHelper:
         if not download_urls:
             html_content = "<p>No data found for your selected subset.</p>"
         else:
-            html_content = ['<a href="' + l + '">' + l + '</a>' for l in download_urls]
+            html_content = ['<a href="' + l + '">' + l + "</a>" for l in download_urls]
         html_part = f"""
         <html>
         <body>
