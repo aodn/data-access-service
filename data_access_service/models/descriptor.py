@@ -8,14 +8,15 @@ class Depth:
     max: decimal
     unit: str
 
+@dataclass
+class Coordinate:
+    valid_min: decimal
+    valid_max: decimal
 
 @dataclass
 class Descriptor:
     uuid: str
     dname: str
+    latitude: Coordinate = None
+    longitude: Coordinate = None
     depth: Depth = None
-
-    def __init__(self, uuid: str, dname: str = None, depth: Depth = None):
-        self.uuid = uuid
-        self.dname = dname
-        self.depth = depth

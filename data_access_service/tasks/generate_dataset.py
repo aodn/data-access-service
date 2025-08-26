@@ -9,7 +9,7 @@ from numcodecs import Zlib
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.constants import PARTITION_KEY
-from data_access_service.core.descriptor import Descriptor
+from data_access_service.models.descriptor import Descriptor
 from data_access_service.server import api_setup, app
 from data_access_service.tasks.data_file_upload import (
     upload_all_files_in_folder_to_temp_s3,
