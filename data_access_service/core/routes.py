@@ -3,9 +3,9 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Optional, List
 
-from aodn_cloud_optimised.lib.DataQuery import ZarrDataSource
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import Response
+from xarray import Dataset
 
 from data_access_service import init_log
 from data_access_service.config.config import Config
@@ -98,7 +98,7 @@ async def get_temporal_extent(uuid: str, key: str, request: Request):
         raise HTTPException(status_code=404, detail="Temporal extent not found")
 
 
-@router.get("data/{uuid}/{key}/indexing_values", dependencies=[Depends(api_key_auth)])
+@router.get("/data/{uuid}/{key}/indexing_values", dependencies=[Depends(api_key_auth)])
 async def get_indexing_values(
     request: Request, uuid: str, key: str, start_date: str, end_date: str
 ):
@@ -139,7 +139,7 @@ async def get_indexing_values(
             detail=f"No data found with provided params for dataset {uuid} with key {key}",
         )
 
-    if not isinstance(data_source, ZarrDataSource):
+    if not isinstance(data_source, Dataset):
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=f"Dataset {uuid} with key {key} is not a Zarr dataset. Please doublecheck or contact AODN",
@@ -149,7 +149,7 @@ async def get_indexing_values(
     lon_key = api.map_column_names(uuid=uuid, key=key, columns=["LONGITUDE"])[0]
     time_key = api.map_column_names(uuid=uuid, key=key, columns=["TIME"])[0]
 
-    dataset = data_source.zarr_store
+    dataset = data_source
 
     if (
         lat_key not in dataset.coords
