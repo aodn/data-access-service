@@ -6,6 +6,7 @@ from typing import Optional, List
 from aodn_cloud_optimised.lib.DataQuery import ZarrDataSource
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import Response
+from xarray import Dataset
 
 from data_access_service import init_log
 from data_access_service.config.config import Config
@@ -23,6 +24,7 @@ from data_access_service.utils.routes_helper import (
     _fetch_data,
     _async_response_json,
     generate_feature_collection,
+    generate_rect_feature_collection,
 )
 from data_access_service.utils.sse_wrapper import sse_wrapper
 
@@ -98,13 +100,13 @@ async def get_temporal_extent(uuid: str, key: str, request: Request):
         raise HTTPException(status_code=404, detail="Temporal extent not found")
 
 
-@router.get("data/{uuid}/{key}/indexing_values", dependencies=[Depends(api_key_auth)])
+@router.get("/data/{uuid}/{key}/indexing_values", dependencies=[Depends(api_key_auth)])
 async def get_indexing_values(
     request: Request, uuid: str, key: str, start_date: str, end_date: str
 ):
     """
     Get feature collection for a Zarr dataset with the given UUID and key.
-    This endpoint is an investigation endpoint. Will try to use it later it necessary
+    This endpoint is an investigation endpoint. Will try to use it later it necessary, Not in use right now.
     """
     # if any parameter is not provided, is a bad request
     if not all([uuid, key, start_date, end_date]):
@@ -139,7 +141,7 @@ async def get_indexing_values(
             detail=f"No data found with provided params for dataset {uuid} with key {key}",
         )
 
-    if not isinstance(data_source, ZarrDataSource):
+    if not isinstance(data_source, Dataset):
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=f"Dataset {uuid} with key {key} is not a Zarr dataset. Please doublecheck or contact AODN",
@@ -149,12 +151,10 @@ async def get_indexing_values(
     lon_key = api.map_column_names(uuid=uuid, key=key, columns=["LONGITUDE"])[0]
     time_key = api.map_column_names(uuid=uuid, key=key, columns=["TIME"])[0]
 
-    dataset = data_source.zarr_store
-
     if (
-        lat_key not in dataset.coords
-        or lon_key not in dataset.coords
-        or time_key not in dataset.coords
+        lat_key not in data_source.coords
+        or lon_key not in data_source.coords
+        or time_key not in data_source.coords
     ):
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
@@ -162,10 +162,66 @@ async def get_indexing_values(
         )
 
     feature_collection = generate_feature_collection(
-        dataset=dataset, lat_key=lat_key, lon_key=lon_key, time_key=time_key
+        dataset=data_source, lat_key=lat_key, lon_key=lon_key, time_key=time_key
     )
     return Response(
         content=json.dumps(feature_collection.to_dict()), media_type="application/json"
+    )
+
+
+@router.get("/data/{uuid}/{key}/zarr_rect", dependencies=[Depends(api_key_auth)])
+async def get_zarr_rectangles(
+    request: Request, uuid: str, key: str, start_date: str, end_date: str
+):
+    if not all([uuid, key, start_date, end_date]):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Missing required parameters",
+        )
+    if not key.endswith(".zarr"):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="This endpoint only supports zarr data format",
+        )
+
+    api = get_api_instance(request)
+    data_source = api.get_dataset_data(
+        uuid=uuid,
+        key=key,
+        date_start=_verify_datatime_param("start_date", start_date),
+        date_end=_verify_datatime_param("end_date", end_date),
+    )
+
+    if data_source is None:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"No data found with provided params for dataset {uuid} with key {key}",
+        )
+    if not isinstance(data_source, Dataset):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=f"Dataset {uuid} with key {key} is not a Zarr dataset. Please doublecheck or contact AODN",
+        )
+
+    lat_key = api.map_column_names(uuid=uuid, key=key, columns=["LATITUDE"])[0]
+    lon_key = api.map_column_names(uuid=uuid, key=key, columns=["LONGITUDE"])[0]
+    time_key = api.map_column_names(uuid=uuid, key=key, columns=["TIME"])[0]
+
+    if (
+        lat_key not in data_source.coords
+        or lon_key not in data_source.coords
+        or time_key not in data_source.coords
+    ):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=f"Dataset {uuid} with key {key} does not contain required coordinates: {lat_key}, {lon_key}, {time_key}",
+        )
+
+    rect_feature_collection = generate_rect_feature_collection(
+        dataset=data_source, lat_key=lat_key, lon_key=lon_key, time_key=time_key
+    )
+    return Response(
+        content=json.dumps(rect_feature_collection), media_type="application/json"
     )
 
 

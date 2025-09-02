@@ -8,6 +8,7 @@ from data_access_service.models.value_count import ValueCount
 from data_access_service.utils.routes_helper import (
     round_coordinate_list,
     generate_feature_collection,
+    generate_rect_feature_collection,
 )
 
 
@@ -53,5 +54,28 @@ def test_generate_feature_collection():
     with open(expected_result_path) as file:
         expected_result = file.read()
 
-    actual_result = json.dumps(feature_collection.to_dict())
+    actual_result = json.dumps(feature_collection)
+    assert json.loads(actual_result) == json.loads(expected_result)
+
+
+def test_generate_rect_feature_collection():
+    zarr_path = (
+        Path(__file__).parent.parent
+        / "canned/s3_sample2/satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
+    )
+    if not zarr_path.exists():
+        raise FileNotFoundError(f"Test data file not found: {zarr_path}")
+    dataset = xarray.open_zarr(zarr_path)
+    start_date = pd.Timestamp("2011-11-01 00:00:00.000000000")
+    end_date = pd.Timestamp("2011-11-30 23:59:59.999999999")
+    subset = dataset.sel(time=slice(start_date, end_date))
+    feature_collection = generate_rect_feature_collection(subset, "lat", "lon", "time")
+    expected_result_path = (
+        Path(__file__).parent.parent
+        / "canned/expected_json/generate_rect_feature_collection_expected.json"
+    )
+    with open(expected_result_path) as file:
+        expected_result = file.read()
+
+    actual_result = json.dumps(feature_collection)
     assert json.loads(actual_result) == json.loads(expected_result)

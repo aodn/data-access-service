@@ -22,7 +22,10 @@ from dask.dataframe import DataFrame
 from dateutil import parser
 from fastapi import HTTPException, Request, BackgroundTasks
 from fastapi.responses import Response, FileResponse
+from geojson import Feature, FeatureCollection
+from geojson.geometry import Geometry
 from pydantic import BaseModel
+import numpy
 
 from data_access_service import init_log
 from data_access_service.config.config import Config
@@ -39,7 +42,6 @@ from data_access_service.core.constants import (
     STR_DEPTH_LOWER_CASE,
 )
 from data_access_service.core.error import ErrorResponse
-from data_access_service.models.feature_collection import FeatureCollection, Feature
 from data_access_service.models.value_count import ValueCount
 from data_access_service.utils.date_time_utils import (
     DATE_FORMAT,
@@ -433,6 +435,12 @@ def round_dates(date_list: List[pandas.Timestamp]):
             existing_value.count += 1
         else:
             rounded_dates.append(ValueCount(value=yyyy_mm_date, count=1))
+
+        if len(rounded_dates) > 1:
+            raise error(
+                "More than one date found, Only one month query is supported for now."
+            )
+
     return rounded_dates
 
 
@@ -462,20 +470,66 @@ def generate_feature_collection(
     rounded_lons = round_coordinate_list(lons)
     rounded_times = round_dates(pandas_times)
 
-    featureCollection = FeatureCollection(features=[])
+    features = []
     for lon in rounded_lons:
         for lat in rounded_lats:
             for time in rounded_times:
                 yyyy_mm_time = time.value
                 geometry = {
                     "type": "Point",
-                    "coordinates": [str(lon.value), str(lat.value)],
+                    "coordinates": [float(lon.value), float(lat.value)],
                 }
                 properties = {
                     "time": yyyy_mm_time,
                     "count": lon.count * lat.count * time.count,
                 }
                 feature = Feature(geometry=geometry, properties=properties)
-                featureCollection.add_feature(feature)
+                features.append(feature)
 
-    return featureCollection
+    return FeatureCollection(features=features)
+
+
+def generate_rect_feature_collection(
+    dataset: xarray.Dataset,
+    lat_key: str,
+    lon_key: str,
+    time_key: str,
+):
+    """
+    Generate a FeatureCollection  with rectangle features from an xarray Dataset.
+    It is a shortterm solution for the zarr subsetting issue.
+    """
+
+    lats = dataset.coords[lat_key].values
+    lons = dataset.coords[lon_key].values
+    times = dataset.coords[time_key].values
+    pandas_times = pandas.to_datetime(times)
+
+    if len(pandas_times) == 0:
+        logger.info("No data available in the dataset.")
+        return None
+
+    rounded_time = round_dates(pandas_times)[0]
+
+    min_lat = float(numpy.nanmin(lats))
+    max_lat = float(numpy.nanmax(lats))
+    min_lon = float(numpy.nanmin(lons))
+    max_lon = float(numpy.nanmax(lons))
+
+    rect_polygon = [
+        [min_lon, min_lat],
+        [min_lon, max_lat],
+        [max_lon, max_lat],
+        [max_lon, min_lat],
+        [min_lon, min_lat],
+    ]
+
+    geometry = Geometry(type="Polygon", coordinates=[rect_polygon])
+    feature = Feature(
+        geometry=geometry,
+        properties={
+            "date": rounded_time.value,
+            "count": len(lats) * len(lons) * rounded_time.count,
+        },
+    )
+    return FeatureCollection(features=[feature])
