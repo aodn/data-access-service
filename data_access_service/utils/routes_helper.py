@@ -506,6 +506,10 @@ def generate_rect_feature_collection(
     times = dataset.coords[time_key].values
     pandas_times = pandas.to_datetime(times)
 
+    if len(pandas_times) == 0:
+        logger.info("No data available in the dataset.")
+        return None
+
     rounded_time = round_dates(pandas_times)[0]
 
     min_lat = float(numpy.nanmin(lats))
