@@ -470,7 +470,6 @@ def generate_feature_collection(
     rounded_lons = round_coordinate_list(lons)
     rounded_times = round_dates(pandas_times)
 
-    feature_collection = FeatureCollection(features=[])
     features = []
     for lon in rounded_lons:
         for lat in rounded_lats:
