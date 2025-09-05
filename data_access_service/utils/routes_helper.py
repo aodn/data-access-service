@@ -25,7 +25,6 @@ from fastapi.responses import Response, FileResponse
 from geojson import Feature, FeatureCollection
 from geojson.geometry import Geometry
 from pydantic import BaseModel
-import numpy
 
 from data_access_service import init_log
 from data_access_service.config.config import Config
@@ -489,7 +488,7 @@ def generate_feature_collection(
     return FeatureCollection(features=features)
 
 
-def generate_rect_feature_collection(
+def generate_rect_features(
     dataset: xarray.Dataset,
     lat_key: str,
     lon_key: str,
@@ -532,4 +531,4 @@ def generate_rect_feature_collection(
             "count": len(lats) * len(lons) * rounded_time.count,
         },
     )
-    return FeatureCollection(features=[feature])
+    return [feature]
