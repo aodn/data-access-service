@@ -425,6 +425,18 @@ class API(BaseAPI):
 
         return output
 
+    def get_datasource(self, uuid: str, key: str) -> Optional[DataQuery.DataSource]:
+        mds: Dict[str, Descriptor] = self._cached.get(uuid)
+        if mds is not None and key in mds:
+            md = mds[key]
+            if md is not None:
+                ds: DataQuery.DataSource = self._instance.get_dataset(md.dname)
+                return ds
+            else:
+                return None
+        else:
+            return None
+
     def get_dataset_data(
         self,
         uuid: str,
@@ -438,81 +450,74 @@ class API(BaseAPI):
         scalar_filter=None,
         columns: list[str] = None,
     ) -> Optional[ddf.DataFrame | xarray.Dataset]:
-        mds: Dict[str, Descriptor] = self._cached.get(uuid)
-
-        if mds is not None and key in mds:
-            md = mds[key]
-            if md is not None:
-                ds: DataQuery.DataSource = self._instance.get_dataset(md.dname)
-
-                # Default get 10 days of data
-                if date_start is None:
-                    date_start = (pd.Timestamp.now() - timedelta(days=10)).tz_convert(
-                        "UTC"
-                    )
-                else:
-                    if date_start.tz is None:
-                        raise ValueError("Missing timezone info in date_start")
-                    else:
-                        date_start = pd.to_datetime(date_start).tz_convert(timezone.utc)
-
-                if date_end is None:
-                    date_end = (
-                        pd.Timestamp.now() + pd.offsets.Day(1) - pd.offsets.Nano(1)
-                    ).tz_convert("UTC")
-                else:
-                    if date_end.tzinfo is None:
-                        raise ValueError("Missing timezone info in date_end")
-                    else:
-                        date_end = date_end.tz_convert(timezone.utc)
-
-                # The get_data call the pyarrow and compare only works with non timezone datetime
-                # now make sure the timezone is correctly convert to utc then remove it.
-                # As get_date datetime are all utc, but the pyarrow do not support compare of datetime vs
-                # datetime with timezone.
-                if date_start.tz is not None:
-                    date_start = date_start.tz_localize(None)
-
-                if date_end.tz is not None:
-                    date_end = date_end.tz_localize(None)
-
-                try:
-                    # All precision to nanosecond
-                    if isinstance(ds, ParquetDataSource):
-                        # Accuracy to nanoseconds
-                        result = ds.get_data(
-                            f"{date_start.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_start.nanosecond:03d}",
-                            f"{date_end.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_end.nanosecond:03d}",
-                            lat_min,
-                            lat_max,
-                            lon_min,
-                            lon_max,
-                            scalar_filter,
-                            self.map_column_names(uuid, key, columns),
-                        )
-
-                        return ddf.from_pandas(
-                            result, npartitions=None, chunksize=None, sort=True
-                        )
-                    elif isinstance(ds, ZarrDataSource):
-                        # Lib slightly different for Zar file
-                        return ds.get_data(
-                            f"{date_start.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_start.nanosecond:03d}",
-                            f"{date_end.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_end.nanosecond:03d}",
-                            lat_min,
-                            lat_max,
-                            lon_min,
-                            lon_max,
-                            scalar_filter,
-                        )
-                except ValueError as e:
-                    log.error(f"Error when query ds.get_data: {e}")
-                    raise e
-                except Exception as v:
-                    log.error(f"Error when query ds.get_data: {v}")
-                    raise
+        ds = self.get_datasource(uuid, key)
+        if ds is not None:
+            # Default get 10 days of data
+            if date_start is None:
+                date_start = (pd.Timestamp.now() - timedelta(days=10)).tz_convert(
+                    "UTC"
+                )
             else:
-                return None
+                if date_start.tz is None:
+                    raise ValueError("Missing timezone info in date_start")
+                else:
+                    date_start = pd.to_datetime(date_start).tz_convert(timezone.utc)
+
+            if date_end is None:
+                date_end = (
+                    pd.Timestamp.now() + pd.offsets.Day(1) - pd.offsets.Nano(1)
+                ).tz_convert("UTC")
+            else:
+                if date_end.tzinfo is None:
+                    raise ValueError("Missing timezone info in date_end")
+                else:
+                    date_end = date_end.tz_convert(timezone.utc)
+
+            # The get_data call the pyarrow and compare only works with non timezone datetime
+            # now make sure the timezone is correctly convert to utc then remove it.
+            # As get_date datetime are all utc, but the pyarrow do not support compare of datetime vs
+            # datetime with timezone.
+            if date_start.tz is not None:
+                date_start = date_start.tz_localize(None)
+
+            if date_end.tz is not None:
+                date_end = date_end.tz_localize(None)
+
+            try:
+                # All precision to nanosecond
+                if isinstance(ds, ParquetDataSource):
+                    # Accuracy to nanoseconds
+                    result = ds.get_data(
+                        f"{date_start.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_start.nanosecond:03d}",
+                        f"{date_end.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_end.nanosecond:03d}",
+                        lat_min,
+                        lat_max,
+                        lon_min,
+                        lon_max,
+                        scalar_filter,
+                        self.map_column_names(uuid, key, columns),
+                    )
+
+                    return ddf.from_pandas(
+                        result, npartitions=None, chunksize=None, sort=True
+                    )
+                elif isinstance(ds, ZarrDataSource):
+                    # Lib slightly different for Zar file
+                    return ds.get_data(
+                        f"{date_start.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_start.nanosecond:03d}",
+                        f"{date_end.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_end.nanosecond:03d}",
+                        lat_min,
+                        lat_max,
+                        lon_min,
+                        lon_max,
+                        scalar_filter,
+                    )
+            except ValueError as e:
+                log.error(f"Error when query ds.get_data: {e}")
+                raise e
+            except Exception as v:
+                log.error(f"Error when query ds.get_data: {v}")
+                raise
         else:
             return None
 

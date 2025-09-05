@@ -4,6 +4,10 @@ import pytz
 
 from typing import Tuple
 from datetime import datetime, timedelta, time
+
+from pandas import Timestamp
+from pandas._libs import NaTType
+
 from data_access_service import init_log, Config
 from dateutil.relativedelta import relativedelta
 from data_access_service.core.api import BaseAPI
@@ -55,7 +59,6 @@ def get_final_day_of_month_(date: pd.Timestamp) -> pd.Timestamp:
     )
     return last_day + pd.offsets.Nano(999)
 
-
 def get_first_day_of_month(date: pd.Timestamp) -> pd.Timestamp:
     """
     Find first day of month, do not care about the timezone and time
@@ -87,6 +90,31 @@ def ensure_timezone(dt: pd.Timestamp) -> pd.Timestamp:
         return dt.tz_localize(pytz.UTC)
     return dt
 
+def split_date_range_binary(start_date: Timestamp, end_date: Timestamp) -> tuple[
+    Timestamp, Timestamp, Timestamp]:
+    """
+    A basic binary division to split date range
+    Args:
+        start_date: The start date of the range. UTC string in 'YYYY-MM-DD HH:MM:SS.fffffffff+00:00' format.
+        end_date: The end date of the range. UTC string in 'YYYY-MM-DD HH:MM:SS.fffffffff+00:00' format.
+    Returns:
+        tuple[str, str, str] The start date, mid date, and end date of the date range.
+    """
+    if not isinstance(start_date, pd.Timestamp):
+        start_date = pd.Timestamp(start_date)
+    if not isinstance(end_date, pd.Timestamp):
+        end_date = pd.Timestamp(end_date)
+
+    duration_ns = (end_date - start_date).total_seconds() * 1e9
+    mid_ns = duration_ns / 2
+
+    mid_date = start_date + pd.Timedelta(nanoseconds=mid_ns)
+    # make sure the time zone is attached
+    start_date = start_date.tz_convert(start_date.tz)
+    mid_date = mid_date.tz_convert(start_date.tz)
+    end_date = end_date.tz_convert(end_date.tz)
+
+    return start_date, mid_date, end_date
 
 def get_monthly_utc_date_range_array_from_(
     start_date: pd.Timestamp, end_date: pd.Timestamp

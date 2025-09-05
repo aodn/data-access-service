@@ -45,6 +45,7 @@ class Config:
 
     @staticmethod
     def get_config(profile: EnvType = None):
+        load_dotenv()
         if profile is None:
             profile = EnvType(os.getenv("PROFILE", EnvType.DEV))
 

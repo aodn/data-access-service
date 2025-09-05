@@ -14,3 +14,5 @@ STATUS = "status"
 MESSAGE = "message"
 DATA = "data"
 PARTITION_KEY = sys.intern("PARTITION_KEY")
+
+PARQUET_SUBSET_ROW_NUMBER: int = 20000
