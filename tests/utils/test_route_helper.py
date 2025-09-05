@@ -8,7 +8,7 @@ from data_access_service.models.value_count import ValueCount
 from data_access_service.utils.routes_helper import (
     round_coordinate_list,
     generate_feature_collection,
-    generate_rect_feature_collection,
+    generate_rect_features,
 )
 
 
@@ -69,7 +69,7 @@ def test_generate_rect_feature_collection():
     start_date = pd.Timestamp("2011-11-01 00:00:00.000000000")
     end_date = pd.Timestamp("2011-11-30 23:59:59.999999999")
     subset = dataset.sel(time=slice(start_date, end_date))
-    feature_collection = generate_rect_feature_collection(subset, "lat", "lon", "time")
+    feature_collection = generate_rect_features(subset, "lat", "lon", "time")
     expected_result_path = (
         Path(__file__).parent.parent
         / "canned/expected_json/generate_rect_feature_collection_expected.json"

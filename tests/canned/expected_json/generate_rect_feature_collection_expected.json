@@ -1,39 +1,36 @@
-{
-  "features": [
-    {
-      "geometry": {
-        "coordinates": [
+[
+  {
+    "geometry": {
+      "coordinates": [
+        [
           [
-            [
-              60.0,
-              -70.0
-            ],
-            [
-              60.0,
-              20.0
-            ],
-            [
-              190.0,
-              20.0
-            ],
-            [
-              190.0,
-              -70.0
-            ],
-            [
-              60.0,
-              -70.0
-            ]
+            60.0,
+            -70.0
+          ],
+          [
+            60.0,
+            20.0
+          ],
+          [
+            190.0,
+            20.0
+          ],
+          [
+            190.0,
+            -70.0
+          ],
+          [
+            60.0,
+            -70.0
           ]
-        ],
-        "type": "Polygon"
-      },
-      "properties": {
-        "count": 3374882,
-        "date": "2011-11"
-      },
-      "type": "Feature"
-    }
-  ],
-  "type": "FeatureCollection"
-}
+        ]
+      ],
+      "type": "Polygon"
+    },
+    "properties": {
+      "count": 3374882,
+      "date": "2011-11"
+    },
+    "type": "Feature"
+  }
+]
