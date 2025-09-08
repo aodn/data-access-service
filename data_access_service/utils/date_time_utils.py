@@ -1,16 +1,29 @@
 import re
 import pandas as pd
 import pytz
+import pyarrow
+from pyarrow import compute as pc
+import numpy as np
+import heapq
+from pandas import Timestamp
 
 from typing import Tuple
-from datetime import datetime, timedelta, time
+from datetime import datetime
 
-from pandas import Timestamp
-from pandas._libs import NaTType
+from aodn_cloud_optimised.lib.DataQuery import (
+    DataSource,
+    get_temporal_extent,
+    get_timestamps_boundary_values,
+    create_time_filter,
+)
 
 from data_access_service import init_log, Config
 from dateutil.relativedelta import relativedelta
 from data_access_service.core.api import BaseAPI
+from data_access_service.core.constants import (
+    PARQUET_SUBSET_ROW_NUMBER,
+    MAX_PARQUET_SPLIT,
+)
 
 YEAR_MONTH_DAY = "%Y-%m-%d"
 YEAR_MONTH_DAY_TIME_NANO = "%Y-%m-%d %H:%M:%S.fffffffff"
@@ -59,6 +72,7 @@ def get_final_day_of_month_(date: pd.Timestamp) -> pd.Timestamp:
     )
     return last_day + pd.offsets.Nano(999)
 
+
 def get_first_day_of_month(date: pd.Timestamp) -> pd.Timestamp:
     """
     Find first day of month, do not care about the timezone and time
@@ -76,6 +90,171 @@ def next_month_first_day(date: pd.Timestamp) -> pd.Timestamp:
     )
 
 
+def check_rows_with_date_range(ds: DataSource, date_ranges: list[dict]):
+    """
+    Count number of rows with specific monthly range. ignore bbox.
+    If rows number exceeds PARQUET_SUBSET_ROW_NUMBER, split this date range with binary division, until rows number
+    under the safe threshold.
+    If rows number is 0, remove this date range from the list of date_ranges so that to skip further querying data.
+    Args:
+        ds: DataSource fetched from cloud optimised library
+        date_ranges: List of monthly intervals as dictionaries with 'start_date' and 'end_date' as UTC timestamps in
+                    'YYYY-MM-DD HH:MM:SS.fffffffff+00:00' format.
+    Returns:
+        List[dict]: List of dictionaries with 'start_date' and 'end_date' as UTC timestamps in
+                    'YYYY-MM-DD HH:MM:SS.fffffffff+00:00' format with row number check.
+    """
+    # apply on parquet dataset only
+    if not ".parquet" in ds.dname:
+        return date_ranges
+
+    dataset = ds.dataset
+
+    checked_date_ranges = []
+    q = []
+
+    # monthly interval
+    for date_range in date_ranges:
+        month_start, month_end = date_range["start_date"], date_range["end_date"]
+        if month_end < month_start:
+            continue
+        heapq.heappush(q, (month_start, month_end, 0))
+
+    # check row count
+    while q:
+        start, end, times_of_split = heapq.heappop(q)
+        if times_of_split >= MAX_PARQUET_SPLIT:
+            checked_date_ranges.append({"start_date": start, "end_date": end})
+            continue
+
+        start_str = start.strftime("%Y-%m-%d")
+        end_str = end.strftime("%Y-%m-%d")
+
+        try:
+            time_filter = create_time_filter(
+                dataset, date_start=start_str, date_end=end_str
+            )
+        except ValueError as e:
+            if "is out of range of dataset." in str(e):
+                try:
+                    time_filter = create_customised_time_filter(
+                        dataset, start=start, end=end
+                    )
+                except ValueError as e:
+                    log.warning(
+                        f"Warning: Could not create time filter for range {start} to {end}: {e}"
+                    )
+                    continue
+            else:
+                raise ValueError(f"Could not create time filter: {e}")
+
+        try:
+            num_rows = dataset.count_rows(filter=time_filter)
+        except Exception as e:
+            log.warning(
+                f"Warning: Could not count rows for range {start} to {end}: {e}"
+            )
+            continue
+
+        if num_rows == 0:
+            # skip the date range if no data in this range
+            continue
+        elif num_rows <= PARQUET_SUBSET_ROW_NUMBER:
+            checked_date_ranges.append(
+                {
+                    "start_date": start,
+                    "end_date": end,
+                }
+            )
+        else:
+            log.info(f"Splitting range {start} to {end} (rows: {num_rows})")
+            try:
+                split_start, split_mid, split_end = split_date_range_binary(start, end)
+                heapq.heappush(q, (split_start, split_mid, times_of_split + 1))
+                heapq.heappush(q, (split_mid, split_end, times_of_split + 1))
+
+            except Exception as e:
+                log.warning(f"Warning: Could not split range {start} to {end}: {e}")
+                checked_date_ranges.append(
+                    {
+                        "start_date": start,
+                        "end_date": end,
+                    }
+                )
+
+    return checked_date_ranges
+
+
+def create_customised_time_filter(
+    dataset, start: pd.Timestamp, end: pd.Timestamp
+) -> pyarrow.dataset.Expression:
+    """
+    Creates a time filter using actual dataset temporal extent instead of partition boundaries.
+
+    The original create_time_filter() validates against partition boundaries, which may be
+    more restrictive and ignore data less than the actual data range but larger than the partition boundaries.
+    This function validates against the real data temporal extent and create a time filter within the actual temporal range.
+
+    Args:
+        dataset: PyArrow dataset object
+        start: Query start timestamp
+        end: Query end timestamp
+
+    Returns:
+        PyArrow filter expression
+    """
+    if start.tz is None:
+        start = ensure_timezone(start)
+    if end.tz is None:
+        end = ensure_timezone(end)
+
+    timestamp_start, timestamp_end = get_temporal_extent(dataset)
+    timestamp_start = pd.to_datetime(timestamp_start)
+    timestamp_end = pd.to_datetime(timestamp_end)
+
+    if timestamp_start.tz is None:
+        timestamp_start = ensure_timezone(timestamp_start)
+    if timestamp_end.tz is None:
+        timestamp_end = ensure_timezone(timestamp_end)
+
+    if start < timestamp_start:
+        start = timestamp_start
+    if end > timestamp_end:
+        end = timestamp_end
+
+    if start >= end:
+        raise ValueError(
+            f"Invalid time range after boundary adjustment: {start} >= {end}"
+        )
+
+    start_str = start.strftime("%Y-%m-%d")
+    end_str = end.strftime("%Y-%m-%d")
+
+    partition_start, partition_end = get_timestamps_boundary_values(
+        dataset, start_str, end_str
+    )
+
+    expr1 = pc.field("timestamp") >= np.int64(partition_start)
+    expr2 = pc.field("timestamp") <= np.int64(partition_end)
+
+    time_varname = "TIME"
+    if "TIME" in dataset.schema.names:
+        time_varname = "TIME"
+    elif "JULD" in dataset.schema.names:
+        time_varname = "JULD"
+    elif "detection_timestamp" in dataset.schema.names:
+        time_varname = "detection_timestamp"
+
+    start_naive = start.tz_localize(None) if start.tz is not None else start
+    end_naive = end.tz_localize(None) if end.tz is not None else end
+
+    expr3 = pc.field(time_varname) >= start_naive
+    expr4 = pc.field(time_varname) <= end_naive
+
+    expression = expr1 & expr2 & expr3 & expr4
+    return expression
+
+
 def ensure_timezone(dt: pd.Timestamp) -> pd.Timestamp:
     """
     Check if datetime has timezone info; if not, assume UTC.
@@ -90,8 +269,10 @@ def ensure_timezone(dt: pd.Timestamp) -> pd.Timestamp:
         return dt.tz_localize(pytz.UTC)
     return dt
 
-def split_date_range_binary(start_date: Timestamp, end_date: Timestamp) -> tuple[
-    Timestamp, Timestamp, Timestamp]:
+
+def split_date_range_binary(
+    start_date: Timestamp, end_date: Timestamp
+) -> tuple[Timestamp, Timestamp, Timestamp]:
     """
     A basic binary division to split date range
     Args:
@@ -115,6 +296,7 @@ def split_date_range_binary(start_date: Timestamp, end_date: Timestamp) -> tuple
     end_date = end_date.tz_convert(end_date.tz)
 
     return start_date, mid_date, end_date
+
 
 def get_monthly_utc_date_range_array_from_(
     start_date: pd.Timestamp, end_date: pd.Timestamp

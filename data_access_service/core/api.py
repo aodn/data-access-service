@@ -454,9 +454,7 @@ class API(BaseAPI):
         if ds is not None:
             # Default get 10 days of data
             if date_start is None:
-                date_start = (pd.Timestamp.now() - timedelta(days=10)).tz_convert(
-                    "UTC"
-                )
+                date_start = (pd.Timestamp.now() - timedelta(days=10)).tz_convert("UTC")
             else:
                 if date_start.tz is None:
                     raise ValueError("Missing timezone info in date_start")

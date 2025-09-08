@@ -1,16 +1,14 @@
 import json
-from typing import List, Dict, Optional, Tuple
-from collections import deque
+from typing import List, Dict, Optional
 
 import dask.dataframe as ddf
 import pandas as pd
 import xarray
 from numcodecs import Zlib
-from aodn_cloud_optimised.lib.DataQuery import create_time_filter
 
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.core.constants import PARTITION_KEY, PARQUET_SUBSET_ROW_NUMBER
+from data_access_service.core.constants import PARTITION_KEY
 from data_access_service.core.descriptor import Descriptor
 from data_access_service.server import api_setup, app
 from data_access_service.tasks.data_file_upload import (
@@ -19,7 +17,7 @@ from data_access_service.tasks.data_file_upload import (
 from data_access_service.utils.date_time_utils import (
     get_monthly_utc_date_range_array_from_,
     trim_date_range,
-    split_date_range_binary,
+    check_rows_with_date_range,
 )
 
 efs_mount_point = "/mount/efs/"
@@ -122,7 +120,8 @@ def _generate_partition_output(
         date_ranges = get_monthly_utc_date_range_array_from_(
             start_date=start_date, end_date=end_date
         )
-        checked_date_ranges = check_rows_with_date_range(api, uuid, key, date_ranges)
+        datasource = api.get_datasource(uuid, key)
+        checked_date_ranges = check_rows_with_date_range(datasource, date_ranges)
 
         need_append = False
         for date_range in checked_date_ranges:
@@ -248,93 +247,6 @@ def _generate_partition_output_with_polygon(
     else:
         return True
 
-def check_rows_with_date_range(
-    api,
-    uuid: str,
-    key: str,
-    date_ranges: list[dict],
-) -> list[dict]:
-    """
-    Count number of rows with specific monthly range. ignore bbox.
-    If rows number exceeds PARQUET_SUBSET_ROW_NUMBER, split this date range with binary division, until rows number
-    under the safe threshold.
-    If rows number is 0, remove this date range from the list of date_ranges so that to skip further querying data.
-    Args:
-        api: API instance
-        uuid: dataset uuid
-        key: partition key
-        date_ranges: List of monthly intervals as dictionaries with 'start_date' and 'end_date' as UTC timestamps in
-                    'YYYY-MM-DD HH:MM:SS.fffffffff+00:00' format.
-    Returns:
-        List[dict]: List of dictionaries with 'start_date' and 'end_date' as UTC timestamps in
-                    'YYYY-MM-DD HH:MM:SS.fffffffff+00:00' format with row number check.
-    """
-    ds = api.get_datasource(uuid=uuid, key=key)
-    # this only applied on parquet, if it is zarr file, we simply return the original date ranges
-    # zarr will be solved in a different way in the future
-    if not ".parquet" in ds.dname:
-        return date_ranges
-
-    dataset = ds.dataset
-    threshold = PARQUET_SUBSET_ROW_NUMBER
-
-    checked_date_ranges = []
-    # create a queue for the iteration, in which are tuples as (split_start, split_end, times_of_split)
-    # in a monthly interval, the max_split should less than 30 so that to get at least daily records
-    q: deque[Tuple[pd.Timestamp, pd.Timestamp, int]] = deque()
-
-    for date_range in date_ranges:
-        start_date, end_date = date_range["start_date"], date_range["end_date"]
-        if end_date < start_date:
-            continue
-        q.append((start_date, end_date, 0))
-
-    while q:
-        start, end, times_of_split = q.popleft()
-
-        if times_of_split >= 30:
-            checked_date_ranges.append({"start_date": start,
-                        "end_date": end})
-            continue
-
-        # Build filter
-        start_str = start.strftime('%Y-%m-%d')
-        end_str = end.strftime('%Y-%m-%d')
-        time_filter = create_time_filter(
-            dataset,
-            date_start=start_str,
-            date_end=end_str,
-        )
-        num_rows = dataset.count_rows(filter=time_filter)
-
-        # drop date range if no data in this range
-        if num_rows == 0:
-            continue
-
-        # keep check number of rows
-        if num_rows <= threshold:
-            # keep range
-            checked_date_ranges.append({
-                "start_date": start,
-                "end_date": end,
-            })
-            continue
-
-        # if the rows reaches threshold, split
-        start, mid, end = split_date_range_binary(start, end)
-        if mid <= start or mid >= end:
-            # cannot split further, accept as-is
-            checked_date_ranges.append({
-                "start_date": start,
-                "end_date": end,
-            })
-            continue
-
-        # enqueue split date ranges
-        q.append((start, mid, times_of_split + 1))
-        q.append((mid, end, times_of_split + 1))
-
-    return checked_date_ranges
 
 def query_data(
     api,
