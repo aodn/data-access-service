@@ -1,6 +1,8 @@
 import asyncio
 import gzip
 import math
+import duckdb
+
 from concurrent.futures import ThreadPoolExecutor
 
 import dask.dataframe as ddf
@@ -272,6 +274,11 @@ class API(BaseAPI):
         self._instance = DataQuery.GetAodn()
         self._metadata = None
         self._is_ready = False
+        self.memconn = duckdb.connect(":memory:cloud_optimized")
+
+    def destroy(self):
+        log.info("Destroying API instance")
+        self.memconn.close()
 
     async def async_initialize_metadata(self):
         # Use ThreadPoolExecutor to run blocking calls in a separate thread
@@ -293,6 +300,39 @@ class API(BaseAPI):
         # used for checking if the API instance is ready
         return self._is_ready
 
+    def fetch_wave_buoy_sites(self, start_date: str, end_date: str):
+        dataset = f"s3://{self._instance.bucket_name}/wave_buoy_realtime_nonqc.parquet"
+        result = self.memconn.execute(f'''SELECT 
+            site_name,
+            first(TIME) AS TIME,
+            first(LATITUDE) AS LATITUDE,
+            first(LONGITUDE) AS LONGITUDE
+            FROM read_parquet('{dataset}/**/*.parquet')
+            WHERE TIME >= '{start_date}' AND TIME < '{end_date}'
+            GROUP BY site_name''').df()
+        log.info("Found %s items", len(result))
+
+        feature_collection = {
+            "type": "FeatureCollection",
+            "features": [],
+        }
+        DATE_FORMAT = "%Y-%m-%d"
+        for _, row in result.iterrows():
+            feature = {
+            "type": "Feature",
+            "properties": {
+                "buoy": row["site_name"],
+                "date": row["TIME"].strftime(DATE_FORMAT),
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [row["LONGITUDE"], row["LATITUDE"]],
+            },
+            }
+            feature_collection["features"].append(feature)
+
+        return feature_collection
+    
     # Do not use cache, so that we can refresh it again
     def refresh_uuid_dataset_map(self):
         # A map contains dataset name and Metadata class, which is not
