@@ -17,6 +17,7 @@ from data_access_service.tasks.data_file_upload import (
 from data_access_service.utils.date_time_utils import (
     get_monthly_utc_date_range_array_from_,
     trim_date_range,
+    check_rows_with_date_range,
 )
 
 efs_mount_point = "/mount/efs/"
@@ -119,8 +120,11 @@ def _generate_partition_output(
         date_ranges = get_monthly_utc_date_range_array_from_(
             start_date=start_date, end_date=end_date
         )
+        datasource = api.get_datasource(uuid, key)
+        checked_date_ranges = check_rows_with_date_range(datasource, date_ranges)
+
         need_append = False
-        for date_range in date_ranges:
+        for date_range in checked_date_ranges:
             result: Optional[ddf.DataFrame | xarray.Dataset] = query_data(
                 api,
                 uuid,
