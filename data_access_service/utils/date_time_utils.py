@@ -90,7 +90,7 @@ def next_month_first_day(date: pd.Timestamp) -> pd.Timestamp:
     )
 
 
-def check_rows_with_date_range(ds: DataSource, date_ranges: list[dict]):
+def check_rows_with_date_range(ds: DataSource, date_ranges: list[dict]) -> list[dict]:
     """
     Count number of rows with specific monthly range. ignore bbox.
     If rows number exceeds PARQUET_SUBSET_ROW_NUMBER, split this date range with binary division, until rows number
@@ -105,7 +105,7 @@ def check_rows_with_date_range(ds: DataSource, date_ranges: list[dict]):
                     'YYYY-MM-DD HH:MM:SS.fffffffff+00:00' format with row number check.
     """
     # apply on parquet dataset only
-    if not ".parquet" in ds.dname:
+    if ".parquet" not in ds.dname:
         return date_ranges
 
     dataset = ds.dataset
@@ -113,7 +113,7 @@ def check_rows_with_date_range(ds: DataSource, date_ranges: list[dict]):
     checked_date_ranges = []
     q = []
 
-    # monthly interval
+    # go through monthly interval
     for date_range in date_ranges:
         month_start, month_end = date_range["start_date"], date_range["end_date"]
         if month_end < month_start:
@@ -291,9 +291,9 @@ def split_date_range_binary(
 
     mid_date = start_date + pd.Timedelta(nanoseconds=mid_ns)
     # make sure the time zone is attached
-    start_date = start_date.tz_convert(start_date.tz)
-    mid_date = mid_date.tz_convert(start_date.tz)
-    end_date = end_date.tz_convert(end_date.tz)
+    start_date = ensure_timezone(start_date)
+    mid_date = ensure_timezone(mid_date)
+    end_date = ensure_timezone(end_date)
 
     return start_date, mid_date, end_date
 

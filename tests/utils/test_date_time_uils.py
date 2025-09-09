@@ -3,7 +3,8 @@ import unittest
 import pandas as pd
 
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, Mock, patch
+from datetime import timezone
 
 import pytz
 
@@ -19,7 +20,8 @@ from data_access_service.utils.date_time_utils import (
     split_yearmonths_into_dict,
     ensure_timezone,
     split_date_range,
-    YEAR_MONTH_DAY_TIME_NANO,
+    split_date_range_binary,
+    check_rows_with_date_range,
 )
 
 
@@ -1134,3 +1136,53 @@ class TestDateTimeUtils(unittest.TestCase):
         }
         self.assertEqual(len(date_ranges), 5)
         self.assertEqual(date_ranges, expected_result)
+
+    def test_split_date_range_binary(self):
+        start = ensure_timezone(pd.Timestamp("2010-01-01"))
+        end = ensure_timezone(pd.Timestamp("2010-01-03"))
+
+        split_start, split_mid, split_end = split_date_range_binary(start, end)
+        expected_split_start = pd.Timestamp("2010-01-01", tz="UTC")
+        expected_split_mid = pd.Timestamp("2010-01-02", tz="UTC")
+        expected_split_end = pd.Timestamp("2010-01-03", tz="UTC")
+        self.assertEqual(
+            (split_start, split_mid, split_end),
+            (expected_split_start, expected_split_mid, expected_split_end),
+        )
+
+    @patch("data_access_service.utils.date_time_utils.PARQUET_SUBSET_ROW_NUMBER", 1000)
+    @patch("data_access_service.utils.date_time_utils.MAX_PARQUET_SPLIT", 10)
+    @patch("data_access_service.utils.date_time_utils.create_time_filter")
+    @patch("data_access_service.utils.date_time_utils.split_date_range_binary")
+    @patch("data_access_service.utils.date_time_utils.log")
+    def test_check_rows_with_date_range(self, mock_log, mock_split, mock_create_filter):
+        mock_ds = Mock()
+        mock_ds.dname = "test_data.parquet"
+        mock_ds.dataset = Mock()
+
+        mock_filter = Mock()
+        mock_create_filter.return_value = mock_filter
+        mock_ds.dataset.count_rows.side_effect = [2000, 400, 400]
+
+        mock_date_ranges = [
+            {
+                "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc),
+                "end_date": datetime(2023, 1, 31, tzinfo=timezone.utc),
+            },
+            {
+                "start_date": datetime(2023, 2, 1, tzinfo=timezone.utc),
+                "end_date": datetime(2023, 2, 28, tzinfo=timezone.utc),
+            },
+        ]
+
+        start_date = mock_date_ranges[0]["start_date"]
+        end_date = mock_date_ranges[0]["end_date"]
+        mid_date = datetime(2023, 1, 15, tzinfo=timezone.utc)
+        mock_split.return_value = (start_date, mid_date, end_date)
+
+        result = check_rows_with_date_range(mock_ds, [mock_date_ranges[0]])
+
+        # Should result in 2 split ranges
+        self.assertEqual(len(result), 2)
+        mock_split.assert_called_once()
+        mock_log.info.assert_called_once()
