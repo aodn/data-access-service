@@ -238,25 +238,34 @@ async def get_feature_collection_of_items_with_data_between_dates(
     end_date = _verify_datatime_param("end_date", end_date)
     api_instance = get_api_instance(request)
     return Response(
-        content=json.dumps(api_instance.fetch_wave_buoy_sites(start_date,end_date)), media_type="application/json"
+        content=json.dumps(api_instance.fetch_wave_buoy_sites(start_date, end_date)),
+        media_type="application/json",
     )
 
-@router.get("/data/feature-collection/wave-buoy/{buoy_name}", dependencies=[Depends(api_key_auth)])
+
+@router.get(
+    "/data/feature-collection/wave-buoy/{buoy_name}",
+    dependencies=[Depends(api_key_auth)],
+)
 async def get_feature_collection_of_items_with_data_between_dates(
     request: Request,
     buoy_name: str,
     start_date: Optional[str] = Query(default=MIN_DATE),
     end_date: Optional[str] = Query(
         default=datetime.now(timezone.utc).strftime(DATE_FORMAT)
-    )
+    ),
 ):
     start_date = _verify_datatime_param("start_date", start_date)
     end_date = _verify_datatime_param("end_date", end_date)
     api_instance = get_api_instance(request)
-    
+
     return Response(
-        content=json.dumps(api_instance.fetch_wave_buoy_data(buoy_name,start_date,end_date)), media_type="application/json"
+        content=json.dumps(
+            api_instance.fetch_wave_buoy_data(buoy_name, start_date, end_date)
+        ),
+        media_type="application/json",
     )
+
 
 @router.get("/data/{uuid}/{key}", dependencies=[Depends(api_key_auth)])
 async def get_data(

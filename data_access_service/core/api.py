@@ -305,24 +305,36 @@ class API(BaseAPI):
         buoy_name = unquote_plus(buoy_name)
         print("Fetching data for buoy:", buoy_name)
         dataset = f"s3://{self._instance.bucket_name}/wave_buoy_realtime_nonqc.parquet"
-        waveBuoyPositionQueryResult = self.memconn.execute(f'''SELECT
+        waveBuoyPositionQueryResult = self.memconn.execute(
+            f"""SELECT
             LATITUDE,
             LONGITUDE
             FROM read_parquet('{dataset}/**/*.parquet', hive_partitioning=true)
             WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (SSWMD IS NOT NULL OR WPFM IS NOT NULL OR WSSH IS NOT NULL)
-            LIMIT 1''').df()
-        
+            LIMIT 1"""
+        ).df()
+
         ds = ddf.from_pandas(waveBuoyPositionQueryResult)
-        lat = ds['LATITUDE'].compute().values[0] if len(ds['LATITUDE'].compute().values) > 0 else None
-        lon = ds['LONGITUDE'].compute().values[0] if len(ds['LONGITUDE'].compute().values) > 0 else None
+        lat = (
+            ds["LATITUDE"].compute().values[0]
+            if len(ds["LATITUDE"].compute().values) > 0
+            else None
+        )
+        lon = (
+            ds["LONGITUDE"].compute().values[0]
+            if len(ds["LONGITUDE"].compute().values) > 0
+            else None
+        )
 
         if lat is None or lon is None:
             return {}
 
-        waveBuoyDataQueryResult = self.memconn.execute(f'''SELECT SSWMD, WPFM, WSSH, TIME
+        waveBuoyDataQueryResult = self.memconn.execute(
+            f"""SELECT SSWMD, WPFM, WSSH, TIME
             FROM read_parquet('{dataset}/**/*.parquet', hive_partitioning=true)
             WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (SSWMD IS NOT NULL OR WPFM IS NOT NULL OR WSSH IS NOT NULL)
-            ORDER BY TIME''').df()
+            ORDER BY TIME"""
+        ).df()
         feature = {
             "type": "Feature",
             "properties": {
@@ -342,18 +354,20 @@ class API(BaseAPI):
             feature["properties"]["WPFM"].append([time_sec, row["WPFM"]])
             feature["properties"]["WSSH"].append([time_sec, row["WSSH"]])
 
-        return feature 
+        return feature
 
     def fetch_wave_buoy_sites(self, start_date: str, end_date: str):
         dataset = f"s3://{self._instance.bucket_name}/wave_buoy_realtime_nonqc.parquet"
-        result = self.memconn.execute(f'''SELECT 
+        result = self.memconn.execute(
+            f"""SELECT
             site_name,
             first(TIME) AS TIME,
             first(LATITUDE) AS LATITUDE,
             first(LONGITUDE) AS LONGITUDE
             FROM read_parquet('{dataset}/**/*.parquet', hive_partitioning=true)
             WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND (SSWMD IS NOT NULL OR WPFM IS NOT NULL OR WSSH IS NOT NULL)
-            GROUP BY site_name''').df()
+            GROUP BY site_name"""
+        ).df()
         feature_collection = {
             "type": "FeatureCollection",
             "features": [],
@@ -361,20 +375,20 @@ class API(BaseAPI):
         DATE_FORMAT = "%Y-%m-%d"
         for _, row in result.iterrows():
             feature = {
-            "type": "Feature",
-            "properties": {
-                "buoy": row["site_name"],
-                "date": row["TIME"].strftime(DATE_FORMAT),
-            },
-            "geometry": {
-                "type": "Point",
-                "coordinates": [row["LONGITUDE"], row["LATITUDE"]],
-            },
+                "type": "Feature",
+                "properties": {
+                    "buoy": row["site_name"],
+                    "date": row["TIME"].strftime(DATE_FORMAT),
+                },
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [row["LONGITUDE"], row["LATITUDE"]],
+                },
             }
             feature_collection["features"].append(feature)
 
         return feature_collection
-    
+
     # Do not use cache, so that we can refresh it again
     def refresh_uuid_dataset_map(self):
         # A map contains dataset name and Metadata class, which is not
