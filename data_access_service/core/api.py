@@ -19,6 +19,7 @@ from aodn_cloud_optimised.lib.config import get_notebook_url
 from bokeh.server.tornado import psutil
 from xarray.core.utils import Frozen
 from data_access_service.core.descriptor import Depth, Descriptor
+from urllib.parse import unquote_plus
 
 log = logging.getLogger(__name__)
 
@@ -300,6 +301,49 @@ class API(BaseAPI):
         # used for checking if the API instance is ready
         return self._is_ready
 
+    def fetch_wave_buoy_data(self, buoy_name: str, start_date: str, end_date: str):
+        buoy_name = unquote_plus(buoy_name)
+        print("Fetching data for buoy:", buoy_name)
+        dataset = f"s3://{self._instance.bucket_name}/wave_buoy_realtime_nonqc.parquet"
+        waveBuoyPositionQueryResult = self.memconn.execute(f'''SELECT
+            LATITUDE,
+            LONGITUDE
+            FROM read_parquet('{dataset}/**/*.parquet', hive_partitioning=true)
+            WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (SSWMD IS NOT NULL OR WPFM IS NOT NULL OR WSSH IS NOT NULL)
+            LIMIT 1''').df()
+        
+        ds = ddf.from_pandas(waveBuoyPositionQueryResult)
+        lat = ds['LATITUDE'].compute().values[0] if len(ds['LATITUDE'].compute().values) > 0 else None
+        lon = ds['LONGITUDE'].compute().values[0] if len(ds['LONGITUDE'].compute().values) > 0 else None
+
+        if lat is None or lon is None:
+            return {}
+
+        waveBuoyDataQueryResult = self.memconn.execute(f'''SELECT SSWMD, WPFM, WSSH, TIME
+            FROM read_parquet('{dataset}/**/*.parquet', hive_partitioning=true)
+            WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (SSWMD IS NOT NULL OR WPFM IS NOT NULL OR WSSH IS NOT NULL)
+            ORDER BY TIME''').df()
+        feature = {
+            "type": "Feature",
+            "properties": {
+                "SSWMD": [],
+                "WPFM": [],
+                "WSSH": [],
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [lon, lat],
+            },
+        }
+
+        for _, row in waveBuoyDataQueryResult.iterrows():
+            time_sec = int(row["TIME"].timestamp() * 1000)
+            feature["properties"]["SSWMD"].append([time_sec, row["SSWMD"]])
+            feature["properties"]["WPFM"].append([time_sec, row["WPFM"]])
+            feature["properties"]["WSSH"].append([time_sec, row["WSSH"]])
+
+        return feature 
+
     def fetch_wave_buoy_sites(self, start_date: str, end_date: str):
         dataset = f"s3://{self._instance.bucket_name}/wave_buoy_realtime_nonqc.parquet"
         result = self.memconn.execute(f'''SELECT 
@@ -307,11 +351,9 @@ class API(BaseAPI):
             first(TIME) AS TIME,
             first(LATITUDE) AS LATITUDE,
             first(LONGITUDE) AS LONGITUDE
-            FROM read_parquet('{dataset}/**/*.parquet')
-            WHERE TIME >= '{start_date}' AND TIME < '{end_date}'
+            FROM read_parquet('{dataset}/**/*.parquet', hive_partitioning=true)
+            WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND (SSWMD IS NOT NULL OR WPFM IS NOT NULL OR WSSH IS NOT NULL)
             GROUP BY site_name''').df()
-        log.info("Found %s items", len(result))
-
         feature_collection = {
             "type": "FeatureCollection",
             "features": [],
