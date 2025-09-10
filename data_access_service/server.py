@@ -31,8 +31,9 @@ def api_setup(application: FastAPI) -> API:
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    api_setup(application)
+    api = api_setup(application)
     yield
+    api.destroy()
 
 
 app = FastAPI(lifespan=lifespan, title="Data Access Service")
