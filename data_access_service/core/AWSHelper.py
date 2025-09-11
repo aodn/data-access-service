@@ -94,18 +94,15 @@ class AWSHelper:
     def write_zarr_from_s3(self, data: xarray.Dataset, bucket_name: str, key: str):
         # Save to temporary local file
         with tempfile.NamedTemporaryFile(suffix=".nc", delete=True) as temp_file:
-            # Work around an issue where some attribute is having not supported encode, we need to
-            # set it back to utf-8 for str
-            for k, v in data.attrs.items():
-                if type(v) == str:
-                    data.attrs[k] = (
-                        data.attrs[k].encode("utf-8", errors="ignore").decode("utf-8")
-                    )
-
-            data.to_netcdf(
-                temp_file.name,
-                engine="netcdf4",
-            )
+            try:
+                data.to_netcdf(
+                    temp_file.name,
+                    engine="netcdf4",
+                )
+            except UnicodeEncodeError:
+                # Work around an issue where some attribute is having not supported encode, we need to
+                # set it back to utf-8 for str
+                self.safe_zarr_to_netcdf(data, temp_file.name)
             helper = AWSHelper()
             helper.upload_file_to_s3(temp_file.name, bucket_name, key)
 
@@ -364,3 +361,19 @@ class AWSHelper:
             consolidated=False,  # Must be false as the file is not consolidated_metadata()
             parallel=False,
         )
+
+    @staticmethod
+    def safe_zarr_to_netcdf(
+        ds: xarray.Dataset, file_path: str, engine="netcdf4"
+    ) -> None:
+        """
+        Write Zarr to NetCDF safely by cleaning invalid Unicode surrogates from attributes before writing.
+        Args:
+            ds: xarray Dataset to write.
+            file_path: Path of the output NetCDF file.
+            engine: NetCDF engine (default "netcdf4").
+        """
+        for k, v in ds.attrs.items():
+            if isinstance(v, str):
+                ds.attrs[k] = v.encode("utf-8", errors="ignore").decode("utf-8")
+        ds.to_netcdf(file_path, engine=engine)
