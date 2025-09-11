@@ -94,6 +94,14 @@ class AWSHelper:
     def write_zarr_from_s3(self, data: xarray.Dataset, bucket_name: str, key: str):
         # Save to temporary local file
         with tempfile.NamedTemporaryFile(suffix=".nc", delete=True) as temp_file:
+            # Work around an issue where some attribute is having not supported encode, we need to
+            # set it back to utf-8 for str
+            for k, v in data.attrs.items():
+                if type(v) == str:
+                    data.attrs[k] = (
+                        data.attrs[k].encode("utf-8", errors="ignore").decode("utf-8")
+                    )
+
             data.to_netcdf(
                 temp_file.name,
                 engine="netcdf4",

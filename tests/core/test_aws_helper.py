@@ -1,4 +1,10 @@
+import shutil
+
 import requests
+
+import xarray as xr
+from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 from botocore.exceptions import ClientError
 from data_access_service.config.config import IntTestConfig, Config
@@ -72,3 +78,38 @@ class TestAWSHelper(TestWithS3):
 
         except requests.exceptions.RequestException as e:
             assert False, f"Error fetching emails: {e}"
+
+    def test_write_zarr_from_s3(
+        self, setup, aws_clients, localstack, mock_boto3_client
+    ):
+        helper = AWSHelper()
+        zarr_dataset = "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
+        zarr_path = Path(__file__).parent.parent / "canned/s3_sample1" / zarr_dataset
+
+        ds = xr.open_zarr(zarr_path, consolidated=False)
+
+        assert any(
+            isinstance(v, str) and has_invalid_unicode(v) for v in ds.attrs.values()
+        )
+
+        helper.s3 = MagicMock()
+        helper.s3.meta.region_name = "us-east-1"
+        # the invalid characters should be processed within write_zarr_from_s3 function
+        mock_url = "https://test-bucket.s3.us-east-1.amazonaws.com/test.nc"
+        with patch(
+            "data_access_service.core.AWSHelper.AWSHelper.upload_file_to_s3",
+            return_value=mock_url,
+        ) as mock_upload:
+            url = helper.write_zarr_from_s3(
+                data=ds, bucket_name="test-bucket", key="test.nc"
+            )
+            mock_upload.assert_called_once()
+            uploaded_file, bucket, key = mock_upload.call_args[0]
+            assert bucket == "test-bucket"
+            assert key == "test.nc"
+            assert uploaded_file.endswith(".nc")
+            assert url == mock_url
+
+
+def has_invalid_unicode(s: str) -> bool:
+    return any(0xD800 <= ord(ch) <= 0xDFFF for ch in s)
