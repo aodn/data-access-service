@@ -82,12 +82,19 @@ class TestAWSHelper(TestWithS3):
     def test_write_zarr_from_s3(
         self, setup, aws_clients, localstack, mock_boto3_client
     ):
+        """
+        Some Zarr datasets contain invalid Unicode surrogates in their metadata (stored in `.zattrs`), which cause `UnicodeEncodeError` when writing to NetCDF.
+        `write_zarr_from_s3` includes logic to sanitize these attributes before writing to make sure the conversion works.
+        """
         helper = AWSHelper()
+        # get dataset with code
+        # ds = aodn_dataset.get_data(date_start="2006-06-12", date_end="2006-06-12", lat_min=-70.0, lat_max=-69.9, lon_min=20.0, lon_max=20.1)
         zarr_dataset = "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
         zarr_path = Path(__file__).parent.parent / "canned/s3_sample1" / zarr_dataset
 
         ds = xr.open_zarr(zarr_path, consolidated=False)
 
+        # the original zarr file has invalid unicode characters in global attributes
         assert any(
             isinstance(v, str) and has_invalid_unicode(v) for v in ds.attrs.values()
         )
