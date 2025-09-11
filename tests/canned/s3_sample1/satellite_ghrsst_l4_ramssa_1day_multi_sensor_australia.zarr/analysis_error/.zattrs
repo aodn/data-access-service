@@ -1,0 +1,14 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "time",
+        "lat",
+        "lon"
+    ],
+    "comment": "Calculated as analysis field error in OI analysis system and a function of the age and estimated standard deviation of all observations used to form analysed_sst value. See Beggs et al (2011) in http://www.bom.gov.au/jshess/papers.php?year=2011.",
+    "coverage_content_type": "auxiliaryInformation",
+    "grid_mapping": "crs",
+    "long_name": "estimated error standard deviation of analysed_sst",
+    "units": "kelvin",
+    "valid_max": 32765,
+    "valid_min": 0
+}
