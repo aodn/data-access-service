@@ -28,8 +28,18 @@ def trim_date_range_for_keys(
 ) -> tuple[pd.Timestamp, pd.Timestamp]:
     api = api_setup(app)
 
-    min_date_of_keys = pd.Timestamp.now()
-    max_date_of_keys = pd.Timestamp("1970-01-01 00:00:00.000000000")
+    # convert into utc:
+    if requested_start_date.tzinfo is not None:
+        requested_start_date = requested_start_date.tz_convert("UTC")
+    else:
+        requested_start_date = requested_start_date.tz_localize("UTC")
+    if requested_end_date.tzinfo is not None:
+        requested_end_date = requested_end_date.tz_convert("UTC")
+    else:
+        requested_end_date = requested_end_date.tz_localize("UTC")
+
+    min_date_of_keys = pd.Timestamp.now(tz="UTC")
+    max_date_of_keys = pd.Timestamp("1970-01-01 00:00:00.000000000", tz="UTC")
 
     # get the union spatial extents of all selected keys
     for key in keys:
