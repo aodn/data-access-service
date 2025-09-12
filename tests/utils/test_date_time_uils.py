@@ -1110,7 +1110,7 @@ class TestDateTimeUtils(unittest.TestCase):
 
     def test_split_date_range(self):
         date_ranges = split_date_range(
-            pd.Timestamp("2010-02-01"), pd.Timestamp("2011-04-30"), 3
+            pd.Timestamp("2010-02-01"), pd.Timestamp("2011-05-02 23:59:59.999999999"), 3
         )
         expected_result = {
             0: [
@@ -1131,11 +1131,15 @@ class TestDateTimeUtils(unittest.TestCase):
             ],
             4: [
                 "2011-02-01 00:00:00.000000000",
-                "2011-04-30 00:00:00.000000000",
+                "2011-04-30 23:59:59.999999999",
+            ],
+            5: [
+                "2011-05-01 00:00:00.000000000",
+                "2011-05-02 23:59:59.999999999",
             ],
         }
-        self.assertEqual(len(date_ranges), 5)
-        self.assertEqual(date_ranges, expected_result)
+        self.assertEqual(len(date_ranges), 6)
+        self.assertEqual(expected_result, date_ranges)
 
     def test_split_date_range_binary(self):
         start = ensure_timezone(pd.Timestamp("2010-01-01"))

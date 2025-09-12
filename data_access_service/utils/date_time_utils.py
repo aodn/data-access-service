@@ -549,7 +549,7 @@ def split_date_range(
             f"{months[-1]['end_date'].strftime('%Y-%m-%d %H:%M:%S.%f')}{months[-1]['end_date'].nanosecond:03d}",
         ]
     else:
-        for i in range(0, len(months) - month_count_per_job + 1, month_count_per_job):
+        for i in range(0, len(months), month_count_per_job):
             window = months[i : i + month_count_per_job]
             if len(window) < month_count_per_job:
                 date_ranges[index] = [
