@@ -521,13 +521,17 @@ def supply_day(
     if (not re.match(pattern, start_date_str)) or (not re.match(pattern, end_date_str)):
         # currently, if no date ranges selected in frontend, the start_date & end_date will be in this format: "yyyy-MM-dd",
         # so for this case, we don't need to supply the day
-        return parse_date(start_date_str), parse_date(end_date_str)
+        return parse_date(start_date_str), parse_date(end_date_str).replace(
+            hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
+        )
 
     start_date = parse_date(start_date_str, format_to_convert="%m-%Y")
     end_date = parse_date(end_date_str, format_to_convert="%m-%Y")
 
     start_date = get_first_day_of_month(start_date)
-    end_date = get_final_day_of_month_(end_date).replace(hour=23, minute=59, second=59)
+    end_date = get_final_day_of_month_(end_date).replace(
+        hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
+    )
 
     return start_date, end_date
 

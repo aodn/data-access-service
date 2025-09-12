@@ -22,6 +22,7 @@ from data_access_service.utils.date_time_utils import (
     split_date_range,
     split_date_range_binary,
     check_rows_with_date_range,
+    supply_day,
 )
 
 
@@ -1190,3 +1191,74 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(len(result), 2)
         mock_split.assert_called_once()
         mock_log.info.assert_called_once()
+
+    def test_supply_day(self):
+        # test supply day to a year-month string
+        start_date1 = "07-2023"
+        end_date1 = "07-2024"
+        expected_start1 = pd.Timestamp(
+            year=2023,
+            month=7,
+            day=1,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+            nanosecond=0,
+            tz=pytz.UTC,
+        )
+        expected_end1 = pd.Timestamp(
+            year=2024,
+            month=7,
+            day=31,
+            hour=23,
+            minute=59,
+            second=59,
+            microsecond=999999,
+            nanosecond=999,
+            tz=pytz.UTC,
+        )
+        expected_tuple = (expected_start1, expected_end1)
+        result_tuple = supply_day(start_date1, end_date1)
+        self.assertEqual(result_tuple, expected_tuple)
+
+        # test supply day to full string
+        start_date2 = "2023-07-15"
+        end_date2 = "2023-09-20"
+        expected_start2 = pd.Timestamp(
+            year=2023,
+            month=7,
+            day=15,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+            nanosecond=0,
+            tz=pytz.UTC,
+        )
+        expected_end2 = pd.Timestamp(
+            year=2023,
+            month=9,
+            day=20,
+            hour=23,
+            minute=59,
+            second=59,
+            microsecond=999999,
+            nanosecond=999,
+            tz=pytz.UTC,
+        )
+        expected_tuple2 = (expected_start2, expected_end2)
+        result_tuple2 = supply_day(start_date2, end_date2)
+        self.assert_same_datetime(result_tuple2[0], expected_tuple2[0])
+        self.assert_same_datetime(result_tuple2[1], expected_tuple2[1])
+
+    def assert_same_datetime(self, dt1: pd.Timestamp, dt2: pd.Timestamp):
+        self.assertEqual(dt1.year, dt2.year)
+        self.assertEqual(dt1.month, dt2.month)
+        self.assertEqual(dt1.day, dt2.day)
+        self.assertEqual(dt1.hour, dt2.hour)
+        self.assertEqual(dt1.minute, dt2.minute)
+        self.assertEqual(dt1.second, dt2.second)
+        self.assertEqual(dt1.microsecond, dt2.microsecond)
+        self.assertEqual(dt1.nanosecond, dt2.nanosecond)
+        self.assertEqual(dt1.tzinfo, dt2.tzinfo)
