@@ -12,7 +12,7 @@ from data_access_service.server import api_setup, app
 from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.tasks.generate_dataset import process_data_files
 from data_access_service.utils.date_time_utils import (
-    supply_day,
+    supply_day_with_nano_precision,
     split_date_range,
     parse_date,
 )
@@ -28,7 +28,9 @@ def init(job_id_of_init, parameters):
     start_date_str = parameters[Parameters.START_DATE.value]
     end_date_str = parameters[Parameters.END_DATE.value]
 
-    requested_start_date, requested_end_date = supply_day(start_date_str, end_date_str)
+    requested_start_date, requested_end_date = supply_day_with_nano_precision(
+        start_date_str, end_date_str
+    )
     api = api_setup(app)
     uuid = get_uuid(parameters)
     keys = get_keys(parameters)

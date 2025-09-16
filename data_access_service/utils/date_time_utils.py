@@ -504,7 +504,7 @@ def split_yearmonths_into_dict(yearmonths, chunk_size: int):
     return result
 
 
-def supply_day(
+def supply_day_with_nano_precision(
     start_date_str: str, end_date_str: str
 ) -> Tuple[pd.Timestamp, pd.Timestamp]:
     """

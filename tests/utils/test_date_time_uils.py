@@ -22,7 +22,7 @@ from data_access_service.utils.date_time_utils import (
     split_date_range,
     split_date_range_binary,
     check_rows_with_date_range,
-    supply_day,
+    supply_day_with_nano_precision,
 )
 
 
@@ -1219,7 +1219,7 @@ class TestDateTimeUtils(unittest.TestCase):
             tz=pytz.UTC,
         )
         expected_tuple = (expected_start1, expected_end1)
-        result_tuple = supply_day(start_date1, end_date1)
+        result_tuple = supply_day_with_nano_precision(start_date1, end_date1)
         self.assertEqual(result_tuple, expected_tuple)
 
         # test supply day to full string
@@ -1248,7 +1248,7 @@ class TestDateTimeUtils(unittest.TestCase):
             tz=pytz.UTC,
         )
         expected_tuple2 = (expected_start2, expected_end2)
-        result_tuple2 = supply_day(start_date2, end_date2)
+        result_tuple2 = supply_day_with_nano_precision(start_date2, end_date2)
         self.assert_same_datetime(result_tuple2[0], expected_tuple2[0])
         self.assert_same_datetime(result_tuple2[1], expected_tuple2[1])
 

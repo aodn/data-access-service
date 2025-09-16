@@ -49,7 +49,6 @@ def trim_date_range_for_keys(
     # if the requested dates are outside the available range, trim them
     trimmed_start_date = requested_start_date
     trimmed_end_date = requested_end_date
-
     if requested_start_date < min_date_of_keys:
         trimmed_start_date = min_date_of_keys
     if requested_end_date > max_date_of_keys:
