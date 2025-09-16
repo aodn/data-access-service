@@ -1,29 +1,21 @@
 import json
 
-from data_access_service import init_log, Config, API
+from data_access_service import init_log, Config
 from data_access_service.batch.batch_enums import Parameters
+from data_access_service.batch.subsetting_helper import (
+    get_uuid,
+    get_keys,
+    trim_date_range_for_keys,
+)
 from data_access_service.core.AWSHelper import AWSHelper
+from data_access_service.server import api_setup, app
 from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.tasks.generate_dataset import process_data_files
 from data_access_service.utils.date_time_utils import (
-    supply_day,
+    supply_day_with_nano_precision,
     split_date_range,
     parse_date,
 )
-
-
-def _get_key(parameters) -> list[str]:
-    if (
-        Parameters.KEY.value in parameters
-        and parameters[Parameters.KEY.value] is not None
-    ):
-        return [item.strip() for item in parameters[Parameters.KEY.value].split(",")]
-    else:
-        return ["*"]
-
-
-def _get_uuid(parameters) -> str:
-    return parameters[Parameters.UUID.value]
 
 
 # The only purpose is to create suitable number of child job, we can fine tune the value
@@ -36,7 +28,23 @@ def init(job_id_of_init, parameters):
     start_date_str = parameters[Parameters.START_DATE.value]
     end_date_str = parameters[Parameters.END_DATE.value]
 
-    requested_start_date, requested_end_date = supply_day(start_date_str, end_date_str)
+    requested_start_date, requested_end_date = supply_day_with_nano_precision(
+        start_date_str, end_date_str
+    )
+    api = api_setup(app)
+    uuid = get_uuid(parameters)
+    keys = get_keys(parameters)
+    if "*" in keys:
+        md = api.get_mapped_meta_data(uuid)
+        keys = list(md.keys())
+
+    requested_start_date, requested_end_date = trim_date_range_for_keys(
+        uuid=uuid,
+        keys=keys,
+        requested_start_date=requested_start_date,
+        requested_end_date=requested_end_date,
+    )
+
     date_ranges = split_date_range(
         start_date=requested_start_date,
         end_date=requested_end_date,
@@ -84,11 +92,11 @@ def prepare_data(job_index: str | None, parameters):
     logger = init_log(config)
 
     # get params
-    uuid = _get_uuid(parameters)
+    uuid = get_uuid(parameters)
     # An uuid can host multiple data file, so we need a key
     # to narrow our target file. Right now it will be the filename
     # if nothing specified, assume all files taken
-    key = _get_key(parameters)
+    key = get_keys(parameters)
     master_job_id = parameters[Parameters.MASTER_JOB_ID.value]
     date_ranges = parameters[Parameters.DATE_RANGES.value]
     date_ranges_dict = json.loads(date_ranges)

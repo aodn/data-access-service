@@ -359,7 +359,13 @@ class API(BaseAPI):
         md: Dict[str, Descriptor] = self._cached.get(uuid)
         if md is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
-            return ds.get_temporal_extent()
+            start_date, end_date = ds.get_temporal_extent()
+            start_date.replace(hour=0, minute=0, second=0, microsecond=0, nanosecond=0)
+            end_date.replace(
+                hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
+            )
+            return start_date, end_date
+
         else:
             return None, None
 
