@@ -1,5 +1,6 @@
 import shutil
 
+import pandas as pd
 import requests
 
 import xarray as xr
@@ -119,6 +120,29 @@ class TestAWSHelper(TestWithS3):
 
                 # if UnicodeEncodeError occurred, the safe_zarr_to_netcdf should be called
                 mock_safe.assert_called_once_with(ds, ANY)
+
+    def test_write_accumulated_partitions_to_csv(
+        self, setup, aws_clients, localstack, mock_boto3_client
+    ):
+        partitions = [
+            pd.DataFrame(
+                {"col1": [1, 2, 3], "col2": ["a", "b", "c"], "col3": [1.1, 2.2, 3.3]}
+            ),
+            pd.DataFrame({"col1": [4, 5, 6], "col2": ["d", "e", "f"]}),
+            pd.DataFrame({"col1": [7, 8, 9], "col2": ["x", "y", "z"]}),
+        ]
+        file_index = 0
+
+        mock_zipfile = MagicMock()
+        helper = AWSHelper()
+        helper.write_accumulated_partitions_to_csv(partitions, mock_zipfile, file_index)
+
+        mock_zipfile.writestr.assert_called_once()
+        filename, csv_content = mock_zipfile.writestr.call_args[0]
+
+        assert filename == "part_000000000.csv"
+        # the expected result should have the concat partitions
+        assert "z" in csv_content
 
 
 def has_invalid_unicode(s: str) -> bool:

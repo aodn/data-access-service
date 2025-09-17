@@ -48,8 +48,6 @@ class AWSHelper:
         target = data.drop(PARTITION_KEY, axis=1).reset_index(drop=True)
         # the max row should be the max excel row limit exclude the header row
         max_excel_row = MAX_CSV_ROW - 1
-        # Get total row count
-        total_rows = target.shape[0].compute()
 
         # Create temporary directory with tempfile
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -57,10 +55,10 @@ class AWSHelper:
             zip_path = temp_dir_path / "output.zip"
             try:
                 with zipfile.ZipFile(
-                        zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+                    zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
                 ) as zf:
                     accumulated_partitions = []
-                    total_rows = 0
+                    accumulated_rows = 0
                     csv_file_index = 0
 
                     for i, partition in enumerate(target.to_delayed()):
@@ -69,23 +67,40 @@ class AWSHelper:
                             partition_df = partition.compute()
                             partition_rows = len(partition_df)
 
+                            # if the current partition already reach the max excel row, split it first
+                            if partition_rows > max_excel_row:
+                                for start in range(0, partition_rows, max_excel_row):
+                                    end = min(start + max_excel_row, partition_rows)
+                                    self.write_accumulated_partitions_to_csv(
+                                        [partition_df.iloc[start:end]],
+                                        zf,
+                                        csv_file_index,
+                                    )
+                                    csv_file_index += 1
+                                continue
+
                             # Check if adding this partition would exceed Excel row limit
-                            #  save the accumulated partitions to csv under max excel row
-                            if total_rows + partition_rows > max_excel_row and accumulated_partitions:
+                            # save the accumulated partitions to csv under max excel row
+                            if (
+                                accumulated_rows + partition_rows > max_excel_row
+                                and accumulated_partitions
+                            ):
                                 # Convert accumulated partitions to CSV
-                                self._write_accumulated_partitions_to_csv(
+                                self.write_accumulated_partitions_to_csv(
                                     accumulated_partitions, zf, csv_file_index
                                 )
                                 csv_file_index += 1
                                 # Reset accumulators
                                 accumulated_partitions = []
-                                total_rows = 0
+                                accumulated_rows = 0
 
                             # Add current partition to accumulator
                             accumulated_partitions.append(partition_df)
-                            total_rows += partition_rows
+                            accumulated_rows += partition_rows
 
-                            self.log.info(f"Accumulated partition {i}, total rows: {total_rows}")
+                            self.log.info(
+                                f"Accumulated partition {i}, total rows: {accumulated_rows}"
+                            )
 
                             # Clean up partition reference
                             del partition_df
@@ -96,7 +111,7 @@ class AWSHelper:
 
                     # Handle remaining accumulated partitions
                     if accumulated_partitions:
-                        self._write_accumulated_partitions_to_csv(
+                        self.write_accumulated_partitions_to_csv(
                             accumulated_partitions, zf, csv_file_index
                         )
 
@@ -396,20 +411,8 @@ class AWSHelper:
                 ds.attrs[k] = v.encode("utf-8", errors="ignore").decode("utf-8")
         ds.to_netcdf(file_path, engine=engine)
 
-    @staticmethod
-    def get_free_space(path: str) -> int:
-        """
-        Get the free space (in int bytes) of a temp directory.
-        Args:
-            path: Path to the temporary directory.
-        Returns:
-            int free space.
-        """
-        usage = shutil.disk_usage(path)
-        return usage.free
-
-    def _write_accumulated_partitions_to_csv(
-            self, partitions: list, zf: zipfile.ZipFile, file_index: int
+    def write_accumulated_partitions_to_csv(
+        self, partitions: list, zf: zipfile.ZipFile, file_index: int
     ) -> None:
         """Helper method to write accumulated partitions to a single CSV file in the ZIP"""
         try:
