@@ -36,5 +36,7 @@ match call_type:
         subsetting.prepare_data(job_index=job_index, parameters=parameters)
     case "sub-setting-data-collection":
         subsetting.collect_data(parameters=parameters)
+    case "sub-setting-zarr":
+        subsetting.subset_zarr(parameters=parameters)
     case _:
         logging.error("Unknow call type", call_type)
