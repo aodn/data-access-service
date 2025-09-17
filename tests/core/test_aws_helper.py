@@ -125,9 +125,7 @@ class TestAWSHelper(TestWithS3):
         self, setup, aws_clients, localstack, mock_boto3_client
     ):
         partitions = [
-            pd.DataFrame(
-                {"col1": [1, 2, 3], "col2": ["a", "b", "c"], "col3": [1.1, 2.2, 3.3]}
-            ),
+            pd.DataFrame({"col1": [1, 2, 3], "col2": ["a", "b", "c"]}),
             pd.DataFrame({"col1": [4, 5, 6], "col2": ["d", "e", "f"]}),
             pd.DataFrame({"col1": [7, 8, 9], "col2": ["x", "y", "z"]}),
         ]

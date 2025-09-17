@@ -1,7 +1,6 @@
 import csv
 import io
 import os
-import shutil
 import tempfile
 import zipfile
 import dask.dataframe
