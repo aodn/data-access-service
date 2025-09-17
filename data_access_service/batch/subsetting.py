@@ -137,3 +137,11 @@ def collect_data(parameters):
     collect_data_files(
         master_job_id=master_job_id, dataset_uuid=uuid, recipient=recipient
     )
+
+
+def subset_zarr(parameters):
+    uuid = get_uuid(parameters)
+    keys = get_keys(parameters)
+    start_date_str = parameters[Parameters.START_DATE.value]
+    end_date_str = parameters[Parameters.END_DATE.value]
+    multi_polygon = parameters[Parameters.MULTI_POLYGON.value]

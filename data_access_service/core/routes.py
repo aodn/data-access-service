@@ -131,7 +131,7 @@ async def get_indexing_values(
         )
 
     api = get_api_instance(request)
-    data_source = api.get_dataset_data(
+    data_source = api.get_dataset(
         uuid=uuid,
         key=key,
         date_start=_verify_datatime_param("start_date", start_date),
@@ -192,7 +192,7 @@ async def get_zarr_rectangles(
         )
 
     api = get_api_instance(request)
-    data_source = api.get_dataset_data(
+    data_source = api.get_dataset(
         uuid=uuid,
         key=key,
         date_start=_verify_datatime_param("start_date", start_date),
