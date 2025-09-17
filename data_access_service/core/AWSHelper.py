@@ -7,6 +7,7 @@ import zipfile
 import dask.dataframe
 import dask.dataframe as dd
 import xarray
+import pandas as pd
 
 from pathlib import Path
 from typing import List
@@ -44,7 +45,6 @@ class AWSHelper:
     def write_csv_to_s3(
         self, data: dask.dataframe.DataFrame, bucket_name: str, key: str
     ) -> str:
-        # Drop partition key and reset index to allow row slicing
         target = data.drop(PARTITION_KEY, axis=1).reset_index(drop=True)
         # the max row should be the max excel row limit exclude the header row
         max_excel_row = MAX_CSV_ROW - 1
@@ -55,34 +55,59 @@ class AWSHelper:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir_path = Path(temp_dir)
             zip_path = temp_dir_path / "output.zip"
-
             try:
-                # Create ZIP file and write partitions directly as CSV entries
                 with zipfile.ZipFile(
-                    zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+                        zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
                 ) as zf:
-                    # Iterate through data in Excel row-limited chunks - start from the first part 0
-                    i = 0
-                    for start in range(0, total_rows, max_excel_row):
-                        end = min(start + max_excel_row, total_rows)
-                        chunk = target.iloc[start:end].compute()
+                    accumulated_partitions = []
+                    total_rows = 0
+                    csv_file_index = 0
 
-                        self.log.info(
-                            f"Processing part_{i:09d}.csv with {len(chunk)} rows"
+                    for i, partition in enumerate(target.to_delayed()):
+                        try:
+                            # Compute one partition
+                            partition_df = partition.compute()
+                            partition_rows = len(partition_df)
+
+                            # Check if adding this partition would exceed Excel row limit
+                            #  save the accumulated partitions to csv under max excel row
+                            if total_rows + partition_rows > max_excel_row and accumulated_partitions:
+                                # Convert accumulated partitions to CSV
+                                self._write_accumulated_partitions_to_csv(
+                                    accumulated_partitions, zf, csv_file_index
+                                )
+                                csv_file_index += 1
+                                # Reset accumulators
+                                accumulated_partitions = []
+                                total_rows = 0
+
+                            # Add current partition to accumulator
+                            accumulated_partitions.append(partition_df)
+                            total_rows += partition_rows
+
+                            self.log.info(f"Accumulated partition {i}, total rows: {total_rows}")
+
+                            # Clean up partition reference
+                            del partition_df
+
+                        except Exception as e:
+                            self.log.error(f"Error processing partition {i}: {e}")
+                            raise
+
+                    # Handle remaining accumulated partitions
+                    if accumulated_partitions:
+                        self._write_accumulated_partitions_to_csv(
+                            accumulated_partitions, zf, csv_file_index
                         )
 
-                        i = self.safe_write_chunk_to_zip(zf, chunk, i, temp_dir)
-                        i += 1
-
-                # Upload final zip to S3
                 self.upload_file_to_s3(str(zip_path), bucket_name, key)
 
             except Exception as e:
                 self.log.error(f"Error creating ZIP: {e}")
                 raise
 
-        region = self.s3.meta.region_name
-        return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
+            region = self.s3.meta.region_name
+            return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
 
     def write_zarr_from_s3(self, data: xarray.Dataset, bucket_name: str, key: str):
         # Save to temporary local file
@@ -383,61 +408,34 @@ class AWSHelper:
         usage = shutil.disk_usage(path)
         return usage.free
 
-    def safe_write_chunk_to_zip(self, zf, df, index: int, temp_dir: str):
-        """
-        Try to write a DataFrame chunk as a csv file and add it to a zip file with the following logic:
-        1. if the dataframe has only one row - convert to a CSV file and stored in the ZIP file
-        2. if the dataframe under max row limit - try to convert to a CSV file and stored in the ZIP file
-        3. if:
-            1) the dataframe exceeds max row limit, or
-            2) has not enough disk space for CSV file
-            3) any memory error raised
-            try split the rows with binary split until it is safe
-        """
-        max_excel_row = MAX_CSV_ROW - 1
-        stack = [(df, index)]
+    def _write_accumulated_partitions_to_csv(
+            self, partitions: list, zf: zipfile.ZipFile, file_index: int
+    ) -> None:
+        """Helper method to write accumulated partitions to a single CSV file in the ZIP"""
+        try:
+            # Concatenate all accumulated partitions
+            combined_df = pd.concat(partitions, ignore_index=True)
 
-        while stack:
-            current_df, current_index = stack.pop()
-            if current_df is None or len(current_df) == 0:
-                continue
+            # Convert to CSV string in memory
+            csv_buffer = io.StringIO()
+            combined_df.to_csv(
+                csv_buffer,
+                escapechar="\\",  # Escape special characters
+                quoting=csv.QUOTE_NONNUMERIC,  # Quote non-numeric fields
+                index=False,
+            )
+            csv_content = csv_buffer.getvalue()
+            csv_buffer.close()
 
-            # If too many rows, binary split and push to stack
-            if len(current_df) > max_excel_row:
-                mid = len(current_df) // 2
-                left, right = current_df.iloc[:mid], current_df.iloc[mid:]
-                stack.append((right, current_index + 1))
-                stack.append((left, current_index))
-                continue
+            # Write to ZIP stream as CSV file
+            filename = f"part_{file_index:09d}.csv"
+            zf.writestr(filename, csv_content)
+            self.log.info(f"Added {filename} to ZIP with {len(combined_df)} rows")
 
-            # Try to write chunk
-            try:
-                csv_buffer = io.StringIO()
-                current_df.to_csv(
-                    csv_buffer,
-                    escapechar="\\",
-                    quoting=csv.QUOTE_NONNUMERIC,
-                    index=False,
-                )
-                csv_content = csv_buffer.getvalue()
-                csv_size = len(csv_content.encode("utf-8"))
-                free_space = self.get_free_space(temp_dir)
+            # Clean up
+            del combined_df
+            del csv_content
 
-                if csv_size > (free_space * 0.8):
-                    raise OSError("Insufficient disk space")
-
-                filename = f"part_{current_index:09d}.csv"
-                zf.writestr(filename, csv_content)
-                self.log.info(f"Added {filename} to ZIP")
-
-            except (OSError, MemoryError):
-                # retry to avoid memory issue
-                if len(current_df) > 1:
-                    mid = len(current_df) // 2
-                    left, right = current_df.iloc[:mid], current_df.iloc[mid:]
-                    stack.append((right, current_index + 1))
-                    stack.append((left, current_index))
-
-            index = max(index, current_index + 1)
-
-        return index
+        except Exception as e:
+            self.log.error(f"Error writing accumulated partitions to CSV: {e}")
+            raise
