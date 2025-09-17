@@ -1,6 +1,7 @@
 import csv
 import io
 import os
+import shutil
 import tempfile
 import zipfile
 import dask.dataframe
@@ -12,7 +13,7 @@ from typing import List
 from data_access_service import init_log
 from data_access_service.config.config import Config, IntTestConfig
 from io import BytesIO
-from data_access_service.core.constants import PARTITION_KEY
+from data_access_service.core.constants import PARTITION_KEY, MAX_CSV_ROW
 
 
 class AWSHelper:
@@ -41,51 +42,43 @@ class AWSHelper:
             return None
 
     def write_csv_to_s3(
-        self, data: dask.dataframe.DataFrame, bucket_name: str, key: str
+        self, data: "dask.dataframe.DataFrame", bucket_name: str, key: str
     ) -> str:
-        target = data.drop(PARTITION_KEY, axis=1)
+        # Drop partition key and reset index to allow row slicing
+        target = data.drop(PARTITION_KEY, axis=1).reset_index(drop=True)
+        # the max row should be the max excel row limit exclude the header row
+        max_excel_row = MAX_CSV_ROW - 1
+        # Get total row count
+        total_rows = target.shape[0].compute()
+
         # Create temporary directory with tempfile
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir_path = Path(temp_dir)
             zip_path = temp_dir_path / "output.zip"
 
-            # Create ZIP file and write partitions directly as CSV entries
             try:
+                # Create ZIP file and write partitions directly as CSV entries
                 with zipfile.ZipFile(
                     zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
                 ) as zf:
-                    for i, partition in enumerate(target.to_delayed()):
-                        try:
-                            # Compute one partition
-                            partition_df = partition.compute()
+                    # Iterate through data in Excel row-limited chunks - start from the first part 0
+                    i = 0
+                    for start in range(0, total_rows, max_excel_row):
+                        end = min(start + max_excel_row, total_rows)
+                        chunk = target.iloc[start:end].compute()
 
-                            # Convert to CSV string in memory
-                            csv_buffer = io.StringIO()
-                            partition_df.to_csv(
-                                csv_buffer,
-                                escapechar="\\",  # Escape special characters
-                                quoting=csv.QUOTE_NONNUMERIC,  # Quote non-numeric fields
-                                index=False,
-                            )
-                            csv_content = csv_buffer.getvalue()
-                            csv_buffer.close()
+                        self.log.info(
+                            f"Processing part_{i:09d}.csv with {len(chunk)} rows"
+                        )
 
-                            # Write to ZIP stream as uncompressed .csv
-                            zf.writestr(f"part_{i:09d}.csv", csv_content)
-                            self.log.info(f"Added part_{i:09d}.csv to ZIP")
+                        i = self.safe_write_chunk_to_zip(zf, chunk, i, temp_dir)
+                        i += 1
 
-                            # Discard partition
-                            del partition_df
-                            del csv_content
-
-                        except Exception as e:
-                            self.log.error(f"Error processing partition {i}: {e}")
-                            raise
-
+                # Upload final zip to S3
                 self.upload_file_to_s3(str(zip_path), bucket_name, key)
 
             except Exception as e:
-                self.log(f"Error creating ZIP: {e}")
+                self.log.error(f"Error creating ZIP: {e}")
                 raise
 
         region = self.s3.meta.region_name
@@ -377,3 +370,70 @@ class AWSHelper:
             if isinstance(v, str):
                 ds.attrs[k] = v.encode("utf-8", errors="ignore").decode("utf-8")
         ds.to_netcdf(file_path, engine=engine)
+
+    @staticmethod
+    def get_free_space(path: str) -> int:
+        """
+        Get the free space (in int bytes) of a temp directory.
+        Args:
+            path: Path to the temporary directory.
+        Returns:
+            int free space.
+        """
+        usage = shutil.disk_usage(path)
+        return usage.free
+
+    def safe_write_chunk_to_zip(self, zf, df, index: int, temp_dir: str):
+        """
+        Try to write a DataFrame chunk as a csv file and add it to a zip file with the following logic:
+        1. if the dataframe has only one row - convert to a CSV file and stored in the ZIP file
+        2. if the dataframe under max row limit - try to convert to a CSV file and stored in the ZIP file
+        3. if:
+            1) the dataframe exceeds max row limit, or
+            2) has not enough disk space for CSV file
+            3) any memory error raised
+            try split the rows with binary split until it is safe
+        """
+        filename = f"part_{index:09d}.csv"
+        max_excel_row = MAX_CSV_ROW - 1
+
+        if len(df) <= 1 and len(df) > 0:
+            csv_buffer = io.StringIO()
+            df.to_csv(
+                csv_buffer, escapechar="\\", quoting=csv.QUOTE_NONNUMERIC, index=False
+            )
+            zf.writestr(filename, csv_buffer.getvalue())
+            return index
+
+        # Split if exceeds Excel limit
+        if len(df) > max_excel_row:
+            mid = len(df) // 2
+            left, right = df.iloc[:mid], df.iloc[mid:]
+            index = self.safe_write_chunk_to_zip(zf, left, index, temp_dir)
+            index = self.safe_write_chunk_to_zip(zf, right, index + 1, temp_dir)
+            return index
+
+        try:
+            csv_buffer = io.StringIO()
+            df.to_csv(
+                csv_buffer, escapechar="\\", quoting=csv.QUOTE_NONNUMERIC, index=False
+            )
+            csv_content = csv_buffer.getvalue()
+            # return the current position of the stream, which can indicate the written length of the data
+            csv_size = csv_buffer.tell()
+            free_space = self.get_free_space(temp_dir)
+
+            # estimate free space with some extra space, if exceeds space, raise OSError for further split
+            if csv_size > (free_space * 0.8):
+                raise OSError("Insufficient disk space")
+
+            zf.writestr(filename, csv_content)
+            self.log.info(f"Added {filename} to ZIP ({csv_size:,} bytes)")
+
+        except (OSError, MemoryError) as e:
+            mid = len(df) // 2
+            left, right = df.iloc[:mid], df.iloc[mid:]
+            index = self.safe_write_chunk_to_zip(zf, left, index, temp_dir)
+            index = self.safe_write_chunk_to_zip(zf, right, index + 1, temp_dir)
+
+        return index
