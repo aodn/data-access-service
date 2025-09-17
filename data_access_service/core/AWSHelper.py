@@ -42,7 +42,7 @@ class AWSHelper:
             return None
 
     def write_csv_to_s3(
-        self, data: "dask.dataframe.DataFrame", bucket_name: str, key: str
+        self, data: dask.dataframe.DataFrame, bucket_name: str, key: str
     ) -> str:
         # Drop partition key and reset index to allow row slicing
         target = data.drop(PARTITION_KEY, axis=1).reset_index(drop=True)
@@ -394,46 +394,50 @@ class AWSHelper:
             3) any memory error raised
             try split the rows with binary split until it is safe
         """
-        filename = f"part_{index:09d}.csv"
         max_excel_row = MAX_CSV_ROW - 1
+        stack = [(df, index)]
 
-        if len(df) <= 1 and len(df) > 0:
-            csv_buffer = io.StringIO()
-            df.to_csv(
-                csv_buffer, escapechar="\\", quoting=csv.QUOTE_NONNUMERIC, index=False
-            )
-            zf.writestr(filename, csv_buffer.getvalue())
-            return index
+        while stack:
+            current_df, current_index = stack.pop()
+            if current_df is None or len(current_df) == 0:
+                continue
 
-        # Split if exceeds Excel limit
-        if len(df) > max_excel_row:
-            mid = len(df) // 2
-            left, right = df.iloc[:mid], df.iloc[mid:]
-            index = self.safe_write_chunk_to_zip(zf, left, index, temp_dir)
-            index = self.safe_write_chunk_to_zip(zf, right, index + 1, temp_dir)
-            return index
+            # If too many rows, binary split and push to stack
+            if len(current_df) > max_excel_row:
+                mid = len(current_df) // 2
+                left, right = current_df.iloc[:mid], current_df.iloc[mid:]
+                stack.append((right, current_index + 1))
+                stack.append((left, current_index))
+                continue
 
-        try:
-            csv_buffer = io.StringIO()
-            df.to_csv(
-                csv_buffer, escapechar="\\", quoting=csv.QUOTE_NONNUMERIC, index=False
-            )
-            csv_content = csv_buffer.getvalue()
-            # return the current position of the stream, which can indicate the written length of the data
-            csv_size = csv_buffer.tell()
-            free_space = self.get_free_space(temp_dir)
+            # Try to write chunk
+            try:
+                csv_buffer = io.StringIO()
+                current_df.to_csv(
+                    csv_buffer,
+                    escapechar="\\",
+                    quoting=csv.QUOTE_NONNUMERIC,
+                    index=False,
+                )
+                csv_content = csv_buffer.getvalue()
+                csv_size = len(csv_content.encode("utf-8"))
+                free_space = self.get_free_space(temp_dir)
 
-            # estimate free space with some extra space, if exceeds space, raise OSError for further split
-            if csv_size > (free_space * 0.8):
-                raise OSError("Insufficient disk space")
+                if csv_size > (free_space * 0.8):
+                    raise OSError("Insufficient disk space")
 
-            zf.writestr(filename, csv_content)
-            self.log.info(f"Added {filename} to ZIP ({csv_size:,} bytes)")
+                filename = f"part_{current_index:09d}.csv"
+                zf.writestr(filename, csv_content)
+                self.log.info(f"Added {filename} to ZIP")
 
-        except (OSError, MemoryError) as e:
-            mid = len(df) // 2
-            left, right = df.iloc[:mid], df.iloc[mid:]
-            index = self.safe_write_chunk_to_zip(zf, left, index, temp_dir)
-            index = self.safe_write_chunk_to_zip(zf, right, index + 1, temp_dir)
+            except (OSError, MemoryError):
+                # retry to avoid memory issue
+                if len(current_df) > 1:
+                    mid = len(current_df) // 2
+                    left, right = current_df.iloc[:mid], current_df.iloc[mid:]
+                    stack.append((right, current_index + 1))
+                    stack.append((left, current_index))
+
+            index = max(index, current_index + 1)
 
         return index
