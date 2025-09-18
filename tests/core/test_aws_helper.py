@@ -194,6 +194,58 @@ class TestAWSHelper(TestWithS3):
             expected_url = f"https://{bucket}.s3.us-east-1.amazonaws.com/{key}"
             assert url == expected_url
 
+    @patch("data_access_service.core.AWSHelper.MAX_CSV_ROW", 10)
+    def test_write_csv_to_s3_edge_case(
+        self, setup, aws_clients, localstack, mock_boto3_client
+    ):
+        helper = AWSHelper()
+        helper.s3 = MagicMock()
+        helper.s3.meta.region_name = "us-east-1"
+        helper.log = MagicMock()
+
+        helper.upload_file_to_s3 = MagicMock()
+
+        helper.get_free_space = lambda path: 8 * 1024**3
+
+        # create a large dataset to test edge case with 1 partition
+        pdf = pd.DataFrame(
+            {
+                "id": range(50),
+                "value": [f"val_{i}" for i in range(50)],
+                PARTITION_KEY: [202001] * 50,
+            }
+        )
+        ddf = dd.from_pandas(pdf, npartitions=1)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bucket = "test-bucket"
+            key = "output/test.zip"
+
+            # mock upload so to investigate csv files within zip file
+            def fake_upload(file_path, bucket, key):
+                assert os.path.exists(file_path)
+                with zipfile.ZipFile(file_path, "r") as zf:
+                    namelist = zf.namelist()
+                    # should generate 6 files, each under 9 rows
+                    assert len(namelist) == 6
+                    assert "part_000000000.csv" in namelist
+                    assert "part_000000005.csv" in namelist
+                    content = zf.read("part_000000000.csv").decode()
+                    assert "id" in content
+                    assert "value" in content
+                    assert "0" in content
+                return True
+
+            helper.upload_file_to_s3 = fake_upload
+
+            bucket = "test-bucket"
+            key = "output/test_edge_case.zip"
+
+            url = helper.write_csv_to_s3(ddf, bucket, key)
+
+            expected_url = f"https://{bucket}.s3.us-east-1.amazonaws.com/{key}"
+            assert url == expected_url
+
 
 def has_invalid_unicode(s: str) -> bool:
     return any(0xD800 <= ord(ch) <= 0xDFFF for ch in s)
