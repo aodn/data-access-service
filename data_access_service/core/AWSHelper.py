@@ -53,67 +53,87 @@ class AWSHelper:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir_path = Path(temp_dir)
             zip_path = temp_dir_path / "output.zip"
+
             try:
                 with zipfile.ZipFile(
                     zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
                 ) as zf:
-                    accumulated_partitions = []
-                    accumulated_rows = 0
                     csv_file_index = 0
+                    current_csv_file = None
+                    current_csv_rows = 0
+                    header_written = False
 
                     for i, partition in enumerate(target.to_delayed()):
                         try:
-                            # Compute one partition
                             partition_df = partition.compute()
                             partition_rows = len(partition_df)
 
-                            # if the current partition already reach the max excel row, split it first
                             if partition_rows > max_excel_row:
-                                for start in range(0, partition_rows, max_excel_row):
-                                    end = min(start + max_excel_row, partition_rows)
-                                    self.write_accumulated_partitions_to_csv(
-                                        [partition_df.iloc[start:end]],
-                                        zf,
-                                        csv_file_index,
-                                        temp_dir,
+                                # if row size exceeds max row limit, close current csv and work with a new one
+                                if current_csv_file:
+                                    self._close_and_add_to_zip(
+                                        current_csv_file, zf, csv_file_index, temp_dir
                                     )
                                     csv_file_index += 1
+                                    current_csv_file = None
+
+                                # start writing data in a single csv by partitions
+                                for start in range(0, partition_rows, max_excel_row):
+                                    end = min(start + max_excel_row, partition_rows)
+                                    chunk_df = partition_df.iloc[start:end]
+                                    self._write_single_partition_to_zip(
+                                        chunk_df, zf, csv_file_index, temp_dir
+                                    )
+                                    csv_file_index += 1
+
+                                # clear memory
+                                header_written = False
+                                current_csv_rows = 0
+                                del partition_df
                                 continue
 
-                            # Check if adding this partition would exceed Excel row limit
-                            # save the accumulated partitions to csv under max excel row
                             if (
-                                accumulated_rows + partition_rows > max_excel_row
-                                and accumulated_partitions
+                                current_csv_rows + partition_rows > max_excel_row
+                                and current_csv_file is not None
                             ):
-                                # Convert accumulated partitions to CSV
-                                self.write_accumulated_partitions_to_csv(
-                                    accumulated_partitions, zf, csv_file_index, temp_dir
+                                self._close_and_add_to_zip(
+                                    current_csv_file, zf, csv_file_index, temp_dir
                                 )
                                 csv_file_index += 1
-                                # Reset accumulators
-                                accumulated_partitions = []
-                                accumulated_rows = 0
+                                current_csv_file = None
+                                header_written = False
+                                current_csv_rows = 0
+                            # init a csv file if current csv is none
+                            if current_csv_file is None:
+                                current_csv_file = tempfile.NamedTemporaryFile(
+                                    "w+", dir=temp_dir, delete=False
+                                )
 
-                            # Add current partition to accumulator
-                            accumulated_partitions.append(partition_df)
-                            accumulated_rows += partition_rows
-
-                            self.log.info(
-                                f"Accumulated partition {i}, total rows: {accumulated_rows}"
+                            partition_df.to_csv(
+                                current_csv_file,
+                                escapechar="\\",
+                                quoting=csv.QUOTE_NONNUMERIC,
+                                index=False,
+                                header=(not header_written),
+                                mode="a",
                             )
+                            header_written = True
+                            current_csv_rows += partition_rows
 
-                            # Clean up partition reference
                             del partition_df
 
                         except Exception as e:
                             self.log.error(f"Error processing partition {i}: {e}")
+                            # clean up memory
+                            if current_csv_file:
+                                current_csv_file.close()
+                                os.remove(current_csv_file.name)
                             raise
 
-                    # Handle remaining accumulated partitions
-                    if accumulated_partitions:
-                        self.write_accumulated_partitions_to_csv(
-                            accumulated_partitions, zf, csv_file_index, temp_dir
+                    # Handle remaining csv
+                    if current_csv_file:
+                        self._close_and_add_to_zip(
+                            current_csv_file, zf, csv_file_index, temp_dir
                         )
 
                 self.upload_file_to_s3(str(zip_path), bucket_name, key)
@@ -412,31 +432,22 @@ class AWSHelper:
                 ds.attrs[k] = v.encode("utf-8", errors="ignore").decode("utf-8")
         ds.to_netcdf(file_path, engine=engine)
 
-    def write_accumulated_partitions_to_csv(
-        self, partitions: list, zf: zipfile.ZipFile, file_index: int, temp_dir: str
+    def _write_single_partition_to_zip(
+        self, df, zf: zipfile.ZipFile, file_index: int, temp_dir: str
     ) -> None:
-        """Helper method to write accumulated partitions to a single CSV file in the ZIP"""
+        """Helper method to write partition to a single CSV file in the ZIP"""
         filename = f"part_{file_index:09d}.csv"
-        # make sure header is written only once
-        header_written = False
-
         with tempfile.NamedTemporaryFile("w+", dir=temp_dir, delete=False) as tmpfile:
             try:
-                # loop partitions, append them to a single csv file
-                for df in partitions:
-                    df.to_csv(
-                        tmpfile,
-                        escapechar="\\",
-                        quoting=csv.QUOTE_NONNUMERIC,
-                        index=False,
-                        header=(not header_written),
-                        mode="a",
-                    )
-                    header_written = True
-
+                df.to_csv(
+                    tmpfile,
+                    escapechar="\\",
+                    quoting=csv.QUOTE_NONNUMERIC,
+                    index=False,
+                    header=True,
+                )
                 tmpfile.flush()
                 tmpfile_size = os.path.getsize(tmpfile.name)
-
                 free_space = self.get_free_space(temp_dir)
                 if tmpfile_size > (free_space * 0.8):
                     raise OSError(
@@ -445,18 +456,34 @@ class AWSHelper:
 
                 zf.write(tmpfile.name, arcname=filename)
                 self.log.info(
-                    f"Added {filename} to ZIP with {sum(len(df) for df in partitions)} rows ({tmpfile_size:,} bytes)"
+                    f"Added {filename} to ZIP with {len(df)} rows ({tmpfile_size:,} bytes)"
                 )
 
-            except Exception as e:
-                self.log.error(f"Error writing partitions to CSV: {e}")
-                raise
-
             finally:
-                # clean up memory
-                partitions.clear()
                 tmpfile.close()
                 os.remove(tmpfile.name)
+
+    def _close_and_add_to_zip(
+        self, csv_file, zf: zipfile.ZipFile, file_index: int, temp_dir: str
+    ) -> None:
+        filename = f"part_{file_index:09d}.csv"
+        try:
+            csv_file.flush()
+
+            tmpfile_size = os.path.getsize(csv_file.name)
+            free_space = self.get_free_space(temp_dir)
+            # check temp directory space
+            if tmpfile_size > (free_space * 0.8):
+                raise OSError(
+                    f"Insufficient disk space: required={tmpfile_size}, free={free_space}"
+                )
+
+            zf.write(csv_file.name, arcname=filename)
+            self.log.info(f"Added {filename} to ZIP ({tmpfile_size:,} bytes)")
+
+        finally:
+            csv_file.close()
+            os.remove(csv_file.name)
 
     @staticmethod
     def get_free_space(path: str) -> int:

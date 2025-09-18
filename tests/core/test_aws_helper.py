@@ -1,6 +1,8 @@
-import shutil
+import os
+import zipfile
 
 import pandas as pd
+import dask.dataframe as dd
 import requests
 
 import xarray as xr
@@ -12,6 +14,7 @@ from pathlib import Path
 from botocore.exceptions import ClientError
 from data_access_service.config.config import IntTestConfig, Config
 from data_access_service.core.AWSHelper import AWSHelper
+from data_access_service.core.constants import PARTITION_KEY
 from tests.core.test_with_s3 import TestWithS3
 
 
@@ -123,38 +126,73 @@ class TestAWSHelper(TestWithS3):
                 # if UnicodeEncodeError occurred, the safe_zarr_to_netcdf should be called
                 mock_safe.assert_called_once_with(ds, ANY)
 
-    def test_write_accumulated_partitions_to_csv(
+    def test_write_single_partition_to_zip(
         self, setup, aws_clients, localstack, mock_boto3_client
     ):
-        """
-        To test partitions safely saved as one single CSV file and stored in ZIP file if row size under limitation
-        """
-        partitions = [
-            pd.DataFrame({"col1": [1, 2, 3], "col2": ["a", "b", "c"]}),
-            pd.DataFrame({"col1": [4, 5, 6], "col2": ["d", "e", "f"]}),
-            pd.DataFrame({"col1": [7, 8, 9], "col2": ["x", "y", "z"]}),
-        ]
-        file_index = 0
-
-        mock_zipfile = MagicMock()
         helper = AWSHelper()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            temp_dir = Path(tmpdir)
-            with patch("os.remove") as mock_remove:
-                helper.write_accumulated_partitions_to_csv(
-                    partitions, mock_zipfile, file_index, temp_dir
-                )
 
-                args, kwargs = mock_zipfile.write.call_args
-                filepath = args[0]
-                arcname = kwargs.get("arcname")
-                assert arcname == "part_000000000.csv"
+        helper.s3 = MagicMock()
+        helper.s3.meta.region_name = "us-east-1"
 
-                with open(filepath, "r") as f:
-                    content = f.read()
-                    assert "z" in content
+        # simulate memory space as 8G
+        helper.get_free_space = lambda path: 8 * 1024**3
 
-                mock_remove.assert_called_once_with(filepath)
+        # simulate a very large partition
+        mock_df = pd.DataFrame({"a": range(10**6), "b": ["x"] * 10**6})
+        with tempfile.TemporaryDirectory() as temp_dir:
+            zip_path = os.path.join(temp_dir, "test.zip")
+
+            with zipfile.ZipFile(zip_path, "w") as zf:
+                helper._write_single_partition_to_zip(mock_df, zf, 0, temp_dir)
+
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                namelist = zf.namelist()
+                assert "part_000000000.csv" in namelist
+
+    def test_write_csv_to_s3(self, setup, aws_clients, localstack, mock_boto3_client):
+        helper = AWSHelper()
+        helper.s3 = MagicMock()
+        helper.s3.meta.region_name = "us-east-1"
+        helper.log = MagicMock()
+
+        helper.upload_file_to_s3 = MagicMock()
+
+        helper.get_free_space = lambda path: 8 * 1024**3
+
+        pdf = pd.DataFrame(
+            {
+                "id": [1, 2, 3, 4, 5],
+                "value": ["a", "b", "c", "d", "e"],
+                PARTITION_KEY: [202001, 202001, 202002, 202002, 202003],
+            }
+        )
+        # create 2 partitions
+        ddf = dd.from_pandas(pdf, npartitions=2)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bucket = "test-bucket"
+            key = "output/test.zip"
+
+            # mock upload so to investigate csv files within zip file
+            def fake_upload(file_path, bucket, key):
+                assert os.path.exists(file_path)
+                with zipfile.ZipFile(file_path, "r") as zf:
+                    namelist = zf.namelist()
+                    assert "part_000000000.csv" in namelist
+                    content = zf.read("part_000000000.csv").decode()
+                    assert "id" in content
+                    assert "value" in content
+                    assert "a" in content
+                return True
+
+            helper.upload_file_to_s3 = fake_upload
+
+            url = helper.write_csv_to_s3(ddf, bucket, key)
+            expected_url = f"https://{bucket}.s3.us-east-1.amazonaws.com/{key}"
+            assert url == expected_url
+
+            expected_url = f"https://{bucket}.s3.us-east-1.amazonaws.com/{key}"
+            assert url == expected_url
 
 
 def has_invalid_unicode(s: str) -> bool:
