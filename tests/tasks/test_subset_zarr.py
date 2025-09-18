@@ -56,10 +56,8 @@ class TestSubsetZarr(TestWithS3):
                         "",
                     )
 
-                    print("files", files)
-
                     assert (
-                        "radar_CoffsHarbour_wind_delayed_qc.zarr" in files
+                        "job_id_888/radar_CoffsHarbour_wind_delayed_qc.nc" in files
                     ), "didn't find expected output file"
                 except Exception as ex:
                     # Should not land here

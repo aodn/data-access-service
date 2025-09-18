@@ -12,7 +12,7 @@ class MultiPolygonHelper:
 
         self.bboxes = []
         multi_polygon = json.loads(multi_polygon)
-        for polygon in multi_polygon:
+        for polygon in multi_polygon["coordinates"]:
             lats_lons = get_lat_lon_from_(polygon=polygon)
             min_lat = lats_lons["min_lat"]
             max_lat = lats_lons["max_lat"]

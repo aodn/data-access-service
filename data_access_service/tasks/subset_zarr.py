@@ -20,6 +20,7 @@ class ZarrProcessor:
     def __init__(
         self,
         uuid: str,
+        job_id: str,
         keys: List[str],
         start_date_str: str,
         end_date_str: str,
@@ -31,6 +32,7 @@ class ZarrProcessor:
         self.config = Config.get_config()
         self.log = init_log(self.config)
         self.uuid = uuid
+        self.job_id = job_id
         self.keys = keys
         self.recipient = recipient
         start_date, end_date = supply_day_with_nano_precision(
@@ -115,10 +117,11 @@ class ZarrProcessor:
         with tempfile.NamedTemporaryFile(suffix=".nc", delete=True) as temp_file:
 
             dataset.to_netcdf(temp_file.name, engine="netcdf4", encoding=compression)
-            self.aws.upload_file_to_s3(temp_file.name, bucket_name, key)
+            s3_key = f"{self.job_id}/{key.replace('.zarr', '.nc')}"
+            self.aws.upload_file_to_s3(temp_file.name, bucket_name, s3_key)
             region = self.aws.s3.meta.region_name
 
-            return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
+            return f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"
 
     def __get_time_count_per_chunk(self, key: str, dataset: xarray.Dataset) -> int:
         total_size = sum(var.nbytes for var in dataset.values())
