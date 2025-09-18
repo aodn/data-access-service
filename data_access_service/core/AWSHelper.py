@@ -91,7 +91,7 @@ class AWSHelper:
         region = self.s3.meta.region_name
         return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
 
-    def write_zarr_from_s3(self, data: xarray.Dataset, bucket_name: str, key: str):
+    def write_zarr_to_s3(self, data: xarray.Dataset, bucket_name: str, key: str):
         # Save to temporary local file
         with tempfile.NamedTemporaryFile(suffix=".nc", delete=True) as temp_file:
             try:

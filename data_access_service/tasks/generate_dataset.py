@@ -267,7 +267,7 @@ def query_data(
     )
 
     try:
-        df: Optional[ddf.DataFrame | xarray.Dataset] = api.get_dataset_data(
+        df: Optional[ddf.DataFrame | xarray.Dataset] = api.get_dataset(
             uuid=uuid,
             key=key,
             date_start=start_date,

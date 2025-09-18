@@ -115,7 +115,7 @@ class TestAWSHelper(TestWithS3):
                 "data_access_service.core.AWSHelper.AWSHelper.upload_file_to_s3",
                 return_value=mock_url,
             ) as mock_upload:
-                url = helper.write_zarr_from_s3(ds, "test-bucket", "test.nc")
+                url = helper.write_zarr_to_s3(ds, "test-bucket", "test.nc")
 
                 # if UnicodeEncodeError occurred, the safe_zarr_to_netcdf should be called
                 mock_safe.assert_called_once_with(ds, ANY)
