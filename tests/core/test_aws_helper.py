@@ -1,3 +1,4 @@
+import io
 import os
 import zipfile
 
@@ -178,19 +179,25 @@ class TestAWSHelper(TestWithS3):
                 assert os.path.exists(file_path)
                 with zipfile.ZipFile(file_path, "r") as zf:
                     namelist = zf.namelist()
+                    assert len(namelist) == 1
                     assert "part_000000000.csv" in namelist
-                    content = zf.read("part_000000000.csv").decode()
-                    assert "id" in content
-                    assert "value" in content
-                    assert "a" in content
+
+                    # content validation - the concat csvs should match the original dataframe
+                    dfs = []
+                    for name in sorted(namelist):
+                        content = zf.read(name).decode()
+                        dfs.append(pd.read_csv(io.StringIO(content)))
+                    combined_df = pd.concat(dfs, ignore_index=True)
+
+                    expected_df = pdf.drop(columns=[PARTITION_KEY]).reset_index(
+                        drop=True
+                    )
+                    pd.testing.assert_frame_equal(combined_df, expected_df)
                 return True
 
             helper.upload_file_to_s3 = fake_upload
 
             url = helper.write_csv_to_s3(ddf, bucket, key)
-            expected_url = f"https://{bucket}.s3.us-east-1.amazonaws.com/{key}"
-            assert url == expected_url
-
             expected_url = f"https://{bucket}.s3.us-east-1.amazonaws.com/{key}"
             assert url == expected_url
 
@@ -234,6 +241,17 @@ class TestAWSHelper(TestWithS3):
                     assert "id" in content
                     assert "value" in content
                     assert "0" in content
+
+                    # content validation - the concat csvs should match the original dataframe
+                    dfs = []
+                    for name in sorted(namelist):
+                        content = zf.read(name).decode()
+                        dfs.append(pd.read_csv(io.StringIO(content)))
+                    combined_df = pd.concat(dfs, ignore_index=True)
+                    expected_df = pdf.drop(columns=[PARTITION_KEY]).reset_index(
+                        drop=True
+                    )
+                    pd.testing.assert_frame_equal(combined_df, expected_df)
                 return True
 
             helper.upload_file_to_s3 = fake_upload
