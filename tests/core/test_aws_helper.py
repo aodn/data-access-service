@@ -6,6 +6,8 @@ import requests
 import xarray as xr
 from pathlib import Path
 from unittest.mock import patch, MagicMock, ANY
+import tempfile
+from pathlib import Path
 
 from botocore.exceptions import ClientError
 from data_access_service.config.config import IntTestConfig, Config
@@ -124,6 +126,9 @@ class TestAWSHelper(TestWithS3):
     def test_write_accumulated_partitions_to_csv(
         self, setup, aws_clients, localstack, mock_boto3_client
     ):
+        """
+        To test partitions safely saved as one single CSV file and stored in ZIP file if row size under limitation
+        """
         partitions = [
             pd.DataFrame({"col1": [1, 2, 3], "col2": ["a", "b", "c"]}),
             pd.DataFrame({"col1": [4, 5, 6], "col2": ["d", "e", "f"]}),
@@ -133,14 +138,23 @@ class TestAWSHelper(TestWithS3):
 
         mock_zipfile = MagicMock()
         helper = AWSHelper()
-        helper.write_accumulated_partitions_to_csv(partitions, mock_zipfile, file_index)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_dir = Path(tmpdir)
+            with patch("os.remove") as mock_remove:
+                helper.write_accumulated_partitions_to_csv(
+                    partitions, mock_zipfile, file_index, temp_dir
+                )
 
-        mock_zipfile.writestr.assert_called_once()
-        filename, csv_content = mock_zipfile.writestr.call_args[0]
+                args, kwargs = mock_zipfile.write.call_args
+                filepath = args[0]
+                arcname = kwargs.get("arcname")
+                assert arcname == "part_000000000.csv"
 
-        assert filename == "part_000000000.csv"
-        # the expected result should have the concat partitions
-        assert "z" in csv_content
+                with open(filepath, "r") as f:
+                    content = f.read()
+                    assert "z" in content
+
+                mock_remove.assert_called_once_with(filepath)
 
 
 def has_invalid_unicode(s: str) -> bool:

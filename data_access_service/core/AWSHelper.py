@@ -1,6 +1,7 @@
 import csv
 import io
 import os
+import shutil
 import tempfile
 import zipfile
 import dask.dataframe
@@ -74,6 +75,7 @@ class AWSHelper:
                                         [partition_df.iloc[start:end]],
                                         zf,
                                         csv_file_index,
+                                        temp_dir,
                                     )
                                     csv_file_index += 1
                                 continue
@@ -86,7 +88,7 @@ class AWSHelper:
                             ):
                                 # Convert accumulated partitions to CSV
                                 self.write_accumulated_partitions_to_csv(
-                                    accumulated_partitions, zf, csv_file_index
+                                    accumulated_partitions, zf, csv_file_index, temp_dir
                                 )
                                 csv_file_index += 1
                                 # Reset accumulators
@@ -111,7 +113,7 @@ class AWSHelper:
                     # Handle remaining accumulated partitions
                     if accumulated_partitions:
                         self.write_accumulated_partitions_to_csv(
-                            accumulated_partitions, zf, csv_file_index
+                            accumulated_partitions, zf, csv_file_index, temp_dir
                         )
 
                 self.upload_file_to_s3(str(zip_path), bucket_name, key)
@@ -411,33 +413,59 @@ class AWSHelper:
         ds.to_netcdf(file_path, engine=engine)
 
     def write_accumulated_partitions_to_csv(
-        self, partitions: list, zf: zipfile.ZipFile, file_index: int
+        self, partitions: list, zf: zipfile.ZipFile, file_index: int, temp_dir: str
     ) -> None:
         """Helper method to write accumulated partitions to a single CSV file in the ZIP"""
-        try:
-            # Concatenate all accumulated partitions
-            combined_df = pd.concat(partitions, ignore_index=True)
+        filename = f"part_{file_index:09d}.csv"
+        # make sure header is written only once
+        header_written = False
 
-            # Convert to CSV string in memory
-            csv_buffer = io.StringIO()
-            combined_df.to_csv(
-                csv_buffer,
-                escapechar="\\",  # Escape special characters
-                quoting=csv.QUOTE_NONNUMERIC,  # Quote non-numeric fields
-                index=False,
-            )
-            csv_content = csv_buffer.getvalue()
-            csv_buffer.close()
+        with tempfile.NamedTemporaryFile("w+", dir=temp_dir, delete=False) as tmpfile:
+            try:
+                # loop partitions, append them to a single csv file
+                for df in partitions:
+                    df.to_csv(
+                        tmpfile,
+                        escapechar="\\",
+                        quoting=csv.QUOTE_NONNUMERIC,
+                        index=False,
+                        header=(not header_written),
+                        mode="a",
+                    )
+                    header_written = True
 
-            # Write to ZIP stream as CSV file
-            filename = f"part_{file_index:09d}.csv"
-            zf.writestr(filename, csv_content)
-            self.log.info(f"Added {filename} to ZIP with {len(combined_df)} rows")
+                tmpfile.flush()
+                tmpfile_size = os.path.getsize(tmpfile.name)
 
-            # Clean up
-            del combined_df
-            del csv_content
+                free_space = self.get_free_space(temp_dir)
+                if tmpfile_size > (free_space * 0.8):
+                    raise OSError(
+                        f"Insufficient disk space: required={tmpfile_size}, free={free_space}"
+                    )
 
-        except Exception as e:
-            self.log.error(f"Error writing accumulated partitions to CSV: {e}")
-            raise
+                zf.write(tmpfile.name, arcname=filename)
+                self.log.info(
+                    f"Added {filename} to ZIP with {sum(len(df) for df in partitions)} rows ({tmpfile_size:,} bytes)"
+                )
+
+            except Exception as e:
+                self.log.error(f"Error writing partitions to CSV: {e}")
+                raise
+
+            finally:
+                # clean up memory
+                partitions.clear()
+                tmpfile.close()
+                os.remove(tmpfile.name)
+
+    @staticmethod
+    def get_free_space(path: str) -> int:
+        """
+        Get the free space (in int bytes) of a temp directory.
+        Args:
+            path: Path to the temporary directory.
+        Returns:
+            int free space.
+        """
+        usage = shutil.disk_usage(path)
+        return usage.free
