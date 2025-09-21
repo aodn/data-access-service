@@ -50,6 +50,9 @@ class ZarrProcessor:
         self.api = api_setup(app)
 
     def process(self):
+        self.log(
+            f"Start processing zarr data for uuid: {self.uuid}, job id: {self.job_id}"
+        )
         urls: List[str] = []
         for key in self.keys:
 

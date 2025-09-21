@@ -11,6 +11,7 @@ from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.server import api_setup, app
 from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.tasks.generate_dataset import process_data_files
+from data_access_service.tasks.subset_zarr import ZarrProcessor
 from data_access_service.utils.date_time_utils import (
     supply_day_with_nano_precision,
     split_date_range,
@@ -145,3 +146,15 @@ def subset_zarr(parameters):
     start_date_str = parameters[Parameters.START_DATE.value]
     end_date_str = parameters[Parameters.END_DATE.value]
     multi_polygon = parameters[Parameters.MULTI_POLYGON.value]
+
+    zarr_processor = ZarrProcessor(
+        uuid=uuid,
+        job_id=parameters[Parameters.MASTER_JOB_ID.value],
+        keys=keys,
+        start_date_str=start_date_str,
+        end_date_str=end_date_str,
+        multi_polygon=multi_polygon,
+        recipient=parameters[Parameters.RECIPIENT.value],
+    )
+
+    zarr_processor.process()

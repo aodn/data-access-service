@@ -37,6 +37,7 @@ match call_type:
     case "sub-setting-data-collection":
         subsetting.collect_data(parameters=parameters)
     case "sub-setting-zarr":
+        logger.info(f"Subsetting zarr dataset")
         subsetting.subset_zarr(parameters=parameters)
     case _:
         logging.error("Unknow call type", call_type)
