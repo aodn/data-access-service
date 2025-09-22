@@ -14,6 +14,7 @@ from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.models.multi_polygon_helper import MultiPolygonHelper
 from data_access_service.server import api_setup, app
 from data_access_service.utils.date_time_utils import supply_day_with_nano_precision
+from data_access_service.utils.process_logger import ProcessLogger
 
 
 class ZarrProcessor:
@@ -126,18 +127,12 @@ class ZarrProcessor:
         bucket_name = self.config.get_csv_bucket_name()
         with tempfile.NamedTemporaryFile(suffix=".nc", delete=True) as temp_file:
 
-            # Only show progress bar in dev or testing mode to avoid unexpected cost from cloudwatch log
-            if os.getenv("PROFILE") in (None, "dev", "testing"):
-                with ProgressBar():
-                    dataset.to_netcdf(
-                        temp_file.name,
-                        engine="netcdf4",
-                        encoding=compression,
-                        compute=True,
-                    )
-            else:
+            with ProcessLogger(self.log):
                 dataset.to_netcdf(
-                    temp_file.name, engine="netcdf4", encoding=compression, compute=True
+                    temp_file.name,
+                    engine="netcdf4",
+                    encoding=compression,
+                    compute=True,
                 )
 
             s3_key = f"{self.job_id}/{key.replace('.zarr', '.nc')}"
@@ -147,8 +142,7 @@ class ZarrProcessor:
             return f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"
 
     def get_available_thread_count(self):
-        profile = os.getenv("PROFILE")
-        if profile is None or profile == "dev" or profile == "testing":
+        if os.getenv("PROFILE") in (None, "dev", "testing"):
             self.log.info("Running in dev or testing mode, using 2 threads")
             return 2
 
@@ -172,6 +166,7 @@ class ZarrProcessor:
         )
         total_size = sum(var.nbytes for var in dataset.values())
         chunk_count = max(1, math.ceil(total_size / safe_memory_per_thread))
+        self.log.info("Chunk count: %d", chunk_count)
         total_time_count = dataset.sizes[time_dim]
         return math.ceil(total_time_count / chunk_count)
 
