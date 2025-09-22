@@ -54,7 +54,7 @@ class ZarrProcessor:
         self.api = api_setup(app)
 
     def process(self):
-        self.log(
+        self.log.info(
             f"Start processing zarr data for uuid: {self.uuid}, job id: {self.job_id}"
         )
         urls: List[str] = []
@@ -133,7 +133,9 @@ class ZarrProcessor:
 
     def __get_time_count_per_chunk(self, key: str, dataset: xarray.Dataset) -> int:
         total_size = sum(var.nbytes for var in dataset.values())
-        chunk_count = math.ceil(total_size / CHUNK_SIZE)
+        chunk_count = max(
+            1, math.ceil(total_size / CHUNK_SIZE)
+        )  # Ensure at least 1 to avoid div by 0
         time_dim = self.api.map_column_names(uuid=self.uuid, key=key, columns=["TIME"])[
             0
         ]
