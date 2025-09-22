@@ -38,6 +38,6 @@ match call_type:
         subsetting.collect_data(parameters=parameters)
     case "sub-setting-zarr":
         logger.info(f"Subsetting zarr dataset")
-        subsetting.subset_zarr(parameters=parameters)
+        subsetting.subset_zarr(job_id=job_id, parameters=parameters)
     case _:
         logging.error("Unknow call type", call_type)
