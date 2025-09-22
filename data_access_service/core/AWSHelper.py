@@ -377,3 +377,13 @@ class AWSHelper:
             if isinstance(v, str):
                 ds.attrs[k] = v.encode("utf-8", errors="ignore").decode("utf-8")
         ds.to_netcdf(file_path, engine=engine)
+
+    def download_file_from_s3(self, bucket_name: str, s3_key: str, local_path: str):
+        """
+        Download a file from S3 to a local path.
+        Args:
+            bucket_name: Name of the S3 bucket.
+            s3_key: Key of the object to download.
+            local_path: Local path to save the downloaded file.
+        """
+        self.s3.download_file(bucket_name, s3_key, local_path)

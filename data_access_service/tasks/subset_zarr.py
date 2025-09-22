@@ -6,7 +6,6 @@ from typing import List
 import dask
 import psutil
 import xarray
-from dask.diagnostics import ProgressBar
 
 from data_access_service import init_log, Config
 from data_access_service.batch.subsetting_helper import trim_date_range_for_keys
@@ -42,6 +41,8 @@ class ZarrProcessor:
         if "*" in keys:
             md = self.api.get_mapped_meta_data(self.uuid)
             self.keys = list(md.keys())
+        else:
+            self.keys = keys
 
         trimmed_start_date, trimmed_end_date = trim_date_range_for_keys(
             uuid=uuid,
@@ -151,8 +152,14 @@ class ZarrProcessor:
         return cpu_count
 
     def __get_time_steps_per_chunk(
-        self, dataset: xarray.Dataset, time_dim: str, memory_fraction: float = 0.75
+        self, dataset: xarray.Dataset, time_dim: str, memory_fraction: float = 0.8
     ) -> int:
+        """
+        Calculate the number of time steps per chunk based on available memory and dataset size.
+        This helps to optimize memory usage during processing.
+        the memory_fraction is the fraction of available memory to use for processing. The
+        value is only for safety. Can be adjusted based on the experience.
+        """
         available_memory = psutil.virtual_memory().available
         self.log.info(
             "total memory in MB: %d", psutil.virtual_memory().total / (1024 * 1024)
