@@ -54,6 +54,11 @@ class ZarrProcessor:
             f"Start processing zarr data for uuid: {self.uuid}, job id: {self.job_id}"
         )
         urls: List[str] = []
+
+        if "*" in self.keys:
+            md = self.api.get_mapped_meta_data(self.uuid)
+            self.keys = list(md.keys())
+
         for key in self.keys:
 
             dataset = self.__get_zarr_dataset_for_(key=key)

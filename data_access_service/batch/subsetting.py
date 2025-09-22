@@ -140,7 +140,7 @@ def collect_data(parameters):
     )
 
 
-def subset_zarr(parameters):
+def subset_zarr(job_id, parameters):
     uuid = get_uuid(parameters)
     keys = get_keys(parameters)
     start_date_str = parameters[Parameters.START_DATE.value]
@@ -149,7 +149,7 @@ def subset_zarr(parameters):
 
     zarr_processor = ZarrProcessor(
         uuid=uuid,
-        job_id=parameters[Parameters.MASTER_JOB_ID.value],
+        job_id=job_id,
         keys=keys,
         start_date_str=start_date_str,
         end_date_str=end_date_str,
