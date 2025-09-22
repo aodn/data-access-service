@@ -1,10 +1,12 @@
 import math
+import os
 import tempfile
 from typing import List
 
 import dask
 import psutil
 import xarray
+from dask.diagnostics import ProgressBar
 
 from data_access_service import init_log, Config
 from data_access_service.batch.subsetting_helper import trim_date_range_for_keys
@@ -12,8 +14,6 @@ from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.models.multi_polygon_helper import MultiPolygonHelper
 from data_access_service.server import api_setup, app
 from data_access_service.utils.date_time_utils import supply_day_with_nano_precision
-
-CHUNK_SIZE = 2 * 1024 * 1024 * 1024  # 2GB
 
 
 class ZarrProcessor:
@@ -51,7 +51,6 @@ class ZarrProcessor:
         self.start_date = trimmed_start_date
         self.end_date = trimmed_end_date
         self.multi_polygon = MultiPolygonHelper(multi_polygon=multi_polygon)
-        self.api = api_setup(app)
 
     def process(self):
         self.log.info(
@@ -111,8 +110,9 @@ class ZarrProcessor:
         time_dim = self.api.map_column_names(uuid=self.uuid, key=key, columns=["TIME"])[
             0
         ]
-        time_per_chunk = self.__get_time_count_per_chunk(key=key, dataset=dataset)
-        dataset.chunk({time_dim: time_per_chunk})
+        time_per_chunk = self.__get_time_steps_per_chunk(dataset, time_dim)
+        self.log.info("Chunking dataset with %d time steps per chunk", time_per_chunk)
+        dataset = dataset.chunk({time_dim: time_per_chunk})
 
         compression = {
             var: {"zlib": True, "complevel": 5}
@@ -120,35 +120,63 @@ class ZarrProcessor:
             if da.dtype.kind in {"i", "u", "f"}  # integer, unsigned, float
         }
         thread_count = self.get_available_thread_count()
+
+        # set the thread count for dask, for the to_netcdf operation later
         dask.config.set(num_workers=thread_count)
         bucket_name = self.config.get_csv_bucket_name()
         with tempfile.NamedTemporaryFile(suffix=".nc", delete=True) as temp_file:
 
-            dataset.to_netcdf(temp_file.name, engine="netcdf4", encoding=compression)
+            # Only show progress bar in dev or testing mode to avoid unexpected cost from cloudwatch log
+            if os.getenv("PROFILE") in (None, "dev", "testing"):
+                with ProgressBar():
+                    dataset.to_netcdf(
+                        temp_file.name,
+                        engine="netcdf4",
+                        encoding=compression,
+                        compute=True,
+                    )
+            else:
+                dataset.to_netcdf(
+                    temp_file.name, engine="netcdf4", encoding=compression, compute=True
+                )
+
             s3_key = f"{self.job_id}/{key.replace('.zarr', '.nc')}"
             self.aws.upload_file_to_s3(temp_file.name, bucket_name, s3_key)
             region = self.aws.s3.meta.region_name
 
             return f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"
 
-    def __get_time_count_per_chunk(self, key: str, dataset: xarray.Dataset) -> int:
-        total_size = sum(var.nbytes for var in dataset.values())
-        chunk_count = max(
-            1, math.ceil(total_size / CHUNK_SIZE)
-        )  # Ensure at least 1 to avoid div by 0
-        time_dim = self.api.map_column_names(uuid=self.uuid, key=key, columns=["TIME"])[
-            0
-        ]
-        total_time_count = dataset.sizes[time_dim]
-        return math.ceil(total_time_count / chunk_count)
-
     def get_available_thread_count(self):
+        profile = os.getenv("PROFILE")
+        if profile is None or profile == "dev" or profile == "testing":
+            self.log.info("Running in dev or testing mode, using 2 threads")
+            return 2
+
         cpu_count = psutil.cpu_count(logical=True)
         self.log.info(f"Available thread count: {cpu_count}")
         return cpu_count
 
+    def __get_time_steps_per_chunk(
+        self, dataset: xarray.Dataset, time_dim: str, memory_fraction: float = 0.75
+    ) -> int:
+        available_memory = psutil.virtual_memory().available
+        self.log.info(
+            "total memory in MB: %d", psutil.virtual_memory().total / (1024 * 1024)
+        )
+        self.log.info(f"Available memory in MB: {available_memory / (1024 * 1024):.2f}")
+        safe_memory_per_thread = int(
+            available_memory * memory_fraction / self.get_available_thread_count()
+        )
+        self.log.info(
+            "Chunk size: %d GB per thread", safe_memory_per_thread / (1024**3)
+        )
+        total_size = sum(var.nbytes for var in dataset.values())
+        chunk_count = max(1, math.ceil(total_size / safe_memory_per_thread))
+        total_time_count = dataset.sizes[time_dim]
+        return math.ceil(total_time_count / chunk_count)
 
-def ignore_invalid_unicode_in_attrs(dataset: xarray.Dataset):
+
+def ignore_invalid_unicode_in_attrs(dataset: xarray.Dataset) -> xarray.Dataset:
     for k, v in dataset.attrs.items():
         if isinstance(v, str):
             dataset.attrs[k] = v.encode("utf-8", errors="ignore").decode("utf-8")
