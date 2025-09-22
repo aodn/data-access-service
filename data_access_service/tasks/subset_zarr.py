@@ -33,14 +33,18 @@ class ZarrProcessor:
         self.log = init_log(self.config)
         self.uuid = uuid
         self.job_id = job_id
-        self.keys = keys
         self.recipient = recipient
         start_date, end_date = supply_day_with_nano_precision(
             start_date_str=start_date_str, end_date_str=end_date_str
         )
+
+        if "*" in keys:
+            md = self.api.get_mapped_meta_data(self.uuid)
+            self.keys = list(md.keys())
+
         trimmed_start_date, trimmed_end_date = trim_date_range_for_keys(
             uuid=uuid,
-            keys=keys,
+            keys=self.keys,
             requested_start_date=start_date,
             requested_end_date=end_date,
         )
@@ -54,10 +58,6 @@ class ZarrProcessor:
             f"Start processing zarr data for uuid: {self.uuid}, job id: {self.job_id}"
         )
         urls: List[str] = []
-
-        if "*" in self.keys:
-            md = self.api.get_mapped_meta_data(self.uuid)
-            self.keys = list(md.keys())
 
         for key in self.keys:
 
