@@ -29,6 +29,8 @@ logger.info(f"Parameters: {parameters}")
 # Switch based on parameter call_type
 call_type = parameters["type"]
 
+# If the sub-setting-zarr workflow is working well enough, we can then consider
+# deprecating the old zarr sub-setting workflow
 match call_type:
     case "sub-setting":
         subsetting.init(job_id_of_init=job_id, parameters=parameters)
