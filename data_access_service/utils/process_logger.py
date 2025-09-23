@@ -7,7 +7,7 @@ class ProcessLogger(Callback):
         self.total_tasks = 0
         self.completed_tasks = 0
         self.task_name = task_name
-        self.milestones = {
+        self.milestones = [
             1,
             2,
             3,
@@ -23,23 +23,21 @@ class ProcessLogger(Callback):
             80,
             90,
             100,
-        }
-        self.logged_milestones = set()
+        ]
 
     def _start(self, dsk):
         self.total_tasks = len(dsk)
         self.completed_tasks = 0
-        self.logged_milestones.clear()
         self.logger.info(f"{self.task_name} started.")
 
     def _posttask(self, key, result, dsk, state, id):
         self.completed_tasks += 1
         percent = int((self.completed_tasks / self.total_tasks) * 100)
-        if percent in self.milestones and percent not in self.logged_milestones:
+        if percent > self.milestones[0]:
             self.logger.info(
                 f"{self.task_name} progress: {percent}% ({self.completed_tasks}/{self.total_tasks})"
             )
-            self.logged_milestones.add(percent)
+            self.milestones.pop(0)
 
     def _finish(self, dsk, state, errored):
         self.logger.info(f" {self.task_name} finished.")

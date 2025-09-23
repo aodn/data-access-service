@@ -1,9 +1,11 @@
 import math
 import os
 import tempfile
+from pathlib import Path
 from typing import List
 
 import dask
+import numcodecs
 import psutil
 import xarray
 
@@ -116,7 +118,12 @@ class ZarrProcessor:
         self.log.info("Chunking dataset with %d time steps per chunk", time_per_chunk)
         dataset = dataset.chunk({time_dim: time_per_chunk})
 
-        compression = {
+        zarr_compression = {
+            var: {"compressor": numcodecs.Blosc(cname="zstd", clevel=5)}
+            for var in dataset.data_vars
+        }
+
+        netcdf_compression = {
             var: {"zlib": True, "complevel": 5}
             for var, da in dataset.data_vars.items()
             if da.dtype.kind in {"i", "u", "f"}  # integer, unsigned, float
@@ -126,21 +133,24 @@ class ZarrProcessor:
         # set the thread count for dask, for the to_netcdf operation later
         dask.config.set(num_workers=thread_count)
         bucket_name = self.config.get_csv_bucket_name()
-        with tempfile.NamedTemporaryFile(suffix=".nc", delete=True) as temp_file:
 
-            with ProcessLogger(self.log):
+        with tempfile.TemporaryDirectory() as tempdirname:
+
+            with ProcessLogger(logger=self.log, task_name="Writing to s3 as netcdf"):
+                temp_netcdf_path = Path(tempdirname) / key.replace(".zarr", ".nc")
                 dataset.to_netcdf(
-                    temp_file.name,
+                    temp_netcdf_path,
                     engine="netcdf4",
-                    encoding=compression,
+                    encoding=netcdf_compression,
                     compute=True,
                 )
-
-            s3_key = f"{self.job_id}/{key.replace('.zarr', '.nc')}"
-            self.aws.upload_file_to_s3(temp_file.name, bucket_name, s3_key)
-            region = self.aws.s3.meta.region_name
-
-            return f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"
+                s3_key = f"{self.job_id}/{key.replace('.zarr', '.nc')}"
+                self.log.info(
+                    "Start uploading to s3 bucket: %s, key: %s", bucket_name, s3_key
+                )
+                self.aws.upload_file_to_s3(str(temp_netcdf_path), bucket_name, s3_key)
+                region = self.aws.s3.meta.region_name
+                return f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"
 
     def get_available_thread_count(self):
         if os.getenv("PROFILE") in (None, "dev", "testing"):
