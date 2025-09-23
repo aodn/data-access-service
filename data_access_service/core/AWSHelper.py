@@ -1,18 +1,17 @@
 import csv
-import io
 import os
+import shutil
 import tempfile
 import zipfile
 import dask.dataframe
 import dask.dataframe as dd
 import xarray
-
 from pathlib import Path
 from typing import List
 from data_access_service import init_log
 from data_access_service.config.config import Config, IntTestConfig
 from io import BytesIO
-from data_access_service.core.constants import PARTITION_KEY
+from data_access_service.core.constants import PARTITION_KEY, MAX_CSV_ROW
 
 
 class AWSHelper:
@@ -43,53 +42,105 @@ class AWSHelper:
     def write_csv_to_s3(
         self, data: dask.dataframe.DataFrame, bucket_name: str, key: str
     ) -> str:
-        target = data.drop(PARTITION_KEY, axis=1)
+        target = data.drop(PARTITION_KEY, axis=1).reset_index(drop=True)
+        # the max row should be the max excel row limit exclude the header row
+        max_excel_row = MAX_CSV_ROW - 1
+
         # Create temporary directory with tempfile
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir_path = Path(temp_dir)
             zip_path = temp_dir_path / "output.zip"
 
-            # Create ZIP file and write partitions directly as CSV entries
             try:
                 with zipfile.ZipFile(
                     zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
                 ) as zf:
+                    csv_file_index = 0
+                    current_csv_file = None
+                    current_csv_rows = 0
+                    header_written = False
+
                     for i, partition in enumerate(target.to_delayed()):
                         try:
-                            # Compute one partition
                             partition_df = partition.compute()
+                            partition_rows = len(partition_df)
 
-                            # Convert to CSV string in memory
-                            csv_buffer = io.StringIO()
+                            if partition_rows > max_excel_row:
+                                # if row size exceeds max row limit, close current csv and work with a new one
+                                if current_csv_file:
+                                    self._close_and_add_to_zip(
+                                        current_csv_file, zf, csv_file_index, temp_dir
+                                    )
+                                    csv_file_index += 1
+                                    current_csv_file = None
+
+                                # start writing data in a single csv by partitions
+                                for start in range(0, partition_rows, max_excel_row):
+                                    end = min(start + max_excel_row, partition_rows)
+                                    chunk_df = partition_df.iloc[start:end]
+                                    self._write_single_partition_to_zip(
+                                        chunk_df, zf, csv_file_index, temp_dir
+                                    )
+                                    csv_file_index += 1
+
+                                # clear memory
+                                header_written = False
+                                current_csv_rows = 0
+                                del partition_df
+                                continue
+
+                            if (
+                                current_csv_rows + partition_rows > max_excel_row
+                                and current_csv_file is not None
+                            ):
+                                self._close_and_add_to_zip(
+                                    current_csv_file, zf, csv_file_index, temp_dir
+                                )
+                                csv_file_index += 1
+                                current_csv_file = None
+                                header_written = False
+                                current_csv_rows = 0
+                            # init a csv file if current csv is none
+                            if current_csv_file is None:
+                                current_csv_file = tempfile.NamedTemporaryFile(
+                                    "w+", dir=temp_dir, delete=False
+                                )
+
                             partition_df.to_csv(
-                                csv_buffer,
-                                escapechar="\\",  # Escape special characters
-                                quoting=csv.QUOTE_NONNUMERIC,  # Quote non-numeric fields
+                                current_csv_file,
+                                escapechar="\\",
+                                quoting=csv.QUOTE_NONNUMERIC,
                                 index=False,
+                                header=(not header_written),
+                                mode="a",
                             )
-                            csv_content = csv_buffer.getvalue()
-                            csv_buffer.close()
+                            header_written = True
+                            current_csv_rows += partition_rows
 
-                            # Write to ZIP stream as uncompressed .csv
-                            zf.writestr(f"part_{i:09d}.csv", csv_content)
-                            self.log.info(f"Added part_{i:09d}.csv to ZIP")
-
-                            # Discard partition
                             del partition_df
-                            del csv_content
 
                         except Exception as e:
                             self.log.error(f"Error processing partition {i}: {e}")
+                            # clean up memory
+                            if current_csv_file:
+                                current_csv_file.close()
+                                os.remove(current_csv_file.name)
                             raise
+
+                    # Handle remaining csv
+                    if current_csv_file:
+                        self._close_and_add_to_zip(
+                            current_csv_file, zf, csv_file_index, temp_dir
+                        )
 
                 self.upload_file_to_s3(str(zip_path), bucket_name, key)
 
             except Exception as e:
-                self.log(f"Error creating ZIP: {e}")
+                self.log.error(f"Error creating ZIP: {e}")
                 raise
 
-        region = self.s3.meta.region_name
-        return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
+            region = self.s3.meta.region_name
+            return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
 
     def write_zarr_to_s3(self, data: xarray.Dataset, bucket_name: str, key: str):
         # Save to temporary local file
@@ -377,6 +428,71 @@ class AWSHelper:
             if isinstance(v, str):
                 ds.attrs[k] = v.encode("utf-8", errors="ignore").decode("utf-8")
         ds.to_netcdf(file_path, engine=engine)
+
+    def _write_single_partition_to_zip(
+        self, df, zf: zipfile.ZipFile, file_index: int, temp_dir: str
+    ) -> None:
+        """Helper method to write partition to a single CSV file in the ZIP"""
+        filename = f"part_{file_index:09d}.csv"
+        with tempfile.NamedTemporaryFile("w+", dir=temp_dir, delete=False) as tmpfile:
+            try:
+                df.to_csv(
+                    tmpfile,
+                    escapechar="\\",
+                    quoting=csv.QUOTE_NONNUMERIC,
+                    index=False,
+                    header=True,
+                )
+                tmpfile.flush()
+                tmpfile_size = os.path.getsize(tmpfile.name)
+                free_space = self.get_free_space(temp_dir)
+                if tmpfile_size > (free_space * 0.8):
+                    raise OSError(
+                        f"Insufficient disk space: required={tmpfile_size}, free={free_space}"
+                    )
+
+                zf.write(tmpfile.name, arcname=filename)
+                self.log.info(
+                    f"Added {filename} to ZIP with {len(df)} rows ({tmpfile_size:,} bytes)"
+                )
+
+            finally:
+                tmpfile.close()
+                os.remove(tmpfile.name)
+
+    def _close_and_add_to_zip(
+        self, csv_file, zf: zipfile.ZipFile, file_index: int, temp_dir: str
+    ) -> None:
+        filename = f"part_{file_index:09d}.csv"
+        try:
+            csv_file.flush()
+
+            tmpfile_size = os.path.getsize(csv_file.name)
+            free_space = self.get_free_space(temp_dir)
+            # check temp directory space
+            if tmpfile_size > (free_space * 0.8):
+                raise OSError(
+                    f"Insufficient disk space: required={tmpfile_size}, free={free_space}"
+                )
+
+            zf.write(csv_file.name, arcname=filename)
+            self.log.info(f"Added {filename} to ZIP ({tmpfile_size:,} bytes)")
+
+        finally:
+            csv_file.close()
+            os.remove(csv_file.name)
+
+    @staticmethod
+    def get_free_space(path: str) -> int:
+        """
+        Get the free space (in int bytes) of a temp directory.
+        Args:
+            path: Path to the temporary directory.
+        Returns:
+            int free space.
+        """
+        usage = shutil.disk_usage(path)
+        return usage.free
 
     def download_file_from_s3(self, bucket_name: str, s3_key: str, local_path: str):
         """
