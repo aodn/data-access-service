@@ -315,7 +315,7 @@ async def _fetch_data(
     columns: List[str],
 ) -> AsyncGenerator[dict, None]:
     try:
-        result: Optional[dd.DataFrame | xr.Dataset] = api_instance.get_dataset_data(
+        result: Optional[dd.DataFrame | xr.Dataset] = api_instance.get_dataset(
             uuid=uuid,
             key=key,
             date_start=start_date,

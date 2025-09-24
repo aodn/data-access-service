@@ -55,7 +55,7 @@ class BaseAPI:
     ):
         pass
 
-    def get_dataset_data(
+    def get_dataset(
         self,
         uuid: str,
         key: str,
@@ -539,7 +539,7 @@ class API(BaseAPI):
         else:
             return None
 
-    def get_dataset_data(
+    def get_dataset(
         self,
         uuid: str,
         key: str,

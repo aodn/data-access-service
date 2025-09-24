@@ -51,7 +51,7 @@ class TestGenerateFunctions:
 
     @patch("data_access_service.tasks.generate_dataset.API")
     def test_query_data_no_data(self, mock_api):
-        mock_api.get_dataset_data.return_value = None
+        mock_api.get_dataset.return_value = None
         result = query_data(
             api=mock_api,
             uuid="test-uuid",

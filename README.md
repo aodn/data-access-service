@@ -175,12 +175,8 @@ After several exporting, make sure your terminal is at the root folder of this p
 ./entry_point.py
 ```
 
-- If you have error like: "mount/efs permission denied" or other errors about the mount/efs folder, please go to `generate_csv_file.py`,
-at the top of the file, make sure `efs_mount_point ="" ` is in use and `efs_mount_point = "/mount/efs/"` is commented out.
-This is just a temp solution. We will then use source file to manage these different values in different environments.
-
 ### aws running testing
-- If you want to test the batch job codes in AWS, (running in AWS Batch), please change the `efs_mount_point ="" ` back to `efs_mount_point = "/mount/efs/"` (if you did the change before), and then:
+- If you want to test the batch job codes in AWS, (running in AWS Batch), please :
   1. Build the docker image and push it to ECR (havier-test-ecr). Please do it by following the instructions in the havier-test-ecr repo by clicking button "View push commands" at the top right corner.
   2. Open the ogc-api project locally
   3. In class DatasetDownloadEnums of the ogc-api project, go to JobDefinition enum and change the value of GENERATE_CSV_DATA_FILE from "generate-csv-data-file" into "generate-csv-data-file-dev" (add "-dev" at the end of the string).

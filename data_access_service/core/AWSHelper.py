@@ -142,7 +142,7 @@ class AWSHelper:
             region = self.s3.meta.region_name
             return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
 
-    def write_zarr_from_s3(self, data: xarray.Dataset, bucket_name: str, key: str):
+    def write_zarr_to_s3(self, data: xarray.Dataset, bucket_name: str, key: str):
         # Save to temporary local file
         with tempfile.NamedTemporaryFile(suffix=".nc", delete=True) as temp_file:
             try:
@@ -493,3 +493,13 @@ class AWSHelper:
         """
         usage = shutil.disk_usage(path)
         return usage.free
+
+    def download_file_from_s3(self, bucket_name: str, s3_key: str, local_path: str):
+        """
+        Download a file from S3 to a local path.
+        Args:
+            bucket_name: Name of the S3 bucket.
+            s3_key: Key of the object to download.
+            local_path: Local path to save the downloaded file.
+        """
+        self.s3.download_file(bucket_name, s3_key, local_path)

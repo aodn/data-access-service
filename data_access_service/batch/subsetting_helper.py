@@ -39,6 +39,9 @@ def trim_date_range_for_keys(
     # get the union spatial extents of all selected keys
     for key in keys:
         start_date, end_date = api.get_temporal_extent(uuid, key)
+        if start_date is None or end_date is None:
+            # if didn't get the temporal extent (e.g. when testing) just return the requested dates
+            return requested_start_date, requested_end_date
         start_date = ensure_timezone(start_date)
         end_date = ensure_timezone(end_date)
         if start_date < min_date_of_keys:
