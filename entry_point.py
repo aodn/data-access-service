@@ -1,6 +1,7 @@
 import os
+
 import boto3
-import logging
+
 from data_access_service import init_log, Config
 from data_access_service.batch import subsetting
 
@@ -37,4 +38,4 @@ match call_type:
     case "sub-setting-data-collection":
         subsetting.collect_data(parameters=parameters)
     case _:
-        logging.error("Unknow call type", call_type)
+        logger.error("Unknow call type", call_type)
