@@ -39,6 +39,11 @@ def init(job_id_of_init, parameters):
         md = api.get_mapped_meta_data(uuid)
         keys = list(md.keys())
 
+    # use new zarr sub-setting workflow if all keys are zarr. It it works well, then deprecate old zarr sub-setting workflow
+    if all(key.endswith(".zarr") for key in keys):
+        subset_zarr(job_id_of_init, parameters)
+        return
+
     requested_start_date, requested_end_date = trim_date_range_for_keys(
         uuid=uuid,
         keys=keys,
