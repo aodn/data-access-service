@@ -10,6 +10,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Show Docker version
+        run: docker --version
       - name: Checkout
         uses: actions/checkout@v4
       - name: Set up Docker Buildx
