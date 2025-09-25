@@ -12,6 +12,7 @@ from data_access_service import init_log
 from data_access_service.config.config import Config, IntTestConfig
 from io import BytesIO
 from data_access_service.core.constants import PARTITION_KEY, MAX_CSV_ROW
+from data_access_service.utils.email_templates.download_email import get_download_email_html
 
 
 class AWSHelper:
@@ -207,6 +208,9 @@ class AWSHelper:
             raise e
 
     def send_email(self, recipient: str, subject: str, download_urls: List[str]):
+        uuid = "12345"
+        conditions = [("start date", "2023-01-01"), ("end date", "2023-01-31")]
+        object_url = "http://example.com/download"
 
         # Text and HTML parts
         text_part = "Hello, User!\nPlease use the link below to download the files"
@@ -214,14 +218,8 @@ class AWSHelper:
         if not download_urls:
             html_content = "<p>No data found for your selected subset.</p>"
         else:
-            html_content = ['<a href="' + l + '">' + l + "</a>" for l in download_urls]
-        html_part = f"""
-        <html>
-        <body>
-            {html_content}
-        </body>
-        </html>
-        """
+            html_content = get_download_email_html(uuid, object_url, conditions)
+        html_part = html_content
 
         try:
             response = self.ses.send_email(
@@ -233,6 +231,7 @@ class AWSHelper:
                         "Text": {"Data": text_part, "Charset": "UTF-8"},
                         "Html": {"Data": html_part, "Charset": "UTF-8"},
                     },
+                    # "Attachements": []
                 },
             )
             self.log.info(

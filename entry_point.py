@@ -4,6 +4,7 @@ import boto3
 
 from data_access_service import init_log, Config
 from data_access_service.batch import subsetting
+from data_access_service.core.AWSHelper import AWSHelper
 
 logger = init_log(Config.get_config())
 
@@ -30,12 +31,15 @@ logger.info(f"Parameters: {parameters}")
 # Switch based on parameter call_type
 call_type = parameters["type"]
 
-match call_type:
-    case "sub-setting":
-        subsetting.init(job_id_of_init=job_id, parameters=parameters)
-    case "sub-setting-data-preparation":
-        subsetting.prepare_data(job_index=job_index, parameters=parameters)
-    case "sub-setting-data-collection":
-        subsetting.collect_data(parameters=parameters)
-    case _:
-        logger.error("Unknow call type", call_type)
+aws=AWSHelper()
+aws.send_email("yujie.bian@utas.edu.au", "test", ["https://example.com/test.csv"])
+
+# match call_type:
+#     case "sub-setting":
+#         subsetting.init(job_id_of_init=job_id, parameters=parameters)
+#     case "sub-setting-data-preparation":
+#         subsetting.prepare_data(job_index=job_index, parameters=parameters)
+#     case "sub-setting-data-collection":
+#         subsetting.collect_data(parameters=parameters)
+#     case _:
+#         logger.error("Unknow call type", call_type)
