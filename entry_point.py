@@ -37,5 +37,7 @@ match call_type:
         subsetting.prepare_data(job_index=job_index, parameters=parameters)
     case "sub-setting-data-collection":
         subsetting.collect_data(parameters=parameters)
+    case "cloud-optimised-data-index-preparation":
+        prepare_co_indexing_data(job_index=job_index, parameters=parameters)
     case _:
         logger.error("Unknow call type", call_type)
