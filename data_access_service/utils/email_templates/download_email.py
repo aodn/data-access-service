@@ -1,18 +1,52 @@
+from data_access_service.utils.email_templates.form_bbox_divs import form_bbox_divs
 from data_access_service.utils.email_templates.png_to_base64 import png_to_base64
 
+
 # <!-- Download Email -->
-def get_download_email_html(uuid: str, object_url: str, conditions: str) -> str:
-    header_img=png_to_base64("data_access_service/utils/email_templates/img/fb1ca2d6ea710e523d5430e8b4c97aee.png")
-    download_icon=png_to_base64("data_access_service/utils/email_templates/img/e58a6cfdb179246fe86eb69b984294cf.png")
-    bbox_img=png_to_base64("data_access_service/utils/email_templates/img/1419180c04931cd1e419efce2690d5b8.png")
-    time_range_img=png_to_base64("data_access_service/utils/email_templates/img/6a9d0202f46342bc6bc7c3998cfa42b7.png")
-    attributes_img=png_to_base64("data_access_service/utils/email_templates/img/b274dfda8abcd8b25fba336b3005aea1.png")
-    footer_text_img=png_to_base64("data_access_service/utils/email_templates/img/72f4fdbff6ad47302caf554e4ed9d49d.png")
-    footer_action_img=png_to_base64("data_access_service/utils/email_templates/img/e17deb6304ba92d747550b727f2b0b3c.png")
-    facebook_img=png_to_base64("data_access_service/utils/email_templates/img/9a5ec6e59d87571e85c9dee34369050e.png")
-    instagram_img=png_to_base64("data_access_service/utils/email_templates/img/61d7bf2cff5309382bd988da59d406db.png")
-    butterfly_img=png_to_base64("data_access_service/utils/email_templates/img/e2ae815b8ce719a4026e08f7fb334b71.png")
-    linkedin_img=png_to_base64("data_access_service/utils/email_templates/img/82192244cf3677674fda6af8c471897d.png")
+def get_download_email_html_body(
+    subset_request: SubsetRequest, object_urls: [str]
+) -> str:
+
+    if not object_urls or len(object_urls) == 0:
+        return "<p>No data found for your selected subset.</p>"
+
+    uuid = subset_request.uuis
+    start_date = subset_request.start_date
+    end_date = subset_request.end_date
+    bboxes = subset_request.bboxes
+    object_url_str = ", ".join(object_urls)
+
+    bbox_divs = form_bbox_divs(bboxes=bboxes)
+    header_img = png_to_base64(
+        "data_access_service/utils/email_templates/img/fb1ca2d6ea710e523d5430e8b4c97aee.png"
+    )
+    download_icon = png_to_base64(
+        "data_access_service/utils/email_templates/img/e58a6cfdb179246fe86eb69b984294cf.png"
+    )
+    time_range_img = png_to_base64(
+        "data_access_service/utils/email_templates/img/6a9d0202f46342bc6bc7c3998cfa42b7.png"
+    )
+    attributes_img = png_to_base64(
+        "data_access_service/utils/email_templates/img/b274dfda8abcd8b25fba336b3005aea1.png"
+    )
+    footer_text_img = png_to_base64(
+        "data_access_service/utils/email_templates/img/72f4fdbff6ad47302caf554e4ed9d49d.png"
+    )
+    footer_action_img = png_to_base64(
+        "data_access_service/utils/email_templates/img/e17deb6304ba92d747550b727f2b0b3c.png"
+    )
+    facebook_img = png_to_base64(
+        "data_access_service/utils/email_templates/img/9a5ec6e59d87571e85c9dee34369050e.png"
+    )
+    instagram_img = png_to_base64(
+        "data_access_service/utils/email_templates/img/61d7bf2cff5309382bd988da59d406db.png"
+    )
+    butterfly_img = png_to_base64(
+        "data_access_service/utils/email_templates/img/e2ae815b8ce719a4026e08f7fb334b71.png"
+    )
+    linkedin_img = png_to_base64(
+        "data_access_service/utils/email_templates/img/82192244cf3677674fda6af8c471897d.png"
+    )
     return f"""
 <!doctype html>
 <html lang="en" dir="auto" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -204,7 +238,7 @@ img {{ background-color: transparent !important; }}
 <tbody>
 <tr>
 <td align="left" style="font-size:0;padding-bottom:24px;word-break:break-word;">
-<div style="font-family:'Open Sans', Arial, sans-serif;font-size:16px;font-weight:400;line-height:150%;text-align:left;color:#2571e9;"><p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;"><span style="color:#090c02;">Hi,</span></p><p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;"><span style="color:#090c02;">&nbsp;</span></p><p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;"><span style="color:#090c02;">Your AODN data download request has been completed. Please click on the following link to access your data request.<br class="s"></span><span style="text-decoration:underline;">{object_url}</span></p></div>
+<div style="font-family:'Open Sans', Arial, sans-serif;font-size:16px;font-weight:400;line-height:150%;text-align:left;color:#2571e9;"><p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;"><span style="color:#090c02;">Hi,</span></p><p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;"><span style="color:#090c02;">&nbsp;</span></p><p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;"><span style="color:#090c02;">Your AODN data download request has been completed. Please click on the following link to access your data request.<br class="s"></span><span style="text-decoration:underline;">{object_url_str}</span></p></div>
 </td>
 </tr>
 <tr>
@@ -477,106 +511,7 @@ img {{ background-color: transparent !important; }}
 </tbody>
 </table>
 </div>
-<!--[if mso | IE]></td><td style="vertical-align:middle;width:600px;"><![endif]-->
-<div class="c h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:middle;width:100%;">
-<table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border:none;vertical-align:middle;" width="100%">
-<tbody>
-<tr>
-<td align="center" class="tr-0" style="background:transparent;font-size:0;padding:0;word-break:break-word;">
-<table cellpadding="0" cellspacing="0" width="100%" border="0" style="color:#000000;line-height:normal;table-layout:fixed;width:100%;border:none;">
-<tr><td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="32"><table border="0" cellpadding="0" cellspacing="0" width="100%"><tr><td align="left" width="100%"> <img alt width="32" style="display:block;width:32px;height:32px;" src="data:image/png;base64,{bbox_img}"></td></tr></table></td><td style="vertical-align:middle;color:transparent;font-size:0;" width="16">&#8203;</td><td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="auto"><table border="0" cellpadding="0" cellspacing="0" width="100%"><tr><td align="left" width="100%"><div style="font-family: 'Open Sans', Arial, sans-serif; font-size: 14px; font-weight: 500; line-height: 157%; text-align: left; color: #090c02"><p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">Bounding Box Selection</p></div></td></tr></table></td></tr>
-</table>
-</td>
-</tr>
-<tr>
-<td style="font-size:0;padding:0;word-break:break-word;">
-<div style="height:8px;line-height:8px;">&#8202;</div>
-</td>
-</tr>
-<tr>
-<td align="center" class="tr-0" style="background:transparent;font-size:0;padding:0px 48px 0px 48px;word-break:break-word;">
-<table cellpadding="0" cellspacing="0" width="100%" border="0" style="color:#000000;line-height:normal;table-layout:fixed;width:100%;border:none;">
-<tr><td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="500"><table border="0" cellpadding="0" cellspacing="0" width="100%"><tr><td align="left" width="100%"><div style="font-family: 'Open Sans', Arial, sans-serif; font-size: 14px; font-weight: 400; line-height: 157%; text-align: left; color: #3c3c3c"><p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">N: -39.57346 </p></div></td></tr></table></td></tr><tr><td style="font-size:0;padding:0;padding-bottom:0;word-break:break-word;color:transparent;" aria-hidden="true"><div style="height:8px;line-height:8px;">&#8203;</div></td></tr><tr><td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="500"><table border="0" cellpadding="0" cellspacing="0" width="100%"><tr><td align="left" width="100%"><div style="font-family: 'Open Sans', Arial, sans-serif; font-size: 14px; font-weight: 400; line-height: 157%; text-align: left; color: #3c3c3c"><p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">S: -52.45856</p></div></td></tr></table></td></tr><tr><td style="font-size:0;padding:0;padding-bottom:0;word-break:break-word;color:transparent;" aria-hidden="true"><div style="height:8px;line-height:8px;">&#8203;</div></td></tr><tr><td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="500"><table border="0" cellpadding="0" cellspacing="0" width="100%"><tr><td align="left" width="100%"><div style="font-family: 'Open Sans', Arial, sans-serif; font-size: 14px; font-weight: 400; line-height: 157%; text-align: left; color: #3c3c3c"><p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">W: 65.45645</p></div></td></tr></table></td></tr><tr><td style="font-size:0;padding:0;padding-bottom:0;word-break:break-word;color:transparent;" aria-hidden="true"><div style="height:8px;line-height:8px;">&#8203;</div></td></tr><tr><td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="500"><table border="0" cellpadding="0" cellspacing="0" width="100%"><tr><td align="left" width="100%"><div style="font-family: 'Open Sans', Arial, sans-serif; font-size: 14px; font-weight: 400; line-height: 157%; text-align: left; color: #3c3c3c"><p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">E: 145.56345</p></div></td></tr></table></td></tr>
-</table>
-</td>
-</tr>
-</tbody>
-</table>
-</div>
-<!--[if mso | IE]></td><td style="vertical-align:top;width:308px;"><![endif]-->
-<div class="h7 h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:top;width:100%;">
-<table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
-<tbody>
-<tr>
-<td style="vertical-align:top;padding:0;">
-<table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
-<tbody>
-</tbody>
-</table>
-</td>
-</tr>
-</tbody>
-</table>
-</div>
-<!--[if mso | IE]></td></tr></table><![endif]-->
-</td>
-</tr>
-</tbody>
-</table>
-</div>
-<!--[if mso | IE]></td></tr></table></td></tr><tr><td width="1280px"><table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1264px;" width="1264"><tr><td style="line-height:0;font-size:0;mso-line-height-rule:exactly;"><![endif]-->
-<div style="margin:0px auto;max-width:1264px;">
-<table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">
-<tbody>
-<tr>
-<td style="direction:ltr;font-size:0;padding:0;text-align:center;">
-<!--[if mso | IE]><table role="presentation" border="0" cellpadding="0" cellspacing="0"><tr><td style="vertical-align:top;width:1264px;"><![endif]-->
-<div class="o h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:top;width:100%;">
-<table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
-<tbody>
-<tr>
-<td style="vertical-align:top;padding:0;">
-<table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
-<tbody>
-<tr>
-<td style="font-size:0;padding:0;word-break:break-word;" aria-hidden="true">
-<div style="height:0;line-height:0;">&#8202;</div>
-</td>
-</tr>
-</tbody>
-</table>
-</td>
-</tr>
-</tbody>
-</table>
-</div>
-<!--[if mso | IE]></td></tr></table><![endif]-->
-</td>
-</tr>
-</tbody>
-</table>
-</div>
-<!--[if mso | IE]></td></tr></table></td></tr><tr><td width="1280px"><table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1264px;" width="1264"><tr><td style="line-height:0;font-size:0;mso-line-height-rule:exactly;"><![endif]-->
-<div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:1264px;">
-<table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#fffffe;background-color:#fffffe;width:100%;">
-<tbody>
-<tr>
-<td style="border:none;direction:ltr;font-size:0;padding:10px 24px 10px 24px;text-align:center;">
-<!--[if mso | IE]><table role="presentation" border="0" cellpadding="0" cellspacing="0"><tr><td style="vertical-align:top;width:308px;"><![endif]-->
-<div class="h7 h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:top;width:100%;">
-<table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
-<tbody>
-<tr>
-<td style="vertical-align:top;padding:0;">
-<table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
-<tbody>
-</tbody>
-</table>
-</td>
-</tr>
-</tbody>
-</table>
-</div>
+{bbox_divs}
 <!--[if mso | IE]></td><td style="vertical-align:middle;width:600px;"><![endif]-->
 <div class="c h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:middle;width:100%;">
 <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border:none;vertical-align:middle;" width="100%">

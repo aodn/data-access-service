@@ -3,6 +3,8 @@ from typing import List
 import pandas as pd
 
 from data_access_service.batch.batch_enums import Parameters
+from data_access_service.models.multi_polygon_helper import MultiPolygonHelper
+from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.server import api_setup, app
 from data_access_service.utils.date_time_utils import ensure_timezone
 
@@ -19,6 +21,26 @@ def get_keys(parameters) -> list[str]:
 
 def get_uuid(parameters) -> str:
     return parameters[Parameters.UUID.value]
+
+
+def get_subset_request(parameters) -> SubsetRequest:
+    uuid = get_uuid(parameters)
+    keys = get_keys(parameters)
+    start_date = parameters[Parameters.START_DATE.value]
+    end_date = parameters[Parameters.END_DATE.value]
+    recipient = parameters[Parameters.RECIPIENT.value]
+    bboxes = MultiPolygonHelper(
+        multi_polygon=(parameters[Parameters.MULTI_POLYGON.value])
+    ).bboxes
+
+    return SubsetRequest(
+        uuid=uuid,
+        keys=keys,
+        start_date=start_date,
+        end_date=end_date,
+        bbox=bboxes,
+        recipient=recipient,
+    )
 
 
 def trim_date_range_for_keys(
