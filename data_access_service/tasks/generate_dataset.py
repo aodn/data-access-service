@@ -295,6 +295,15 @@ def query_data(
             )
             return None
 
+        # the below error is raised if the requested bounding box does not intersect with the dataset's spatial extent.
+        # The User behaviors are not predictable, so this error is acceptable. Therefore, it will be downgraded to an error log
+        # rather than throwing it.
+        if "No data for given bounding box. Amend lat/lon values" in str(e):
+            log.error(
+                f"The provided bounding box does not intersect with the dataset's spatial extent. Error message is: `{e}`. Please check whether it is acceptable."
+            )
+            return None
+
         raise e
     except Exception as e:
         log.error(f"Error: {e}")
