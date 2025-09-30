@@ -23,8 +23,8 @@ from data_access_service.utils.routes_helper import (
     HealthCheckResponse,
     get_api_instance,
     _verify_datatime_param,
-    _fetch_data,
-    _async_response_json,
+    fetch_data,
+    async_response_json,
     generate_feature_collection,
     generate_rect_features,
 )
@@ -335,7 +335,7 @@ async def get_data(
 
     if sse:
         return await sse_wrapper(
-            _fetch_data,
+            fetch_data,
             api_instance,
             uuid,
             key,
@@ -346,7 +346,7 @@ async def get_data(
             columns,
         )
     else:
-        result = _fetch_data(
+        result = fetch_data(
             api_instance,
             uuid,
             key,
@@ -360,7 +360,7 @@ async def get_data(
         if f == "json":
             # Depends on whether receiver support gzip encoding
             logger.info("Use compressed output %s", compress)
-            return _async_response_json(result, compress)
+            return async_response_json(result, compress)
         # elif f == "netcdf":
         #    return _response_netcdf(filtered, background_tasks)
         return None

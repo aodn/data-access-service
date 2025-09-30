@@ -4,6 +4,10 @@ import boto3
 
 from data_access_service import init_log, Config
 from data_access_service.batch import subsetting
+from data_access_service.batch.co_indexing import (
+    prepare_co_indexing_data,
+    init_co_indexing_data,
+)
 
 logger = init_log(Config.get_config())
 
@@ -37,6 +41,8 @@ match call_type:
         subsetting.prepare_data(job_index=job_index, parameters=parameters)
     case "sub-setting-data-collection":
         subsetting.collect_data(parameters=parameters)
+    case "cloud-optimised-data-index-init":
+        init_co_indexing_data()
     case "cloud-optimised-data-index-preparation":
         prepare_co_indexing_data(job_index=job_index, parameters=parameters)
     case _:
