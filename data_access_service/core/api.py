@@ -269,7 +269,7 @@ class API(BaseAPI):
         log.info("Init parquet data query instance")
 
         self._raw: Dict[str, Dict[str, Any]] = dict()
-        self._cached: Dict[str, Dict[str, Descriptor]] = dict()
+        self._cached_metadata: Dict[str, Dict[str, Descriptor]] = dict()
 
         # UUID to metadata mapper
         self._instance = DataQuery.GetAodn()
@@ -406,21 +406,21 @@ class API(BaseAPI):
                 # We can add directly because the dict() created
                 self._raw[uuid][key] = data
 
-                if uuid not in self._cached:
-                    self._cached[uuid] = dict()
+                if uuid not in self._cached_metadata:
+                    self._cached_metadata[uuid] = dict()
                 # We can add directly because the dict() created
-                self._cached[uuid][key] = Descriptor(
+                self._cached_metadata[uuid][key] = Descriptor(
                     uuid=uuid, dname=key, depth=_extract_depth(data)
                 )
             else:
                 log.error("Mising UUID entry for dataset " + key)
 
-    def get_mapped_meta_data(self, uuid: str | None) -> Dict[str, Descriptor]:
+    def get_mapped_meta_data(self, uuid: str | None):
         if uuid is not None:
-            value = self._cached.get(uuid)
+            value = self._cached_metadata.get(uuid)
         else:
             # Return all values
-            value = self._cached
+            value = self._cached_metadata
 
         if value is not None:
             return value
@@ -442,7 +442,7 @@ class API(BaseAPI):
     def has_data(
         self, uuid: str, key: str, start_date: pd.Timestamp, end_date: pd.Timestamp
     ):
-        md: Dict[str, Descriptor] = self._cached.get(uuid)
+        md: Dict[str, Descriptor] = self._cached_metadata.get(uuid)
         if md is not None and md[key] is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
             tes, tee = ds.get_temporal_extent()
@@ -452,7 +452,7 @@ class API(BaseAPI):
     def get_temporal_extent(
         self, uuid: str, key: str
     ) -> Tuple[pd.Timestamp | None, pd.Timestamp | None]:
-        md: Dict[str, Descriptor] = self._cached.get(uuid)
+        md: Dict[str, Descriptor] = self._cached_metadata.get(uuid)
         if md is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
             start_date, end_date = ds.get_temporal_extent()
@@ -528,7 +528,7 @@ class API(BaseAPI):
         return output
 
     def get_datasource(self, uuid: str, key: str) -> Optional[DataQuery.DataSource]:
-        mds: Dict[str, Descriptor] = self._cached.get(uuid)
+        mds: Dict[str, Descriptor] = self._cached_metadata.get(uuid)
         if mds is not None and key in mds:
             md = mds[key]
             if md is not None:
