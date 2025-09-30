@@ -16,6 +16,10 @@ def api_setup(application: FastAPI) -> API:
     :param application:
     :return:
     """
+
+    # Ensure we only create one instance of the API
+    if hasattr(application.state, "api_instance"):
+        return application.state.api_instance  # type: ignore
     api = API()
     application.state.api_instance = api  # type: ignore
 

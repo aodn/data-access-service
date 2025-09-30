@@ -221,7 +221,7 @@ def _verify_to_index_flag_param(flag: str | bool | None) -> bool:
 
 
 # Parallel process records and map the field back to standard name
-def _async_response_json(result: AsyncGenerator[dict, None], compress: bool):
+def async_response_json(result: AsyncGenerator[dict, None], compress: bool):
     # Thread-safe queue to collect results
     result_queue = Queue()
     json_results = []
@@ -304,7 +304,7 @@ def _response_netcdf(filtered: pd.DataFrame, background_tasks: BackgroundTasks):
     return response
 
 
-async def _fetch_data(
+async def fetch_data(
     api_instance: API,
     uuid: str,
     key: str,
