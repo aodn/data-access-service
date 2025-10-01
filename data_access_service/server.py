@@ -4,8 +4,8 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
-from data_access_service.core.api import API
 
+from data_access_service.core.api import API
 from data_access_service.core.routes import router as api_router
 
 
@@ -43,13 +43,17 @@ async def lifespan(application: FastAPI):
 app = FastAPI(lifespan=lifespan, title="Data Access Service")
 
 
+# reload = True is used for faster local development. It cannot be used with workers > 1
+# If workers=1, the api may only working in one thread. So for local running, please change
+# the settings according to your needs.
 if __name__ == "__main__":
     log_config_path = str(Path(__file__).parent.parent / "log_config.yaml")
     uvicorn.run(
         "data_access_service.server:app",
         host="0.0.0.0",
         port=5000,
-        reload=True,
+        # reload=True,
+        workers=3,
         log_config=log_config_path,
         timeout_keep_alive=900,  # 15 mins
     )

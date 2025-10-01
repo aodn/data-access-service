@@ -9,7 +9,6 @@ from xarray import Dataset
 
 from data_access_service import init_log
 from data_access_service.config.config import Config
-from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.api import API
 from data_access_service.models.ExtendedFeatureCollection import (
     ExtendedFeatureCollection,
