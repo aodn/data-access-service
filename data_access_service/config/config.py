@@ -117,6 +117,13 @@ class Config:
         return f"{master_job_id}/temp/"
 
     @staticmethod
+    def get_preload_folder_name():
+        """
+        Returns the folder name in S3 bucket to place all the preloaded data for co-indexing.
+        """
+        return "co-index-prep/"
+
+    @staticmethod
     def get_month_count_per_job():
         """
         Returns the number of months to process in each job.

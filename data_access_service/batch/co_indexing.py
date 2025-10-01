@@ -26,7 +26,7 @@ def init_co_indexing_data():
             subjob_params.append({"uuid": uuid, "key": key})
 
     print(subjob_params)
-    indexing_preparation_job_id = aws.submit_a_job(
+    data_prep_job_id = aws.submit_a_job(
         job_name="co-indexing-data-preparation",
         job_queue=config.get_job_queue_name(),
         job_definition=config.get_job_definition_name(),
@@ -35,6 +35,12 @@ def init_co_indexing_data():
             Parameters.INDEX_DATASETS.value: json.dumps(subjob_params),
         },
         array_size=len(subjob_params),
+    )
+
+    aws.submit_a_job(
+        job_name="index-co-data",
+        job_queue=config.get_job_queue_name(),
+        job_definition=config.get_co_indexing_job_definition_name(),
     )
 
 

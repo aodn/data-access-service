@@ -9,6 +9,7 @@ from xarray import Dataset
 
 from data_access_service import init_log
 from data_access_service.config.config import Config
+from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.api import API
 from data_access_service.models.ExtendedFeatureCollection import (
     ExtendedFeatureCollection,
@@ -31,7 +32,8 @@ from data_access_service.utils.routes_helper import (
 from data_access_service.utils.sse_wrapper import sse_wrapper
 
 router = APIRouter(prefix=Config.BASE_URL)
-logger = init_log(Config.get_config())
+config = Config.get_config()
+logger = init_log(config)
 
 
 @router.get("/health", response_model=HealthCheckResponse)
@@ -364,3 +366,42 @@ async def get_data(
         # elif f == "netcdf":
         #    return _response_netcdf(filtered, background_tasks)
         return None
+
+
+@router.get("/data/{uuid}/{key}/preload", dependencies=[Depends(api_key_auth)])
+async def get_preload_data(
+    request: Request,
+    uuid: str,
+    key: str,
+    start_date: Optional[str] = Query(default=MIN_DATE),
+    end_date: Optional[str] = Query(
+        default=datetime.now(timezone.utc).strftime(DATE_FORMAT)
+    ),
+):
+    # get data from s3
+    aws = AWSHelper()
+    prefix = config.get_preload_folder_name()
+    start_date_ts = _verify_datatime_param("start_date", start_date)
+    end_date_ts = _verify_datatime_param("end_date", end_date)
+    start_year = start_date_ts.year
+    end_year = end_date_ts.year
+    start_month = start_date_ts.month
+    end_month = end_date_ts.month
+
+    if start_year != end_year or start_month != end_month:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Preload data can only be fetched for a single month",
+        )
+
+    if key.endswith(".zarr"):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Preload data is not available for zarr datasets",
+        )
+
+    s3_key = f"{prefix}{uuid}/{key}/{start_year}/{start_month:02d}.json"
+    bucket = config.get_csv_bucket_name()
+    json_data = aws.get_s3_object(bucket, s3_key)
+
+    return Response(content=json_data, media_type="application/json")
