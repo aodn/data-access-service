@@ -45,15 +45,15 @@ app = FastAPI(lifespan=lifespan, title="Data Access Service")
 
 # reload = True is used for faster local development. It cannot be used with workers > 1
 # If workers=1, the api may only working in one thread. So for local running, please change
-# the settings according to your needs.
+# the settings according to your needs. Appdeploy has disabled reload and set workers=3
 if __name__ == "__main__":
     log_config_path = str(Path(__file__).parent.parent / "log_config.yaml")
     uvicorn.run(
         "data_access_service.server:app",
         host="0.0.0.0",
         port=5000,
-        # reload=True,
-        workers=3,
+        reload=True,
+        # workers=3,
         log_config=log_config_path,
         timeout_keep_alive=900,  # 15 mins
     )
