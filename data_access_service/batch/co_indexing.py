@@ -25,7 +25,12 @@ def init_co_indexing_data():
 
             subjob_params.append({"uuid": uuid, "key": key})
 
-    print(subjob_params)
+    array_size = len(subjob_params)
+    if array_size > 100:
+        raise ValueError(
+            f"Too many sub-jobs required for co-indexing data preparation: {array_size}. Must be something wrong"
+        )
+
     data_prep_job_id = aws.submit_a_job(
         job_name="co-indexing-data-preparation",
         job_queue=config.get_job_queue_name(),
@@ -41,6 +46,13 @@ def init_co_indexing_data():
         job_name="index-co-data",
         job_queue=config.get_job_queue_name(),
         job_definition=config.get_co_indexing_job_definition_name(),
+        dependency_job_id=data_prep_job_id,
+        parameters={},
+        container_overrides={
+            "environment": [
+                {"name": "INDEXER_BATCH_JOB_NAME", "value": "indexAllCODataset"}
+            ]
+        },
     )
 
 
@@ -60,6 +72,7 @@ def prepare_co_indexing_data(job_index, parameters):
     dataset = index_datasets[int(job_index)]
     uuid = dataset["uuid"]
     key = dataset["key"]
+    log.info(f"Preparing co-indexing data for {uuid}: {key}")
 
     start_date, end_date = api.get_temporal_extent(uuid, key)
     log.debug(
