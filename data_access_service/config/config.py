@@ -101,13 +101,6 @@ class Config:
             else None
         )
 
-    def get_co_indexing_job_definition_name(self):
-        return (
-            self.config["aws"]["batch"]["index_job_definition"]
-            if self.config is not None
-            else None
-        )
-
     @staticmethod
     def get_s3_temp_folder_name(master_job_id: str):
         """
@@ -115,13 +108,6 @@ class Config:
         :param master_job_id: The ID of the master job, which is the init job ID.
         """
         return f"{master_job_id}/temp/"
-
-    @staticmethod
-    def get_preload_folder_name():
-        """
-        Returns the folder name in S3 bucket to place all the preloaded data for co-indexing.
-        """
-        return "co-index-prep/"
 
     @staticmethod
     def get_month_count_per_job():

@@ -251,7 +251,6 @@ class AWSHelper:
         parameters: dict,
         array_size: int = 1,
         dependency_job_id: str = None,
-        container_overrides: dict = None,
     ) -> str:
         """
         Submit a job to AWS Batch.
@@ -279,8 +278,6 @@ class AWSHelper:
 
         if dependency_job_id:
             request["dependsOn"] = [{"jobId": dependency_job_id}]
-        if container_overrides:
-            request["containerOverrides"] = container_overrides
         response = self.batch.submit_job(**request)
 
         self.log.info(f"Job submitted: {response['jobId']}")
