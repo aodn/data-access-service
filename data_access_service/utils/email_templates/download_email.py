@@ -23,6 +23,7 @@ TERMS_OF_USE_URL = "https://imos.org.au/terms-of-use"
 ACKNOWLEDGE_US_URL = "https://imos.org.au/resources/acknowledging-us"
 CONDITIONS_OF_USE_URL = "https://imos.org.au/conditions-of-use"
 
+
 def get_download_email_html_body(
     subset_request: SubsetRequest, object_urls: [str]
 ) -> str:

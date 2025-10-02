@@ -1,5 +1,6 @@
 import base64
 
+
 def png_to_base64(image_path):
     """
     Converts a PNG image file to a Base64 encoded string.

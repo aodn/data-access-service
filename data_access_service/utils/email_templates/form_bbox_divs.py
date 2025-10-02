@@ -3,20 +3,21 @@ from data_access_service.utils.email_templates.email_images import (
     BBOX_IMG,
 )
 
+
 def form_bbox_divs(bboxes: [BoundingBox]):
-    """Form all bbox divs"""    
+    """Form all bbox divs"""
     if not bboxes:
         return "<p>No bounding boxes specified</p>"
-    
+
     all_divs = ""
-    for i, bbox in enumerate(bboxes):        
+    for i, bbox in enumerate(bboxes):
         div = __form_bbox_div(bbox)
-        
+
         if div is not None:
             all_divs += div
         else:
             all_divs += "<p>Invalid bounding box</p>"
-    
+
     return all_divs if all_divs else "<p>No valid bounding boxes</p>"
 
 
