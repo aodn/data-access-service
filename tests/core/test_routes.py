@@ -15,7 +15,7 @@ class TestRoutes(unittest.TestCase):
         with TestClient(app) as client:
             response = client.get("/api/v1/das/health")
             self.assertEqual(
-                response.json(), {"status": "UP", "status_code": HTTPStatus.OK}
+                {"status": "UP", "status_code": HTTPStatus.OK}, response.json()
             )
 
     @patch("data_access_service.server.API")
