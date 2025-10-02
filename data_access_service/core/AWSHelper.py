@@ -231,7 +231,6 @@ class AWSHelper:
                 Message={
                     "Subject": {"Data": subject, "Charset": "UTF-8"},
                     "Body": body,
-                    # "Attachements": []
                 },
             )
             self.log.info(

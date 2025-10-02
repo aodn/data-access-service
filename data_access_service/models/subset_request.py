@@ -1,7 +1,7 @@
 from data_access_service.models.bounding_box import BoundingBox
+from dataclasses import dataclass
 
-
-@dataclasses(frozen=True)
+@dataclass(frozen=True)
 class SubsetRequest:
     uuid: str
     keys: list[str]
