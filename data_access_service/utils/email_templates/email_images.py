@@ -16,6 +16,7 @@ _IMAGE_FILES = {
     'X_IMG': "93c45889ccd4dbea02f449acff11cfb1.png",
     'YOUTUBE_IMG': "91912da1b4494c1dff3048977473c402.png",
     'CONTACT_IMG': "44a03adf2a462ad89ad6e3e05760ecb1.png",
+    'LINKEDIN_IMG': '82192244cf3677674fda6af8c471897d.png',
 }
 
 def _load_image(item):
@@ -39,6 +40,7 @@ INSTAGRAM_IMG = _results['INSTAGRAM_IMG']
 X_IMG = _results['X_IMG']
 YOUTUBE_IMG = _results['YOUTUBE_IMG']
 CONTACT_IMG = _results['CONTACT_IMG']
+LINKEDIN_IMG = _results['LINKEDIN_IMG']
 
 # For convenience, export all as a dict too
 EMAIL_IMAGES = _results
@@ -46,5 +48,5 @@ EMAIL_IMAGES = _results
 __all__ = [
     'HEADER_IMG', 'DOWNLOAD_ICON', 'BBOX_IMG', 'TIME_RANGE_IMG',
     'ATTRIBUTES_IMG', 'FACEBOOK_IMG', 'INSTAGRAM_IMG', 'X_IMG',
-    'YOUTUBE_IMG', 'CONTACT_IMG', 'EMAIL_IMAGES'
+    'YOUTUBE_IMG', 'CONTACT_IMG', 'EMAIL_IMAGES', 'LINKEDIN_IMG'
 ]

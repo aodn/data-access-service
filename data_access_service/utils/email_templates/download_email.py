@@ -9,8 +9,19 @@ from data_access_service.utils.email_templates.email_images import (
     INSTAGRAM_IMG,
     X_IMG,
     YOUTUBE_IMG,
+    LINKEDIN_IMG,
     CONTACT_IMG,
 )
+
+# footer links
+FACEBOOK_URL = "https://www.facebook.com/IntegratedMarineObservingSystem"
+LINKEDIN_URL = "https://www.linkedin.com/company/imos_aus/posts/?feedView=all"
+x_URL = "https://x.com/IMOS_AUS"
+INSTAGRAM_URL = "https://www.instagram.com/imos_australia/#"
+CONTACT_US_URL = "mailto:info@aodn.org.au"
+TERMS_OF_USE_URL = "https://imos.org.au/terms-of-use"
+ACKNOWLEDGE_US_URL = "https://imos.org.au/resources/acknowledging-us"
+CONDITIONS_OF_USE_URL = "https://imos.org.au/conditions-of-use"
 
 def get_download_email_html_body(
     subset_request: SubsetRequest, object_urls: [str]
@@ -2524,7 +2535,7 @@ def get_download_email_html_body(
                                 >
                                   <!--[if mso]><v:roundrect style="width:148px;height:39px;v-text-anchor:middle;" arcsize="41%" fill="t" stroke="f" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word"><w:anchorlock/><v:fill type="solid" color="#595959" /><v:textbox inset="0,0,0,0"><center><![endif]-->
                                   <a
-                                    href="#insertUrlLink"
+                                    href="{CONTACT_US_URL}"
                                     class="co"
                                     style="
                                       display: inline-block;
@@ -2682,7 +2693,7 @@ def get_download_email_html_body(
                                   valign="middle"
                                 >
                                   <a
-                                    href="#insertUrlLink"
+                                    href="{TERMS_OF_USE_URL}"
                                     style="
                                       display: inline-block;
                                       width: 112px;
@@ -2818,7 +2829,7 @@ def get_download_email_html_body(
                                   valign="middle"
                                 >
                                   <a
-                                    href="#insertUrlLink"
+                                    href="{CONDITIONS_OF_USE_URL}"
                                     style="
                                       display: inline-block;
                                       width: 142px;
@@ -2954,7 +2965,7 @@ def get_download_email_html_body(
                                   valign="middle"
                                 >
                                   <a
-                                    href="#insertUrlLink"
+                                    href="{ACKNOWLEDGE_US_URL}"
                                     style="
                                       display: inline-block;
                                       width: 145px;
@@ -3179,7 +3190,7 @@ def get_download_email_html_body(
                                             "
                                           >
                                             <a
-                                              href="#insertUrlLink"
+                                              href="{INSTAGRAM_URL}"
                                               target="_blank"
                                             >
                                               <img
@@ -3233,7 +3244,7 @@ def get_download_email_html_body(
                                             "
                                           >
                                             <a
-                                              href="#insertUrlLink"
+                                              href="{FACEBOOK_URL}"
                                               target="_blank"
                                             >
                                               <img
@@ -3287,7 +3298,7 @@ def get_download_email_html_body(
                                             "
                                           >
                                             <a
-                                              href="#insertUrlLink"
+                                              href="{x_URL}"
                                               target="_blank"
                                             >
                                               <img
@@ -3342,13 +3353,13 @@ def get_download_email_html_body(
                                             "
                                           >
                                             <a
-                                              href="#insertUrlLink"
+                                              href="{LINKEDIN_URL}"
                                               target="_blank"
                                             >
                                               <img
-                                                alt="YouTube"
+                                                alt="Linkedin"
                                                 height="24"
-                                                src="data:image/png;base64,{YOUTUBE_IMG}"
+                                                src="data:image/png;base64,{LINKEDIN_IMG}"
                                                 style="display: block"
                                                 width="24"
                                               />
