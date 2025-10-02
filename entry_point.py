@@ -31,8 +31,6 @@ logger.info(f"Parameters: {parameters}")
 # Switch based on parameter call_type
 call_type = parameters["type"]
 
-# this one is a global api instance for batch running
-batch_api = api_setup(app)
 
 match call_type:
     case "sub-setting":

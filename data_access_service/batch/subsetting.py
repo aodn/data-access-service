@@ -2,6 +2,7 @@ import json
 
 from data_access_service import init_log, Config
 from data_access_service.batch.batch_enums import Parameters
+from data_access_service.batch.global_variables import batch_api
 from data_access_service.batch.subsetting_helper import (
     get_uuid,
     get_keys,
@@ -16,7 +17,6 @@ from data_access_service.utils.date_time_utils import (
     split_date_range,
     parse_date,
 )
-from entry_point import batch_api
 
 
 # The only purpose is to create suitable number of child job, we can fine tune the value
