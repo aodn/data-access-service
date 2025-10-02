@@ -6,7 +6,6 @@ import uvicorn
 from fastapi import FastAPI
 
 from data_access_service import Config
-from data_access_service.config.config import EnvType
 from data_access_service.core.api import API
 from data_access_service.core.routes import router as api_router
 
@@ -18,12 +17,6 @@ def api_setup(application: FastAPI) -> API:
     :param application:
     :return:
     """
-    config = Config
-
-    # Ensure we only create one instance of the API
-    # for testing, multiple api instance is necessary to make sure they are independent
-    if hasattr(application.state, "api_instance") and config.get_env_type() != EnvType.TESTING:  # type: ignore
-        return application.state.api_instance  # type: ignore
     api = API()
     application.state.api_instance = api  # type: ignore
 

@@ -19,6 +19,10 @@ from data_access_service.utils.date_time_utils import (
 )
 
 
+# this one is a global api instance for batch running
+batch_api = api_setup(app)
+
+
 # The only purpose is to create suitable number of child job, we can fine tune the value
 # on what is optimal value later
 def init(job_id_of_init, parameters):
@@ -32,7 +36,7 @@ def init(job_id_of_init, parameters):
     requested_start_date, requested_end_date = supply_day_with_nano_precision(
         start_date_str, end_date_str
     )
-    api = api_setup(app)
+    api = batch_api
     uuid = get_uuid(parameters)
     keys = get_keys(parameters)
     if "*" in keys:
