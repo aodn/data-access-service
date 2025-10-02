@@ -5,9 +5,15 @@ from typing import List
 
 from data_access_service import Config, init_log
 from data_access_service.core.AWSHelper import AWSHelper
+from data_access_service.models.subset_request import SubsetRequest
+from data_access_service.utils.email_templates.download_email import (
+    get_download_email_html_body,
+)
 
 
-def collect_data_files(master_job_id: str, dataset_uuid: str, recipient: str):
+def collect_data_files(
+    master_job_id: str, dataset_uuid: str, recipient: str, subset_request: SubsetRequest
+):
 
     aws = AWSHelper()
     config = Config.get_config()
@@ -19,13 +25,13 @@ def collect_data_files(master_job_id: str, dataset_uuid: str, recipient: str):
 
     # We can have multiple dataset to the same UUID, they are export accordingly under different folder
     # so we need to scan each folder and depends on the folder name
-    download_url: List[str] = []
+    download_urls: List[str] = []
     for d in dataset:
         if d.endswith(".parquet"):
             p = aws.read_parquet_from_s3(
                 f"s3://{bucket_name}/{config.get_s3_temp_folder_name(master_job_id)}{d}"
             )
-            download_url.append(
+            download_urls.append(
                 aws.write_csv_to_s3(
                     p, bucket_name, f"{master_job_id}/{d.replace('.parquet', '')}.zip"
                 )
@@ -34,7 +40,7 @@ def collect_data_files(master_job_id: str, dataset_uuid: str, recipient: str):
             p = AWSHelper.read_multipart_zarr_from_s3(
                 f"s3://{bucket_name}/{config.get_s3_temp_folder_name(master_job_id)}{d}/part-*.zarr"
             )
-            download_url.append(
+            download_urls.append(
                 aws.write_zarr_to_s3(
                     p, bucket_name, f"{master_job_id}/{d.replace('.zarr', '')}.nc"
                 )
@@ -42,9 +48,14 @@ def collect_data_files(master_job_id: str, dataset_uuid: str, recipient: str):
 
     subject = f"Finish processing data file whose uuid is:  {dataset_uuid}"
     body_text = (
-        f"You can download the data file from the following link(s): {download_url}"
+        f"You can download the data file from the following link(s): {download_urls}"
     )
-    aws.send_email(recipient=recipient, subject=subject, download_urls=download_url)
+
+    html_content = get_download_email_html_body(
+        subset_request=subset_request, object_urls=download_urls
+    )
+
+    aws.send_email(recipient=recipient, subject=subject, html_body=html_content)
     log.info("Finish aggregation and send email")
 
 
