@@ -10,12 +10,12 @@ import psutil
 import xarray
 
 from data_access_service import init_log, Config
-from data_access_service.batch.subsetting import batch_api
 from data_access_service.batch.subsetting_helper import trim_date_range_for_keys
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.models.multi_polygon_helper import MultiPolygonHelper
 from data_access_service.utils.date_time_utils import supply_day_with_nano_precision
 from data_access_service.utils.process_logger import ProcessLogger
+from entry_point import batch_api
 
 
 class ZarrProcessor:

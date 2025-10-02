@@ -4,6 +4,7 @@ import boto3
 
 from data_access_service import init_log, Config
 from data_access_service.batch import subsetting
+from data_access_service.server import api_setup, app
 
 logger = init_log(Config.get_config())
 
@@ -29,6 +30,9 @@ logger.info(f"Parameters: {parameters}")
 
 # Switch based on parameter call_type
 call_type = parameters["type"]
+
+# this one is a global api instance for batch running
+batch_api = api_setup(app)
 
 match call_type:
     case "sub-setting":

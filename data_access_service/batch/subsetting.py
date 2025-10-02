@@ -8,7 +8,6 @@ from data_access_service.batch.subsetting_helper import (
     trim_date_range_for_keys,
 )
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.server import api_setup, app
 from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.tasks.generate_dataset import process_data_files
 from data_access_service.tasks.subset_zarr import ZarrProcessor
@@ -17,10 +16,7 @@ from data_access_service.utils.date_time_utils import (
     split_date_range,
     parse_date,
 )
-
-
-# this one is a global api instance for batch running
-batch_api = api_setup(app)
+from entry_point import batch_api
 
 
 # The only purpose is to create suitable number of child job, we can fine tune the value
