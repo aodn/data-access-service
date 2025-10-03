@@ -182,40 +182,35 @@ class TestGenerateZarrFile(TestWithS3):
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
             # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
             with patch.object(AWSHelper, "send_email") as mock_send_email:
-                with patch.object(ZarrDataSource, "get_data") as mock_get_data:
-                    mock_get_data.return_value = xarray.open_zarr(
-                        Path(__file__).parent.parent
-                        / "canned/s3_sample2/radar_CoffsHarbour_wind_delayed_qc.zarr"
+
+                try:
+                    # Job 1, use different job id to avoid read same folder
+                    process_data_files(
+                        job_id_of_init="888",
+                        job_index="1",
+                        intermediate_output_folder=config.get_temp_folder("888"),
+                        uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
+                        keys=["radar_CoffsHarbour_wind_delayed_qc.zarr"],
+                        start_date=pd.Timestamp("2012-03-01 00:00:00"),
+                        end_date=pd.Timestamp("2012-04-30 23:59:59.999999999"),
+                        multi_polygon=None,
                     )
+                    # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
+                    names = helper.list_s3_folders(
+                        config.get_csv_bucket_name(),
+                        f"{config.get_s3_temp_folder_name('888')}radar_CoffsHarbour_wind_delayed_qc.zarr",
+                    )
+                    assert "part-1.zarr" in names, "part-1.zarr not exit!"
 
-                    try:
-                        # Job 1, use different job id to avoid read same folder
-                        process_data_files(
-                            job_id_of_init="888",
-                            job_index="1",
-                            intermediate_output_folder=config.get_temp_folder("888"),
-                            uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
-                            keys=["radar_CoffsHarbour_wind_delayed_qc.zarr"],
-                            start_date=pd.Timestamp("2012-03-01 00:00:00"),
-                            end_date=pd.Timestamp("2012-04-30 23:59:59.999999999"),
-                            multi_polygon=None,
-                        )
-                        # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
-                        names = helper.list_s3_folders(
-                            config.get_csv_bucket_name(),
-                            f"{config.get_s3_temp_folder_name('888')}radar_CoffsHarbour_wind_delayed_qc.zarr",
-                        )
-                        assert "part-1.zarr" in names, "part-1.zarr not exit!"
-
-                        # This will aggregate to the same row count as above
-                        target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name('888')}radar_CoffsHarbour_wind_delayed_qc.zarr/part-*.zarr"
-                        data = helper.read_multipart_zarr_from_s3(target_path)
-                        assert (
-                            len(data["TIME"]) == 1
-                        ), "this dataset is an edge case and should only have one time entry"
-                    except Exception as ex:
-                        # Should not land here
-                        assert False, f"{ex}"
-                    finally:
-                        # Delete temp output folder as the name always same for testing
-                        shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
+                    # This will aggregate to the same row count as above
+                    target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name('888')}radar_CoffsHarbour_wind_delayed_qc.zarr/part-*.zarr"
+                    data = helper.read_multipart_zarr_from_s3(target_path)
+                    assert (
+                        len(data["TIME"]) == 1
+                    ), "this dataset is an edge case and should only have one time entry"
+                except Exception as ex:
+                    # Should not land here
+                    assert False, f"{ex}"
+                finally:
+                    # Delete temp output folder as the name always same for testing
+                    shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
