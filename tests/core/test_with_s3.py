@@ -103,7 +103,10 @@ class TestWithS3:
 
     @pytest.fixture(scope="function")
     def mock_boto3_client(self, localstack):
-        """Mock boto3.client to use LocalStack endpoint for S3 and SES."""
+        """
+        Mock boto3.client and fsspec to use LocalStack endpoint for S3 and SES, this is needed
+        so that the cloud optimized lib points to local stack s3 instead of the real cloud data.
+        """
         monkeypatch = MonkeyPatch()  # Create manual MonkeyPatch instance
         original_client = boto3.client
 
