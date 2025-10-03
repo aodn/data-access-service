@@ -206,7 +206,7 @@ class TestGenerateZarrFile(TestWithS3):
                         end_date=pd.Timestamp("2012-04-30 23:59:59.999999999"),
                         multi_polygon=None,
                     )
-                    # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
+                    # This is a zarr file, we should be able to read the result from S3, and have part-1
                     names = helper.list_s3_folders(
                         config.get_csv_bucket_name(),
                         f"{config.get_s3_temp_folder_name('888')}radar_CoffsHarbour_wind_delayed_qc.zarr",

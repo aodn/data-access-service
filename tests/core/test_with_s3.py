@@ -1,11 +1,13 @@
 from pathlib import Path
 from typing import Any, Generator
 
+import fsspec.config
 import pytest
 import boto3
 import os
 
 from _pytest.monkeypatch import MonkeyPatch
+from s3fs import S3FileSystem
 from testcontainers.core.waiting_utils import wait_for_logs
 
 from data_access_service.config.config import EnvType, Config, IntTestConfig
@@ -115,12 +117,28 @@ class TestWithS3:
             return original_client(*args, **kwargs)
 
         monkeypatch.setattr(DataQuery.boto3, "client", wrapped_client)
-        monkeypatch.setattr(DataQuery, "ENDPOINT_URL", localstack.get_url())
 
-        # Other test may have call this get_s3_filesystem() this function is cached and
-        # may use different ENDPOINT_URL other than the one above
-        # so we need to clear it now before the next call happens
-        DataQuery.get_s3_filesystem.cache_clear()
+        # Now patch get_mapper, which is use inside the ZarrDataSource lib. It different from
+        # parquet which use the get_s3_filesystem(), so we need one more mock
+        original_get_mapper = fsspec.get_mapper
+
+        def wrapped_get_mapper(path, **kwargs):
+            # Inject/update endpoint_url for LocalStack
+            kwargs["endpoint_url"] = localstack.get_url()
+            kwargs["anon"] = kwargs.get("anon", True)  # Preserve anon=True from lib
+
+            # Call the REAL fsspec.get_mapper with modified kwargs
+            real_mapper = original_get_mapper(path, **kwargs)
+            return real_mapper
+
+        monkeypatch.setattr(DataQuery.fsspec, "get_mapper", wrapped_get_mapper)
+
+        monkeypatch.setattr(DataQuery, "ENDPOINT_URL", localstack.get_url())
+        monkeypatch.setattr(DataQuery, "REGION", REGION)
+
+        # Force a load so its cache value use the test value
+        DataQuery.get_s3_filesystem()
+
         yield wrapped_client
         monkeypatch.undo()
 
