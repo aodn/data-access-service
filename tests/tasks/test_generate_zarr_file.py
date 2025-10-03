@@ -13,8 +13,6 @@ from data_access_service.tasks.generate_dataset import (
 )
 from tests.batch.batch_test_consts import INIT_JOB_ID
 from tests.core.test_with_s3 import TestWithS3, REGION
-from aodn_cloud_optimised.lib.DataQuery import ZarrDataSource
-import xarray
 
 
 class TestGenerateZarrFile(TestWithS3):
@@ -182,7 +180,6 @@ class TestGenerateZarrFile(TestWithS3):
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
             # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
             with patch.object(AWSHelper, "send_email") as mock_send_email:
-
                 try:
                     # Job 1, use different job id to avoid read same folder
                     process_data_files(
