@@ -136,6 +136,10 @@ class TestWithS3:
         monkeypatch.setattr(DataQuery, "ENDPOINT_URL", localstack.get_url())
         monkeypatch.setattr(DataQuery, "REGION", REGION)
 
+        # Other test may have call this get_s3_filesystem() this function is cached and
+        # may use different ENDPOINT_URL other than the one above
+        # so we need to clear it now before the next call happens
+        DataQuery.get_s3_filesystem.cache_clear()
         # Force a load so its cache value use the test value
         DataQuery.get_s3_filesystem()
 
