@@ -6,7 +6,6 @@ from unittest.mock import patch
 import pytest
 import xarray
 from aodn_cloud_optimised.lib import DataQuery
-from aodn_cloud_optimised.lib.DataQuery import ZarrDataSource
 
 from data_access_service import Config
 from data_access_service.core.AWSHelper import AWSHelper
