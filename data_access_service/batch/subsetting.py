@@ -1,8 +1,7 @@
 import json
 
-from data_access_service import init_log, Config
+from data_access_service import init_log, Config, API
 from data_access_service.batch.batch_enums import Parameters
-from data_access_service.batch.global_variables import batch_api
 from data_access_service.batch.subsetting_helper import (
     get_uuid,
     get_keys,
@@ -21,7 +20,7 @@ from data_access_service.utils.date_time_utils import (
 
 # The only purpose is to create suitable number of child job, we can fine tune the value
 # on what is optimal value later
-def init(job_id_of_init, parameters):
+def init(api: API, job_id_of_init, parameters):
     # Must be here, this give change for test to init properly before calling get_config()
     config = Config.get_config()
 
@@ -32,7 +31,7 @@ def init(job_id_of_init, parameters):
     requested_start_date, requested_end_date = supply_day_with_nano_precision(
         start_date_str, end_date_str
     )
-    api = batch_api
+
     uuid = get_uuid(parameters)
     keys = get_keys(parameters)
     if "*" in keys:
@@ -41,7 +40,7 @@ def init(job_id_of_init, parameters):
 
     # use new zarr sub-setting workflow if all keys are zarr. It it works well, then deprecate old zarr sub-setting workflow
     if all(key.endswith(".zarr") for key in keys):
-        subset_zarr(job_id_of_init, parameters)
+        subset_zarr(api, job_id_of_init, parameters)
         return
 
     requested_start_date, requested_end_date = trim_date_range_for_keys(
@@ -145,7 +144,7 @@ def collect_data(parameters):
     )
 
 
-def subset_zarr(job_id, parameters):
+def subset_zarr(api: API, job_id, parameters):
     uuid = get_uuid(parameters)
     keys = get_keys(parameters)
     start_date_str = parameters[Parameters.START_DATE.value]
@@ -153,6 +152,7 @@ def subset_zarr(job_id, parameters):
     multi_polygon = parameters[Parameters.MULTI_POLYGON.value]
 
     zarr_processor = ZarrProcessor(
+        api=api,
         uuid=uuid,
         job_id=job_id,
         keys=keys,

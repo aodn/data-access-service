@@ -19,11 +19,6 @@ class EnvType(Enum):
     PRODUCTION = "prod"
 
 
-def get_env_type():
-    profile = os.getenv("PROFILE", EnvType.DEV)
-    return EnvType(profile)
-
-
 class Config:
     DEBUG = True
     LOGLEVEL = logging.DEBUG

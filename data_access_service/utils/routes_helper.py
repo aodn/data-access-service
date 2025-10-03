@@ -107,11 +107,18 @@ def _generate_partial_json_array(
                     ).strftime(DATE_FORMAT)
                 )
             elif "detection_timestamp" in record:
-                filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
-                    datetime.fromtimestamp(
-                        record["detection_timestamp"], tz=timezone.utc
-                    ).strftime(DATE_FORMAT)
-                )
+                if isinstance(record["detection_timestamp"], str):
+                    filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
+                        parser.parse(record["detection_timestamp"])
+                        .astimezone(timezone.utc)
+                        .strftime(DATE_FORMAT)
+                    )
+                else:
+                    filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
+                        datetime.fromtimestamp(
+                            record["detection_timestamp"], tz=timezone.utc
+                        ).strftime(DATE_FORMAT)
+                    )
 
             #  may need to add more field here
             if "LONGITUDE" in record:

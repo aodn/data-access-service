@@ -7,7 +7,7 @@ import pytest
 import xarray
 from aodn_cloud_optimised.lib import DataQuery
 
-from data_access_service import Config
+from data_access_service import Config, API
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.tasks.subset_zarr import ZarrProcessor
 from tests.core.test_with_s3 import TestWithS3, REGION
@@ -44,6 +44,7 @@ class TestSubsetZarr(TestWithS3):
                 no_ext_key = key.replace(".zarr", "")
                 try:
                     zarr_processor = ZarrProcessor(
+                        api=API(),
                         uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
                         job_id="job_id_888",
                         keys=[key],
