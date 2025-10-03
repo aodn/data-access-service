@@ -45,13 +45,16 @@ class TestKeyMapping(TestWithS3):
         config = Config.get_config()
         helper = AWSHelper()
 
+        api = API()
+        api.initialize_metadata()
+
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
             # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
             with patch.object(AWSHelper, "send_email") as mock_send_email:
                 try:
                     # Job 1, use different job id to avoid read same folder
                     process_data_files(
-                        API(),
+                        api,
                         job_id_of_init="888",
                         job_index="1",
                         intermediate_output_folder=config.get_temp_folder("888"),
@@ -91,6 +94,9 @@ class TestKeyMapping(TestWithS3):
         config = Config.get_config()
         helper = AWSHelper()
 
+        api = API()
+        api.initialize_metadata()
+
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
             # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
             with patch.object(AWSHelper, "send_email") as mock_send_email:
@@ -99,7 +105,7 @@ class TestKeyMapping(TestWithS3):
                     dname = "satellite_ghrsst_l4_gamssa_1day_multi_sensor_world.zarr"
 
                     process_data_files(
-                        API(),
+                        api,
                         job_id_of_init="888",
                         job_index="1",
                         intermediate_output_folder=config.get_temp_folder("888"),
