@@ -10,7 +10,6 @@ from data_access_service import API, init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.constants import PARTITION_KEY
 from data_access_service.core.descriptor import Descriptor
-from data_access_service.server import api_setup, app
 from data_access_service.tasks.data_file_upload import (
     upload_all_files_in_folder_to_temp_s3,
 )
@@ -27,6 +26,7 @@ log = init_log(config)
 
 
 def process_data_files(
+    api: API,
     job_id_of_init: str,
     job_index: str,
     intermediate_output_folder: str,
@@ -40,9 +40,6 @@ def process_data_files(
         multi_polygon_dict = json.loads(multi_polygon)
     else:
         multi_polygon_dict = None
-
-    # Use sync init, it does not matter the load is slow as we run in batch
-    api = api_setup(app)
 
     if None in [uuid, keys, start_date, end_date, intermediate_output_folder]:
         raise ValueError("One or more required arguments are None")
