@@ -210,8 +210,8 @@ class TestApiWithS3(TestWithS3):
         with patch.object(AWSHelper, "send_email") as mock_send_email:
             # Test with range, this dataset field is different, dataset without DEPTH
             param = {
-                "start_date": "2024-02-01",
-                "end_date": "2024-02-28",
+                "start_date": "2011-07-01 00:00:00",
+                "end_date": "2011-08-01 00:00:00",
                 "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             }
 
@@ -253,7 +253,9 @@ class TestApiWithS3(TestWithS3):
             # Read and process response body
             try:
                 parsed = json.loads(response.content.decode("utf-8"))
-                assert len(parsed) == 5967, "Number of record is incorrect"
+                assert (
+                    len(parsed) == 4519
+                ), "No special meaning of record, just verify we get something"
 
             except json.JSONDecodeError as e:
                 assert False, "Fail to parse to JSON"

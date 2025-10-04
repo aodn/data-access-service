@@ -1,9 +1,0 @@
-{
-    "_ARRAY_DIMENSIONS": [
-        "TIME"
-    ],
-    "coordinates": "LATITUDE LONGITUDE",
-    "long_name": "Platform roll angle",
-    "standard_name": "platform_roll_angle",
-    "units": "degrees"
-}
