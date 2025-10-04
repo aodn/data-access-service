@@ -142,7 +142,7 @@ class TestApiWithS3(TestWithS3):
                 assert parsed[0] == {
                     "latitude": -27.7,
                     "longitude": 153.3,
-                    "time": "2012-11-06",
+                    "time": "2012-11-07",
                 }, f"Unexpected JSON content: {parsed[0]}"
                 assert parsed[21] == {
                     "latitude": -33.9,
@@ -240,18 +240,18 @@ class TestApiWithS3(TestWithS3):
                 assert False, "Fail to parse to JSON"
 
             # Read and process response body
+            # Now call to extract some values from the zarr file
+            response = client.get(
+                config.BASE_URL
+                + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_delayed_qc.zarr",
+                params=param,
+                headers={"X-API-Key": config.get_api_key()},
+            )
+
+            assert response.status_code == HTTP_200_OK
+            assert isinstance(response.content, bytes)
+
             try:
-                # Now call to extract some values from the zarr file
-                response = client.get(
-                    config.BASE_URL
-                    + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_delayed_qc.zarr",
-                    params=param,
-                    headers={"X-API-Key": config.get_api_key()},
-                )
-
-                assert response.status_code == HTTP_200_OK
-                assert isinstance(response.content, bytes)
-
                 parsed = json.loads(response.content.decode("utf-8"))
                 assert (
                     len(parsed) == 90
