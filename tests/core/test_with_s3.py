@@ -201,7 +201,7 @@ class TestWithS3:
                 s3_client.upload_file(str(local_path), bucket_name, s3_key)
                 try:
                     s3_client.head_object(Bucket=bucket_name, Key=s3_key)
-                    print(f"Uploaded {local_path} to s3://{bucket_name}/{s3_key}")
+                    # print(f"Uploaded {local_path} to s3://{bucket_name}/{s3_key}")
                 except Exception as e:
                     print(
                         f"Failed to upload {local_path} to s3://{bucket_name}/{s3_key}: {e}"
