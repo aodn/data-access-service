@@ -129,7 +129,7 @@ class TestGenerateZarrFile(TestWithS3):
                     )
                     # Job 2
                     process_data_files(
-                        API(),
+                        api,
                         job_id_of_init="888",
                         job_index="2",
                         intermediate_output_folder=config.get_temp_folder("888"),
@@ -140,7 +140,7 @@ class TestGenerateZarrFile(TestWithS3):
                         multi_polygon=None,
                     )
                     process_data_files(
-                        API(),
+                        api,
                         job_id_of_init="888",
                         job_index="3",
                         intermediate_output_folder=config.get_temp_folder("888"),
