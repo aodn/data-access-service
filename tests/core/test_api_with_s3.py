@@ -239,19 +239,19 @@ class TestApiWithS3(TestWithS3):
             except json.JSONDecodeError as e:
                 assert False, "Fail to parse to JSON"
 
-            # Now call to extract some values from the zarr file
-            response = client.get(
-                config.BASE_URL
-                + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_delayed_qc.zarr",
-                params=param,
-                headers={"X-API-Key": config.get_api_key()},
-            )
-
-            assert response.status_code == HTTP_200_OK
-            assert isinstance(response.content, bytes)
-
             # Read and process response body
             try:
+                # Now call to extract some values from the zarr file
+                response = client.get(
+                    config.BASE_URL
+                    + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_delayed_qc.zarr",
+                    params=param,
+                    headers={"X-API-Key": config.get_api_key()},
+                )
+
+                assert response.status_code == HTTP_200_OK
+                assert isinstance(response.content, bytes)
+
                 parsed = json.loads(response.content.decode("utf-8"))
                 assert (
                     len(parsed) == 90
@@ -260,19 +260,19 @@ class TestApiWithS3(TestWithS3):
             except json.JSONDecodeError as e:
                 assert False, "Fail to parse to JSON"
 
-            # Now call to another zarr file having same UUID, create with this date range
-            response = client.get(
-                config.BASE_URL
-                + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_derived_product.zarr",
-                params=param,
-                headers={"X-API-Key": config.get_api_key()},
-            )
-
-            assert response.status_code == HTTP_200_OK
-            assert isinstance(response.content, bytes)
-
             # Read and process response body
             try:
+                # Now call to another zarr file having same UUID, create with this date range
+                response = client.get(
+                    config.BASE_URL
+                    + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_derived_product.zarr",
+                    params=param,
+                    headers={"X-API-Key": config.get_api_key()},
+                )
+
+                assert response.status_code == HTTP_200_OK
+                assert isinstance(response.content, bytes)
+
                 parsed = json.loads(response.content.decode("utf-8"))
                 assert len(parsed) == 0, "This test dataset is empty, so it is ok"
 

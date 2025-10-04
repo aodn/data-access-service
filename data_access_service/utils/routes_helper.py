@@ -241,7 +241,10 @@ def async_response_json(result: AsyncGenerator[dict, None], compress: bool):
 
             async def collect():
                 async for i in result:
-                    result_queue.put(i)  # Thread-safe append
+                    if i is not None:
+                        result_queue.put(i)  # Thread-safe append
+                    else:
+                        break
                 result_queue.put(None)  # Sentinel to indicate completion
 
             loop.run_until_complete(collect())
@@ -253,7 +256,7 @@ def async_response_json(result: AsyncGenerator[dict, None], compress: bool):
     thread.start()
 
     # Wait for results and collect
-    while True:
+    while result is not None:
         item = result_queue.get()
         if item is None:  # Sentinel indicates completion
             break
@@ -320,7 +323,7 @@ async def fetch_data(
     start_depth: float | None,
     end_depth: float | None,
     columns: List[str],
-) -> AsyncGenerator[dict, None]:
+) -> AsyncGenerator[dict | None, None]:
     try:
         result: Optional[dd.DataFrame | xr.Dataset] = api_instance.get_dataset(
             uuid=uuid,
@@ -331,11 +334,12 @@ async def fetch_data(
         )
         # If we get nothing
         if result is None:
-            return
+            # Indicate end of generator record
+            yield None
 
-    except ValueError as e:
-        # TODO If error return empty response. This maybe hard to debug
-        return
+    except Exception as e:
+        # Indicate end of generator record
+        yield None
     else:
         # Now we need to change the xarray if type match to 2D dataframe for processing
         if isinstance(result, xr.Dataset):

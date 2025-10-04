@@ -362,6 +362,5 @@ async def get_data(
             # Depends on whether receiver support gzip encoding
             logger.info("Use compressed output %s", compress)
             return async_response_json(result, compress)
-        # elif f == "netcdf":
-        #    return _response_netcdf(filtered, background_tasks)
+
         return None
