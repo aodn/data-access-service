@@ -36,6 +36,9 @@ class TestSubsetZarr(TestWithS3):
         config = Config.get_config()
         helper = AWSHelper()
 
+        api = API()
+        api.initialize_metadata()
+
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
             # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
             with patch.object(AWSHelper, "send_email") as mock_send_email:
@@ -44,7 +47,7 @@ class TestSubsetZarr(TestWithS3):
                 no_ext_key = key.replace(".zarr", "")
                 try:
                     zarr_processor = ZarrProcessor(
-                        api=API(),
+                        api,
                         uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
                         job_id="job_id_888",
                         keys=[key],
