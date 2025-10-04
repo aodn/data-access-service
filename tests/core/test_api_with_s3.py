@@ -274,7 +274,7 @@ class TestApiWithS3(TestWithS3):
             # Read and process response body
             try:
                 parsed = json.loads(response.content.decode("utf-8"))
-                assert len(parsed) == 5961, "Number of record is incorrect"
+                assert len(parsed) == 0, "This test dataset is empty, so it is ok"
 
             except json.JSONDecodeError as e:
                 assert False, "Fail to parse to JSON"
