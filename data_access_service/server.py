@@ -1,4 +1,5 @@
 import asyncio
+from asyncio import AbstractEventLoop
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -22,7 +23,9 @@ def api_setup(application: FastAPI) -> API:
 
     # Heavy load so try to use a task to complete it in the background
     try:
-        asyncio.create_task(api.async_initialize_metadata())
+        # Check for running event loop first to avoid creating an unawaited coroutine
+        loop: AbstractEventLoop = asyncio.get_running_loop()
+        asyncio.create_task(api.async_initialize_metadata(), name="api_metadata_init")
     except Exception as e:
         api.initialize_metadata()
 

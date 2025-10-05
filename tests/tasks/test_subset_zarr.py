@@ -80,7 +80,7 @@ class TestSubsetZarr(TestWithS3):
 
                         netcdf_xarray = xarray.open_dataset(temp_file_path)
                         assert (
-                            netcdf_xarray.dims["TIME"] == 1
+                            netcdf_xarray.sizes["TIME"] == 1
                         ), f"TIME dimension size expected to be 1, but got {netcdf_xarray.dims['TIME']}"
 
                 except Exception as ex:
