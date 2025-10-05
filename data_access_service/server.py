@@ -9,11 +9,11 @@ from data_access_service.core.api import API
 from data_access_service.core.routes import router as api_router
 
 
-def api_setup(application: FastAPI, asyncrhroize: bool = True) -> API:
+def api_setup(application: FastAPI, asynchronize: bool = True) -> API:
     """
     This function is not async which can be use in test, the lifespan however
     expect async function which is not good for testing
-    :param asyncrhroize:
+    :param asynchronize:
     :param application:
     :return:
     """
@@ -22,7 +22,7 @@ def api_setup(application: FastAPI, asyncrhroize: bool = True) -> API:
 
     # Heavy load so try to use a task to complete it in the background
     try:
-        if asyncrhroize:
+        if asynchronize:
             # Check for running event loop first to avoid creating an unawaited coroutine
             loop: AbstractEventLoop = asyncio.get_running_loop()
             asyncio.create_task(
