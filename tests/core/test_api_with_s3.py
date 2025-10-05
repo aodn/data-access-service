@@ -139,6 +139,10 @@ class TestApiWithS3(TestWithS3):
                 assert (
                     len(parsed) == 22
                 ), f"Size not match, return size is {len(parsed)} and X-API-Key is {config.get_api_key()}"
+
+                # Sort by time in order to avoid check fail randomly
+                parsed = sorted(parsed, key=lambda x: x["time"])
+
                 assert parsed[0] == {
                     "latitude": -27.7,
                     "longitude": 153.3,
