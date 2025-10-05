@@ -2,6 +2,7 @@ from typing import List
 
 import pandas as pd
 
+from data_access_service import API
 from data_access_service.batch.batch_enums import Parameters
 from data_access_service.server import api_setup, app
 from data_access_service.utils.date_time_utils import ensure_timezone
@@ -22,12 +23,12 @@ def get_uuid(parameters) -> str:
 
 
 def trim_date_range_for_keys(
+    api: API,
     uuid: str,
     keys: List[str],
     requested_start_date: pd.Timestamp,
     requested_end_date: pd.Timestamp,
 ) -> tuple[pd.Timestamp, pd.Timestamp]:
-    api = api_setup(app)
 
     # convert into utc:
     requested_start_date = ensure_timezone(requested_start_date)

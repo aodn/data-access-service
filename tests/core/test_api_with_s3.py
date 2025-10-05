@@ -31,7 +31,7 @@ class TestApiWithS3(TestWithS3):
     def client(self, upload_test_case_to_s3):
         # Use LifespanManager to ensure lifespan events are triggered
         # Make sure file uploaded before init the app
-        api = api_setup(app)
+        api_setup(app, False)
         return TestClient(app)
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)

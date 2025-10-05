@@ -47,6 +47,7 @@ class ZarrProcessor:
             self.keys = keys
 
         trimmed_start_date, trimmed_end_date = trim_date_range_for_keys(
+            api=api,
             uuid=uuid,
             keys=self.keys,
             requested_start_date=start_date,

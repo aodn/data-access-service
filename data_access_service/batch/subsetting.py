@@ -44,6 +44,7 @@ def init(api: API, job_id_of_init, parameters):
         return
 
     requested_start_date, requested_end_date = trim_date_range_for_keys(
+        api=api,
         uuid=uuid,
         keys=keys,
         requested_start_date=requested_start_date,

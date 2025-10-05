@@ -37,6 +37,7 @@ class TestTrimDateRangeForKeys(unittest.TestCase):
         )
 
         trimmed_start, trimmed_end = trim_date_range_for_keys(
+            api=mock_api,
             uuid=uuid,
             keys=keys,
             requested_start_date=requested_start,

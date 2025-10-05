@@ -5,16 +5,15 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
-
-from data_access_service import Config
 from data_access_service.core.api import API
 from data_access_service.core.routes import router as api_router
 
 
-def api_setup(application: FastAPI) -> API:
+def api_setup(application: FastAPI, asyncrhroize: bool = True) -> API:
     """
     This function is not async which can be use in test, the lifespan however
     expect async function which is not good for testing
+    :param asyncrhroize:
     :param application:
     :return:
     """
@@ -23,9 +22,14 @@ def api_setup(application: FastAPI) -> API:
 
     # Heavy load so try to use a task to complete it in the background
     try:
-        # Check for running event loop first to avoid creating an unawaited coroutine
-        loop: AbstractEventLoop = asyncio.get_running_loop()
-        asyncio.create_task(api.async_initialize_metadata(), name="api_metadata_init")
+        if asyncrhroize:
+            # Check for running event loop first to avoid creating an unawaited coroutine
+            loop: AbstractEventLoop = asyncio.get_running_loop()
+            asyncio.create_task(
+                api.async_initialize_metadata(), name="api_metadata_init"
+            )
+        else:
+            api.initialize_metadata()
     except Exception as e:
         api.initialize_metadata()
 
