@@ -110,7 +110,7 @@ def _generate_partial_json_array(
                 if isinstance(record["detection_timestamp"], str):
                     filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
                         parser.parse(record["detection_timestamp"])
-                        .astimezone(timezone.utc)
+                        .replace(tzinfo=timezone.utc)
                         .strftime(DATE_FORMAT)
                     )
                 else:
