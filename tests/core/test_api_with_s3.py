@@ -142,7 +142,7 @@ class TestApiWithS3(TestWithS3):
                 assert parsed[0] == {
                     "latitude": -27.7,
                     "longitude": 153.3,
-                    "time": "2012-11-07",
+                    "time": "2012-11-06",
                 }, f"Unexpected JSON content: {parsed[0]}"
                 assert parsed[21] == {
                     "latitude": -33.9,

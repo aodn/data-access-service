@@ -457,12 +457,17 @@ class API(BaseAPI):
         if md is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
             start_date, end_date = ds.get_temporal_extent()
-            start_date.replace(hour=0, minute=0, second=0, microsecond=0, nanosecond=0)
-            end_date.replace(
-                hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
-            )
-            return start_date, end_date
 
+            if start_date is not None:
+                start_date = start_date.replace(
+                    hour=0, minute=0, second=0, microsecond=0, nanosecond=0
+                )
+
+            if end_date is not None:
+                end_date = end_date.replace(
+                    hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
+                )
+            return start_date, end_date
         else:
             return None, None
 

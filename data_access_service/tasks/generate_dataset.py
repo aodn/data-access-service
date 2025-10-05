@@ -79,13 +79,16 @@ def process_data_files(
         except ValueError as e:
             log.error(f"Error: {e}")
             raise e
+        except KeyError as e:
+            # We do not throw the error again to avoid blocking other datum from processing
+            # in the for loop
+            log.error(f"{e}, likely due to malform source file {datum}")
         except MemoryError as e:
             # If you try to convert a zarr to CSV, it will be too big to fit into memory or file due to multiple dimension
             # hence it is not something we can support
             raise MemoryError(f"Data file {datum} too big to convert subset : {e}")
         except Exception as e:
             log.error(f"Error: {e}")
-            raise e
     return None
 
 
