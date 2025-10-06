@@ -219,16 +219,16 @@ class TestApiWithS3(TestWithS3):
                 "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             }
 
-            response = client.get(
-                config.BASE_URL + "/metadata/28f8bfed-ca6a-472a-84e4-42563ce4df3f",
-                headers={"X-API-Key": config.get_api_key()},
-            )
-
-            assert response.status_code == HTTP_200_OK
-            assert isinstance(response.content, bytes)
-
             # Read and process response body
             try:
+                response = client.get(
+                    config.BASE_URL + "/metadata/28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                    headers={"X-API-Key": config.get_api_key()},
+                )
+
+                assert response.status_code == HTTP_200_OK
+                assert isinstance(response.content, bytes)
+
                 metadata: Dict[str, Any] = json.loads(response.content.decode("utf-8"))
 
                 # We should get a map
@@ -240,29 +240,29 @@ class TestApiWithS3(TestWithS3):
                     ]
                 ), "No missing key"
 
-            except json.JSONDecodeError as e:
-                assert False, "Fail to parse to JSON"
-
-            # Read and process response body
-            # Now call to extract some values from the zarr file
-            response = client.get(
-                config.BASE_URL
-                + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_delayed_qc.zarr",
-                params=param,
-                headers={"X-API-Key": config.get_api_key()},
-            )
+            except Exception as e:
+                assert False, f"Fail with error {e}"
 
             assert response.status_code == HTTP_200_OK
             assert isinstance(response.content, bytes)
 
             try:
+                # Read and process response body
+                # Now call to extract some values from the zarr file
+                response = client.get(
+                    config.BASE_URL
+                    + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_delayed_qc.zarr",
+                    params=param,
+                    headers={"X-API-Key": config.get_api_key()},
+                )
+
                 parsed = json.loads(response.content.decode("utf-8"))
                 assert (
                     len(parsed) == 90
                 ), "No special meaning of record, just verify we get something"
 
-            except json.JSONDecodeError as e:
-                assert False, "Fail to parse to JSON"
+            except Exception as e:
+                assert False, f"Fail with error {e}"
 
             # Read and process response body
             try:
@@ -279,6 +279,5 @@ class TestApiWithS3(TestWithS3):
 
                 parsed = json.loads(response.content.decode("utf-8"))
                 assert len(parsed) == 0, "This test dataset is empty, so it is ok"
-
-            except json.JSONDecodeError as e:
-                assert False, "Fail to parse to JSON"
+            except Exception as e:
+                assert False, f"Fail with error {e}"
