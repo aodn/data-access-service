@@ -297,7 +297,7 @@ def query_data(
 
         raise e
     except Exception as e:
-        log.error(f"Error: {e}")
+        log.error(f"{type(e)}: {e}")
         raise e
 
 

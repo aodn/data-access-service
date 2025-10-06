@@ -1,0 +1,8 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "TIME"
+    ],
+    "coordinates": "LATITUDE LONGITUDE",
+    "long_name": "DALEC pitch standard deviation",
+    "units": "degrees"
+}

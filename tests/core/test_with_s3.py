@@ -80,6 +80,8 @@ class TestWithS3:
             # Tier down automatically
             yield localstack
 
+            log.info(f"Close localstack S3 at port {localstack.get_url()}")
+
     @pytest.fixture(scope="class")
     def aws_clients(self, localstack):
         """Initialize AWS S3 and SQS clients pointing to LocalStack."""
