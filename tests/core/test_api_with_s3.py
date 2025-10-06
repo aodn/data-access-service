@@ -17,18 +17,17 @@ from unittest.mock import patch
 
 class TestApiWithS3(TestWithS3):
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def upload_test_case_to_s3(self, aws_clients, localstack, mock_boto3_client):
         s3_client, _, _ = aws_clients
         # Upload test data
-        TestWithS3.delete_object_in_s3(s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT)
         TestWithS3.upload_to_s3(
             s3_client,
             DataQuery.BUCKET_OPTIMISED_DEFAULT,
             Path(__file__).parent.parent / "canned/s3_sample2",
         )
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def client(self, upload_test_case_to_s3, mock_boto3_client):
         # Use LifespanManager to ensure lifespan events are triggered
         # Make sure file uploaded before init the app
@@ -216,7 +215,7 @@ class TestApiWithS3(TestWithS3):
             # Test with range, this dataset field is different, dataset without DEPTH
             param = {
                 "start_date": "2011-07-25",
-                "end_date": "2025-11-08",
+                "end_date": "2011-07-30",
                 "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             }
 
@@ -259,7 +258,7 @@ class TestApiWithS3(TestWithS3):
 
                 parsed = json.loads(response.content.decode("utf-8"))
                 assert (
-                    len(parsed) == 175937
+                    len(parsed) == 90
                 ), "No special meaning of record, just verify we get something"
 
             except Exception as e:

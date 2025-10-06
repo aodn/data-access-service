@@ -61,7 +61,7 @@ class TestWithS3:
         """Set environment variable for testing profile."""
         os.environ["PROFILE"] = EnvType.TESTING.value
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def localstack(self) -> Generator[LocalStackContainer, Any, None]:
         """
         Start LocalStack container with SQS and S3 services.
@@ -74,7 +74,7 @@ class TestWithS3:
             print(f"Create localstack S3 at port {localstack.get_url()}, time = {time}")
             yield localstack
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def aws_clients(self, localstack):
         """Initialize AWS S3 and SQS clients pointing to LocalStack."""
         s3_client = boto3.client(
@@ -101,7 +101,7 @@ class TestWithS3:
         print(f"Bind S3 client to {localstack.get_url()}")
         yield s3_client, sqs_client, ses_client
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def mock_boto3_client(self, localstack):
         """
         Mock boto3.client and fsspec to use LocalStack endpoint for S3 and SES, this is needed
@@ -149,7 +149,7 @@ class TestWithS3:
         yield wrapped_client
         monkeypatch.undo()
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def setup_resources(self, aws_clients):
         """Set up S3 buckets and SQS queue for testing."""
         s3_client, sqs_client, _ = aws_clients
