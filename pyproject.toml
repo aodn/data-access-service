@@ -51,6 +51,8 @@ testcontainers = "4.8.0"
 [tool.pytest.ini_options]
 addopts = "-vv"
 asyncio_debug = true
+log_cli = true
+log_cli_level = "DEBUG"
 testpaths = ["tests"]
 
 [build-system]

@@ -76,6 +76,8 @@ class TestWithS3:
             log.info(
                 f"Create localstack S3 at port {localstack.get_url()}, time = {time}"
             )
+
+            # Tier down automatically
             yield localstack
 
     @pytest.fixture(scope="class")
