@@ -216,7 +216,7 @@ class TestApiWithS3(TestWithS3):
             # Test with range, this dataset field is different, dataset without DEPTH
             param = {
                 "start_date": "2011-07-25",
-                "end_date": "2011-07-30",
+                "end_date": "2025-11-08",
                 "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             }
 
@@ -259,7 +259,7 @@ class TestApiWithS3(TestWithS3):
 
                 parsed = json.loads(response.content.decode("utf-8"))
                 assert (
-                    len(parsed) == 90
+                    len(parsed) == 175937
                 ), "No special meaning of record, just verify we get something"
 
             except Exception as e:
