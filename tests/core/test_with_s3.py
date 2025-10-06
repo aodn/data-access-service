@@ -76,9 +76,6 @@ class TestWithS3:
             log.info(
                 f"Create localstack S3 at port {localstack.get_url()}, time = {time}"
             )
-
-            # Register teardown (passes closure vars like s3_client, bucket)
-            request.addfinalizer(lambda: localstack.stop())
             yield localstack
 
     @pytest.fixture(scope="class")

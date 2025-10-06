@@ -133,7 +133,6 @@ class IntTestConfig(Config):
     def __init__(self):
         super().__init__()
         self.config = Config.load_config("tests/config/config-test.yaml")
-        logging.basicConfig(level=logging.DEBUG)
 
     def set_s3_client(self, s3_client):
         self.s3 = s3_client
