@@ -3,6 +3,7 @@ import yaml
 import boto3
 import os
 import tempfile
+import logging.config
 
 from threading import Lock
 from pathlib import Path
@@ -132,6 +133,7 @@ class IntTestConfig(Config):
     def __init__(self):
         super().__init__()
         self.config = Config.load_config("tests/config/config-test.yaml")
+        logging.getLogger().setLevel(logging.DEBUG)
 
     def set_s3_client(self, s3_client):
         self.s3 = s3_client
