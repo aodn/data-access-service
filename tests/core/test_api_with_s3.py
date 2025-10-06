@@ -21,6 +21,7 @@ class TestApiWithS3(TestWithS3):
     def upload_test_case_to_s3(self, aws_clients, localstack, mock_boto3_client):
         s3_client, _, _ = aws_clients
         # Upload test data
+        TestWithS3.delete_object_in_s3(s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT)
         TestWithS3.upload_to_s3(
             s3_client,
             DataQuery.BUCKET_OPTIMISED_DEFAULT,
