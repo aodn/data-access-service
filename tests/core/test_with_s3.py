@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Any, Generator
 
@@ -7,7 +8,6 @@ import boto3
 import os
 
 from _pytest.monkeypatch import MonkeyPatch
-from s3fs import S3FileSystem
 from testcontainers.core.waiting_utils import wait_for_logs
 
 from data_access_service.config.config import EnvType, Config, IntTestConfig
@@ -18,6 +18,8 @@ from botocore import UNSIGNED
 from fsspec.core import get_fs_token_paths as original_get_fs_token_paths
 
 from data_access_service.core.AWSHelper import AWSHelper
+
+log = logging.getLogger(__name__)
 
 # Default region for Localstack
 REGION = "us-east-1"
@@ -62,7 +64,7 @@ class TestWithS3:
         os.environ["PROFILE"] = EnvType.TESTING.value
 
     @pytest.fixture(scope="class")
-    def localstack(self) -> Generator[LocalStackContainer, Any, None]:
+    def localstack(self, request) -> Generator[LocalStackContainer, Any, None]:
         """
         Start LocalStack container with SQS and S3 services.
         using with scope cause the call to localstack.stop() happen
@@ -71,7 +73,12 @@ class TestWithS3:
         with LocalStackContainer(image="localstack/localstack:4.3.0") as localstack:
             localstack.start()
             time = wait_for_logs(localstack, "Ready.")
-            print(f"Create localstack S3 at port {localstack.get_url()}, time = {time}")
+            log.info(
+                f"Create localstack S3 at port {localstack.get_url()}, time = {time}"
+            )
+
+            # Register teardown (passes closure vars like s3_client, bucket)
+            request.addfinalizer(lambda: localstack.stop())
             yield localstack
 
     @pytest.fixture(scope="class")
@@ -98,7 +105,7 @@ class TestWithS3:
             aws_secret_access_key=IntTestConfig.get_s3_secret(),
             region_name=REGION,
         )
-        print(f"Bind S3 client to {localstack.get_url()}")
+        log.info(f"Bind S3 client to {localstack.get_url()}")
         yield s3_client, sqs_client, ses_client
 
     @pytest.fixture(scope="class")
