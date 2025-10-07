@@ -3,6 +3,7 @@ import yaml
 import boto3
 import os
 import tempfile
+import logging.config
 
 from threading import Lock
 from pathlib import Path

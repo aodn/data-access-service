@@ -9,6 +9,7 @@
     "credit": " The collection of this data was supported by the Scientists and Crew of the RV Solander operated by the Australian Institute of Marine Science.",
     "data_centre": "Australian Ocean Data Network (AODN)",
     "data_centre_email": "info@aodn.org.au",
+    "dataset_name": "vessel_satellite_radiance_derived_product",
     "disclaimer": "Any users of IMOS data are required to clearly acknowledge the source of the material.\n Data, products and services from IMOS are provided \"as is\" without any warranty as to fitness for a particular purpose.",
     "file_version": "Level 2 - derived product",
     "file_version_quality_control": "Data have been filtered based on the following limits: sza<60degrees; pitch<5degrees; roll<5degrees;pitchsd<2degrees; rollsd<2degrees; abs(gearpos)<120degrees; and 85<relaz<95 OR 130<relaz<140. \nGearPos threshold eliminates spectra where the DALEC is pointing too close to the platform. \nData were rejected if the calculated Rrs was less than 0.0 in the wavelength range 400-800nm.\nIn addition, the Rrs_xflags variable provides extra flags for precision uses. A flag value of 1 indicates that the solar zenith angle exceeds 50 degrees.\nA flag value of 2 indicates that the sun is within 10 deg of zenith and thus data are likely to be affected by residual sun glint.\nFor precision use, data should be excluded where Rrs_xflags>0\nData have not been filtered for cloud.",
@@ -29,5 +30,5 @@
     "standard_name_vocabulary": "NetCDF Climate and Forecast (CF) Metadata Convention Standard Name Table 47",
     "time_coverage_end": "2024-11-15T23:51:08Z",
     "time_coverage_start": "2024-11-15T23:36:12Z",
-    "title": "FILL UP MANUALLY - CHECK DOCUMENTATION"
+    "title": ""
 }

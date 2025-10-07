@@ -107,11 +107,18 @@ def _generate_partial_json_array(
                     ).strftime(DATE_FORMAT)
                 )
             elif "detection_timestamp" in record:
-                filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
-                    datetime.fromtimestamp(
-                        record["detection_timestamp"], tz=timezone.utc
-                    ).strftime(DATE_FORMAT)
-                )
+                if isinstance(record["detection_timestamp"], str):
+                    filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
+                        parser.parse(record["detection_timestamp"])
+                        .replace(tzinfo=timezone.utc)
+                        .strftime(DATE_FORMAT)
+                    )
+                else:
+                    filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
+                        datetime.fromtimestamp(
+                            record["detection_timestamp"], tz=timezone.utc
+                        ).strftime(DATE_FORMAT)
+                    )
 
             #  may need to add more field here
             if "LONGITUDE" in record:
@@ -221,7 +228,7 @@ def _verify_to_index_flag_param(flag: str | bool | None) -> bool:
 
 
 # Parallel process records and map the field back to standard name
-def _async_response_json(result: AsyncGenerator[dict, None], compress: bool):
+def async_response_json(result: AsyncGenerator[dict, None], compress: bool):
     # Thread-safe queue to collect results
     result_queue = Queue()
     json_results = []
@@ -234,7 +241,10 @@ def _async_response_json(result: AsyncGenerator[dict, None], compress: bool):
 
             async def collect():
                 async for i in result:
-                    result_queue.put(i)  # Thread-safe append
+                    if i is not None:
+                        result_queue.put(i)  # Thread-safe append
+                    else:
+                        break
                 result_queue.put(None)  # Sentinel to indicate completion
 
             loop.run_until_complete(collect())
@@ -246,7 +256,7 @@ def _async_response_json(result: AsyncGenerator[dict, None], compress: bool):
     thread.start()
 
     # Wait for results and collect
-    while True:
+    while result is not None:
         item = result_queue.get()
         if item is None:  # Sentinel indicates completion
             break
@@ -304,7 +314,7 @@ def _response_netcdf(filtered: pd.DataFrame, background_tasks: BackgroundTasks):
     return response
 
 
-async def _fetch_data(
+async def fetch_data(
     api_instance: API,
     uuid: str,
     key: str,
@@ -313,7 +323,7 @@ async def _fetch_data(
     start_depth: float | None,
     end_depth: float | None,
     columns: List[str],
-) -> AsyncGenerator[dict, None]:
+) -> AsyncGenerator[dict | None, None]:
     try:
         result: Optional[dd.DataFrame | xr.Dataset] = api_instance.get_dataset(
             uuid=uuid,
@@ -324,11 +334,12 @@ async def _fetch_data(
         )
         # If we get nothing
         if result is None:
-            return
+            # Indicate end of generator record
+            yield None
 
-    except ValueError as e:
-        # TODO If error return empty response. This maybe hard to debug
-        return
+    except Exception as e:
+        # Indicate end of generator record
+        yield None
     else:
         # Now we need to change the xarray if type match to 2D dataframe for processing
         if isinstance(result, xr.Dataset):

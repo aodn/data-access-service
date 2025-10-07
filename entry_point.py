@@ -2,7 +2,7 @@ import os
 
 import boto3
 
-from data_access_service import init_log, Config
+from data_access_service import init_log, Config, API
 from data_access_service.batch import subsetting
 
 logger = init_log(Config.get_config())
@@ -30,11 +30,15 @@ logger.info(f"Parameters: {parameters}")
 # Switch based on parameter call_type
 call_type = parameters["type"]
 
+# A global app
+api = API()
+api.initialize_metadata()
+
 match call_type:
     case "sub-setting":
-        subsetting.init(job_id_of_init=job_id, parameters=parameters)
+        subsetting.init(api, job_id_of_init=job_id, parameters=parameters)
     case "sub-setting-data-preparation":
-        subsetting.prepare_data(job_index=job_index, parameters=parameters)
+        subsetting.prepare_data(api, job_index=job_index, parameters=parameters)
     case "sub-setting-data-collection":
         subsetting.collect_data(parameters=parameters)
     case _:

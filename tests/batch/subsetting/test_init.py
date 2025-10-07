@@ -3,6 +3,7 @@ import pytest
 import os
 
 from unittest.mock import patch, call
+
 from data_access_service import API
 from data_access_service.batch.subsetting import init
 from data_access_service.config.config import EnvType, Config
@@ -13,24 +14,25 @@ from tests.batch.batch_test_consts import (
     PREPARATION_JOB_SUBMISSION_ARGS,
     COLLECTION_JOB_SUBMISSION_ARGS,
 )
+from tests.core.test_with_s3 import TestWithS3, REGION
 
 
-class TestInit:
+class TestInit(TestWithS3):
 
-    @pytest.fixture(autouse=True, scope="class")
-    def setup(self):
-        """Set environment variable for testing profile."""
-        os.environ["PROFILE"] = EnvType.TESTING.value
+    @pytest.fixture(scope="function")
+    def upload_test_case_to_s3(self, aws_clients, setup_resources, mock_boto3_client):
+        # Make sure we create the mock s3 to local s3
         yield
 
-    def test_init(self, setup):
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_init(self, upload_test_case_to_s3):
         with patch.object(Config, "get_month_count_per_job") as get_month_count_per_job:
             with patch.object(AWSHelper, "submit_a_job") as submit_a_job:
                 get_month_count_per_job.return_value = 3
                 submit_a_job.return_value = "test-job-id-returned"
 
                 # Call the init function
-                init(INIT_JOB_ID, INIT_PARAMETERS)
+                init(API(), INIT_JOB_ID, INIT_PARAMETERS)
 
                 expected_call_1 = call(
                     job_name=PREPARATION_JOB_SUBMISSION_ARGS["job_name"],
@@ -61,7 +63,8 @@ class TestInit:
                     expected_call_2 == submit_a_job.call_args_list[1]
                 ), "call arg list 2"
 
-    def test_init_with_very_narrow_date_range(self, setup):
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_init_with_very_narrow_date_range(self, upload_test_case_to_s3):
         with patch.object(Config, "get_month_count_per_job") as get_month_count_per_job:
             with patch.object(API, "get_temporal_extent") as get_temporal_extent:
                 with patch.object(AWSHelper, "submit_a_job") as submit_a_job:
@@ -75,7 +78,7 @@ class TestInit:
                     submit_a_job.return_value = "test-job-id-returned"
 
                     # Call the init function
-                    init(INIT_JOB_ID, INIT_PARAMETERS)
+                    init(API(), INIT_JOB_ID, INIT_PARAMETERS)
 
                     expected_call_1 = call(
                         job_name=PREPARATION_JOB_SUBMISSION_ARGS["job_name"],
