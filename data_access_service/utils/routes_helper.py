@@ -335,11 +335,11 @@ async def fetch_data(
         # If we get nothing
         if result is None:
             # Indicate end of generator record
-            yield None
+            return
 
     except Exception as e:
         # Indicate end of generator record
-        yield None
+        return
     else:
         # Now we need to change the xarray if type match to 2D dataframe for processing
         if isinstance(result, xr.Dataset):
