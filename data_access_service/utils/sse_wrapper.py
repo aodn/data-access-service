@@ -98,6 +98,13 @@ async def sse_wrapper(
                         "result",
                     )
 
+            # if chunk is empty, send a final completed message
+            if chunk == []:
+                yield format_sse(
+                    {STATUS: "completed", MESSAGE: "No data found", DATA: []},
+                    "result",
+                )
+
         except CancelledError as ge:
             raise
 
