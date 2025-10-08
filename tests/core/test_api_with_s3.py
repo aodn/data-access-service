@@ -49,8 +49,8 @@ class TestApiWithS3(TestWithS3):
         with patch.object(AWSHelper, "send_email") as mock_send_email:
             # Test with range, this dataset field is different, it called detection_timestamp
             param = {
-                "start_date": "2011-11-17",
-                "end_date": "2011-11-18",
+                "start_date": "2011-11-17 00:00:00.000000000",
+                "end_date": "2011-11-18 23:59:59.999999999",
                 "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             }
 
@@ -98,8 +98,8 @@ class TestApiWithS3(TestWithS3):
         with patch.object(AWSHelper, "send_email") as mock_send_email:
             # Test with range, this dataset field is different, it called detection_timestamp
             param = {
-                "start_date": "1999-11-07",
-                "end_date": "2025-11-08",
+                "start_date": "1999-11-07 00:00:00.000000000",
+                "end_date": "2025-11-08 23:59:59.999999999",
                 "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             }
 
@@ -168,8 +168,8 @@ class TestApiWithS3(TestWithS3):
         with patch.object(AWSHelper, "send_email") as mock_send_email:
             # Test with range, this dataset field is different, dataset without DEPTH
             param = {
-                "start_date": "2009-11-07",
-                "end_date": "2025-11-08",
+                "start_date": "2009-11-07 00:00:00.000000000",
+                "end_date": "2025-11-08 23:59:59.999999999",
                 "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             }
 
@@ -214,8 +214,8 @@ class TestApiWithS3(TestWithS3):
         with patch.object(AWSHelper, "send_email") as mock_send_email:
             # Test with range, this dataset field is different, dataset without DEPTH
             param = {
-                "start_date": "2011-07-25",
-                "end_date": "2011-07-30",
+                "start_date": "2011-07-25 00:00:00.000000000",
+                "end_date": "2011-07-30 23:59:59.999999999",
                 "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             }
 
@@ -294,8 +294,8 @@ class TestApiWithS3(TestWithS3):
         with patch.object(AWSHelper, "send_email") as mock_send_email:
             # Test with range, this dataset field is different, dataset without DEPTH
             param = {
-                "start_date": "2009-11-07",
-                "end_date": "2025-11-08",
+                "start_date": "2009-11-07 00:00:00.000000000",
+                "end_date": "2025-11-08 23:59:59.999999999",
                 "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             }
 
@@ -330,8 +330,8 @@ class TestApiWithS3(TestWithS3):
         with patch.object(AWSHelper, "send_email") as mock_send_email:
             # Test with range, this dataset field is different, dataset without DEPTH
             param = {
-                "start_date": "2026-11-07",
-                "end_date": "2026-11-08",
+                "start_date": "2026-11-07 00:00:00.000000000",
+                "end_date": "2026-11-08 23:59:59.999999999",
                 "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             }
 

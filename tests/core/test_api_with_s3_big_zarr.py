@@ -55,8 +55,8 @@ class TestApiWithS3BigZarr(TestWithS3):
         with patch.object(AWSHelper, "send_email") as mock_send_email:
             # Test with range, this dataset field is different, it called detection_timestamp
             param = {
-                "start_date": "2008-08-01",
-                "end_date": "2008-09-01",
+                "start_date": "2008-08-01 00:00:00.000000000",
+                "end_date": "2008-09-01 23:59:59.999999999",
                 "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
                 "f": "sse/json",
             }
