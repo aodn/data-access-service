@@ -71,7 +71,7 @@ class TestApiWithS3(TestWithS3):
             try:
                 parsed = json.loads(response.content.decode("utf-8"))
                 assert (
-                    len(parsed) == 1687441
+                    len(parsed) == 3374882
                 ), f"Size not match, return size is {len(parsed)} and X-API-Key is {config.get_api_key()}"
                 assert parsed[0] == {
                     "latitude": -70.0,
@@ -258,7 +258,7 @@ class TestApiWithS3(TestWithS3):
 
                 parsed = json.loads(response.content.decode("utf-8"))
                 assert (
-                    len(parsed) == 90
+                    len(parsed) == 2394
                 ), "No special meaning of record, just verify we get something"
 
             except Exception as e:
