@@ -590,9 +590,18 @@ class API(BaseAPI):
                 date_end = date_end.tz_localize(None)
 
             # make sure the date end is really the final nano second of the day
-            date_end = date_end.replace(
-                hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
-            )
+            # if hours, minutes, seconds, microseconds, nanoseconds are all zero, it means, used didn't specify time
+            # so we assume they want the whole day, so set to the end of the day
+            if (
+                date_end.hour == 0
+                and date_end.minute == 0
+                and date_end.second == 0
+                and date_end.microsecond == 0
+                and date_end.nanosecond == 0
+            ):
+                date_end = date_end.replace(
+                    hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
+                )
 
             try:
                 # All precision to nanosecond
