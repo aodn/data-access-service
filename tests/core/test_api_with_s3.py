@@ -281,3 +281,75 @@ class TestApiWithS3(TestWithS3):
                 assert len(parsed) == 0, "This test dataset is empty, so it is ok"
             except Exception as e:
                 assert False, f"Fail with error {e}"
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_fetch_empty_data_correct_without_error_zarr(
+        self, setup, localstack, aws_clients, setup_resources, client
+    ):
+        """Test subsetting with valid and invalid time ranges."""
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
+            # Test with range, this dataset field is different, dataset without DEPTH
+            param = {
+                "start_date": "2009-11-07",
+                "end_date": "2025-11-08",
+                "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
+            }
+
+            response = client.get(
+                config.BASE_URL
+                + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_derived_product.zarr",
+                params=param,
+                headers={"X-API-Key": config.get_api_key()},
+            )
+
+            # The X-API-KEY has typo, it should be X-API-Key
+            assert response.status_code == HTTP_200_OK
+            assert isinstance(response.content, bytes)
+
+            # Read and process response body
+            try:
+                parsed = json.loads(response.content.decode("utf-8"))
+                # make sure if the returning is empty, it should not be any errors
+                assert len(parsed) == 0, "Number of record is incorrect"
+            except json.JSONDecodeError as e:
+                assert False, "Fail to parse to JSON"
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_fetch_empty_data_correct_without_error_parquet(
+        self, setup, localstack, aws_clients, setup_resources, client
+    ):
+        """Test subsetting with valid and invalid time ranges."""
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
+            # Test with range, this dataset field is different, dataset without DEPTH
+            param = {
+                "start_date": "2026-11-07",
+                "end_date": "2026-11-08",
+                "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
+            }
+
+            response = client.get(
+                config.BASE_URL
+                + "/data/7e13b5f3-4a70-4e31-9e95-335efa491c5c/mooring_temperature_logger_delayed_qc.parquet",
+                params=param,
+                headers={"X-API-Key": config.get_api_key()},
+            )
+
+            # The X-API-KEY has typo, it should be X-API-Key
+            assert response.status_code == HTTP_200_OK
+            assert isinstance(response.content, bytes)
+
+            # Read and process response body
+            try:
+                parsed = json.loads(response.content.decode("utf-8"))
+                # make sure if the returning is empty, it should not be any errors
+                assert len(parsed) == 0, "Number of record is incorrect"
+            except json.JSONDecodeError as e:
+                assert False, "Fail to parse to JSON"
