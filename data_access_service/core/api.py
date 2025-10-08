@@ -589,6 +589,11 @@ class API(BaseAPI):
             if date_end.tz is not None:
                 date_end = date_end.tz_localize(None)
 
+            # make sure the date end is really the final nano second of the day
+            date_end = date_end.replace(
+                hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
+            )
+
             try:
                 # All precision to nanosecond
                 if isinstance(ds, ParquetDataSource):
