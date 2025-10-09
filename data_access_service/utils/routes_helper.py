@@ -184,7 +184,7 @@ def _round_5_decimal(value: float) -> float:
 def _verify_datatime_param(name: str, req_date: str) -> pd.Timestamp:
     _date = None
 
-    if req_date is not None:
+    if req_date is not None and name == "end_date":
         # Require time and nanosecond precision (at least 7 digits after decimal)
         if not re.search(r"[T ]\d{2}:\d{2}:\d{2}\.\d{9,}", req_date):
             error_message = ErrorResponse(
