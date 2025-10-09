@@ -59,30 +59,34 @@ async def sse_wrapper(
             chunk_count = 0
             # Iterate over the async generator
             async for record in async_function(*function_args):
-                chunk.append(record)
+                if record is not None:
+                    chunk.append(record)
 
-                # When chunk reaches chunk_size, split and yield
-                if len(chunk) >= chunk_size:
-                    chunks = split_list(chunk, chunk_size)
-                    for i, small_chunk in enumerate(chunks):
-                        chunk_count += 1
+                    # When chunk reaches chunk_size, split and yield
+                    if len(chunk) >= chunk_size:
+                        chunks = split_list(chunk, chunk_size)
+                        for i, small_chunk in enumerate(chunks):
+                            chunk_count += 1
+                            yield format_sse(
+                                {
+                                    STATUS: "completed",
+                                    MESSAGE: f"chunk {chunk_count}",
+                                    DATA: small_chunk,
+                                },
+                                "result",
+                            )
+                        chunk = []  # Reset chunk
+
+                    # Send periodic processing message
+                    if time.time() - start_time >= processing_interval:
                         yield format_sse(
-                            {
-                                STATUS: "completed",
-                                MESSAGE: f"chunk {chunk_count}",
-                                DATA: small_chunk,
-                            },
-                            "result",
+                            {STATUS: "processing", MESSAGE: "Still processing..."},
+                            "processing",
                         )
-                    chunk = []  # Reset chunk
-
-                # Send periodic processing message
-                if time.time() - start_time >= processing_interval:
-                    yield format_sse(
-                        {STATUS: "processing", MESSAGE: "Still processing..."},
-                        "processing",
-                    )
-                    start_time = time.time()
+                        start_time = time.time()
+                # The generator might yield None to indicate no more data so we break the loop
+                else:
+                    break
 
             # Yield any remaining records
             if chunk:
@@ -97,6 +101,15 @@ async def sse_wrapper(
                         },
                         "result",
                     )
+            else:
+                yield format_sse(
+                    {
+                        STATUS: "completed",
+                        MESSAGE: "chunk 0/end",
+                        DATA: [],
+                    },
+                    "result",
+                )
 
         except CancelledError as ge:
             raise

@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import json
 import os
+import re
 import tempfile
 import threading
 from datetime import datetime, timezone
@@ -182,6 +183,18 @@ def _round_5_decimal(value: float) -> float:
 
 def _verify_datatime_param(name: str, req_date: str) -> pd.Timestamp:
     _date = None
+
+    if req_date is not None and name == "end_date":
+        # Require time and nanosecond precision (at least 7 digits after decimal)
+        if not re.search(r"[T ]\d{2}:\d{2}:\d{2}\.\d{9,}", req_date):
+            error_message = ErrorResponse(
+                status_code=HTTPStatus.BAD_REQUEST,
+                details=f"Time with nanosecond precision missing in [{name}]. Example: 1970-02-03 12:34:56.123456789",
+                parameters=f"{name}={req_date}",
+            )
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST, detail=error_message.details
+            )
 
     try:
         if req_date is not None:
