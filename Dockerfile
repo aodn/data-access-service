@@ -1,10 +1,15 @@
-FROM python:3.10-slim
+FROM tiangolo/uwsgi-nginx:python3.10
 
 WORKDIR /app
-RUN useradd -l -m -s /bin/bash appuser
 
 COPY pyproject.toml poetry.lock README.md entry_point.py /app/
 COPY data_access_service /app/data_access_service
+
+# Copy uWSGI config (required for your app; adjust path if entry_point.py handles it)
+COPY uwsgi.ini /app/uwsgi.ini
+
+# Copy Nginx custom config (gets auto-included for /health routing)
+COPY custom.conf /etc/nginx/conf.d/custom.conf
 
 # For Docker build to understand the possible env
 RUN apt update && \
@@ -16,10 +21,11 @@ RUN apt update && \
     poetry lock && \
     poetry install --no-root
 
+# Do not need to switch user, image will use www-data automatically
 
-RUN chown -R appuser:appuser /app
-USER appuser
-
+# Switch to non-root user for security
 COPY log_config.yaml /app/log_config.yaml
 
-EXPOSE 8000
+RUN chown -R www-data:www-data /app
+
+EXPOSE 8000:80
