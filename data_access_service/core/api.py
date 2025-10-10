@@ -1,6 +1,8 @@
 import asyncio
 import gzip
 import math
+import os
+
 import duckdb
 
 from concurrent.futures import ThreadPoolExecutor
@@ -23,6 +25,8 @@ from urllib.parse import unquote_plus
 
 
 log = logging.getLogger(__name__)
+
+HEALTH_JSON = "/tmp/health.json"
 
 
 def _extract_depth(data: dict):
@@ -280,6 +284,17 @@ class API(BaseAPI):
 
     def destroy(self):
         log.info("Destroying API instance")
+        """
+        Delete the temp file if it exists, this make sure Ngnix report something
+        invalid and AWS knew process ends
+        """
+        if os.path.exists(HEALTH_JSON):
+            try:
+                os.remove(HEALTH_JSON)
+            except OSError as e:
+                # Do nothing as we end process
+                pass
+
         self.memconn.close()
 
     async def async_initialize_metadata(self):
@@ -290,6 +305,10 @@ class API(BaseAPI):
             await loop.run_in_executor(executor, lambda: self.initialize_metadata())
 
     def initialize_metadata(self):
+        """Write health status"""
+        with open(HEALTH_JSON, "w") as f:
+            f.write('{"status":"STARTING","status_code":200}')
+
         """Helper method to run blocking initialization tasks."""
         self._metadata = self._instance.get_metadata()
         self.refresh_uuid_dataset_map()
@@ -297,6 +316,9 @@ class API(BaseAPI):
         log.info("Done init")
         # init finalised, set as ready
         self._is_ready = True
+
+        with open(HEALTH_JSON, "w") as f:
+            f.write('{"status":"UP","status_code":200}')
 
     def get_api_status(self) -> bool:
         # used for checking if the API instance is ready
