@@ -1,19 +1,19 @@
-FROM tiangolo/uwsgi-nginx:python3.10
+FROM python:3.10-slim
 
 WORKDIR /app
+RUN useradd -l -m -s /bin/bash appuser
 
 COPY pyproject.toml poetry.lock README.md entry_point.py /app/
 COPY data_access_service /app/data_access_service
-
-# Copy uWSGI config (required for your app; adjust path if entry_point.py handles it)
-COPY uwsgi.ini /app/uwsgi.ini
-
-# Copy Nginx custom config (gets auto-included for /health routing)
-COPY custom.conf /etc/nginx/conf.d/custom.conf
+COPY log_config.yaml /app/log_config.yaml
 
 # For Docker build to understand the possible env
+# nginx to allow offload of health check on busy python app to get fast response
+# supervisor use to start mutliple process
+# netcat-openbsd this image allow nginx to probe status correctly
 RUN apt update && \
     apt -y upgrade && \
+    apt install -y nginx supervisor netcat-openbsd && \
     pip3 install --upgrade pip && \
     pip3 install virtualenv==20.28.1 && \
     pip3 install poetry && \
@@ -21,11 +21,20 @@ RUN apt update && \
     poetry lock && \
     poetry install --no-root
 
-# Do not need to switch user, image will use www-data automatically
+COPY das_site.conf  /etc/nginx/sites-available/
+RUN ln -s /etc/nginx/sites-available/das_site.conf /etc/nginx/sites-enabled/ \
+    && rm /etc/nginx/sites-enabled/default \
+    && nginx -t  # Test config during build
 
-# Switch to non-root user for security
-COPY log_config.yaml /app/log_config.yaml
+# Copy Supervisor config to run both services
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-RUN chown -R www-data:www-data /app
+CMD ["nginx", "-g", "daemon off;"]
 
-EXPOSE 8000:80
+RUN chown -R appuser:appuser /app /var/log/nginx/error.log /var/log/nginx/access.log /run/nginx.pid
+USER appuser
+
+# Run Supervisor as the main process
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+
+EXPOSE 8000

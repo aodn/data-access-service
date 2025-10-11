@@ -26,7 +26,7 @@ from urllib.parse import unquote_plus
 
 log = logging.getLogger(__name__)
 
-HEALTH_JSON = "/tmp/health.json"
+HEALTH_JSON = "/tmp/status/health.json"
 
 
 def _extract_depth(data: dict):
@@ -305,6 +305,9 @@ class API(BaseAPI):
             await loop.run_in_executor(executor, lambda: self.initialize_metadata())
 
     def initialize_metadata(self):
+        # Create the directory if it doesn't exist
+        os.makedirs(os.path.dirname(HEALTH_JSON), exist_ok=True)
+
         """Write health status"""
         with open(HEALTH_JSON, "w") as f:
             f.write('{"status":"STARTING","status_code":200}')
