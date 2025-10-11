@@ -5,10 +5,15 @@ RUN useradd -l -m -s /bin/bash appuser
 
 COPY pyproject.toml poetry.lock README.md entry_point.py /app/
 COPY data_access_service /app/data_access_service
+COPY log_config.yaml /app/log_config.yaml
 
 # For Docker build to understand the possible env
+# nginx to allow offload of health check on busy python app to get fast response
+# supervisor use to start mutliple process
+# netcat-openbsd this image allow nginx to probe status correctly
 RUN apt update && \
     apt -y upgrade && \
+    apt install -y nginx supervisor netcat-openbsd && \
     pip3 install --upgrade pip && \
     pip3 install virtualenv==20.28.1 && \
     pip3 install poetry && \
@@ -16,10 +21,20 @@ RUN apt update && \
     poetry lock && \
     poetry install --no-root
 
+COPY das_site.conf  /etc/nginx/sites-available/
+RUN ln -s /etc/nginx/sites-available/das_site.conf /etc/nginx/sites-enabled/ \
+    && rm /etc/nginx/sites-enabled/default \
+    && nginx -t  # Test config during build
 
-RUN chown -R appuser:appuser /app
+# Copy Supervisor config to run both services
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+CMD ["nginx", "-g", "daemon off;"]
+
+RUN chown -R appuser:appuser /app /var/log/nginx/error.log /var/log/nginx/access.log /run/nginx.pid
 USER appuser
 
-COPY log_config.yaml /app/log_config.yaml
+# Run Supervisor as the main process
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
 
 EXPOSE 8000

@@ -5,5 +5,4 @@ services:
     env_file:
       - .env
     ports:
-      - "8000:5000"
-    command: python -m data_access_service.server
+      - "8000:80"
