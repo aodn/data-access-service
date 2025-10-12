@@ -1,4 +1,3 @@
-import logging
 import yaml
 import boto3
 import os
@@ -160,9 +159,9 @@ class DevConfig(Config):
     def __init__(self):
         super().__init__()
         self.config = Config.load_config("data_access_service/config/config-dev.yaml")
-        self.batch = boto3.client("batch")
+        self.batch = boto3.client("batch", region_name="ap-southeast-2")
         self.s3 = boto3.client("s3")
-        self.ses = boto3.client("ses")
+        self.ses = boto3.client("ses", region_name="ap-southeast-2")
 
 
 class EdgeConfig(Config):
