@@ -29,12 +29,13 @@ RUN ln -s /etc/nginx/sites-available/das_site.conf /etc/nginx/sites-enabled/ \
 # Copy Supervisor config to run both services
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-CMD ["nginx", "-g", "daemon off;"]
-
 RUN chown -R appuser:appuser /app /var/log/nginx/error.log /var/log/nginx/access.log /run/nginx.pid
 USER appuser
 
-# Run Supervisor as the main process
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
-
 EXPOSE 8000
+
+# Run Supervisor as the main process, it starts an nginx server and our app. In case the app die, it
+# will restart the app. The ngnix is use to block too many request and offload the health check so
+# that we always get response even the app is busy. User who do not want this behavior should
+# use their own entry point to start the app
+ENTRYPOINT ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
