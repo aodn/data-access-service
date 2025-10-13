@@ -79,6 +79,27 @@ class BaseAPI:
         return False
 
     @staticmethod
+    def fix_encode_error_nested_dict(data):
+        """
+        The metadata may contain UTF-16 encode, this cause decode to json causing, source need to fix it
+        but before that we need to work around the problem.
+        :param data: Dict of dict where the content may have UTF-16
+        :return: A clean dict with UTF-16 ignored
+        """
+        if isinstance(data, dict):
+            return {
+                key: BaseAPI.fix_encode_error_nested_dict(value)
+                for key, value in data.items()
+            }
+        elif isinstance(data, list):
+            return [BaseAPI.fix_encode_error_nested_dict(item) for item in data]
+        elif isinstance(data, str):
+            # Clean string by ignoring invalid surrogate characters
+            return data.encode("utf-8", errors="ignore").decode("utf-8")
+        else:
+            return data
+
+    @staticmethod
     def _calculate_chunk_sizes(
         sizes: Frozen[Hashable, int],
         dtype_size: int = 8,
@@ -457,7 +478,7 @@ class API(BaseAPI):
         value = self._raw.get(uuid)
 
         if value is not None:
-            return value
+            return BaseAPI.fix_encode_error_nested_dict(value)
         else:
             return dict()
 
