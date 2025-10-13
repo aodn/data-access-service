@@ -29,10 +29,6 @@ RUN ln -s /etc/nginx/sites-available/das_site.conf /etc/nginx/sites-enabled/ \
 # Copy Supervisor config to run both services
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-RUN chown -R appuser:appuser /app /dev/stdout /dev/stderr /var/log/nginx/error.log /var/log/nginx/access.log /run/nginx.pid
-RUN chmod 666 /dev/stdout /dev/stderr
-USER appuser
-
 EXPOSE 8000
 
 # Run Supervisor as the main process, it starts an nginx server and our app. In case the app die, it
