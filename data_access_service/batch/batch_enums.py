@@ -12,3 +12,4 @@ class Parameters(Enum):
     TYPE = "type"
     MASTER_JOB_ID = "master_job_id"
     INTERMEDIATE_OUTPUT_FOLDER = "intermediate_output_folder"
+    INDEX_DATASETS = "index_datasets"

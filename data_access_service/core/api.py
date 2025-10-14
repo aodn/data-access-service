@@ -1,6 +1,8 @@
 import asyncio
 import gzip
 import math
+import os
+
 import duckdb
 
 from concurrent.futures import ThreadPoolExecutor
@@ -21,7 +23,10 @@ from xarray.core.utils import Frozen
 from data_access_service.core.descriptor import Depth, Descriptor
 from urllib.parse import unquote_plus
 
+
 log = logging.getLogger(__name__)
+
+HEALTH_JSON = "/tmp/status/health.json"
 
 
 def _extract_depth(data: dict):
@@ -269,7 +274,7 @@ class API(BaseAPI):
         log.info("Init parquet data query instance")
 
         self._raw: Dict[str, Dict[str, Any]] = dict()
-        self._cached: Dict[str, Dict[str, Descriptor]] = dict()
+        self._cached_metadata: Dict[str, Dict[str, Descriptor]] = dict()
 
         # UUID to metadata mapper
         self._instance = DataQuery.GetAodn()
@@ -279,6 +284,17 @@ class API(BaseAPI):
 
     def destroy(self):
         log.info("Destroying API instance")
+        """
+        Delete the temp file if it exists, this make sure Ngnix report something
+        invalid and AWS knew process ends
+        """
+        if os.path.exists(HEALTH_JSON):
+            try:
+                os.remove(HEALTH_JSON)
+            except OSError as e:
+                # Do nothing as we end process
+                pass
+
         self.memconn.close()
 
     async def async_initialize_metadata(self):
@@ -289,6 +305,13 @@ class API(BaseAPI):
             await loop.run_in_executor(executor, lambda: self.initialize_metadata())
 
     def initialize_metadata(self):
+        # Create the directory if it doesn't exist
+        os.makedirs(os.path.dirname(HEALTH_JSON), exist_ok=True)
+
+        """Write health status"""
+        with open(HEALTH_JSON, "w") as f:
+            f.write('{"status":"STARTING","status_code":200}')
+
         """Helper method to run blocking initialization tasks."""
         self._metadata = self._instance.get_metadata()
         self.refresh_uuid_dataset_map()
@@ -296,6 +319,9 @@ class API(BaseAPI):
         log.info("Done init")
         # init finalised, set as ready
         self._is_ready = True
+
+        with open(HEALTH_JSON, "w") as f:
+            f.write('{"status":"UP","status_code":200}')
 
     def get_api_status(self) -> bool:
         # used for checking if the API instance is ready
@@ -406,21 +432,21 @@ class API(BaseAPI):
                 # We can add directly because the dict() created
                 self._raw[uuid][key] = data
 
-                if uuid not in self._cached:
-                    self._cached[uuid] = dict()
+                if uuid not in self._cached_metadata:
+                    self._cached_metadata[uuid] = dict()
                 # We can add directly because the dict() created
-                self._cached[uuid][key] = Descriptor(
+                self._cached_metadata[uuid][key] = Descriptor(
                     uuid=uuid, dname=key, depth=_extract_depth(data)
                 )
             else:
                 log.error("Mising UUID entry for dataset " + key)
 
-    def get_mapped_meta_data(self, uuid: str | None) -> Dict[str, Descriptor]:
+    def get_mapped_meta_data(self, uuid: str | None):
         if uuid is not None:
-            value = self._cached.get(uuid)
+            value = self._cached_metadata.get(uuid)
         else:
             # Return all values
-            value = self._cached
+            value = self._cached_metadata
 
         if value is not None:
             return value
@@ -442,7 +468,7 @@ class API(BaseAPI):
     def has_data(
         self, uuid: str, key: str, start_date: pd.Timestamp, end_date: pd.Timestamp
     ):
-        md: Dict[str, Descriptor] = self._cached.get(uuid)
+        md: Dict[str, Descriptor] = self._cached_metadata.get(uuid)
         if md is not None and md[key] is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
             tes, tee = ds.get_temporal_extent()
@@ -452,16 +478,21 @@ class API(BaseAPI):
     def get_temporal_extent(
         self, uuid: str, key: str
     ) -> Tuple[pd.Timestamp | None, pd.Timestamp | None]:
-        md: Dict[str, Descriptor] = self._cached.get(uuid)
+        md: Dict[str, Descriptor] = self._cached_metadata.get(uuid)
         if md is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
             start_date, end_date = ds.get_temporal_extent()
-            start_date.replace(hour=0, minute=0, second=0, microsecond=0, nanosecond=0)
-            end_date.replace(
-                hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
-            )
-            return start_date, end_date
 
+            if start_date is not None:
+                start_date = start_date.replace(
+                    hour=0, minute=0, second=0, microsecond=0, nanosecond=0
+                )
+
+            if end_date is not None:
+                end_date = end_date.replace(
+                    hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
+                )
+            return start_date, end_date
         else:
             return None, None
 
@@ -528,7 +559,7 @@ class API(BaseAPI):
         return output
 
     def get_datasource(self, uuid: str, key: str) -> Optional[DataQuery.DataSource]:
-        mds: Dict[str, Descriptor] = self._cached.get(uuid)
+        mds: Dict[str, Descriptor] = self._cached_metadata.get(uuid)
         if mds is not None and key in mds:
             md = mds[key]
             if md is not None:
@@ -617,7 +648,7 @@ class API(BaseAPI):
                 raise e
             except Exception as v:
                 log.error(f"Error when query ds.get_data: {v}")
-                raise
+                raise v
         else:
             return None
 

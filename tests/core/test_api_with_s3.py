@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 class TestApiWithS3(TestWithS3):
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def upload_test_case_to_s3(self, aws_clients, localstack, mock_boto3_client):
         s3_client, _, _ = aws_clients
         # Upload test data
@@ -27,11 +27,11 @@ class TestApiWithS3(TestWithS3):
             Path(__file__).parent.parent / "canned/s3_sample2",
         )
 
-    @pytest.fixture(scope="function")
-    def client(self, upload_test_case_to_s3):
+    @pytest.fixture(scope="class")
+    def client(self, upload_test_case_to_s3, mock_boto3_client):
         # Use LifespanManager to ensure lifespan events are triggered
         # Make sure file uploaded before init the app
-        api = api_setup(app)
+        api_setup(app)
         return TestClient(app)
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
@@ -49,8 +49,8 @@ class TestApiWithS3(TestWithS3):
         with patch.object(AWSHelper, "send_email") as mock_send_email:
             # Test with range, this dataset field is different, it called detection_timestamp
             param = {
-                "start_date": "2011-11-17",
-                "end_date": "2011-11-18",
+                "start_date": "2011-11-17 00:00:00.000000000",
+                "end_date": "2011-11-18 23:59:59.999999999",
                 "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             }
 
@@ -71,7 +71,7 @@ class TestApiWithS3(TestWithS3):
             try:
                 parsed = json.loads(response.content.decode("utf-8"))
                 assert (
-                    len(parsed) == 1687441
+                    len(parsed) == 3374882
                 ), f"Size not match, return size is {len(parsed)} and X-API-Key is {config.get_api_key()}"
                 assert parsed[0] == {
                     "latitude": -70.0,
@@ -86,9 +86,6 @@ class TestApiWithS3(TestWithS3):
             except json.JSONDecodeError as e:
                 assert False, "Fail to parse to JSON"
 
-    @pytest.mark.skip(
-        reason="After changing column mapping, this test will be stuck until 6hours timeout. should fix it later"
-    )
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_auth_fetch_data_correct(
         self, setup, localstack, aws_clients, setup_resources, client
@@ -97,13 +94,12 @@ class TestApiWithS3(TestWithS3):
         s3_client, _, _ = aws_clients
         config = Config.get_config()
         config.set_s3_client(s3_client)
-        print("1")
+
         with patch.object(AWSHelper, "send_email") as mock_send_email:
             # Test with range, this dataset field is different, it called detection_timestamp
-            print("2")
             param = {
-                "start_date": "1999-11-07",
-                "end_date": "2025-11-08",
+                "start_date": "1999-11-07 00:00:00.000000000",
+                "end_date": "2025-11-08 23:59:59.999999999",
                 "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             }
 
@@ -111,43 +107,46 @@ class TestApiWithS3(TestWithS3):
                 config.BASE_URL
                 + "/data/541d4f15-122a-443d-ab4e-2b5feb08d6a0/animal_acoustic_tracking_delayed_qc.parquet"
             )
-            print("3")
+
             response = client.get(
                 target,
                 params=param,
             )
-            print("4")
+
             # We have not set key so forbidden
             assert response.status_code == HTTP_403_FORBIDDEN
-            print("5")
+
             response = client.get(
                 target,
                 params=param,
                 headers={"X-API-KEY": "test"},
             )
-            print("6")
+
             # The X-API-KEY has wrong key value
             assert response.status_code == HTTP_401_UNAUTHORIZED
-            print("7")
+
             response = client.get(
                 target,
                 params=param,
                 headers={"X-API-Key": config.get_api_key()},
             )
-            print("8")
+
             # The X-API-KEY has typo, it should be X-API-Key
             assert response.status_code == HTTP_200_OK
-            print("9")
+
             try:
-                print("10")
                 parsed = json.loads(response.content.decode("utf-8"))
                 assert (
                     len(parsed) == 22
                 ), f"Size not match, return size is {len(parsed)} and X-API-Key is {config.get_api_key()}"
+
+                # Sort by time in order to avoid check fail randomly
+                parsed = sorted(parsed, key=lambda x: x["time"])
+
                 assert parsed[0] == {
                     "latitude": -27.7,
                     "longitude": 153.3,
-                    "time": "2012-11-01",
+                    "time": "2012-11-07",
                 }, f"Unexpected JSON content: {parsed[0]}"
                 assert parsed[21] == {
                     "latitude": -33.9,
@@ -169,8 +168,8 @@ class TestApiWithS3(TestWithS3):
         with patch.object(AWSHelper, "send_email") as mock_send_email:
             # Test with range, this dataset field is different, dataset without DEPTH
             param = {
-                "start_date": "2009-11-07",
-                "end_date": "2025-11-08",
+                "start_date": "2009-11-07 00:00:00.000000000",
+                "end_date": "2025-11-08 23:59:59.999999999",
                 "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             }
 
@@ -215,21 +214,21 @@ class TestApiWithS3(TestWithS3):
         with patch.object(AWSHelper, "send_email") as mock_send_email:
             # Test with range, this dataset field is different, dataset without DEPTH
             param = {
-                "start_date": "2024-02-01",
-                "end_date": "2024-02-28",
+                "start_date": "2011-07-25 00:00:00.000000000",
+                "end_date": "2011-07-30 23:59:59.999999999",
                 "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             }
 
-            response = client.get(
-                config.BASE_URL + "/metadata/28f8bfed-ca6a-472a-84e4-42563ce4df3f",
-                headers={"X-API-Key": config.get_api_key()},
-            )
-
-            assert response.status_code == HTTP_200_OK
-            assert isinstance(response.content, bytes)
-
             # Read and process response body
             try:
+                response = client.get(
+                    config.BASE_URL + "/metadata/28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                    headers={"X-API-Key": config.get_api_key()},
+                )
+
+                assert response.status_code == HTTP_200_OK
+                assert isinstance(response.content, bytes)
+
                 metadata: Dict[str, Any] = json.loads(response.content.decode("utf-8"))
 
                 # We should get a map
@@ -241,29 +240,65 @@ class TestApiWithS3(TestWithS3):
                     ]
                 ), "No missing key"
 
-            except json.JSONDecodeError as e:
-                assert False, "Fail to parse to JSON"
-
-            # Now call to extract some values from the zarr file
-            response = client.get(
-                config.BASE_URL
-                + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_delayed_qc.zarr",
-                params=param,
-                headers={"X-API-Key": config.get_api_key()},
-            )
+            except Exception as e:
+                assert False, f"Fail with error {e}"
 
             assert response.status_code == HTTP_200_OK
             assert isinstance(response.content, bytes)
 
+            try:
+                # Read and process response body
+                # Now call to extract some values from the zarr file
+                response = client.get(
+                    config.BASE_URL
+                    + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_delayed_qc.zarr",
+                    params=param,
+                    headers={"X-API-Key": config.get_api_key()},
+                )
+
+                parsed = json.loads(response.content.decode("utf-8"))
+                assert (
+                    len(parsed) == 2394
+                ), "No special meaning of record, just verify we get something"
+
+            except Exception as e:
+                assert False, f"Fail with error {e}"
+
             # Read and process response body
             try:
+                # Now call to another zarr file having same UUID, create with this date range
+                response = client.get(
+                    config.BASE_URL
+                    + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_derived_product.zarr",
+                    params=param,
+                    headers={"X-API-Key": config.get_api_key()},
+                )
+
+                assert response.status_code == HTTP_200_OK
+                assert isinstance(response.content, bytes)
+
                 parsed = json.loads(response.content.decode("utf-8"))
-                assert len(parsed) == 5967, "Number of record is incorrect"
+                assert len(parsed) == 0, "This test dataset is empty, so it is ok"
+            except Exception as e:
+                assert False, f"Fail with error {e}"
 
-            except json.JSONDecodeError as e:
-                assert False, "Fail to parse to JSON"
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_fetch_empty_data_correct_without_error_zarr(
+        self, setup, localstack, aws_clients, setup_resources, client
+    ):
+        """Test subsetting with valid and invalid time ranges."""
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
 
-            # Now call to another zarr file having same UUID, create with this date range
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
+            # Test with range, this dataset field is different, dataset without DEPTH
+            param = {
+                "start_date": "2009-11-07 00:00:00.000000000",
+                "end_date": "2025-11-08 23:59:59.999999999",
+                "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
+            }
+
             response = client.get(
                 config.BASE_URL
                 + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_derived_product.zarr",
@@ -271,13 +306,50 @@ class TestApiWithS3(TestWithS3):
                 headers={"X-API-Key": config.get_api_key()},
             )
 
+            # The X-API-KEY has typo, it should be X-API-Key
             assert response.status_code == HTTP_200_OK
             assert isinstance(response.content, bytes)
 
             # Read and process response body
             try:
                 parsed = json.loads(response.content.decode("utf-8"))
-                assert len(parsed) == 5961, "Number of record is incorrect"
+                # make sure if the returning is empty, it should not be any errors
+                assert len(parsed) == 0, "Number of record is incorrect"
+            except json.JSONDecodeError as e:
+                assert False, "Fail to parse to JSON"
 
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_fetch_empty_data_correct_without_error_parquet(
+        self, setup, localstack, aws_clients, setup_resources, client
+    ):
+        """Test subsetting with valid and invalid time ranges."""
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
+            # Test with range, this dataset field is different, dataset without DEPTH
+            param = {
+                "start_date": "2026-11-07 00:00:00.000000000",
+                "end_date": "2026-11-08 23:59:59.999999999",
+                "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
+            }
+
+            response = client.get(
+                config.BASE_URL
+                + "/data/7e13b5f3-4a70-4e31-9e95-335efa491c5c/mooring_temperature_logger_delayed_qc.parquet",
+                params=param,
+                headers={"X-API-Key": config.get_api_key()},
+            )
+
+            # The X-API-KEY has typo, it should be X-API-Key
+            assert response.status_code == HTTP_200_OK
+            assert isinstance(response.content, bytes)
+
+            # Read and process response body
+            try:
+                parsed = json.loads(response.content.decode("utf-8"))
+                # make sure if the returning is empty, it should not be any errors
+                assert len(parsed) == 0, "Number of record is incorrect"
             except json.JSONDecodeError as e:
                 assert False, "Fail to parse to JSON"

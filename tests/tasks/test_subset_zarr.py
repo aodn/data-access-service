@@ -7,7 +7,7 @@ import pytest
 import xarray
 from aodn_cloud_optimised.lib import DataQuery
 
-from data_access_service import Config
+from data_access_service import Config, API
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.tasks.subset_zarr import ZarrProcessor
 from tests.core.test_with_s3 import TestWithS3, REGION
@@ -36,6 +36,9 @@ class TestSubsetZarr(TestWithS3):
         config = Config.get_config()
         helper = AWSHelper()
 
+        api = API()
+        api.initialize_metadata()
+
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
             # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
             with patch.object(AWSHelper, "send_email") as mock_send_email:
@@ -44,6 +47,7 @@ class TestSubsetZarr(TestWithS3):
                 no_ext_key = key.replace(".zarr", "")
                 try:
                     zarr_processor = ZarrProcessor(
+                        api,
                         uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
                         job_id="job_id_888",
                         keys=[key],
@@ -76,7 +80,7 @@ class TestSubsetZarr(TestWithS3):
 
                         netcdf_xarray = xarray.open_dataset(temp_file_path)
                         assert (
-                            netcdf_xarray.dims["TIME"] == 1
+                            netcdf_xarray.sizes["TIME"] == 1
                         ), f"TIME dimension size expected to be 1, but got {netcdf_xarray.dims['TIME']}"
 
                 except Exception as ex:

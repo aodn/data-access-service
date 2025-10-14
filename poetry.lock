@@ -456,6 +456,56 @@ jupyter = ["ipython (>=7.8.0)", "tokenize-rt (>=3.2.0)"]
 uvloop = ["uvloop (>=0.15.2)"]
 
 [[package]]
+name = "blosc"
+version = "1.11.3"
+description = "Blosc data compressor"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "blosc-1.11.3-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:6b96333a29cbd7c23811f84afb406eeefde668d1b30b52d8cf97619f1a6e2218"},
+    {file = "blosc-1.11.3-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:f993509c04335426d140e44d33011604a35aeff48873a86158393cfb4cadba41"},
+    {file = "blosc-1.11.3-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:db3593bbe73fd9877feee6b97e12a16973fa16c2e4cb21286b64369724482b5e"},
+    {file = "blosc-1.11.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:ed133aabada36fc04f5b435592a95498277441a0b8d6e106006879ec4d094e05"},
+    {file = "blosc-1.11.3-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:1f5aa57e574762fed475daa9172a53053e3eeb1f72979f7dd1739289472c475c"},
+    {file = "blosc-1.11.3-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:0dfed36910623db800ed98c2ef3ba24e2d65aa6972aafd10b9f0db550ec197fc"},
+    {file = "blosc-1.11.3-cp310-cp310-win32.whl", hash = "sha256:179e7030cd3088cec9f9235eb54740db8eb6abfca2f3f80d62921dc5fe56d2dd"},
+    {file = "blosc-1.11.3-cp310-cp310-win_amd64.whl", hash = "sha256:b70a2f7ccbbc7b8c37f16816947ae3f15e05e1cb443b37c3bb21c4a472e7de0c"},
+    {file = "blosc-1.11.3-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:8e235534e09d428e3665d9bec8655913e1bd095b55436a11b5bc9a196e07d477"},
+    {file = "blosc-1.11.3-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:953fa3bd263d0a23838598a91aaf623f3faa20160289ab5c53404d95814283ae"},
+    {file = "blosc-1.11.3-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:89b57f7428e40329d2e2caa1c439078cef265b3bd91b64f05fd76ee845ec7b25"},
+    {file = "blosc-1.11.3-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7c3e148519bec17e05e5fa390d55d8c4270d18edba430bca7949ae1493fa79d4"},
+    {file = "blosc-1.11.3-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:8014b760e051fbbf6c4c75f342721d908494c4631fdfc738b177849966f38526"},
+    {file = "blosc-1.11.3-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:e9ded3af5b49d1912dc087a700a20c001e5992bb9a31b1b6eb22d3c4372d3d02"},
+    {file = "blosc-1.11.3-cp311-cp311-win32.whl", hash = "sha256:5c8586f13caf8848c676101259842d77f49fa0ba83e3e4e8fdd6a7f6f7b34b3e"},
+    {file = "blosc-1.11.3-cp311-cp311-win_amd64.whl", hash = "sha256:171a3a6e9ce365b43978de65e93732c4d30dbf478f532cf41cfcc4d4a68e120a"},
+    {file = "blosc-1.11.3-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:075f7b57576e8197c3febbb0317a198b18911a6b882ac114de8c9e90d9058acb"},
+    {file = "blosc-1.11.3-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:d5a63601d24bd722b2daa20b86380bc147969466471ea8bf7950ad2f5da19834"},
+    {file = "blosc-1.11.3-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:f9ec958830a22a20fea66f4d7f491e0993959974d68d104d3798c88f543dda14"},
+    {file = "blosc-1.11.3-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:47dbe4ad431a773699a5779a98a982d8241eb412e4ddd1f19a4a869106d7a8d9"},
+    {file = "blosc-1.11.3-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:f41e9202cd2d73238f2620725e84f668338aa45a53549a807d4c09fcf74e901f"},
+    {file = "blosc-1.11.3-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:52edad6b839b9ae2a7f1268fabe1570fd64bc5ba25c3f4f7aba5c5e555dd4a8a"},
+    {file = "blosc-1.11.3-cp312-cp312-win_amd64.whl", hash = "sha256:1a5cbcaa68d73e1115fed9ff09c20d35ab34d3b5e9bc6f0a2865156c363c0168"},
+    {file = "blosc-1.11.3-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:9b474c70b9765587323dd1d7ff8e9fa9e9b35ccb3bee77e7658ce9faf2e05f7f"},
+    {file = "blosc-1.11.3-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:291d153864f53960861a48c2a5f6706adc2a84a2bdd9c3d1c5353d9c32748a03"},
+    {file = "blosc-1.11.3-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ece67bb34741a147e4120cff3ee3784121709a112d16795716b8f4239aaddfa4"},
+    {file = "blosc-1.11.3-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e70216dbddb85b69a8d0f62a4a5c09b7a1fce9ca2f329793e799f8b6f9fa3ab0"},
+    {file = "blosc-1.11.3-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:220865ffcac638f8f0f4b51259d4e4f3236165e5b43fffd1e836cd7cd29b9367"},
+    {file = "blosc-1.11.3-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:d57dde8c335378e8443757b69d0b29e90dfc53047d01311e952aecc815167dec"},
+    {file = "blosc-1.11.3-cp313-cp313-win32.whl", hash = "sha256:d3d72046580a50177811916c78130d6ae7307420733de6e950cb567c896b1ca5"},
+    {file = "blosc-1.11.3-cp313-cp313-win_amd64.whl", hash = "sha256:73721c1949f2b8d2f4168cababbfe6280511f0da9a971ba7ec9c56eab9603824"},
+    {file = "blosc-1.11.3-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:d894ed85184ca02b29d291a7c944a10b587fa1962f8e9341dc99253e01fe343e"},
+    {file = "blosc-1.11.3-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:6a8dc50e2532be15d77f0b4a66c54fa778f997ada1cfad38b6b7b93806b54b7e"},
+    {file = "blosc-1.11.3-cp39-cp39-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d02137c38493013e7f7eee27fa9f7637d7efa72d03b2c985a1a9fb59887db7a0"},
+    {file = "blosc-1.11.3-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a2eea36ebcd89e4f263224f51ac2135e5e669f2ba33dc0757e88c34ae1cd4950"},
+    {file = "blosc-1.11.3-cp39-cp39-musllinux_1_2_aarch64.whl", hash = "sha256:72dbe1dcadf7703019465937713cb7144491d834564a17af0a971a7916274922"},
+    {file = "blosc-1.11.3-cp39-cp39-musllinux_1_2_x86_64.whl", hash = "sha256:9a1b22b0ea2c5d9e9cacf7d1105dd2238058955570ca5d172fb9b77a746256dc"},
+    {file = "blosc-1.11.3-cp39-cp39-win32.whl", hash = "sha256:cbaa7c3be6ce86c7e5845530976f80536d0334a62d85e03509c21afefe22abec"},
+    {file = "blosc-1.11.3-cp39-cp39-win_amd64.whl", hash = "sha256:1edf02436f7fb3220ff377e11c6973af33f4ce85f213d42e876662daaa9c5320"},
+    {file = "blosc-1.11.3.tar.gz", hash = "sha256:89ed658eba7814a92e89c44d8c524148d55921595bc133bd1a90f8888a9e088e"},
+]
+
+[[package]]
 name = "bokeh"
 version = "3.7.3"
 description = "Interactive plots and applications in the browser from Python"
@@ -4567,19 +4617,20 @@ dev = ["argcomplete", "attrs (>=19.2)", "hypothesis (>=3.56)", "mock", "requests
 
 [[package]]
 name = "pytest-asyncio"
-version = "1.1.0"
+version = "1.2.0"
 description = "Pytest support for asyncio"
 optional = false
 python-versions = ">=3.9"
 groups = ["test"]
 files = [
-    {file = "pytest_asyncio-1.1.0-py3-none-any.whl", hash = "sha256:5fe2d69607b0bd75c656d1211f969cadba035030156745ee09e7d71740e58ecf"},
-    {file = "pytest_asyncio-1.1.0.tar.gz", hash = "sha256:796aa822981e01b68c12e4827b8697108f7205020f24b5793b3c41555dab68ea"},
+    {file = "pytest_asyncio-1.2.0-py3-none-any.whl", hash = "sha256:8e17ae5e46d8e7efe51ab6494dd2010f4ca8dae51652aa3c8d55acf50bfb2e99"},
+    {file = "pytest_asyncio-1.2.0.tar.gz", hash = "sha256:c609a64a2a8768462d0c99811ddb8bd2583c33fd33cf7f21af1c142e824ffb57"},
 ]
 
 [package.dependencies]
 backports-asyncio-runner = {version = ">=1.1,<2", markers = "python_version < \"3.11\""}
 pytest = ">=8.2,<9"
+typing-extensions = {version = ">=4.12", markers = "python_version < \"3.13\""}
 
 [package.extras]
 docs = ["sphinx (>=5.3)", "sphinx-rtd-theme (>=1)"]
@@ -4925,19 +4976,19 @@ typing-extensions = {version = ">=4.4.0", markers = "python_version < \"3.13\""}
 
 [[package]]
 name = "requests"
-version = "2.32.3"
+version = "2.32.5"
 description = "Python HTTP for Humans."
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.9"
 groups = ["main", "test"]
 files = [
-    {file = "requests-2.32.3-py3-none-any.whl", hash = "sha256:70761cfe03c773ceb22aa2f671b4757976145175cdfca038c02654d061d6dcc6"},
-    {file = "requests-2.32.3.tar.gz", hash = "sha256:55365417734eb18255590a9ff9eb97e9e1da868d4ccd6402399eaf68af20a760"},
+    {file = "requests-2.32.5-py3-none-any.whl", hash = "sha256:2462f94637a34fd532264295e186976db0f5d453d1cdd31473c85a6a161affb6"},
+    {file = "requests-2.32.5.tar.gz", hash = "sha256:dbba0bac56e100853db0ea71b82b4dfd5fe2bf6d3754a8893c3af500cec7d7cf"},
 ]
 
 [package.dependencies]
 certifi = ">=2017.4.17"
-charset-normalizer = ">=2,<4"
+charset_normalizer = ">=2,<4"
 idna = ">=2.5,<4"
 urllib3 = ">=1.21.1,<3"
 
@@ -6259,4 +6310,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10.14"
-content-hash = "51c27ea1c731a8fb46b30cca45c58a8f7a239efbd0bf4fa8faffe5619c64efa3"
+content-hash = "f3fc52ba14a2c64d5c6976f9fed2d0790ee9c73d6108adc0a783b9b1dd764a37"

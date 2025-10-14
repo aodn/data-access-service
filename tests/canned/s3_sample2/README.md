@@ -3,6 +3,8 @@
 The dataset comes from copy of cloud optimized data, using query like this and execute in the
 corresponding ipnb in https://github.com/aodn/aodn_cloud_optimised/tree/main/notebooks
 
+Noted: vessel_satellite_radiance_derived_product.zarr in intended to missing field as negative test case.
+
 ```python
 # These two dataset do not have depth
 ds1 = aodn_dataset.get_data(date_start='2024-02-04', date_end='2024-02-06')

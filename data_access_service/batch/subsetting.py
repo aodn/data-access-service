@@ -1,6 +1,6 @@
 import json
 
-from data_access_service import init_log, Config
+from data_access_service import init_log, Config, API
 from data_access_service.batch.batch_enums import Parameters
 from data_access_service.batch.subsetting_helper import (
     get_uuid,
@@ -9,7 +9,6 @@ from data_access_service.batch.subsetting_helper import (
     get_subset_request,
 )
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.server import api_setup, app
 from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.tasks.generate_dataset import process_data_files
 from data_access_service.tasks.subset_zarr import ZarrProcessor
@@ -22,7 +21,7 @@ from data_access_service.utils.date_time_utils import (
 
 # The only purpose is to create suitable number of child job, we can fine tune the value
 # on what is optimal value later
-def init(job_id_of_init, parameters):
+def init(api: API, job_id_of_init, parameters):
     # Must be here, this give change for test to init properly before calling get_config()
     config = Config.get_config()
 
@@ -33,7 +32,7 @@ def init(job_id_of_init, parameters):
     requested_start_date, requested_end_date = supply_day_with_nano_precision(
         start_date_str, end_date_str
     )
-    api = api_setup(app)
+
     uuid = get_uuid(parameters)
     keys = get_keys(parameters)
     if "*" in keys:
@@ -42,10 +41,11 @@ def init(job_id_of_init, parameters):
 
     # use new zarr sub-setting workflow if all keys are zarr. It it works well, then deprecate old zarr sub-setting workflow
     if all(key.endswith(".zarr") for key in keys):
-        subset_zarr(job_id_of_init, parameters)
+        subset_zarr(api, job_id_of_init, parameters)
         return
 
     requested_start_date, requested_end_date = trim_date_range_for_keys(
+        api=api,
         uuid=uuid,
         keys=keys,
         requested_start_date=requested_start_date,
@@ -94,7 +94,7 @@ def init(job_id_of_init, parameters):
     )
 
 
-def prepare_data(job_index: str | None, parameters):
+def prepare_data(api: API, job_index: str | None, parameters):
     config = Config.get_config()
     logger = init_log(config)
 
@@ -125,6 +125,7 @@ def prepare_data(job_index: str | None, parameters):
     logger.info(f"End Date:{end_date}")
 
     process_data_files(
+        api,
         master_job_id,
         job_index,
         intermediate_output_folder,
@@ -150,7 +151,7 @@ def collect_data(parameters):
     )
 
 
-def subset_zarr(job_id, parameters):
+def subset_zarr(api: API, job_id, parameters):
     uuid = get_uuid(parameters)
     keys = get_keys(parameters)
     start_date_str = parameters[Parameters.START_DATE.value]
@@ -160,6 +161,7 @@ def subset_zarr(job_id, parameters):
     subset_request = get_subset_request(parameters)
 
     zarr_processor = ZarrProcessor(
+        api=api,
         uuid=uuid,
         job_id=job_id,
         keys=keys,

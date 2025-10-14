@@ -23,15 +23,16 @@ from data_access_service.utils.routes_helper import (
     HealthCheckResponse,
     get_api_instance,
     _verify_datatime_param,
-    _fetch_data,
-    _async_response_json,
+    fetch_data,
+    async_response_json,
     generate_feature_collection,
     generate_rect_features,
 )
 from data_access_service.utils.sse_wrapper import sse_wrapper
 
 router = APIRouter(prefix=Config.BASE_URL)
-logger = init_log(Config.get_config())
+config = Config.get_config()
+logger = init_log(config)
 
 
 @router.get("/health", response_model=HealthCheckResponse)
@@ -39,6 +40,11 @@ async def health_check(request: Request):
     """
     Health check endpoint. The init now become very slow due to the need to load zarr data on init
     so we report status code OK, to avoid AWS timeout but the status value is STARTING
+
+    This endpoint will not be call in Docker run due to fact that we install a Ngnix in front to
+    intercept call of health. The reason is during heavy load, the health may not reply on time
+    and cause AWS kill process. The Ngnix will reply health check using a json that is dump by
+    this process.
     """
     api_instance = get_api_instance(request)
     if api_instance.get_api_status():
@@ -335,7 +341,7 @@ async def get_data(
 
     if sse:
         return await sse_wrapper(
-            _fetch_data,
+            fetch_data,
             api_instance,
             uuid,
             key,
@@ -346,7 +352,7 @@ async def get_data(
             columns,
         )
     else:
-        result = _fetch_data(
+        result = fetch_data(
             api_instance,
             uuid,
             key,
@@ -360,7 +366,6 @@ async def get_data(
         if f == "json":
             # Depends on whether receiver support gzip encoding
             logger.info("Use compressed output %s", compress)
-            return _async_response_json(result, compress)
-        # elif f == "netcdf":
-        #    return _response_netcdf(filtered, background_tasks)
+            return async_response_json(result, compress)
+
         return None

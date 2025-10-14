@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 from data_access_service.core.AWSHelper import AWSHelper
 from aodn_cloud_optimised.lib import DataQuery
-from data_access_service import Config
+from data_access_service import Config, API
 from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.tasks.generate_dataset import (
     process_data_files,
@@ -49,6 +49,9 @@ class TestGenerateZarrFile(TestWithS3):
         config = Config.get_config()
         helper = AWSHelper()
 
+        api = API()
+        api.initialize_metadata()
+
         # This uuid contains two dataset in the canned data
         # uuid 28f8bfed-ca6a-472a-84e4-42563ce4df3f name vessel_satellite_radiance_delayed_qc.zarr
         # uuid 28f8bfed-ca6a-472a-84e4-42563ce4df3f name vessel_satellite_radiance_derived_product.zarr
@@ -57,6 +60,7 @@ class TestGenerateZarrFile(TestWithS3):
             with patch.object(AWSHelper, "send_email") as mock_send_email:
                 try:
                     process_data_files(
+                        api,
                         job_id_of_init=INIT_JOB_ID,
                         job_index="10",
                         intermediate_output_folder=config.get_temp_folder(INIT_JOB_ID),
@@ -101,6 +105,9 @@ class TestGenerateZarrFile(TestWithS3):
         config = Config.get_config()
         helper = AWSHelper()
 
+        api = API()
+        api.initialize_metadata()
+
         # This uuid contains two dataset in the canned data
         # uuid 28f8bfed-ca6a-472a-84e4-42563ce4df3f name vessel_satellite_radiance_delayed_qc.zarr
         # uuid 28f8bfed-ca6a-472a-84e4-42563ce4df3f name vessel_satellite_radiance_derived_product.zarr
@@ -110,6 +117,7 @@ class TestGenerateZarrFile(TestWithS3):
                 try:
                     # Job 1, use different job id to avoid read same folder
                     process_data_files(
+                        api,
                         job_id_of_init="888",
                         job_index="1",
                         intermediate_output_folder=config.get_temp_folder("888"),
@@ -121,6 +129,7 @@ class TestGenerateZarrFile(TestWithS3):
                     )
                     # Job 2
                     process_data_files(
+                        api,
                         job_id_of_init="888",
                         job_index="2",
                         intermediate_output_folder=config.get_temp_folder("888"),
@@ -131,6 +140,7 @@ class TestGenerateZarrFile(TestWithS3):
                         multi_polygon=None,
                     )
                     process_data_files(
+                        api,
                         job_id_of_init="888",
                         job_index="3",
                         intermediate_output_folder=config.get_temp_folder("888"),
@@ -177,12 +187,16 @@ class TestGenerateZarrFile(TestWithS3):
         config = Config.get_config()
         helper = AWSHelper()
 
+        api = API()
+        api.initialize_metadata()
+
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
             # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
             with patch.object(AWSHelper, "send_email") as mock_send_email:
                 try:
                     # Job 1, use different job id to avoid read same folder
                     process_data_files(
+                        api,
                         job_id_of_init="888",
                         job_index="1",
                         intermediate_output_folder=config.get_temp_folder("888"),
@@ -192,7 +206,7 @@ class TestGenerateZarrFile(TestWithS3):
                         end_date=pd.Timestamp("2012-04-30 23:59:59.999999999"),
                         multi_polygon=None,
                     )
-                    # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
+                    # This is a zarr file, we should be able to read the result from S3, and have part-1
                     names = helper.list_s3_folders(
                         config.get_csv_bucket_name(),
                         f"{config.get_s3_temp_folder_name('888')}radar_CoffsHarbour_wind_delayed_qc.zarr",

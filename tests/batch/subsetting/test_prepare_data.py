@@ -10,6 +10,7 @@ from unittest.mock import patch
 from aodn_cloud_optimised.lib import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import Metadata
 
+from data_access_service import API
 from data_access_service.batch.subsetting import prepare_data
 from data_access_service.config.config import Config, EnvType
 from data_access_service.core.AWSHelper import AWSHelper
@@ -75,8 +76,12 @@ class TestDataGeneration(TestWithS3):
                 )
 
                 # prepare data according to the test parameters
+                api = API()
+                api.initialize_metadata()
                 for i in range(5):
-                    prepare_data(job_index=str(i), parameters=PREPARATION_PARAMETERS)
+                    prepare_data(
+                        api, job_index=str(i), parameters=PREPARATION_PARAMETERS
+                    )
 
                 bucket_name = config.get_csv_bucket_name()
                 response = s3_client.list_objects_v2(Bucket=bucket_name)
@@ -146,9 +151,12 @@ class TestDataGeneration(TestWithS3):
         config = Config.get_config()
         config.set_s3_client(s3_client)
 
+        api = API()
+        api.initialize_metadata()
+
         with patch.object(AWSHelper, "send_email") as mock_send_email:
             try:
-                prepare_data(job_index=None, parameters=parameters)
+                prepare_data(api, job_index=None, parameters=parameters)
             except Exception as e:
                 assert False, f"prepare_data raised an exception: {e}"
             finally:

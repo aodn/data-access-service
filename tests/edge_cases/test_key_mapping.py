@@ -8,12 +8,10 @@ from pathlib import Path
 from unittest.mock import patch
 from data_access_service.core.AWSHelper import AWSHelper
 from aodn_cloud_optimised.lib import DataQuery
-from data_access_service import Config
-from data_access_service.tasks.data_collection import collect_data_files
+from data_access_service import Config, API
 from data_access_service.tasks.generate_dataset import (
     process_data_files,
 )
-from tests.batch.batch_test_consts import INIT_JOB_ID
 from tests.core.test_with_s3 import TestWithS3, REGION
 
 
@@ -47,12 +45,16 @@ class TestKeyMapping(TestWithS3):
         config = Config.get_config()
         helper = AWSHelper()
 
+        api = API()
+        api.initialize_metadata()
+
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
             # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
             with patch.object(AWSHelper, "send_email") as mock_send_email:
                 try:
                     # Job 1, use different job id to avoid read same folder
                     process_data_files(
+                        api,
                         job_id_of_init="888",
                         job_index="1",
                         intermediate_output_folder=config.get_temp_folder("888"),
@@ -92,6 +94,9 @@ class TestKeyMapping(TestWithS3):
         config = Config.get_config()
         helper = AWSHelper()
 
+        api = API()
+        api.initialize_metadata()
+
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
             # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
             with patch.object(AWSHelper, "send_email") as mock_send_email:
@@ -100,6 +105,7 @@ class TestKeyMapping(TestWithS3):
                     dname = "satellite_ghrsst_l4_gamssa_1day_multi_sensor_world.zarr"
 
                     process_data_files(
+                        api,
                         job_id_of_init="888",
                         job_index="1",
                         intermediate_output_folder=config.get_temp_folder("888"),
