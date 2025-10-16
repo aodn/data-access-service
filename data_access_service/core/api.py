@@ -99,7 +99,7 @@ class BaseAPI:
         Normalize a longitude value to the range [0, 360], this happens with satellite data which is not [-180, 180]
 
         Parameters:
-        lon (float): Longitude value (can be negative or any real number).
+        lon (float): Longitude value (assume range -180, 180).
 
         Returns:
         float: Normalized longitude in [0, 360].
@@ -108,7 +108,10 @@ class BaseAPI:
 
         if desc is not None:
             if desc.lng.min == 0 and desc.lng.max == 360:
-                return lon % 360
+                if 0 <= lon <= 360:
+                    return lon
+                else:
+                    return lon % 360
 
         return lon
 

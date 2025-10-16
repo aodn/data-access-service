@@ -135,7 +135,9 @@ class TestApi(unittest.TestCase):
         """Test positive wrap-arounds (>180)"""
         self.assertEqual(BaseAPI.normalize_lon(181), -179)
         self.assertEqual(BaseAPI.normalize_lon(360), 0)
-        self.assertEqual(BaseAPI.normalize_lon(540), -180)  # 180 = -180 due to circle
+        self.assertEqual(
+            BaseAPI.normalize_lon(540), -180
+        )  # 180 = -180 due to circle !!! Issue??
         self.assertEqual(BaseAPI.normalize_lon(1000), -80)
 
         """Test negative wrap-arounds (<-180)"""
@@ -165,3 +167,50 @@ class TestApi(unittest.TestCase):
         for input_lon, expected in cases:
             with self.subTest(input_lon=input_lon):
                 self.assertAlmostEqual(BaseAPI.normalize_lon(input_lon), expected)
+
+    with open(
+        Path(__file__).resolve().parent.parent / "canned/catalog_uncached.json", "r"
+    ) as file:
+
+        @patch.object(
+            DataQuery.Metadata,
+            "metadata_catalog_uncached",
+            return_value=json.load(file),
+        )
+        def test_normalize_to_0_360_if_needed(self, get_metadata):
+            """
+            Data from satellite may use lon [0, 360] rather than the usual [-180. 180], this function is used to test
+            the conversion is correct, the function check dataset metadata min max lon to confirm which range it belong
+            :param get_metadata:
+            :return:
+            """
+            api = API()
+            api.initialize_metadata()
+
+            uuid = "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
+            key = "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
+
+            self.assertAlmostEqual(
+                10, api.normalize_to_0_360_if_needed(uuid, key, 370), places=6
+            )
+            self.assertAlmostEqual(
+                350, api.normalize_to_0_360_if_needed(uuid, key, 350.0), places=6
+            )
+            self.assertAlmostEqual(
+                350, api.normalize_to_0_360_if_needed(uuid, key, -370.0), places=6
+            )
+            self.assertAlmostEqual(
+                180, api.normalize_to_0_360_if_needed(uuid, key, 540.0), places=6
+            )
+            self.assertAlmostEqual(
+                179, api.normalize_to_0_360_if_needed(uuid, key, -181.0), places=6
+            )
+            self.assertAlmostEqual(
+                181, api.normalize_to_0_360_if_needed(uuid, key, 181.0), places=6
+            )
+            self.assertAlmostEqual(
+                0, api.normalize_to_0_360_if_needed(uuid, key, 0), places=6
+            )
+            self.assertAlmostEqual(
+                360, api.normalize_to_0_360_if_needed(uuid, key, 360), places=6
+            )
