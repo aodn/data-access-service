@@ -125,6 +125,9 @@ class TestApi(unittest.TestCase):
         assert parsed_result[1]["depth"] is None, "DEPTH NaN should be None"
 
     def test_normalize_lon(self):
+        """Test None"""
+        self.assertEqual(BaseAPI.normalize_lon(None), None)
+
         """Test standard longitude values"""
         self.assertEqual(BaseAPI.normalize_lon(0), 0)
         self.assertEqual(BaseAPI.normalize_lon(90), 90)
@@ -189,6 +192,9 @@ class TestApi(unittest.TestCase):
 
             uuid = "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
             key = "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
+
+            """Test None"""
+            self.assertEqual(api.normalize_to_0_360_if_needed(uuid, key, None), None)
 
             self.assertAlmostEqual(
                 10, api.normalize_to_0_360_if_needed(uuid, key, 370), places=6

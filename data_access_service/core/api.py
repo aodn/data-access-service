@@ -94,7 +94,7 @@ class BaseAPI:
 
         return None
 
-    def normalize_to_0_360_if_needed(self, uuid: str, key: str, lon: float):
+    def normalize_to_0_360_if_needed(self, uuid: str, key: str, lon: float | None):
         """
         Normalize a longitude value to the range [0, 360], this happens with satellite data which is not [-180, 180]
 
@@ -130,7 +130,7 @@ class BaseAPI:
             return None
 
     @staticmethod
-    def normalize_lon(lon: float) -> float:
+    def normalize_lon(lon: float | None) -> float:
         if lon is None or -180 <= lon <= 180:
             return lon
         else:
