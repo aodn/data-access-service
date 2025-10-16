@@ -35,4 +35,4 @@ EXPOSE 8000
 # will restart the app. The ngnix is use to block too many request and offload the health check so
 # that we always get response even the app is busy. User who do not want this behavior should
 # use their own entry point to start the app
-ENTRYPOINT ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
