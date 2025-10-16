@@ -11,6 +11,7 @@ from unittest.mock import patch
 from aodn_cloud_optimised import DataQuery
 
 from data_access_service import API
+from data_access_service.core.api import BaseAPI
 from data_access_service.utils.routes_helper import (
     _generate_partial_json_array,
     _response_json,
@@ -123,6 +124,44 @@ class TestApi(unittest.TestCase):
         assert parsed_result[1]["longitude"] is None, "LONGITUDE NaN should be None"
         assert parsed_result[1]["depth"] is None, "DEPTH NaN should be None"
 
+    def test_normalize_lon(self):
+        """Test standard longitude values"""
+        self.assertEqual(BaseAPI.normalize_lon(0), 0)
+        self.assertEqual(BaseAPI.normalize_lon(90), 90)
+        self.assertEqual(BaseAPI.normalize_lon(-90), -90)
+        self.assertEqual(BaseAPI.normalize_lon(180), 180)
+        self.assertEqual(BaseAPI.normalize_lon(-180), -180)
 
-if __name__ == "__main__":
-    unittest.main()
+        """Test positive wrap-arounds (>180)"""
+        self.assertEqual(BaseAPI.normalize_lon(181), -179)
+        self.assertEqual(BaseAPI.normalize_lon(360), 0)
+        self.assertEqual(BaseAPI.normalize_lon(540), -180)  # 180 = -180 due to circle
+        self.assertEqual(BaseAPI.normalize_lon(1000), -80)
+
+        """Test negative wrap-arounds (<-180)"""
+        self.assertEqual(BaseAPI.normalize_lon(-181), 179)
+        self.assertEqual(BaseAPI.normalize_lon(-360), 0)
+        self.assertEqual(BaseAPI.normalize_lon(-540), -180)
+        self.assertEqual(BaseAPI.normalize_lon(-1000), 80)
+
+        """Test exact boundary values"""
+        self.assertEqual(BaseAPI.normalize_lon(180.0), 180.0)
+        self.assertEqual(BaseAPI.normalize_lon(-180.0), -180.0)
+        self.assertEqual(BaseAPI.normalize_lon(179.999), 179.999)
+        self.assertEqual(BaseAPI.normalize_lon(-179.999), -179.999)
+
+        """Test with decimal degrees"""
+        self.assertAlmostEqual(BaseAPI.normalize_lon(181.5), -178.5)
+        self.assertAlmostEqual(BaseAPI.normalize_lon(-181.5), 178.5)
+        self.assertAlmostEqual(BaseAPI.normalize_lon(360.1), 0.1)
+
+        """Test values from actual GPS datasets"""
+        cases = [
+            (370.0, 10.0),  # Pacific crossing
+            (-350.0, 10.0),  # Atlantic crossing
+            (179.999999, 179.999999),
+            (-179.999999, -179.999999),
+        ]
+        for input_lon, expected in cases:
+            with self.subTest(input_lon=input_lon):
+                self.assertAlmostEqual(BaseAPI.normalize_lon(input_lon), expected)

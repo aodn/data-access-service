@@ -94,6 +94,24 @@ class BaseAPI:
 
         return None
 
+    def normalize_to_0_360_if_needed(self, uuid: str, key: str, lon: float):
+        """
+        Normalize a longitude value to the range [0, 360], this happens with satellite data which is not [-180, 180]
+
+        Parameters:
+        lon (float): Longitude value (can be negative or any real number).
+
+        Returns:
+        float: Normalized longitude in [0, 360].
+        """
+        desc: Descriptor = self.get_mapped_meta_data(uuid)[key]
+
+        if desc is not None:
+            if desc.lng.min == 0 and desc.lng.max == 360:
+                return lon % 360
+
+        return lon
+
     @staticmethod
     def _extract_depth(data: dict) -> Depth | None:
         # We need to extract depth info
@@ -107,17 +125,11 @@ class BaseAPI:
             return None
 
     @staticmethod
-    def normalize_to_0_360(lon):
-        """
-        Normalize a longitude value to the range [0, 360], this happens with satellite data which is not [-180, 180]
-
-        Parameters:
-        lon (float): Longitude value (can be negative or any real number).
-
-        Returns:
-        float: Normalized longitude in [0, 360].
-        """
-        return lon % 360
+    def normalize_lon(lon: float) -> float:
+        if -180 <= lon <= 180:
+            return lon
+        else:
+            return ((lon + 180) % 360) - 180
 
     @staticmethod
     def fix_encode_error_nested_dict(data):
@@ -704,7 +716,14 @@ class API(BaseAPI):
             if date_end.tz is not None:
                 date_end = date_end.tz_localize(None)
 
-            # Now we need to check the convention to use for coordination system
+            # First, make sure lon is [-180, 180], some map application allow > 180
+            lon_min = BaseAPI.normalize_lon(lon_min)
+            lon_max = BaseAPI.normalize_lon(lon_max)
+
+            # Now depends on dataset, especially satellite have convention [0,360] inside data
+            # so we need to map it back to dataset specific coordinate
+            lon_min = self.normalize_to_0_360_if_needed(uuid, key, lon_min)
+            lon_max = self.normalize_to_0_360_if_needed(uuid, key, lon_max)
 
             try:
                 # All precision to nanosecond
