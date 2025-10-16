@@ -4,12 +4,6 @@ import boto3
 
 from data_access_service import init_log, Config, API
 from data_access_service.batch import subsetting
-from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.models.bounding_box import BoundingBox
-from data_access_service.models.subset_request import SubsetRequest
-from data_access_service.utils.email_templates.download_email import (
-    get_download_email_html_body,
-)
 
 logger = init_log(Config.get_config())
 
