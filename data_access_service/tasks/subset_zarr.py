@@ -39,7 +39,7 @@ class ZarrProcessor:
         self.job_id = job_id
         self.uuid = uuid
         self.recipient = recipient
-        
+
         start_date, end_date = supply_day_with_nano_precision(
             start_date_str=start_date_str,
             end_date_str=end_date_str,
@@ -62,7 +62,7 @@ class ZarrProcessor:
         self.end_date = trimmed_end_date
         self.multi_polygon = MultiPolygonHelper(multi_polygon=multi_polygon)
         self.bboxes = self.multi_polygon.bboxes
-        
+
         # Create a subset_request-like object for email template
         class SubsetRequest:
             def __init__(self, uuid, keys, start_date, end_date, bboxes, recipient):
@@ -72,14 +72,14 @@ class ZarrProcessor:
                 self.end_date = end_date
                 self.bboxes = bboxes
                 self.recipient = recipient
-        
+
         self.subset_request = SubsetRequest(
             uuid=self.uuid,
             keys=self.keys,
             start_date=start_date_str,
             end_date=end_date_str,
             bboxes=self.bboxes,
-            recipient=self.recipient
+            recipient=self.recipient,
         )
 
     def process(self):
