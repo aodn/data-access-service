@@ -104,14 +104,16 @@ class BaseAPI:
         Returns:
         float: Normalized longitude in [0, 360].
         """
-        desc: Descriptor = self.get_mapped_meta_data(uuid)[key]
 
-        if desc is not None:
-            if desc.lng.min == 0 and desc.lng.max == 360:
-                if 0 <= lon <= 360:
-                    return lon
-                else:
-                    return lon % 360
+        if lon is not None:
+            desc: Descriptor = self.get_mapped_meta_data(uuid)[key]
+
+            if desc is not None:
+                if desc.lng.min == 0 and desc.lng.max == 360:
+                    if 0 <= lon <= 360:
+                        return lon
+                    else:
+                        return lon % 360
 
         return lon
 
@@ -129,7 +131,7 @@ class BaseAPI:
 
     @staticmethod
     def normalize_lon(lon: float) -> float:
-        if -180 <= lon <= 180:
+        if lon is None or -180 <= lon <= 180:
             return lon
         else:
             return ((lon + 180) % 360) - 180
