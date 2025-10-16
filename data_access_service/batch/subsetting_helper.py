@@ -39,7 +39,7 @@ def get_subset_request(parameters) -> SubsetRequest:
         keys=keys,
         start_date=start_date,
         end_date=end_date,
-        bbox=bboxes,
+        bboxes=bboxes,
         recipient=recipient,
     )
 
