@@ -20,23 +20,20 @@ from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, ZarrDataSource
 from aodn_cloud_optimised.lib.config import get_notebook_url
 from bokeh.server.tornado import psutil
 from xarray.core.utils import Frozen
-from data_access_service.core.descriptor import Depth, Descriptor
+
+from data_access_service.core.constants import (
+    STR_LATITUDE_UPPER_CASE,
+    STR_LATITUDE_LOWER_CASE,
+    STR_LONGITUDE_UPPER_CASE,
+    STR_LONGITUDE_LOWER_CASE,
+)
+from data_access_service.core.descriptor import Depth, Descriptor, Coordinate
 from urllib.parse import unquote_plus
 
 
 log = logging.getLogger(__name__)
 
 HEALTH_JSON = "/tmp/status/health.json"
-
-
-def _extract_depth(data: dict):
-    # We need to extract depth info
-    depth = data.get("DEPTH")
-
-    if depth is not None:
-        return Depth(depth.get("valid_min"), depth.get("valid_max"), depth.get("units"))
-    else:
-        return None
 
 
 def gzip_compress(data):
@@ -77,6 +74,50 @@ class BaseAPI:
 
     def get_api_status(self) -> bool:
         return False
+
+    def map_column_names(
+        self, uuid: str, key: str, columns: list[str] | None
+    ) -> list[str] | None:
+        pass
+
+    def _extract_coordinate(
+        self, data: dict, uuid: str, key: str, column: str
+    ) -> Coordinate | None:
+
+        if data is not None:
+            # Translate to the correct column name for dataset
+            mapped_col = self.map_column_names(uuid, key, [column])[0]
+            val = data.get(mapped_col)
+
+            if val is not None:
+                return Coordinate(min=val.get("valid_min"), max=val.get("valid_max"))
+
+        return None
+
+    @staticmethod
+    def _extract_depth(data: dict) -> Depth | None:
+        # We need to extract depth info
+        depth = data.get("DEPTH")
+
+        if depth is not None:
+            return Depth(
+                depth.get("valid_min"), depth.get("valid_max"), depth.get("units")
+            )
+        else:
+            return None
+
+    @staticmethod
+    def normalize_to_0_360(lon):
+        """
+        Normalize a longitude value to the range [0, 360], this happens with satellite data which is not [-180, 180]
+
+        Parameters:
+        lon (float): Longitude value (can be negative or any real number).
+
+        Returns:
+        float: Normalized longitude in [0, 360].
+        """
+        return lon % 360
 
     @staticmethod
     def fix_encode_error_nested_dict(data):
@@ -363,13 +404,13 @@ class API(BaseAPI):
 
         ds = ddf.from_pandas(waveBuoyPositionQueryResult)
         lat = (
-            ds["LATITUDE"].compute().values[0]
-            if len(ds["LATITUDE"].compute().values) > 0
+            ds[STR_LATITUDE_UPPER_CASE].compute().values[0]
+            if len(ds[STR_LATITUDE_UPPER_CASE].compute().values) > 0
             else None
         )
         lon = (
-            ds["LONGITUDE"].compute().values[0]
-            if len(ds["LONGITUDE"].compute().values) > 0
+            ds[STR_LONGITUDE_UPPER_CASE].compute().values[0]
+            if len(ds[STR_LONGITUDE_UPPER_CASE].compute().values) > 0
             else None
         )
 
@@ -429,7 +470,10 @@ class API(BaseAPI):
                 },
                 "geometry": {
                     "type": "Point",
-                    "coordinates": [row["LONGITUDE"], row["LATITUDE"]],
+                    "coordinates": [
+                        row[STR_LONGITUDE_UPPER_CASE],
+                        row[STR_LATITUDE_UPPER_CASE],
+                    ],
                 },
             }
             feature_collection["features"].append(feature)
@@ -457,7 +501,15 @@ class API(BaseAPI):
                     self._cached_metadata[uuid] = dict()
                 # We can add directly because the dict() created
                 self._cached_metadata[uuid][key] = Descriptor(
-                    uuid=uuid, dname=key, depth=_extract_depth(data)
+                    uuid=uuid,
+                    dname=key,
+                    lat=self._extract_coordinate(
+                        data, uuid, key, STR_LATITUDE_UPPER_CASE
+                    ),
+                    lng=self._extract_coordinate(
+                        data, uuid, key, STR_LONGITUDE_UPPER_CASE
+                    ),
+                    depth=BaseAPI._extract_depth(data),
                 )
             else:
                 log.error("Mising UUID entry for dataset " + key)
@@ -554,24 +606,26 @@ class API(BaseAPI):
             ):
                 # Just ignore the field in the query, assume zero
                 pass
-            elif column.casefold() == "LATITUDE".casefold() and (
-                "LATITUDE" not in meta or "latitude" not in meta
+            elif column.casefold() == STR_LATITUDE_UPPER_CASE.casefold() and (
+                STR_LATITUDE_UPPER_CASE not in meta
+                or STR_LATITUDE_LOWER_CASE not in meta
             ):
                 match meta:
-                    case meta if "latitude" in meta:
-                        output.append("latitude")
-                    case meta if "LATITUDE" in meta:
-                        output.append("LATITUDE")
+                    case meta if STR_LATITUDE_LOWER_CASE in meta:
+                        output.append(STR_LATITUDE_LOWER_CASE)
+                    case meta if STR_LATITUDE_UPPER_CASE in meta:
+                        output.append(STR_LATITUDE_UPPER_CASE)
                     case meta if "lat" in meta:
                         output.append("lat")
-            elif column.casefold() == "LONGITUDE".casefold() and (
-                "LONGITUDE" not in meta or "longitude" not in meta
+            elif column.casefold() == STR_LONGITUDE_UPPER_CASE.casefold() and (
+                STR_LONGITUDE_UPPER_CASE not in meta
+                or STR_LONGITUDE_LOWER_CASE not in meta
             ):
                 match meta:
-                    case meta if "longitude" in meta:
-                        output.append("longitude")
-                    case meta if "LONGITUDE" in meta:
-                        output.append("LONGITUDE")
+                    case meta if STR_LONGITUDE_LOWER_CASE in meta:
+                        output.append(STR_LONGITUDE_LOWER_CASE)
+                    case meta if STR_LONGITUDE_UPPER_CASE in meta:
+                        output.append(STR_LONGITUDE_UPPER_CASE)
                     case meta if "lon" in meta:
                         output.append("lon")
             else:
@@ -604,7 +658,22 @@ class API(BaseAPI):
         scalar_filter=None,
         columns: list[str] = None,
     ) -> Optional[ddf.DataFrame | xarray.Dataset]:
+        """
+        Get the data by calling cloud optimized data library aodn_cloud_optimised
+        :param uuid: The UUID of the dataset
+        :param key: Each UUID may have more than one dataset, this key is use to select the dataset you need
+        :param date_start: Filter by start date
+        :param date_end: Filter by end date
+        :param lat_min: Filter by min lat, assume -90, 90
+        :param lat_max: Filter by max lat, assume -90, 90
+        :param lon_min: Filter by min lon, assume -180, 180
+        :param lon_max: Filter by max lon, assume -180, 180
+        :param scalar_filter: Additional filter not support by the argument
+        :param columns: The column include in the return result, this is used to reduce unnecessary data flow
+        :return: The dataset, noted zarr and parquest return different data type.
+        """
         ds = self.get_datasource(uuid, key)
+
         if ds is not None:
             # Default get 10 days of data
             if date_start is None:
@@ -634,6 +703,8 @@ class API(BaseAPI):
 
             if date_end.tz is not None:
                 date_end = date_end.tz_localize(None)
+
+            # Now we need to check the convention to use for coordination system
 
             try:
                 # All precision to nanosecond
