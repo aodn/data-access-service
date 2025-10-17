@@ -103,6 +103,7 @@ class TestDataGeneration(TestWithS3):
                     master_job_id="999",
                     dataset_uuid="test-dataset-uuid",
                     recipient="test@example.com",
+                    subset_request=None,
                 )
                 response2 = s3_client.list_objects_v2(
                     Bucket=bucket_name, Prefix=compressed_s3_key

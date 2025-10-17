@@ -31,11 +31,17 @@ class TestAWSHelper(TestWithS3):
         helper = AWSHelper()
         receipt = "receipt@test.com"
         subject = "This is a test"
-        links = ["http://test/test.zip", "https://test/test1.zip"]
+        download_urls = ["http://test/test.zip", "https://test/test1.zip"]
 
         # Need to setup email verify otherwise SES will reject sent
         ses_client.verify_email_identity(EmailAddress=config.get_sender_email())
-        helper.send_email(receipt, subject, links)
+        html_body = """<html>
+        <body>
+        <a href="http://test/test.zip">http://test/test.zip</a>
+        <a href="https://test/test1.zip">https://test/test1.zip</a>
+        </body>
+        </html>"""
+        helper.send_email(receipt, subject, download_urls=download_urls)
 
         # Retrieve sent emails from LocalStack SES endpoint
         try:

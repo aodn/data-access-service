@@ -77,9 +77,10 @@ class TestGenerateZarrFile(TestWithS3):
 
                     # At least we can convert it to netcdf
                     collect_data_files(
-                        INIT_JOB_ID,
-                        "28f8bfed-ca6a-472a-84e4-42563ce4df3f",
-                        "testreceipt@something.com",
+                        master_job_id=INIT_JOB_ID,
+                        dataset_uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                        recipient="testreceipt@something.com",
+                        subset_request=None,
                     )
                 except Exception as ex:
                     raise ex
