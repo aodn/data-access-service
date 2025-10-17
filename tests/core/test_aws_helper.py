@@ -16,6 +16,9 @@ from botocore.exceptions import ClientError
 from data_access_service.config.config import IntTestConfig, Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.constants import PARTITION_KEY
+from data_access_service.utils.email_templates.download_email import (
+    get_download_email_html_body,
+)
 from tests.core.test_with_s3 import TestWithS3
 
 
@@ -35,7 +38,21 @@ class TestAWSHelper(TestWithS3):
 
         # Need to setup email verify otherwise SES will reject sent
         ses_client.verify_email_identity(EmailAddress=config.get_sender_email())
-        helper.send_email(receipt, subject, download_urls)
+
+        # Create a mock subset_request for the email template
+        class MockSubsetRequest:
+            uuid = "test-uuid"
+            keys = ["*"]
+            start_date = "2024-01-01"
+            end_date = "2024-12-31"
+
+        # Convert download_urls to HTML body using the template function
+        html_body = get_download_email_html_body(
+            subset_request=MockSubsetRequest(), object_urls=download_urls
+        )
+
+        # Send email with proper HTML string
+        helper.send_email(receipt, subject, html_body=html_body)
 
         # Retrieve sent emails from LocalStack SES endpoint
         try:
@@ -82,12 +99,12 @@ class TestAWSHelper(TestWithS3):
                     ), "Text correct"
 
                     # Check HTML contains both URLs (flexible check)
-                    html_body = email["Body"]["html_part"]
+                    html_body_received = email["Body"]["html_part"]
                     assert (
-                        "http://test/test.zip" in html_body
+                        "http://test/test.zip" in html_body_received
                     ), "Html contains first URL"
                     assert (
-                        "https://test/test1.zip" in html_body
+                        "https://test/test1.zip" in html_body_received
                     ), "Html contains second URL"
                     break
 
