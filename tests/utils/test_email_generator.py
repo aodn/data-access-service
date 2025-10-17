@@ -6,8 +6,10 @@ from data_access_service.utils.email_generator import (
     generate_completed_email_content,
 )
 
+
 def create_dummy_subset_request(uuid, keys, start_date, end_date, recipient):
     """Create a dummy SubsetRequest for testing"""
+
     class SubsetRequest:
         def __init__(self, uuid, keys, start_date, end_date, recipient):
             self.uuid = uuid
@@ -15,8 +17,9 @@ def create_dummy_subset_request(uuid, keys, start_date, end_date, recipient):
             self.start_date = start_date
             self.end_date = end_date
             self.recipient = recipient
+
     return SubsetRequest(uuid, keys, start_date, end_date, recipient)
-    
+
 
 class TestEmailGenerator(unittest.TestCase):
 

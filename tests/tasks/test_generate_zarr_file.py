@@ -83,7 +83,7 @@ class TestGenerateZarrFile(TestWithS3):
                         keys=["*"],
                         start_date="2011-07-01",
                         end_date="2011-09-01",
-                        recipient="testreceipt@something.com"
+                        recipient="testreceipt@something.com",
                     )
 
                     collect_data_files(

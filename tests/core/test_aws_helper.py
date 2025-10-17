@@ -74,18 +74,23 @@ class TestAWSHelper(TestWithS3):
                         receipt
                     ], "ToAddress correct"
                     assert email["Subject"] == subject, "Subject correct"
-                    
+
                     # Check text part exists
                     assert (
-                        "Please use the link below to download the files" in email["Body"]["text_part"]
+                        "Please use the link below to download the files"
+                        in email["Body"]["text_part"]
                     ), "Text correct"
-                    
+
                     # Check HTML contains both URLs (flexible check)
                     html_body = email["Body"]["html_part"]
-                    assert "http://test/test.zip" in html_body, "Html contains first URL"
-                    assert "https://test/test1.zip" in html_body, "Html contains second URL"
+                    assert (
+                        "http://test/test.zip" in html_body
+                    ), "Html contains first URL"
+                    assert (
+                        "https://test/test1.zip" in html_body
+                    ), "Html contains second URL"
                     break
-            
+
             if not email_found:
                 assert False, "Email not found in LocalStack SES."
 
@@ -273,4 +278,3 @@ class TestAWSHelper(TestWithS3):
 
 def has_invalid_unicode(s: str) -> bool:
     return any(0xD800 <= ord(ch) <= 0xDFFF for ch in s)
-    
