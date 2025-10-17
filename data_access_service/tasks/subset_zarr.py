@@ -13,14 +13,17 @@ from data_access_service import init_log, Config, API
 from data_access_service.batch.subsetting_helper import trim_date_range_for_keys
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.models.multi_polygon_helper import MultiPolygonHelper
+from data_access_service.server import api_setup, app
 from data_access_service.utils.date_time_utils import supply_day_with_nano_precision
+from data_access_service.utils.email_templates.download_email import (
+    get_download_email_html_body,
+)
 from data_access_service.utils.process_logger import ProcessLogger
 
 
 class ZarrProcessor:
     def __init__(
         self,
-        api: API,
         uuid: str,
         job_id: str,
         keys: List[str],
@@ -30,14 +33,16 @@ class ZarrProcessor:
         recipient: str,
     ):
         self.aws = AWSHelper()
-        self.api = api
+        self.api = api_setup(app)
         self.config = Config.get_config()
         self.log = init_log(self.config)
-        self.uuid = uuid
         self.job_id = job_id
+        self.uuid = uuid
         self.recipient = recipient
+
         start_date, end_date = supply_day_with_nano_precision(
-            start_date_str=start_date_str, end_date_str=end_date_str
+            start_date_str=start_date_str,
+            end_date_str=end_date_str,
         )
 
         if "*" in keys:
@@ -47,7 +52,7 @@ class ZarrProcessor:
             self.keys = keys
 
         trimmed_start_date, trimmed_end_date = trim_date_range_for_keys(
-            api=api,
+            api=self.api,
             uuid=uuid,
             keys=self.keys,
             requested_start_date=start_date,
@@ -56,6 +61,26 @@ class ZarrProcessor:
         self.start_date = trimmed_start_date
         self.end_date = trimmed_end_date
         self.multi_polygon = MultiPolygonHelper(multi_polygon=multi_polygon)
+        self.bboxes = self.multi_polygon.bboxes
+
+        # Create a subset_request-like object for email template
+        class SubsetRequest:
+            def __init__(self, uuid, keys, start_date, end_date, bboxes, recipient):
+                self.uuid = uuid
+                self.keys = keys
+                self.start_date = start_date
+                self.end_date = end_date
+                self.bboxes = bboxes
+                self.recipient = recipient
+
+        self.subset_request = SubsetRequest(
+            uuid=self.uuid,
+            keys=self.keys,
+            start_date=start_date_str,
+            end_date=end_date_str,
+            bboxes=self.bboxes,
+            recipient=self.recipient,
+        )
 
     def process(self):
         self.log.info(
@@ -72,13 +97,18 @@ class ZarrProcessor:
             download_uri = self.__write_to_s3_as_netcdf(dataset=dataset, key=key)
             urls.append(download_uri)
         subject = f"Finish processing data file whose uuid is:  {self.uuid}"
+
+        html_content = get_download_email_html_body(
+            subset_request=self.subset_request, object_urls=urls
+        )
+
         self.aws.send_email(
-            recipient=self.recipient, subject=subject, download_urls=urls
+            recipient=self.recipient, subject=subject, html_body=html_content
         )
 
     def __get_zarr_dataset_for_(self, key: str) -> xarray.Dataset | None:
         merged_dataset: xarray.Dataset | None = None
-        for bbox in self.multi_polygon.bboxes:
+        for bbox in self.bboxes:
 
             subset = self.api.get_dataset(
                 uuid=self.uuid,
