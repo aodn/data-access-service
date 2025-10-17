@@ -2,6 +2,7 @@ from data_access_service.utils.email_templates.email_images import (
     DOWNLOAD_ICON,
 )
 
+
 def generate_download_button_html(object_urls):
     """
     Generate download button HTML only for single URL.

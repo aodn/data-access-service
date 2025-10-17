@@ -7,8 +7,11 @@ from data_access_service.utils.email_generator import (
 )
 
 
-def create_dummy_subset_request(uuid, keys, start_date, end_date, recipient, bboxes=None):
+def create_dummy_subset_request(
+    uuid, keys, start_date, end_date, recipient, bboxes=None
+):
     """Create a dummy SubsetRequest for testing"""
+
     class SubsetRequest:
         def __init__(self, uuid, keys, start_date, end_date, recipient, bboxes):
             self.uuid = uuid
@@ -17,6 +20,7 @@ def create_dummy_subset_request(uuid, keys, start_date, end_date, recipient, bbo
             self.end_date = end_date
             self.recipient = recipient
             self.bboxes = bboxes if bboxes else []
+
     return SubsetRequest(uuid, keys, start_date, end_date, recipient, bboxes)
 
 

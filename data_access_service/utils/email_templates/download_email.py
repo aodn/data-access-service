@@ -1,5 +1,7 @@
 from data_access_service.models.subset_request import SubsetRequest
-from data_access_service.utils.email_templates.download_button import generate_download_button_html
+from data_access_service.utils.email_templates.download_button import (
+    generate_download_button_html,
+)
 from data_access_service.utils.email_templates.form_bbox_divs import form_bbox_divs
 from data_access_service.utils.email_templates.email_images import (
     HEADER_IMG,
