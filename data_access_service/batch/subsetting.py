@@ -93,7 +93,7 @@ def init(api: API, job_id_of_init, parameters):
     )
 
 
-def prepare_data(api: API, job_index: str | None, parameters):
+def prepare_data(api: API, job_index: str | None, parameters) -> str | None:
     config = Config.get_config()
     logger = init_log(config)
 
@@ -123,7 +123,7 @@ def prepare_data(api: API, job_index: str | None, parameters):
     logger.info(f"Start Date:{start_date}")
     logger.info(f"End Date:{end_date}")
 
-    process_data_files(
+    return process_data_files(
         api,
         master_job_id,
         job_index,
