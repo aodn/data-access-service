@@ -75,12 +75,20 @@ class TestGenerateZarrFile(TestWithS3):
                     data = helper.read_multipart_zarr_from_s3(target_path)
                     assert len(data["TIME"]) == 158902, "file have enough data"
 
+                    subset_request = create_dummy_subset_request(
+                        uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                        keys=["*"],
+                        start_date="2011-07-01",
+                        end_date="2011-09-01",
+                        recipient="test@example.com"
+                    )
+
                     # At least we can convert it to netcdf
                     collect_data_files(
                         master_job_id=INIT_JOB_ID,
                         dataset_uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
-                        recipient="testreceipt@something.com",
-                        subset_request=None,
+                        recipient="test@example.com",
+                        subset_request=subset_request,
                     )
                 except Exception as ex:
                     raise ex

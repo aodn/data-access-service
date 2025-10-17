@@ -97,13 +97,21 @@ class TestDataGeneration(TestWithS3):
                     == "999/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11/part.0.parquet"
                 )
 
+                subset_request = create_dummy_subset_request(
+                    uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                    keys=["*"],
+                    start_date="2011-07-01",
+                    end_date="2011-09-01",
+                    recipient="test@example.com"
+                )
+
                 # Check if the files are compressed and uploaded correctly
                 compressed_s3_key = "999/autonomous_underwater_vehicle.zip"
                 collect_data_files(
                     master_job_id="999",
                     dataset_uuid="test-dataset-uuid",
                     recipient="test@example.com",
-                    subset_request=None,
+                    subset_request=subset_request,
                 )
                 response2 = s3_client.list_objects_v2(
                     Bucket=bucket_name, Prefix=compressed_s3_key

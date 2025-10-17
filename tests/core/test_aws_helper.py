@@ -41,7 +41,7 @@ class TestAWSHelper(TestWithS3):
         <a href="https://test/test1.zip">https://test/test1.zip</a>
         </body>
         </html>"""
-        helper.send_email(receipt, subject, download_urls=download_urls)
+        helper.send_email(receipt, subject, download_urls)
 
         # Retrieve sent emails from LocalStack SES endpoint
         try:
