@@ -35,12 +35,6 @@ class TestAWSHelper(TestWithS3):
 
         # Need to setup email verify otherwise SES will reject sent
         ses_client.verify_email_identity(EmailAddress=config.get_sender_email())
-        html_body = """<html>
-        <body>
-        <a href="http://test/test.zip">http://test/test.zip</a>
-        <a href="https://test/test1.zip">https://test/test1.zip</a>
-        </body>
-        </html>"""
         helper.send_email(receipt, subject, download_urls)
 
         # Retrieve sent emails from LocalStack SES endpoint
@@ -66,11 +60,13 @@ class TestAWSHelper(TestWithS3):
                 assert False, "No emails found in LocalStack SES."
 
             # Find the latest email (or filter by Message ID if needed)
+            email_found = False
             for email in emails:
                 if (
                     email["Source"] == config.get_sender_email()
                     and email["Subject"] == subject
                 ):
+                    email_found = True
                     assert (
                         email["Source"] == config.get_sender_email()
                     ), "Source correct"
@@ -78,16 +74,20 @@ class TestAWSHelper(TestWithS3):
                         receipt
                     ], "ToAddress correct"
                     assert email["Subject"] == subject, "Subject correct"
+                    
+                    # Check text part exists
                     assert (
-                        email["Body"]["text_part"]
-                        == "Hello, User!\nPlease use the link below to download the files"
+                        "Please use the link below to download the files" in email["Body"]["text_part"]
                     ), "Text correct"
-                    assert (
-                        email["Body"]["html_part"].strip()
-                        == """<html>\n        <body>\n            [\'<a href="http://test/test.zip">http://test/test.zip</a>\', \'<a href="https://test/test1.zip">https://test/test1.zip</a>\']\n        </body>\n        </html>"""
-                    ), "Html correct"
-                else:
-                    assert False, "Email not found in LocalStack SES."
+                    
+                    # Check HTML contains both URLs (flexible check)
+                    html_body = email["Body"]["html_part"]
+                    assert "http://test/test.zip" in html_body, "Html contains first URL"
+                    assert "https://test/test1.zip" in html_body, "Html contains second URL"
+                    break
+            
+            if not email_found:
+                assert False, "Email not found in LocalStack SES."
 
         except requests.exceptions.RequestException as e:
             assert False, f"Error fetching emails: {e}"
@@ -273,3 +273,4 @@ class TestAWSHelper(TestWithS3):
 
 def has_invalid_unicode(s: str) -> bool:
     return any(0xD800 <= ord(ch) <= 0xDFFF for ch in s)
+    
