@@ -68,7 +68,7 @@ def process_data_files(
                 multi_polygon_dict,
             )
             if has_result:
-                upload_all_files_in_folder_to_temp_s3(
+                return upload_all_files_in_folder_to_temp_s3(
                     master_job_id=job_id_of_init,
                     local_folder=intermediate_output_folder,
                     aws=aws,

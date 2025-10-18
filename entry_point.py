@@ -38,6 +38,10 @@ match call_type:
     case "sub-setting":
         subsetting.init(api, job_id_of_init=job_id, parameters=parameters)
     case "sub-setting-data-preparation":
+        """
+        Please take noted that the parameters in each call are different, the batch will call the
+        first job init, and init job will add some parameter before calling the prepare_data job
+        """
         subsetting.prepare_data(api, job_index=job_index, parameters=parameters)
     case "sub-setting-data-collection":
         subsetting.collect_data(parameters=parameters)

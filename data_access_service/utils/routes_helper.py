@@ -181,7 +181,7 @@ def _round_5_decimal(value: float) -> float:
     return round(value, 5)
 
 
-def _verify_datatime_param(name: str, req_date: str) -> pd.Timestamp:
+def verify_datatime_param(name: str, req_date: str) -> pd.Timestamp:
     _date = None
 
     if req_date is not None and name == "end_date":

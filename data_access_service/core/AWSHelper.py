@@ -401,7 +401,7 @@ class AWSHelper:
         """
         The s3 connection need to set via mock because the mfdataset call the
         get_fs_token_paths where argument cannot be pass via s3_client. Hence, it is
-        expect you call the mock_get_fs_token_paths because call this function
+        expected you call the mock_get_fs_token_paths because call this function
         :param file_path:
         :return:
         """

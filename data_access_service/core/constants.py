@@ -9,6 +9,8 @@ STR_TIME_LOWER_CASE = sys.intern("time")
 STR_LONGITUDE_LOWER_CASE = sys.intern("longitude")
 STR_LATITUDE_LOWER_CASE = sys.intern("latitude")
 STR_DEPTH_LOWER_CASE = sys.intern("depth")
+STR_LATITUDE_UPPER_CASE = sys.intern("LATITUDE")
+STR_LONGITUDE_UPPER_CASE = sys.intern("LONGITUDE")
 
 STATUS = "status"
 MESSAGE = "message"
