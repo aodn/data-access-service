@@ -110,10 +110,7 @@ class BaseAPI:
 
             if desc is not None:
                 if desc.lng.min == 0 and desc.lng.max == 360:
-                    if 0 <= lon <= 360:
-                        return lon
-                    else:
-                        return lon % 360
+                    return lon % 360
 
         return lon
 
@@ -134,7 +131,14 @@ class BaseAPI:
         if lon is None or -180 <= lon <= 180:
             return lon
         else:
-            return ((lon + 180) % 360) - 180
+            val = ((lon + 180) % 360) - 180
+            # Handle special case where input 540 will become -180
+            if val == -180 and lon > 180:
+                return 180
+            elif val == 180 and lon < -180:
+                return -180
+            else:
+                return val
 
     @staticmethod
     def fix_encode_error_nested_dict(data):

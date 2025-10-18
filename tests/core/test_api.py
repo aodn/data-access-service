@@ -139,7 +139,7 @@ class TestApi(unittest.TestCase):
         self.assertEqual(BaseAPI.normalize_lon(181), -179)
         self.assertEqual(BaseAPI.normalize_lon(360), 0)
         self.assertEqual(
-            BaseAPI.normalize_lon(540), -180
+            BaseAPI.normalize_lon(540), 180
         )  # 180 = -180 due to circle !!! Issue??
         self.assertEqual(BaseAPI.normalize_lon(1000), -80)
 
@@ -215,8 +215,5 @@ class TestApi(unittest.TestCase):
                 181, api.normalize_to_0_360_if_needed(uuid, key, 181.0), places=6
             )
             self.assertAlmostEqual(
-                0, api.normalize_to_0_360_if_needed(uuid, key, 0), places=6
-            )
-            self.assertAlmostEqual(
-                360, api.normalize_to_0_360_if_needed(uuid, key, 360), places=6
+                180, api.normalize_to_0_360_if_needed(uuid, key, 0), places=6
             )

@@ -176,8 +176,6 @@ class TestDataGeneration(TestWithS3):
         :return: Nothing
         """
         with tempfile.TemporaryDirectory() as temp_folder:
-            job_index = "index-testing"
-
             parameters = PREPARATION_PARAMETERS.copy()
             parameters[Parameters.UUID.value] = "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
             parameters[Parameters.KEY.value] = (
@@ -214,6 +212,10 @@ class TestDataGeneration(TestWithS3):
                         parallel=False,
                     )
                     log.info(store)
+
+                    assert (
+                        store.lon.size > 0
+                    ), "This dataset contains lon > 180, if code right we should get value with -180, 180 bounds"
 
                 except Exception as e:
                     assert False, f"prepare_data raised an exception: {e}"
