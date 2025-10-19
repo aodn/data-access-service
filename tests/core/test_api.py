@@ -197,23 +197,9 @@ class TestApi(unittest.TestCase):
             self.assertEqual(api.normalize_to_0_360_if_needed(uuid, key, None), None)
 
             self.assertAlmostEqual(
-                10, api.normalize_to_0_360_if_needed(uuid, key, 370), places=6
-            )
-            self.assertAlmostEqual(
-                350, api.normalize_to_0_360_if_needed(uuid, key, 350.0), places=6
-            )
-            self.assertAlmostEqual(
-                350, api.normalize_to_0_360_if_needed(uuid, key, -370.0), places=6
-            )
-            self.assertAlmostEqual(
-                180, api.normalize_to_0_360_if_needed(uuid, key, 540.0), places=6
-            )
-            self.assertAlmostEqual(
-                179, api.normalize_to_0_360_if_needed(uuid, key, -181.0), places=6
-            )
-            self.assertAlmostEqual(
-                181, api.normalize_to_0_360_if_needed(uuid, key, 181.0), places=6
-            )
-            self.assertAlmostEqual(
                 180, api.normalize_to_0_360_if_needed(uuid, key, 0), places=6
             )
+
+            with self.assertRaises(TypeError):
+                api.normalize_to_0_360_if_needed(uuid, key, 370)
+                api.normalize_to_0_360_if_needed(uuid, key, -370.0)

@@ -104,13 +104,15 @@ class BaseAPI:
         Returns:
         float: Normalized longitude in [0, 360].
         """
-
         if lon is not None:
+            if not -180 <= lon <= 180:
+                raise TypeError(f"lon {lon} should be within -180, 180")
+
             desc: Descriptor = self.get_mapped_meta_data(uuid)[key]
 
             if desc is not None:
                 if desc.lng.min == 0 and desc.lng.max == 360:
-                    return lon % 360
+                    return lon + 180
 
         return lon
 
