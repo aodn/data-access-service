@@ -11,6 +11,7 @@ from unittest.mock import patch
 from aodn_cloud_optimised import DataQuery
 
 from data_access_service import API
+from data_access_service.core.api import BaseAPI
 from data_access_service.utils.routes_helper import (
     _generate_partial_json_array,
     _response_json,
@@ -123,6 +124,82 @@ class TestApi(unittest.TestCase):
         assert parsed_result[1]["longitude"] is None, "LONGITUDE NaN should be None"
         assert parsed_result[1]["depth"] is None, "DEPTH NaN should be None"
 
+    def test_normalize_lon(self):
+        """Test None"""
+        self.assertEqual(BaseAPI.normalize_lon(None), None)
 
-if __name__ == "__main__":
-    unittest.main()
+        """Test standard longitude values"""
+        self.assertEqual(BaseAPI.normalize_lon(0), 0)
+        self.assertEqual(BaseAPI.normalize_lon(90), 90)
+        self.assertEqual(BaseAPI.normalize_lon(-90), -90)
+        self.assertEqual(BaseAPI.normalize_lon(180), 180)
+        self.assertEqual(BaseAPI.normalize_lon(-180), -180)
+
+        """Test positive wrap-arounds (>180)"""
+        self.assertEqual(BaseAPI.normalize_lon(181), -179)
+        self.assertEqual(BaseAPI.normalize_lon(360), 0)
+        self.assertEqual(
+            BaseAPI.normalize_lon(540), 180
+        )  # 180 = -180 due to circle !!! Issue??
+        self.assertEqual(BaseAPI.normalize_lon(1000), -80)
+
+        """Test negative wrap-arounds (<-180)"""
+        self.assertEqual(BaseAPI.normalize_lon(-181), 179)
+        self.assertEqual(BaseAPI.normalize_lon(-360), 0)
+        self.assertEqual(BaseAPI.normalize_lon(-540), -180)
+        self.assertEqual(BaseAPI.normalize_lon(-1000), 80)
+
+        """Test exact boundary values"""
+        self.assertEqual(BaseAPI.normalize_lon(180.0), 180.0)
+        self.assertEqual(BaseAPI.normalize_lon(-180.0), -180.0)
+        self.assertEqual(BaseAPI.normalize_lon(179.999), 179.999)
+        self.assertEqual(BaseAPI.normalize_lon(-179.999), -179.999)
+
+        """Test with decimal degrees"""
+        self.assertAlmostEqual(BaseAPI.normalize_lon(181.5), -178.5)
+        self.assertAlmostEqual(BaseAPI.normalize_lon(-181.5), 178.5)
+        self.assertAlmostEqual(BaseAPI.normalize_lon(360.1), 0.1)
+
+        """Test values from actual GPS datasets"""
+        cases = [
+            (370.0, 10.0),  # Pacific crossing
+            (-350.0, 10.0),  # Atlantic crossing
+            (179.999999, 179.999999),
+            (-179.999999, -179.999999),
+        ]
+        for input_lon, expected in cases:
+            with self.subTest(input_lon=input_lon):
+                self.assertAlmostEqual(BaseAPI.normalize_lon(input_lon), expected)
+
+    with open(
+        Path(__file__).resolve().parent.parent / "canned/catalog_uncached.json", "r"
+    ) as file:
+
+        @patch.object(
+            DataQuery.Metadata,
+            "metadata_catalog_uncached",
+            return_value=json.load(file),
+        )
+        def test_normalize_to_0_360_if_needed(self, get_metadata):
+            """
+            Data from satellite may use lon [0, 360] rather than the usual [-180. 180], this function is used to test
+            the conversion is correct, the function check dataset metadata min max lon to confirm which range it belong
+            :param get_metadata:
+            :return:
+            """
+            api = API()
+            api.initialize_metadata()
+
+            uuid = "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
+            key = "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
+
+            """Test None"""
+            self.assertEqual(api.normalize_to_0_360_if_needed(uuid, key, None), None)
+
+            self.assertAlmostEqual(
+                180, api.normalize_to_0_360_if_needed(uuid, key, 0), places=6
+            )
+
+            with self.assertRaises(TypeError):
+                api.normalize_to_0_360_if_needed(uuid, key, 370)
+                api.normalize_to_0_360_if_needed(uuid, key, -370.0)

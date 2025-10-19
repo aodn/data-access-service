@@ -1,20 +1,23 @@
+import json
 import shutil
 
+import numpy as np
 import pandas as pd
 import pytest
-import os
+import tempfile
+import xarray
 
 from pathlib import Path
 from unittest.mock import patch
-
 from aodn_cloud_optimised.lib import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import Metadata
-
-from data_access_service import API
+from data_access_service import API, init_log
+from data_access_service.batch.batch_enums import Parameters
 from data_access_service.batch.subsetting import prepare_data
 from data_access_service.config.config import Config, EnvType
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.tasks.data_collection import collect_data_files
+from data_access_service.utils.date_time_utils import split_date_range
 from tests.batch.batch_test_consts import PREPARATION_PARAMETERS, INIT_JOB_ID
 from tests.core.test_with_s3 import TestWithS3, REGION
 
@@ -138,14 +141,12 @@ class TestDataGeneration(TestWithS3):
                 # Delete temp output folder as the name always same for testing
                 shutil.rmtree(config.get_temp_folder(INIT_JOB_ID), ignore_errors=True)
 
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_data_preparation_without_index(
         self, aws_clients, setup_resources, upload_test_case_to_s3
     ):
         # Test the prepare_data function without a job index
         parameters = PREPARATION_PARAMETERS.copy()
-        parameters["job_index"] = None
-        parameters["start_date"] = "02-2010"
-        parameters["end_date"] = "04-2011"
 
         s3_client, _, _ = aws_clients
         config = Config.get_config()
@@ -162,3 +163,126 @@ class TestDataGeneration(TestWithS3):
             finally:
                 # Delete temp output folder as the name always same for testing
                 shutil.rmtree(config.get_temp_folder(INIT_JOB_ID), ignore_errors=True)
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_data_preparation_with_lat_lon(
+        self, aws_clients, setup_resources, upload_test_case_to_s3
+    ):
+        """
+        Test with satellite data where lat/lon is of range [0,360]. The dataset use in the test is specially crafted
+        that the lon is > 180., so any query < 180 will yield no result
+
+        We always assume opi interface [-180,180] and this test verify the code automatically handle it.
+
+        :param aws_clients: The aws client to local s3
+        :param setup_resources: Depends, just make sure resource setup correctly
+        :param upload_test_case_to_s3: Make sure data uploaded to local s3
+        :return: Nothing
+        """
+        parameters = PREPARATION_PARAMETERS.copy()
+        parameters[Parameters.UUID.value] = "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
+        parameters[Parameters.KEY.value] = (
+            "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
+        )
+        parameters[Parameters.MASTER_JOB_ID.value] = "master"
+
+        parameters[Parameters.DATE_RANGES.value] = json.dumps(
+            split_date_range(pd.Timestamp("2012-10-16"), pd.Timestamp("2012-11-16"), 1)
+        )
+
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+
+        log = init_log(config)
+
+        api = API()
+        api.initialize_metadata()
+
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
+            with tempfile.TemporaryDirectory() as temp_folder:
+                parameters[Parameters.INTERMEDIATE_OUTPUT_FOLDER.value] = temp_folder
+
+                try:
+                    # First test, no bounding box so system will auto assign -180, 180. Internally if code correct
+                    # will result in value found from range > 180 because this is satellite data where system should
+                    # adjust -180, 180 to 0, 360 based on metadata's lon range in the dataset
+                    prepare_data(api, job_index="0", parameters=parameters)
+
+                    # Now open the file and inspect values
+                    store = xarray.open_mfdataset(
+                        paths=f"{temp_folder}/{parameters[Parameters.KEY.value]}/part-*.zarr",
+                        engine="zarr",
+                        combine="nested",
+                        consolidated=False,  # Must be false as the file is not consolidated_metadata()
+                        parallel=False,
+                    )
+
+                    assert (
+                        store.lon.size > 0
+                    ), "This dataset contains lon > 180, if code right we should get value with -180, 180 bounds"
+
+                    u = np.unique(store.lon.values)
+                    assert 182.25 in u, "Values greate than 182.25 found"
+                    assert 190.0 in u, "Values greate than 190.0 found"
+
+                except Exception as e:
+                    assert False, f"prepare_data raised an exception: {e}"
+
+            with tempfile.TemporaryDirectory() as temp_folder:
+                parameters[Parameters.INTERMEDIATE_OUTPUT_FOLDER.value] = temp_folder
+
+                try:
+                    # Second test we specify a polygon range from -180, 0, it should translated to 0, 180, due to our crafted data
+                    # we should yield no result as above shows data range is 180 above.
+                    parameters[Parameters.MULTI_POLYGON.value] = json.dumps(
+                        obj={
+                            "type": "MultiPolygon",
+                            "coordinates": [
+                                # POLYGON 1: Northern Hemisphere (-180 to 0)
+                                [
+                                    [
+                                        [-180, 90],  # NW
+                                        [0, 90],  # NE
+                                        [0, 0],  # SE
+                                        [-180, 0],  # SW
+                                        [-180, 90],  # Close
+                                    ]
+                                ],
+                                # POLYGON 2: Southern Hemisphere (-180 to 0)
+                                [
+                                    [
+                                        [-180, 0],  # NW
+                                        [0, 0],  # NE
+                                        [0, -90],  # SE
+                                        [-180, -90],  # SW
+                                        [-180, 0],  # Close
+                                    ]
+                                ],
+                            ],
+                        }
+                    )
+                    prepare_data(api, job_index="0", parameters=parameters)
+
+                    # Now open the file and inspect values
+                    store = xarray.open_mfdataset(
+                        paths=f"{temp_folder}/{parameters[Parameters.KEY.value]}/part-*.zarr",
+                        engine="zarr",
+                        combine="nested",
+                        consolidated=False,  # Must be false as the file is not consolidated_metadata()
+                        parallel=False,
+                    )
+                    log.info(store)
+
+                    assert (
+                        store.lon.size == 0
+                    ), "This dataset contains lon > 180, if code right we should not get value"
+
+                except Exception as e:
+                    assert False, f"prepare_data raised an exception: {e}"
+
+                finally:
+                    # Delete temp output folder as the name always same for testing
+                    shutil.rmtree(
+                        config.get_temp_folder(INIT_JOB_ID), ignore_errors=True
+                    )
