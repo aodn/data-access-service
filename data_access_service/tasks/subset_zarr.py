@@ -33,18 +33,16 @@ class ZarrProcessor:
         recipient: str,
     ):
         self.aws = AWSHelper()
-        self.api = api
+        self.api = api_setup(app)
         self.config = Config.get_config()
         self.log = init_log(self.config)
         self.job_id = job_id
-        self.uuid = subset_request.uuid
-        self.keys = subset_request.keys
-        self.bboxes = subset_request.bboxes
-        self.recipient = subset_request.recipient
-        self.subset_request = subset_request
+        self.uuid = uuid
+        self.recipient = recipient
+
         start_date, end_date = supply_day_with_nano_precision(
-            start_date_str=subset_request.start_date,
-            end_date_str=subset_request.end_date,
+            start_date_str=start_date_str,
+            end_date_str=end_date_str,
         )
 
         if "*" in keys:
@@ -54,7 +52,7 @@ class ZarrProcessor:
             self.keys = keys
 
         trimmed_start_date, trimmed_end_date = trim_date_range_for_keys(
-            api=api,
+            api=self.api,
             uuid=uuid,
             keys=self.keys,
             requested_start_date=start_date,
@@ -63,6 +61,26 @@ class ZarrProcessor:
         self.start_date = trimmed_start_date
         self.end_date = trimmed_end_date
         self.multi_polygon = MultiPolygonHelper(multi_polygon=multi_polygon)
+        self.bboxes = self.multi_polygon.bboxes
+
+        # Create a subset_request-like object for email template
+        class SubsetRequest:
+            def __init__(self, uuid, keys, start_date, end_date, bboxes, recipient):
+                self.uuid = uuid
+                self.keys = keys
+                self.start_date = start_date
+                self.end_date = end_date
+                self.bboxes = bboxes
+                self.recipient = recipient
+
+        self.subset_request = SubsetRequest(
+            uuid=self.uuid,
+            keys=self.keys,
+            start_date=start_date_str,
+            end_date=end_date_str,
+            bboxes=self.bboxes,
+            recipient=self.recipient,
+        )
 
     def process(self):
         self.log.info(

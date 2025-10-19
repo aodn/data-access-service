@@ -161,7 +161,6 @@ def subset_zarr(api: API, job_id, parameters):
     subset_request = get_subset_request(parameters)
 
     zarr_processor = ZarrProcessor(
-        api=api,
         uuid=uuid,
         job_id=job_id,
         keys=keys,

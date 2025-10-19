@@ -212,16 +212,15 @@ class AWSHelper:
     def send_email(
         self, recipient: str, subject: str, html_body: str = "", text_body: str = ""
     ):
+        body = {}
 
         if html_body:
-            body = {
-                "Html": {"Data": html_body, "Charset": "UTF-8"},
-            }
-        elif text_body:
-            body = {
-                "Text": {"Data": text_body, "Charset": "UTF-8"},
-            }
-        else:
+            body["Html"] = {"Data": html_body, "Charset": "UTF-8"}
+
+        if text_body:
+            body["Text"] = {"Data": text_body, "Charset": "UTF-8"}
+
+        if not body:
             raise ValueError("Either html_body or text_body must be provided")
 
         try:

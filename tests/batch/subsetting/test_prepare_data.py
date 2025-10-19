@@ -17,6 +17,7 @@ from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.tasks.data_collection import collect_data_files
 from tests.batch.batch_test_consts import PREPARATION_PARAMETERS, INIT_JOB_ID
 from tests.core.test_with_s3 import TestWithS3, REGION
+from tests.utils.test_email_generator import create_dummy_subset_request
 
 
 class TestDataGeneration(TestWithS3):
@@ -99,11 +100,23 @@ class TestDataGeneration(TestWithS3):
 
                 # Check if the files are compressed and uploaded correctly
                 compressed_s3_key = "999/autonomous_underwater_vehicle.zip"
+
+                # Create dummy subset_request
+                subset_request = create_dummy_subset_request(
+                    uuid="test-dataset-uuid",
+                    keys=["*"],
+                    start_date="2010-02-01",
+                    end_date="2011-04-30",
+                    recipient="test@example.com",
+                )
+
                 collect_data_files(
                     master_job_id="999",
                     dataset_uuid="test-dataset-uuid",
                     recipient="test@example.com",
+                    subset_request=subset_request,
                 )
+
                 response2 = s3_client.list_objects_v2(
                     Bucket=bucket_name, Prefix=compressed_s3_key
                 )
