@@ -179,31 +179,30 @@ class TestDataGeneration(TestWithS3):
         :param upload_test_case_to_s3: Make sure data uploaded to local s3
         :return: Nothing
         """
-        with tempfile.TemporaryDirectory() as temp_folder:
-            parameters = PREPARATION_PARAMETERS.copy()
-            parameters[Parameters.UUID.value] = "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
-            parameters[Parameters.KEY.value] = (
-                "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
-            )
-            parameters[Parameters.MASTER_JOB_ID.value] = "master"
+        parameters = PREPARATION_PARAMETERS.copy()
+        parameters[Parameters.UUID.value] = "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
+        parameters[Parameters.KEY.value] = (
+            "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
+        )
+        parameters[Parameters.MASTER_JOB_ID.value] = "master"
 
-            parameters[Parameters.DATE_RANGES.value] = json.dumps(
-                split_date_range(
-                    pd.Timestamp("2012-10-16"), pd.Timestamp("2012-11-16"), 1
-                )
-            )
-            parameters[Parameters.INTERMEDIATE_OUTPUT_FOLDER.value] = temp_folder
+        parameters[Parameters.DATE_RANGES.value] = json.dumps(
+            split_date_range(pd.Timestamp("2012-10-16"), pd.Timestamp("2012-11-16"), 1)
+        )
 
-            s3_client, _, _ = aws_clients
-            config = Config.get_config()
-            config.set_s3_client(s3_client)
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
 
-            log = init_log(config)
+        log = init_log(config)
 
-            api = API()
-            api.initialize_metadata()
+        api = API()
+        api.initialize_metadata()
 
-            with patch.object(AWSHelper, "send_email") as mock_send_email:
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
+            with tempfile.TemporaryDirectory() as temp_folder:
+                parameters[Parameters.INTERMEDIATE_OUTPUT_FOLDER.value] = temp_folder
+
                 try:
                     # First test, no bounding box so system will auto assign -180, 180. Internally if code correct
                     # will result in value found from range > 180 because this is satellite data where system should
@@ -227,10 +226,13 @@ class TestDataGeneration(TestWithS3):
                     assert 182.25 in u, "Values greate than 182.25 found"
                     assert 190.0 in u, "Values greate than 190.0 found"
 
-                    shutil.rmtree(
-                        f"{temp_folder}/{parameters[Parameters.KEY.value]}"
-                    )  # Clear up before run
+                except Exception as e:
+                    assert False, f"prepare_data raised an exception: {e}"
 
+            with tempfile.TemporaryDirectory() as temp_folder:
+                parameters[Parameters.INTERMEDIATE_OUTPUT_FOLDER.value] = temp_folder
+
+                try:
                     # Second test we specify a polygon range from -180, 0, it should translated to 0, 180, due to our crafted data
                     # we should yield no result as above shows data range is 180 above.
                     parameters[Parameters.MULTI_POLYGON.value] = json.dumps(
@@ -278,6 +280,7 @@ class TestDataGeneration(TestWithS3):
 
                 except Exception as e:
                     assert False, f"prepare_data raised an exception: {e}"
+
                 finally:
                     # Delete temp output folder as the name always same for testing
                     shutil.rmtree(
