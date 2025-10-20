@@ -125,13 +125,12 @@ class TestDataGeneration(TestWithS3):
                 assert response2["Contents"][0]["Key"] == compressed_s3_key
 
                 # Check if the email was sent correctly
-                mock_send_email.assert_called_once_with(
-                    recipient="test@example.com",
-                    subject="Finish processing data file whose uuid is:  test-dataset-uuid",
-                    download_urls=[
-                        "https://test-bucket.s3.us-east-1.amazonaws.com/999/autonomous_underwater_vehicle.zip"
-                    ],
-                )
+                mock_send_email.assert_called_once()
+                call_kwargs = mock_send_email.call_args.kwargs
+                assert call_kwargs["recipient"] == "test@example.com"
+                assert "test-dataset-uuid" in call_kwargs["subject"]
+                assert "html_body" in call_kwargs
+                assert "autonomous_underwater_vehicle.zip" in call_kwargs["html_body"]
 
                 # Download the zip file and check the content
                 names: list[str] = helper.extract_zip_from_s3(
