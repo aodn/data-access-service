@@ -127,6 +127,8 @@ class TestApi(unittest.TestCase):
     def test_normalize_lon(self):
         """Test None"""
         self.assertEqual(BaseAPI.normalize_lon(None), None)
+        self.assertAlmostEqual(BaseAPI.normalize_lon(-252.85), 107.15, delta=0.01)
+        self.assertAlmostEqual(BaseAPI.normalize_lon(-209.96), 150.04, delta=0.01)
 
         """Test standard longitude values"""
         self.assertEqual(BaseAPI.normalize_lon(0), 0)
