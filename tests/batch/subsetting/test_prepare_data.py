@@ -20,6 +20,7 @@ from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.utils.date_time_utils import split_date_range
 from tests.batch.batch_test_consts import PREPARATION_PARAMETERS, INIT_JOB_ID
 from tests.core.test_with_s3 import TestWithS3, REGION
+from tests.utils.test_email_generator import create_dummy_subset_request
 
 
 class TestDataGeneration(TestWithS3):
@@ -102,11 +103,23 @@ class TestDataGeneration(TestWithS3):
 
                 # Check if the files are compressed and uploaded correctly
                 compressed_s3_key = "999/autonomous_underwater_vehicle.zip"
+
+                # Create dummy subset_request
+                subset_request = create_dummy_subset_request(
+                    uuid="test-dataset-uuid",
+                    keys=["*"],
+                    start_date="2010-02-01",
+                    end_date="2011-04-30",
+                    recipient="test@example.com",
+                )
+
                 collect_data_files(
                     master_job_id="999",
                     dataset_uuid="test-dataset-uuid",
                     recipient="test@example.com",
+                    subset_request=subset_request,
                 )
+
                 response2 = s3_client.list_objects_v2(
                     Bucket=bucket_name, Prefix=compressed_s3_key
                 )
@@ -115,13 +128,12 @@ class TestDataGeneration(TestWithS3):
                 assert response2["Contents"][0]["Key"] == compressed_s3_key
 
                 # Check if the email was sent correctly
-                mock_send_email.assert_called_once_with(
-                    recipient="test@example.com",
-                    subject="Finish processing data file whose uuid is:  test-dataset-uuid",
-                    download_urls=[
-                        "https://test-bucket.s3.us-east-1.amazonaws.com/999/autonomous_underwater_vehicle.zip"
-                    ],
-                )
+                mock_send_email.assert_called_once()
+                call_kwargs = mock_send_email.call_args.kwargs
+                assert call_kwargs["recipient"] == "test@example.com"
+                assert "test-dataset-uuid" in call_kwargs["subject"]
+                assert "html_body" in call_kwargs
+                assert "autonomous_underwater_vehicle.zip" in call_kwargs["html_body"]
 
                 # Download the zip file and check the content
                 names: list[str] = helper.extract_zip_from_s3(

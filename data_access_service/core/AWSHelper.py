@@ -12,6 +12,9 @@ from data_access_service import init_log
 from data_access_service.config.config import Config, IntTestConfig
 from io import BytesIO
 from data_access_service.core.constants import PARTITION_KEY, MAX_CSV_ROW
+from data_access_service.utils.email_templates.download_email import (
+    get_download_email_html_body,
+)
 
 
 class AWSHelper:
@@ -206,22 +209,19 @@ class AWSHelper:
             self.log.error(f"Error uploading file object to S3: {e}")
             raise e
 
-    def send_email(self, recipient: str, subject: str, download_urls: List[str]):
+    def send_email(
+        self, recipient: str, subject: str, html_body: str = "", text_body: str = ""
+    ):
+        body = {}
 
-        # Text and HTML parts
-        text_part = "Hello, User!\nPlease use the link below to download the files"
+        if html_body:
+            body["Html"] = {"Data": html_body, "Charset": "UTF-8"}
 
-        if not download_urls:
-            html_content = "<p>No data found for your selected subset.</p>"
-        else:
-            html_content = ['<a href="' + l + '">' + l + "</a>" for l in download_urls]
-        html_part = f"""
-        <html>
-        <body>
-            {html_content}
-        </body>
-        </html>
-        """
+        if text_body:
+            body["Text"] = {"Data": text_body, "Charset": "UTF-8"}
+
+        if not body:
+            raise ValueError("Either html_body or text_body must be provided")
 
         try:
             response = self.ses.send_email(
@@ -229,10 +229,7 @@ class AWSHelper:
                 Destination={"ToAddresses": [recipient]},
                 Message={
                     "Subject": {"Data": subject, "Charset": "UTF-8"},
-                    "Body": {
-                        "Text": {"Data": text_part, "Charset": "UTF-8"},
-                        "Html": {"Data": html_part, "Charset": "UTF-8"},
-                    },
+                    "Body": body,
                 },
             )
             self.log.info(
