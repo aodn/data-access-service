@@ -13,7 +13,6 @@ from data_access_service import init_log, Config, API
 from data_access_service.batch.subsetting_helper import trim_date_range_for_keys
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.models.multi_polygon_helper import MultiPolygonHelper
-from data_access_service.server import api_setup, app
 from data_access_service.utils.date_time_utils import supply_day_with_nano_precision
 from data_access_service.utils.email_templates.download_email import (
     get_download_email_html_body,
@@ -24,6 +23,7 @@ from data_access_service.utils.process_logger import ProcessLogger
 class ZarrProcessor:
     def __init__(
         self,
+        api: API,
         uuid: str,
         job_id: str,
         keys: List[str],
@@ -33,7 +33,7 @@ class ZarrProcessor:
         recipient: str,
     ):
         self.aws = AWSHelper()
-        self.api = api_setup(app)
+        self.api = api
         self.config = Config.get_config()
         self.log = init_log(self.config)
         self.job_id = job_id
@@ -52,7 +52,7 @@ class ZarrProcessor:
             self.keys = keys
 
         trimmed_start_date, trimmed_end_date = trim_date_range_for_keys(
-            api=self.api,
+            api=api,
             uuid=uuid,
             keys=self.keys,
             requested_start_date=start_date,

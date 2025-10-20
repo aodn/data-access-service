@@ -158,9 +158,8 @@ def subset_zarr(api: API, job_id, parameters):
     end_date_str = parameters[Parameters.END_DATE.value]
     multi_polygon = parameters[Parameters.MULTI_POLYGON.value]
 
-    subset_request = get_subset_request(parameters)
-
     zarr_processor = ZarrProcessor(
+        api=api,
         uuid=uuid,
         job_id=job_id,
         keys=keys,

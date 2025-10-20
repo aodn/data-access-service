@@ -47,6 +47,7 @@ class TestSubsetZarr(TestWithS3):
                 no_ext_key = key.replace(".zarr", "")
                 try:
                     zarr_processor = ZarrProcessor(
+                        api,
                         uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
                         job_id="job_id_888",
                         keys=[key],

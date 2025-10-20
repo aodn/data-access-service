@@ -5,13 +5,11 @@ from data_access_service.utils.email_templates.download_button import (
 from data_access_service.utils.email_templates.form_bbox_divs import form_bbox_divs
 from data_access_service.utils.email_templates.email_images import (
     HEADER_IMG,
-    DOWNLOAD_ICON,
     TIME_RANGE_IMG,
     ATTRIBUTES_IMG,
     FACEBOOK_IMG,
     INSTAGRAM_IMG,
     X_IMG,
-    YOUTUBE_IMG,
     LINKEDIN_IMG,
     CONTACT_IMG,
 )
@@ -19,7 +17,7 @@ from data_access_service.utils.email_templates.email_images import (
 # footer links
 FACEBOOK_URL = "https://www.facebook.com/IntegratedMarineObservingSystem"
 LINKEDIN_URL = "https://www.linkedin.com/company/imos_aus/posts/?feedView=all"
-x_URL = "https://x.com/IMOS_AUS"
+X_URL = "https://x.com/IMOS_AUS"
 INSTAGRAM_URL = "https://www.instagram.com/imos_australia/#"
 CONTACT_US_URL = "mailto:info@aodn.org.au"
 TERMS_OF_USE_URL = "https://imos.org.au/terms-of-use"
@@ -1609,7 +1607,7 @@ def get_download_email_html_body(
                                                                                              <tbody>
                                                                                                 <tr>
                                                                                                    <td style="font-size:0;height:24px;vertical-align:middle;width:24px;">
-                                                                                                      <a href="{x_URL}" target="_blank">
+                                                                                                      <a href="{X_URL}" target="_blank">
                                                                                                       <img alt="X" height="24" src="data:image/png;base64,{X_IMG}" style="display:block;" width="24">
                                                                                                       </a>
                                                                                                    </td>
