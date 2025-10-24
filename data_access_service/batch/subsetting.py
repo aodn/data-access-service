@@ -1,5 +1,7 @@
 import json
 
+import pandas
+
 from data_access_service import init_log, Config, API
 from data_access_service.batch.batch_enums import Parameters
 from data_access_service.batch.subsetting_helper import (
@@ -28,6 +30,12 @@ def init(api: API, job_id_of_init, parameters):
     month_count_per_job = config.get_month_count_per_job()
     start_date_str = parameters[Parameters.START_DATE.value]
     end_date_str = parameters[Parameters.END_DATE.value]
+
+    # Users may not specify start date and end date
+    if start_date_str == "non-specified":
+        start_date_str = "1970-01-01"
+    if end_date_str == "non-specified":
+        end_date_str = pandas.Timestamp.today().strftime("%Y-%m-%d")
 
     requested_start_date, requested_end_date = supply_day_with_nano_precision(
         start_date_str, end_date_str
