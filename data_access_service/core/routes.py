@@ -10,6 +10,11 @@ from xarray import Dataset
 from data_access_service import init_log
 from data_access_service.config.config import Config
 from data_access_service.core.api import API
+from data_access_service.core.constants import (
+    STR_LATITUDE_UPPER_CASE,
+    STR_LONGITUDE_UPPER_CASE,
+    STR_TIME,
+)
 from data_access_service.models.ExtendedFeatureCollection import (
     ExtendedFeatureCollection,
 )
@@ -22,7 +27,7 @@ from data_access_service.utils.date_time_utils import (
 from data_access_service.utils.routes_helper import (
     HealthCheckResponse,
     get_api_instance,
-    _verify_datatime_param,
+    verify_datatime_param,
     fetch_data,
     async_response_json,
     generate_feature_collection,
@@ -86,8 +91,8 @@ async def has_data(
     logger.info(
         "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
     )
-    start_date = _verify_datatime_param("start_date", start_date)
-    end_date = _verify_datatime_param("end_date", end_date)
+    start_date = verify_datatime_param("start_date", start_date)
+    end_date = verify_datatime_param("end_date", end_date)
     result = str(api_instance.has_data(uuid, key, start_date, end_date)).lower()
     return Response(result, media_type="application/json")
 
@@ -140,8 +145,8 @@ async def get_indexing_values(
     data_source = api.get_dataset(
         uuid=uuid,
         key=key,
-        date_start=_verify_datatime_param("start_date", start_date),
-        date_end=_verify_datatime_param("end_date", end_date),
+        date_start=verify_datatime_param("start_date", start_date),
+        date_end=verify_datatime_param("end_date", end_date),
     )
     if data_source is None:
         raise HTTPException(
@@ -155,9 +160,13 @@ async def get_indexing_values(
             detail=f"Dataset {uuid} with key {key} is not a Zarr dataset. Please doublecheck or contact AODN",
         )
 
-    lat_key = api.map_column_names(uuid=uuid, key=key, columns=["LATITUDE"])[0]
-    lon_key = api.map_column_names(uuid=uuid, key=key, columns=["LONGITUDE"])[0]
-    time_key = api.map_column_names(uuid=uuid, key=key, columns=["TIME"])[0]
+    lat_key = api.map_column_names(
+        uuid=uuid, key=key, columns=[STR_LATITUDE_UPPER_CASE]
+    )[0]
+    lon_key = api.map_column_names(
+        uuid=uuid, key=key, columns=[STR_LONGITUDE_UPPER_CASE]
+    )[0]
+    time_key = api.map_column_names(uuid=uuid, key=key, columns=[STR_TIME])[0]
 
     if (
         lat_key not in data_source.coords
@@ -201,8 +210,8 @@ async def get_zarr_rectangles(
     data_source = api.get_dataset(
         uuid=uuid,
         key=key,
-        date_start=_verify_datatime_param("start_date", start_date),
-        date_end=_verify_datatime_param("end_date", end_date),
+        date_start=verify_datatime_param("start_date", start_date),
+        date_end=verify_datatime_param("end_date", end_date),
     )
 
     if data_source is None:
@@ -220,9 +229,13 @@ async def get_zarr_rectangles(
             detail=f"Dataset {uuid} with key {key} is not a Zarr dataset. Please doublecheck or contact AODN",
         )
 
-    lat_key = api.map_column_names(uuid=uuid, key=key, columns=["LATITUDE"])[0]
-    lon_key = api.map_column_names(uuid=uuid, key=key, columns=["LONGITUDE"])[0]
-    time_key = api.map_column_names(uuid=uuid, key=key, columns=["TIME"])[0]
+    lat_key = api.map_column_names(
+        uuid=uuid, key=key, columns=[STR_LATITUDE_UPPER_CASE]
+    )[0]
+    lon_key = api.map_column_names(
+        uuid=uuid, key=key, columns=[STR_LONGITUDE_UPPER_CASE]
+    )[0]
+    time_key = api.map_column_names(uuid=uuid, key=key, columns=[STR_TIME])[0]
 
     if (
         lat_key not in data_source.coords
@@ -268,8 +281,8 @@ async def get_feature_collection_of_items_with_data_between_dates(
     ),
 ):
 
-    start_date = _verify_datatime_param("start_date", start_date)
-    end_date = _verify_datatime_param("end_date", end_date)
+    start_date = verify_datatime_param("start_date", start_date)
+    end_date = verify_datatime_param("end_date", end_date)
     api_instance = get_api_instance(request)
     return Response(
         content=json.dumps(api_instance.fetch_wave_buoy_sites(start_date, end_date)),
@@ -289,8 +302,8 @@ async def get_feature_collection_of_items_with_data_between_dates(
         default=datetime.now(timezone.utc).strftime(DATE_FORMAT)
     ),
 ):
-    start_date = _verify_datatime_param("start_date", start_date)
-    end_date = _verify_datatime_param("end_date", end_date)
+    start_date = verify_datatime_param("start_date", start_date)
+    end_date = verify_datatime_param("end_date", end_date)
     api_instance = get_api_instance(request)
 
     return Response(
@@ -333,8 +346,8 @@ async def get_data(
         start_depth,
         end_depth,
     )
-    start_date = _verify_datatime_param("start_date", start_date)
-    end_date = _verify_datatime_param("end_date", end_date)
+    start_date = verify_datatime_param("start_date", start_date)
+    end_date = verify_datatime_param("end_date", end_date)
 
     sse = f.startswith("sse/")
     compress = "gzip" in request.headers.get("Accept-Encoding", "")

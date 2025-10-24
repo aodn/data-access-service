@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "data-access-service"
-version = "0.0.10"
+version = "0.0.18"
 description = ""
 authors = ["utas-raymondng <manfai.ng@utas.edu.au>"]
 readme = "README.md"
@@ -14,7 +14,7 @@ boto3 = "^1.28.0"
 cartopy = "^0.24.1"
 cryptography = "<44.0.2"
 dask = {extras = ["dataframe"], version = ">=2024.9.1"}
-fastapi = "0.115.2"
+fastapi = "0.119.0"
 fuzzywuzzy = "^0.18.0"
 gsw = "^3.6.19"
 gunicorn = "23.0.0"

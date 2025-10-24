@@ -14,10 +14,10 @@
             "creator_type": "Institution",
             "creator_url": "http://www.bom.gov.au",
             "dataset_name": "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia",
-            "date_created": "20250910T120000Z",
-            "date_issued": "20250910T120000Z",
-            "date_metadata_modified": "20250910T120000Z",
-            "date_modified": "20250910T120000Z",
+            "date_created": "20251016T120000Z",
+            "date_issued": "20251016T120000Z",
+            "date_metadata_modified": "20251016T120000Z",
+            "date_modified": "20251016T120000Z",
             "easternmost_longitude": 360.0,
             "file_quality_level": 3,
             "gds_version_id": "2.0r5",
@@ -31,7 +31,7 @@
             "geospatial_lon_min": 60.0,
             "geospatial_lon_resolution": 0.08330000191926956,
             "geospatial_lon_units": "degrees_east",
-            "history": "Modified format and attributes of 20250909-ABOM-L4fnd-AUS-v01-fv01.nc using file_convert_RAMSSA,version 1.0 to match the GDS2.0 rev 5 specification",
+            "history": "Modified format and attributes of 20251015-ABOM-L4fnd-AUS-v01-fv01.nc using file_convert_RAMSSA,version 1.0 to match the GDS2.0 rev 5 specification",
             "id": "RAMSSA_09km-ABOM-L4-AUS-v01",
             "institution": "ABOM",
             "keywords": "Oceans > Ocean Temperature > Sea Surface Temperature",
@@ -54,19 +54,19 @@
             "publisher_url": "http://www.bom.gov.au",
             "references": "Beggs H., A. Zhong, G. Warren, O. Alves, G. Brassington and T. Pugh (2011)  RAMSSA  An Operational, High-Resolution, Multi-Sensor Sea Surface Temperature Analysis over the Australian Region, Australian Meteorological and Oceanographic Journal, 61, 1-22.  http://www.bom.gov.au/jshess/papers.php?year=2011",
             "sensor": "AMSR2,AVHRR_GAC,VIIRS",
-            "source": "AMSR2-JAXA,AVHRRMTB_G-NAVO,AVHRR_METOPC_G-NAVO,VIIRS_NPP_OSPO,VIIRS_N20_OSPO,IN_SITU-GTS_BUOYS,IN_SITU-GTS_SHIP,IN_SITU-GTS_TESAC,ACCESS-G-WSP,NCEP-ICE",
+            "source": "AMSR2-JAXA,AVHRRMTB_G-NAVO,AVHRR_METOPC_G-NAVO,VIIRS_NPP_OSPO,VIIRS_N20_OSPO,IN_SITU-GTS_BUOYS,IN_SITU-GTS_BATHY,IN_SITU-GTS_SHIP,IN_SITU-GTS_TESAC,ACCESS-G-WSP,NCEP-ICE",
             "southernmost_latitude": -70.0,
             "spatial_resolution": "1/12 degree",
             "standard_name_vocabulary": "NetCDF Climate and Forecast (CF) Metadata Convention",
-            "start_time": "20250909T000000Z",
-            "stop_time": "20250910T000000Z",
-            "summary": "AMSR2-JAXA nobs=****** obsesd: avg=0.693 min=0.700 max= 0.700, AVHRRMTB_G-NAVO nobs=147579 obsesd: avg=0.550 min=0.550 max= 0.550, AVHRR_METOPC_G-NAVO nobs=155327 obsesd: avg=0.550 min=0.550 max= 0.550, VIIRS_NPP_OSPO nobs= 25401 obsesd: avg=0.400 min=0.400 max= 0.400, VIIRS_N20_OSPO nobs= 26063 obsesd: avg=0.380 min=0.380 max= 0.380, IN_SITU-GTS_BUOYS nobs= 5659 obsesd: avg=0.400 min=0.400 max= 0.400, IN_SITU-GTS_SHIP nobs= 641 obsesd: avg=1.200 min=1.200 max= 1.200, IN_SITU-GTS_TESAC nobs= 45 obsesd: avg=1.200 min=1.200 max= 1.200, Univariate Statistical Interpolation Package, SIANAL v13, background correlation length scale = 50 km, observation correlation length scale = 12 km, observation correlation time scale = 0.5 days",
+            "start_time": "20251015T000000Z",
+            "stop_time": "20251016T000000Z",
+            "summary": "AMSR2-JAXA nobs=****** obsesd: avg=0.693 min=0.700 max= 0.700, AVHRRMTB_G-NAVO nobs=207030 obsesd: avg=0.549 min=0.550 max= 0.550, AVHRR_METOPC_G-NAVO nobs=202577 obsesd: avg=0.549 min=0.550 max= 0.550, VIIRS_NPP_OSPO nobs= 31787 obsesd: avg=0.400 min=0.400 max= 0.400, VIIRS_N20_OSPO nobs= 31152 obsesd: avg=0.380 min=0.380 max= 0.380, IN_SITU-GTS_BUOYS nobs= 5584 obsesd: avg=0.400 min=0.400 max= 0.400, IN_SITU-GTS_BATHY nobs= 8 obsesd: avg=1.200 min=1.200 max= 1.200, IN_SITU-GTS_SHIP nobs= 767 obsesd: avg=1.200 min=1.200 max= 1.200, IN_SITU-GTS_TESAC nobs= 56 obsesd: avg=1.200 min=1.200 max= 1.200, Univariate Statistical Interpolation Package, SIANAL v13, background correlation length scale = 50 km, observation correlation length scale = 12 km, observation correlation time scale = 0.5 days",
             "time_coverage_duration": "P1D",
-            "time_coverage_end": "20250910T000000Z",
+            "time_coverage_end": "20251016T000000Z",
             "time_coverage_resolution": "P1D",
-            "time_coverage_start": "20250909T000000Z",
-            "title": "FILL UP MANUALLY - CHECK DOCUMENTATION",
-            "uuid": "5dd8a377-332f-4d43-8a41-1845ea420d87",
+            "time_coverage_start": "20251015T000000Z",
+            "title": "",
+            "uuid": "19406b12-9fb0-4b9e-8fc0-3b527b8bb71f",
             "westernmost_longitude": 0.0
         },
         ".zgroup": {
@@ -90,9 +90,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
-                2,
-                0
+                32,
+                1081,
+                109
             ],
             "zarr_format": 2
         },
@@ -130,9 +130,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
-                2,
-                0
+                32,
+                1081,
+                109
             ],
             "zarr_format": 2
         },
@@ -184,7 +184,7 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1
+                32
             ],
             "zarr_format": 2
         },
@@ -209,7 +209,7 @@
             "filters": null,
             "order": "C",
             "shape": [
-                2
+                1081
             ],
             "zarr_format": 2
         },
@@ -242,7 +242,7 @@
             "filters": null,
             "order": "C",
             "shape": [
-                0
+                109
             ],
             "zarr_format": 2
         },
@@ -277,9 +277,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
-                2,
-                0
+                32,
+                1081,
+                109
             ],
             "zarr_format": 2
         },
@@ -321,9 +321,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
-                2,
-                0
+                32,
+                1081,
+                109
             ],
             "zarr_format": 2
         },
@@ -359,7 +359,7 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1
+                32
             ],
             "zarr_format": 2
         },

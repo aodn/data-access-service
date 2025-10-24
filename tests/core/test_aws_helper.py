@@ -16,6 +16,9 @@ from botocore.exceptions import ClientError
 from data_access_service.config.config import IntTestConfig, Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.constants import PARTITION_KEY
+from data_access_service.utils.email_templates.download_email import (
+    get_download_email_html_body,
+)
 from tests.core.test_with_s3 import TestWithS3
 
 
@@ -31,11 +34,31 @@ class TestAWSHelper(TestWithS3):
         helper = AWSHelper()
         receipt = "receipt@test.com"
         subject = "This is a test"
-        links = ["http://test/test.zip", "https://test/test1.zip"]
+        download_urls = ["http://test/test.zip", "https://test/test1.zip"]
 
         # Need to setup email verify otherwise SES will reject sent
         ses_client.verify_email_identity(EmailAddress=config.get_sender_email())
-        helper.send_email(receipt, subject, links)
+
+        # Create a mock subset_request for the email template
+        class MockSubsetRequest:
+            uuid = "test-uuid"
+            keys = ["*"]
+            start_date = "2024-01-01"
+            end_date = "2024-12-31"
+            bboxes = []
+
+        # Convert download_urls to HTML body using the template function
+        html_body = get_download_email_html_body(
+            subset_request=MockSubsetRequest(), object_urls=download_urls
+        )
+
+        # Send email with proper HTML string
+        helper.send_email(
+            receipt,
+            subject,
+            html_body=html_body,
+            text_body="Please use the link below to download the files",
+        )
 
         # Retrieve sent emails from LocalStack SES endpoint
         try:
@@ -60,11 +83,13 @@ class TestAWSHelper(TestWithS3):
                 assert False, "No emails found in LocalStack SES."
 
             # Find the latest email (or filter by Message ID if needed)
+            email_found = False
             for email in emails:
                 if (
                     email["Source"] == config.get_sender_email()
                     and email["Subject"] == subject
                 ):
+                    email_found = True
                     assert (
                         email["Source"] == config.get_sender_email()
                     ), "Source correct"
@@ -72,16 +97,25 @@ class TestAWSHelper(TestWithS3):
                         receipt
                     ], "ToAddress correct"
                     assert email["Subject"] == subject, "Subject correct"
+
+                    # Check text part exists
                     assert (
-                        email["Body"]["text_part"]
-                        == "Hello, User!\nPlease use the link below to download the files"
+                        "Please use the link below to download the files"
+                        in email["Body"]["text_part"]
                     ), "Text correct"
+
+                    # Check HTML contains both URLs (flexible check)
+                    html_body_received = email["Body"]["html_part"]
                     assert (
-                        email["Body"]["html_part"].strip()
-                        == """<html>\n        <body>\n            [\'<a href="http://test/test.zip">http://test/test.zip</a>\', \'<a href="https://test/test1.zip">https://test/test1.zip</a>\']\n        </body>\n        </html>"""
-                    ), "Html correct"
-                else:
-                    assert False, "Email not found in LocalStack SES."
+                        "http://test/test.zip" in html_body_received
+                    ), "Html contains first URL"
+                    assert (
+                        "https://test/test1.zip" in html_body_received
+                    ), "Html contains second URL"
+                    break
+
+            if not email_found:
+                assert False, "Email not found in LocalStack SES."
 
         except requests.exceptions.RequestException as e:
             assert False, f"Error fetching emails: {e}"

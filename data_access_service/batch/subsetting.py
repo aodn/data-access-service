@@ -8,6 +8,7 @@ from data_access_service.batch.subsetting_helper import (
     get_uuid,
     get_keys,
     trim_date_range_for_keys,
+    get_subset_request,
 )
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.tasks.data_collection import collect_data_files
@@ -101,7 +102,7 @@ def init(api: API, job_id_of_init, parameters):
     )
 
 
-def prepare_data(api: API, job_index: str | None, parameters):
+def prepare_data(api: API, job_index: str | None, parameters) -> str | None:
     config = Config.get_config()
     logger = init_log(config)
 
@@ -131,7 +132,7 @@ def prepare_data(api: API, job_index: str | None, parameters):
     logger.info(f"Start Date:{start_date}")
     logger.info(f"End Date:{end_date}")
 
-    process_data_files(
+    return process_data_files(
         api,
         master_job_id,
         job_index,
@@ -148,9 +149,13 @@ def collect_data(parameters):
     recipient = parameters[Parameters.RECIPIENT.value]
     uuid = parameters[Parameters.UUID.value]
     master_job_id = parameters[Parameters.MASTER_JOB_ID.value]
+    subset_request = get_subset_request(parameters)
 
     collect_data_files(
-        master_job_id=master_job_id, dataset_uuid=uuid, recipient=recipient
+        master_job_id=master_job_id,
+        dataset_uuid=uuid,
+        recipient=recipient,
+        subset_request=subset_request,
     )
 
 
