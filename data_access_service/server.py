@@ -46,15 +46,18 @@ async def lifespan(application: FastAPI):
     # Initialize API
     api = api_setup(application)
 
-    # Initialize and start scheduler
-    scheduler = TaskScheduler()
-    await scheduler.start_with_initial_run()  # Runs task on startup + schedules hourly
-    application.state.scheduler = scheduler  # type: ignore
+    # Initialize and start scheduler (skip in test environment)
+    scheduler = None
+    if not isinstance(Config.get_config(), IntTestConfig):
+        scheduler = TaskScheduler()
+        await scheduler.start_with_initial_run()  # Runs task on startup + schedules hourly
+        application.state.scheduler = scheduler  # type: ignore
 
     yield
 
     # Cleanup
-    scheduler.shutdown()
+    if scheduler:
+        scheduler.shutdown()
     api.destroy()
 
 

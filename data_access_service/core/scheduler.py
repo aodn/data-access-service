@@ -1,7 +1,3 @@
-"""
-Scheduler module for running periodic tasks in the FastAPI application.
-"""
-
 import logging
 import duckdb
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -15,7 +11,7 @@ class TaskScheduler:
     """Manages scheduled tasks for the application."""
 
     def __init__(self):
-        self.memconn = duckdb.connect(":memory:cloud_optimized", read_only=False)
+        self.memconn = duckdb.connect(":memory:cloud_optimized")
         self.scheduler = AsyncIOScheduler()
         self._instance = DataQuery.GetAodn()
 
