@@ -80,4 +80,11 @@ def trim_date_range_for_keys(
     if requested_end_date > max_date_of_keys:
         trimmed_end_date = max_date_of_keys
 
+    # make sure the trimmed dates includes nanoseconds. end date should be  the final nanosecond
+    trimmed_start_date = pd.Timestamp(
+        trimmed_start_date.strftime("%Y-%m-%d %H:%M:%S.%f0000"), tz="UTC"
+    )
+    trimmed_end_date = pd.Timestamp(
+        trimmed_end_date.strftime("%Y-%m-%d %H:%M:%S.%f9999"), tz="UTC"
+    )
     return trimmed_start_date, trimmed_end_date
