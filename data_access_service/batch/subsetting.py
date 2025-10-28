@@ -49,7 +49,13 @@ def init(api: API, job_id_of_init, parameters):
 
     # use new zarr sub-setting workflow if all keys are zarr. It it works well, then deprecate old zarr sub-setting workflow
     if all(key.endswith(".zarr") for key in keys):
-        subset_zarr(api, job_id_of_init, parameters)
+        # Pass normalized date strings instead of raw parameters
+        normalized_parameters = {
+            **parameters,
+            Parameters.START_DATE.value: start_date_str,
+            Parameters.END_DATE.value: end_date_str,
+        }
+        subset_zarr(api, job_id_of_init, normalized_parameters)
         return
 
     requested_start_date, requested_end_date = trim_date_range_for_keys(
