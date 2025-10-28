@@ -415,12 +415,11 @@ class API(BaseAPI):
     def fetch_wave_buoy_data(self, buoy_name: str, start_date: str, end_date: str):
         buoy_name = unquote_plus(buoy_name)
         print("Fetching data for buoy:", buoy_name)
-        dataset = f"s3://{self._instance.bucket_name}/wave_buoy_realtime_nonqc.parquet"
         waveBuoyPositionQueryResult = self.memconn.execute(
             f"""SELECT
             LATITUDE,
             LONGITUDE
-            FROM read_parquet('{dataset}/**/*.parquet', hive_partitioning=true)
+            FROM wave_buoy_realtime_nonqc
             WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (SSWMD IS NOT NULL OR WPFM IS NOT NULL OR WSSH IS NOT NULL)
             LIMIT 1"""
         ).df()
@@ -442,7 +441,7 @@ class API(BaseAPI):
 
         waveBuoyDataQueryResult = self.memconn.execute(
             f"""SELECT SSWMD, WPFM, WSSH, TIME
-            FROM read_parquet('{dataset}/**/*.parquet', hive_partitioning=true)
+            FROM wave_buoy_realtime_nonqc
             WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (SSWMD IS NOT NULL OR WPFM IS NOT NULL OR WSSH IS NOT NULL)
             ORDER BY TIME"""
         ).df()
@@ -475,7 +474,7 @@ class API(BaseAPI):
             first(TIME) AS TIME,
             first(LATITUDE) AS LATITUDE,
             first(LONGITUDE) AS LONGITUDE
-            FROM read_parquet('{dataset}/**/*.parquet', hive_partitioning=true)
+            FROM wave_buoy_realtime_nonqc
             WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND (SSWMD IS NOT NULL OR WPFM IS NOT NULL OR WSSH IS NOT NULL)
             GROUP BY site_name"""
         ).df()

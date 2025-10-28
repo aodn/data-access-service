@@ -10,6 +10,7 @@ from data_access_service import Config
 from data_access_service.config.config import IntTestConfig
 from data_access_service.core.api import API
 from data_access_service.core.routes import router as api_router
+from data_access_service.core.scheduler import TaskScheduler
 
 
 def api_setup(application: FastAPI) -> API:
@@ -42,8 +43,21 @@ def api_setup(application: FastAPI) -> API:
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    # Initialize API
     api = api_setup(application)
+
+    # Initialize and start scheduler (skip in test environment)
+    scheduler = None
+    if not isinstance(Config.get_config(), IntTestConfig):
+        scheduler = TaskScheduler()
+        await scheduler.start_with_initial_run()  # Runs task on startup + schedules hourly
+        application.state.scheduler = scheduler  # type: ignore
+
     yield
+
+    # Cleanup
+    if scheduler:
+        scheduler.shutdown()
     api.destroy()
 
 
