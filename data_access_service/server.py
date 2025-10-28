@@ -50,8 +50,8 @@ async def lifespan(application: FastAPI):
     scheduler = None
     if not isinstance(Config.get_config(), IntTestConfig):
         scheduler = TaskScheduler()
-        await scheduler.start_with_initial_run()  # Runs task on startup + schedules hourly
-        application.state.scheduler = scheduler  # type: ignore
+        # Check for running event loop first to avoid creating an unawaited coroutine
+        asyncio.create_task(scheduler.start_with_initial_run(), name="wave_buoy_cache")
 
     yield
 

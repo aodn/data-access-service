@@ -1,5 +1,7 @@
 import logging
 import duckdb
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from aodn_cloud_optimised import DataQuery
@@ -15,7 +17,7 @@ class TaskScheduler:
         self.scheduler = AsyncIOScheduler()
         self._instance = DataQuery.GetAodn()
 
-    async def hourly_task(self):
+    def hourly_task(self):
         """
         Example task that runs every hour.
         Replace this with your actual task logic.
@@ -47,9 +49,13 @@ class TaskScheduler:
 
     async def start_with_initial_run(self):
         """Start the scheduler and run the hourly task immediately."""
+        # Use ThreadPoolExecutor to run blocking calls in a separate thread
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as executor:
+            # Schedule the blocking calls in a thread
+            await loop.run_in_executor(executor, lambda: self.hourly_task())
         self.start()
         logger.info("Running hourly task on startup...")
-        await self.hourly_task()
 
     def shutdown(self):
         """Shutdown the scheduler gracefully."""
