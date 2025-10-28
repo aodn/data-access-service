@@ -113,3 +113,71 @@ class TestInit(TestWithS3):
                     # Assert that the expected calls were made
                     assert expected_call_1 in submit_a_job.call_args_list
                     assert expected_call_2 in submit_a_job.call_args_list
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_init_with_non_specified_dates(self, upload_test_case_to_s3):
+        with patch.object(Config, "get_month_count_per_job") as get_month_count_per_job:
+            with patch.object(API, "get_temporal_extent") as get_temporal_extent:
+                with patch.object(AWSHelper, "submit_a_job") as submit_a_job:
+                    get_month_count_per_job.return_value = 1200  # Set a very high month count to ensure no splitting occurs
+                    # Mock the get_temporal_extent method to return a fixed value
+                    get_temporal_extent.return_value = (
+                        pd.Timestamp(year=1970, month=1, day=1),
+                        pd.Timestamp(year=2024, month=12, day=31),
+                    )
+
+                    submit_a_job.return_value = "test-job-id-returned"
+
+                    # Create parameters with non-specified dates
+                    non_specified_parameters = {
+                        **INIT_PARAMETERS,
+                        "start_date": "non-specified",
+                        "end_date": "non-specified",
+                    }
+
+                    # Call the init function
+                    init(API(), INIT_JOB_ID, non_specified_parameters)
+
+                    # Get today's date in the expected format
+                    today_str = pd.Timestamp.today().strftime("%Y-%m-%d")
+
+                    expected_date_ranges = f'{{"0": ["1970-01-01 00:00:00.000000000", "2024-12-31 23:59:59.999999999"]}}'
+
+                    expected_call_1 = call(
+                        job_name=PREPARATION_JOB_SUBMISSION_ARGS["job_name"],
+                        job_queue=PREPARATION_JOB_SUBMISSION_ARGS["job_queue"],
+                        job_definition=PREPARATION_JOB_SUBMISSION_ARGS[
+                            "job_definition"
+                        ],
+                        parameters={
+                            **PREPARATION_JOB_SUBMISSION_ARGS["parameters"],
+                            # it is ok that start_date and end_date are non-specified here, because we already used them to generate date_ranges
+                            "start_date": "non-specified",
+                            "end_date": "non-specified",
+                            "date_ranges": expected_date_ranges,
+                        },
+                        array_size=1,
+                        dependency_job_id=INIT_JOB_ID,
+                    )
+
+                    expected_call_2 = call(
+                        job_name=COLLECTION_JOB_SUBMISSION_ARGS["job_name"],
+                        job_queue=COLLECTION_JOB_SUBMISSION_ARGS["job_queue"],
+                        job_definition=COLLECTION_JOB_SUBMISSION_ARGS["job_definition"],
+                        parameters={
+                            **COLLECTION_JOB_SUBMISSION_ARGS["parameters"],
+                            # it is ok that start_date and end_date are non-specified here, because we already used them to generate date_ranges
+                            "start_date": "non-specified",
+                            "end_date": "non-specified",
+                            "date_ranges": expected_date_ranges,
+                        },
+                        dependency_job_id=COLLECTION_JOB_SUBMISSION_ARGS[
+                            "dependency_job_id"
+                        ],
+                    )
+
+                    # Assert that submit_a_job was called twice
+                    assert submit_a_job.call_count == 2
+                    # Assert that the expected calls were made
+                    assert expected_call_1 in submit_a_job.call_args_list
+                    assert expected_call_2 in submit_a_job.call_args_list
