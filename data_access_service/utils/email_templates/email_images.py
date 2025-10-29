@@ -44,7 +44,7 @@ ATTRIBUTES_IMG = _results["ATTRIBUTES_IMG"]
 FACEBOOK_IMG = _results["FACEBOOK_IMG"]
 INSTAGRAM_IMG = _results["INSTAGRAM_IMG"]
 X_IMG = _results["X_IMG"]
-BLUESKY_IMG=_results["BLUESKY_IMG"]
+BLUESKY_IMG = _results["BLUESKY_IMG"]
 YOUTUBE_IMG = _results["YOUTUBE_IMG"]
 CONTACT_IMG = _results["CONTACT_IMG"]
 LINKEDIN_IMG = _results["LINKEDIN_IMG"]
@@ -61,8 +61,7 @@ __all__ = [
     "FACEBOOK_IMG",
     "INSTAGRAM_IMG",
     "X_IMG",
-    "BLUESKY_IMG"
-    "YOUTUBE_IMG",
+    "BLUESKY_IMG" "YOUTUBE_IMG",
     "CONTACT_IMG",
     "EMAIL_IMAGES",
     "LINKEDIN_IMG",
