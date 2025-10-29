@@ -193,7 +193,7 @@ class ZarrProcessor:
         return cpu_count
 
     def __get_time_steps_per_chunk(
-        self, dataset: xarray.Dataset, time_dim: str, memory_fraction: float = 0.8
+        self, dataset: xarray.Dataset, time_dim: str, memory_fraction: float = 0.5
     ) -> int:
         """
         Calculate the number of time steps per chunk based on available memory and dataset size.
