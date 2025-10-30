@@ -131,7 +131,9 @@ class ZarrProcessor:
             if merged_dataset is None:
                 merged_dataset = subset
             else:
-                merged_dataset = xarray.concat([merged_dataset, subset])
+                merged_dataset = xarray.merge(
+                    [merged_dataset, subset], compat="override"
+                )
 
         if merged_dataset is None:
             self.log.warning(
