@@ -23,24 +23,30 @@ class TaskScheduler:
         Replace this with your actual task logic.
         """
         logger.info("Hourly task is running...")
-        dataset = f"s3://{self._instance.bucket_name}/wave_buoy_realtime_nonqc.parquet"
-        self.memconn.execute(
-            f"""
-            CREATE OR REPLACE TABLE wave_buoy_realtime_nonqc AS
-            SELECT *
-            FROM read_parquet('{dataset}/**/*.parquet', hive_partitioning=true)"""
-        )
-
-        logger.info("Hourly task completed")
+        try:
+            dataset = (
+                f"s3://{self._instance.bucket_name}/wave_buoy_realtime_nonqc.parquet"
+            )
+            self.memconn.execute(
+                f"""
+                CREATE OR REPLACE TABLE wave_buoy_realtime_nonqc AS
+                SELECT *
+                FROM read_parquet('{dataset}/**/*.parquet', hive_partitioning=true)"""
+            )
+            logger.info("Hourly task completed")
+        except Exception as e:
+            logger.error(f"Error in hourly task: {e}", exc_info=True)
 
     def start(self):
         """Start the scheduler and add jobs."""
         self.scheduler.add_job(
             self.hourly_task,
-            trigger=CronTrigger(hour="*", minute="0"),  # Every hour at :00
+            trigger=CronTrigger(hour="*/2", minute="0"),  # Every 2 hours at :00
             id="hourly_task",
             name="Hourly scheduled task",
             replace_existing=True,
+            coalesce=True,
+            misfire_grace_time=None,
         )
 
         logger.info("Starting task scheduler...")
