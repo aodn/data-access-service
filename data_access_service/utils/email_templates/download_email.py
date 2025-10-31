@@ -37,6 +37,9 @@ def get_download_email_html_body(
     end_date = subset_request.end_date
     bboxes = subset_request.bboxes if subset_request.bboxes else []
     object_url_str = "<br>".join(object_urls)
+    collection_title = subset_request.collection_title
+    full_metadata_link = subset_request.full_metadata_link
+    suggested_citation = subset_request.suggested_citation
 
     bbox_divs = form_bbox_divs(bboxes=bboxes)
     return f"""
@@ -401,7 +404,7 @@ def get_download_email_html_body(
                                                                                                       <tr>
                                                                                                          <td align="left" width="100%">
                                                                                                             <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 16px; font-weight: 500; line-height: 150%; text-align: left; color: #090c02">
-                                                                                                               <p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;">Collection:</p>
+                                                                                                               <p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;">Collection: {collection_title}</p>
                                                                                                             </div>
                                                                                                          </td>
                                                                                                       </tr>
@@ -787,95 +790,6 @@ def get_download_email_html_body(
                                              <tr>
                                                 <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
                                                    <![endif]-->
-                                                   <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:1264px;">
-                                                      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#fffffe;background-color:#fffffe;width:100%;">
-                                                         <tbody>
-                                                            <tr>
-                                                               <td style="border:none;direction:ltr;font-size:0;padding:10px 20px 10px 20px;text-align:center;">
-                                                                  <!--[if mso | IE]>
-                                                                  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
-                                                                     <tr>
-                                                                        <td style="vertical-align:middle;width:600px;">
-                                                                           <![endif]-->
-                                                                           <div class="c h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:middle;width:100%;">
-                                                                              <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border:none;vertical-align:middle;" width="100%">
-                                                                                 <tbody>
-                                                                                    <tr>
-                                                                                       <td align="center" class="tr-0" style="background:transparent;font-size:0;padding:0;word-break:break-word;">
-                                                                                          <table cellpadding="0" cellspacing="0" width="100%" border="0" style="color:#000000;line-height:normal;table-layout:fixed;width:100%;border:none;">
-                                                                                             <tr>
-                                                                                                <td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="32">
-                                                                                                   <table border="0" cellpadding="0" cellspacing="0" width="100%">
-                                                                                                      <tr>
-                                                                                                         <td align="left" width="100%"> <img alt width="32" style="display:block;width:32px;height:32px;" src="data:image/png;base64,{ATTRIBUTES_IMG}"></td>
-                                                                                                      </tr>
-                                                                                                   </table>
-                                                                                                </td>
-                                                                                                <td style="vertical-align:middle;color:transparent;font-size:0;" width="16">&#8203;</td>
-                                                                                                <td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="auto">
-                                                                                                   <table border="0" cellpadding="0" cellspacing="0" width="100%">
-                                                                                                      <tr>
-                                                                                                         <td align="left" width="100%">
-                                                                                                            <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 14px; font-weight: 500; line-height: 157%; text-align: left; color: #090c02">
-                                                                                                               <p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">Attributes</p>
-                                                                                                            </div>
-                                                                                                         </td>
-                                                                                                      </tr>
-                                                                                                   </table>
-                                                                                                </td>
-                                                                                             </tr>
-                                                                                          </table>
-                                                                                       </td>
-                                                                                    </tr>
-                                                                                    <tr>
-                                                                                       <td style="font-size:0;padding:0;word-break:break-word;">
-                                                                                          <div style="height:8px;line-height:8px;">&#8202;</div>
-                                                                                       </td>
-                                                                                    </tr>
-                                                                                    <tr>
-                                                                                       <td align="center" class="tr-0" style="background:transparent;font-size:0;padding:0;word-break:break-word;">
-                                                                                          <table cellpadding="0" cellspacing="0" width="100%" border="0" style="color:#000000;line-height:normal;table-layout:fixed;width:100%;border:none;">
-                                                                                             <tr>
-                                                                                                <td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="auto">
-                                                                                                   <table border="0" cellpadding="0" cellspacing="0" width="100%">
-                                                                                                      <tr>
-                                                                                                         <td align="left" width="100%">
-                                                                                                            <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 14px; font-weight: 500; line-height: 157%; text-align: left; color: #090c02">
-                                                                                                               <p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">Instrument: DALEC </p>
-                                                                                                            </div>
-                                                                                                         </td>
-                                                                                                      </tr>
-                                                                                                   </table>
-                                                                                                </td>
-                                                                                             </tr>
-                                                                                          </table>
-                                                                                       </td>
-                                                                                    </tr>
-                                                                                 </tbody>
-                                                                              </table>
-                                                                           </div>
-                                                                           <!--[if mso | IE]>
-                                                                        </td>
-                                                                     </tr>
-                                                                  </table>
-                                                                  <![endif]-->
-                                                               </td>
-                                                            </tr>
-                                                         </tbody>
-                                                      </table>
-                                                   </div>
-                                                   <!--[if mso | IE]>
-                                                </td>
-                                             </tr>
-                                          </table>
-                                       </td>
-                                    </tr>
-                                    <tr>
-                                       <td width="1280px">
-                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1264px;" width="1264">
-                                             <tr>
-                                                <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
-                                                   <![endif]-->
                                                    <div style="margin:0px auto;max-width:1264px;">
                                                       <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">
                                                          <tbody>
@@ -949,7 +863,7 @@ def get_download_email_html_body(
                                                                                                       <tr>
                                                                                                          <td align="left" width="100%">
                                                                                                             <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 16px; font-weight: 400; line-height: 150%; text-align: left; color: #090c02">
-                                                                                                               <p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;">uuid is: {uuid}</p>
+                                                                                                               <p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;">Metadata Link: {full_metadata_link}</p>
                                                                                                             </div>
                                                                                                          </td>
                                                                                                       </tr>
@@ -1057,7 +971,7 @@ def get_download_email_html_body(
                                                                                                       <tr>
                                                                                                          <td align="left" width="100%">
                                                                                                             <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 16px; font-weight: 400; line-height: 150%; text-align: left; color: #090c02">
-                                                                                                               <p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;">Suggested Citation: "IMOS [year-of-data-download], [Title], [data-access-URL], accessed [date-of-access]."</p>
+                                                                                                               <p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;">{suggested_citation}</p>
                                                                                                             </div>
                                                                                                          </td>
                                                                                                       </tr>
