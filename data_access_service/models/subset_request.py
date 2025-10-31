@@ -10,5 +10,7 @@ class SubsetRequest:
     end_date: str
     bboxes: [BoundingBox]
     recipient: str
-    collection_title: str = ""  # Not implement yet
+    collection_title: str
+    full_metadata_link: str
+    suggested_citation: str
     # TODO: add more fields if needed
