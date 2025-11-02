@@ -9,7 +9,7 @@ from data_access_service.utils.email_templates.email_images import (
     ATTRIBUTES_IMG,
     FACEBOOK_IMG,
     INSTAGRAM_IMG,
-    X_IMG,
+    BLUESKY_IMG,
     LINKEDIN_IMG,
     CONTACT_IMG,
 )
@@ -18,6 +18,7 @@ from data_access_service.utils.email_templates.email_images import (
 FACEBOOK_URL = "https://www.facebook.com/IntegratedMarineObservingSystem"
 LINKEDIN_URL = "https://www.linkedin.com/company/imos_aus/posts/?feedView=all"
 X_URL = "https://x.com/IMOS_AUS"
+BLUESKY_URL = "https://bsky.app/profile/imos-aus.bsky.social"
 INSTAGRAM_URL = "https://www.instagram.com/imos_australia/#"
 CONTACT_US_URL = "mailto:info@aodn.org.au"
 TERMS_OF_USE_URL = "https://imos.org.au/terms-of-use"
@@ -1521,8 +1522,8 @@ def get_download_email_html_body(
                                                                                              <tbody>
                                                                                                 <tr>
                                                                                                    <td style="font-size:0;height:24px;vertical-align:middle;width:24px;">
-                                                                                                      <a href="{X_URL}" target="_blank">
-                                                                                                      <img alt="X" height="24" src="data:image/png;base64,{X_IMG}" style="display:block;" width="24">
+                                                                                                      <a href="{BLUESKY_URL}" target="_blank">
+                                                                                                      <img alt="X" height="24" src="data:image/png;base64,{BLUESKY_IMG}" style="display:block;" width="24">
                                                                                                       </a>
                                                                                                    </td>
                                                                                                 </tr>
