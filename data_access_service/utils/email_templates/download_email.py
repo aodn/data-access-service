@@ -37,7 +37,12 @@ def get_download_email_html_body(
     end_date = subset_request.end_date
     bboxes = subset_request.bboxes if subset_request.bboxes else []
     subsetting_section = form_subsetting_divs(start_date, end_date, bboxes)
-    object_url_str = "<br>".join(object_urls)
+    object_url_str = "<br>".join(
+        [
+            f'<a href="{url}" style="color:#2571e9;text-decoration:underline;">{url}</a>'
+            for url in object_urls
+        ]
+    )
     collection_title = subset_request.collection_title
     full_metadata_link = subset_request.full_metadata_link
     suggested_citation = subset_request.suggested_citation
@@ -160,12 +165,12 @@ def get_download_email_html_body(
       <style>
          a:link {{
          mso-style-priority: 99;
-         color: inherit;
+         color:#2571e9 important;
          text-decoration: none;
          }}
          a:visited {{
          mso-style-priority: 99;
-         color: inherit;
+         color:#2571e9 important;
          text-decoration: none;
          }}
          li {{ margin-left: -1em !important }}
@@ -615,7 +620,7 @@ def get_download_email_html_body(
                                                                                                       <tr>
                                                                                                          <td align="left" width="100%">
                                                                                                             <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 16px; font-weight: 400; line-height: 150%; text-align: left; color: #090c02">
-                                                                                                               <p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;">Metadata Link: {full_metadata_link}</p>
+                                                                                                               <p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;">Metadata Link: <a href="{full_metadata_link}" style="color:#2571e9;text-decoration:underline;">{full_metadata_link}</a></p>
                                                                                                             </div>
                                                                                                          </td>
                                                                                                       </tr>

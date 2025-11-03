@@ -7,19 +7,22 @@ from data_access_service.utils.email_templates.email_images import (
 
 def form_subsetting_divs(start_date, end_date, bboxes):
     """Form subsetting section with time range and bounding boxes"""
-    
+
     # Hide if dates are "non-specified" or match default values (1970-01-01 to today)
     has_dates = False
     if start_date and end_date:
         start_str = str(start_date).lower()
         end_str = str(end_date).lower()
-        
+
         # Check if not "non-specified" and not default values
-        is_non_specified = (start_str == "non-specified" or end_str == "non-specified")
-        is_default = (start_str == "1970-01-01" and end_str == pandas.Timestamp.today().strftime("%Y-%m-%d").lower())
-        
+        is_non_specified = start_str == "non-specified" or end_str == "non-specified"
+        is_default = (
+            start_str == "1970-01-01"
+            and end_str == pandas.Timestamp.today().strftime("%Y-%m-%d").lower()
+        )
+
         has_dates = not is_non_specified and not is_default
-    
+
     # Check if bboxes exist and are not global extent
     has_bboxes = False
     if bboxes and len(bboxes) > 0:
@@ -27,24 +30,24 @@ def form_subsetting_divs(start_date, end_date, bboxes):
         for bbox in bboxes:
             # Assuming bbox has attributes: north, south, east, west
             is_global = (
-                bbox.max_lat == 90 and 
-                bbox.min_lat == -90 and 
-                bbox.min_lon == -180 and 
-                bbox.max_lon == 180
+                bbox.max_lat == 90
+                and bbox.min_lat == -90
+                and bbox.min_lon == -180
+                and bbox.max_lon == 180
             )
             if not is_global:
                 has_bboxes = True
                 break
-    
+
     # If no subsetting data at all, return empty string
     if not has_dates and not has_bboxes:
         return ""
-    
+
     # Form bbox divs if they exist and are not all global
     bbox_divs = ""
     if has_bboxes:
         bbox_divs = form_bbox_divs(bboxes)
-    
+
     # Form time range section if dates exist
     time_range_section = ""
     if has_dates:
@@ -138,7 +141,7 @@ def form_subsetting_divs(start_date, end_date, bboxes):
             </table>
         </td>
     </tr>"""
-    
+
     # Build complete subsetting section
     return f"""
     <tr>
