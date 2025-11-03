@@ -12,8 +12,8 @@ from data_access_service.tasks.generate_dataset import (
     process_data_files,
 )
 from tests.batch.batch_test_consts import INIT_JOB_ID
+from tests.conftest import subset_request_factory
 from tests.core.test_with_s3 import TestWithS3, REGION
-from tests.utils.test_email_generator import create_dummy_subset_request
 
 
 class TestGenerateZarrFile(TestWithS3):
@@ -78,13 +78,7 @@ class TestGenerateZarrFile(TestWithS3):
 
                     # At least we can convert it to netcdf
                     # Create dummy subset_request
-                    subset_request = create_dummy_subset_request(
-                        uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
-                        keys=["*"],
-                        start_date="2011-07-01",
-                        end_date="2011-09-01",
-                        recipient="testreceipt@something.com",
-                    )
+                    subset_request = subset_request_factory()
 
                     collect_data_files(
                         master_job_id=INIT_JOB_ID,

@@ -6,6 +6,7 @@ import pandas as pd
 import dask.dataframe as dd
 import requests
 
+from tests.conftest import subset_request_factory
 import xarray as xr
 from pathlib import Path
 from unittest.mock import patch, MagicMock, ANY
@@ -40,16 +41,11 @@ class TestAWSHelper(TestWithS3):
         ses_client.verify_email_identity(EmailAddress=config.get_sender_email())
 
         # Create a mock subset_request for the email template
-        class MockSubsetRequest:
-            uuid = "test-uuid"
-            keys = ["*"]
-            start_date = "2024-01-01"
-            end_date = "2024-12-31"
-            bboxes = []
+        subset_request = subset_request_factory()
 
         # Convert download_urls to HTML body using the template function
         html_body = get_download_email_html_body(
-            subset_request=MockSubsetRequest(), object_urls=download_urls
+            subset_request=subset_request, object_urls=download_urls
         )
 
         # Send email with proper HTML string
