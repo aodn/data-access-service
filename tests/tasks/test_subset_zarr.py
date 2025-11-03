@@ -99,7 +99,7 @@ class TestSubsetZarr(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
-        subset_request_factory
+        subset_request_factory,
     ):
         s3_client, _, _ = aws_clients
         config = Config.get_config()

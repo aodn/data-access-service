@@ -20,7 +20,7 @@ from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.utils.date_time_utils import split_date_range
 from tests.batch.batch_test_consts import PREPARATION_PARAMETERS, INIT_JOB_ID
-from tests.core.test_with_s3 import TestWithS3, REGION 
+from tests.core.test_with_s3 import TestWithS3, REGION
 
 
 class TestDataGeneration(TestWithS3):
@@ -44,7 +44,11 @@ class TestDataGeneration(TestWithS3):
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_parquet_preparation_and_collection(
-        self, aws_clients, setup_resources, upload_test_case_to_s3, subset_request_factory
+        self,
+        aws_clients,
+        setup_resources,
+        upload_test_case_to_s3,
+        subset_request_factory,
     ):
         s3_client, _, _ = aws_clients
         config = Config.get_config()
