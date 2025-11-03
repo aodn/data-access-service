@@ -41,6 +41,7 @@ class TestGenerateZarrFile(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
     ):
         """
         Test the process_data_files function by doing a single job index 10, this make sure

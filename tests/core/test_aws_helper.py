@@ -26,7 +26,7 @@ from tests.core.test_with_s3 import TestWithS3
 class TestAWSHelper(TestWithS3):
 
     def test_email_client_format(
-        self, setup, aws_clients, localstack, mock_boto3_client
+        self, setup, aws_clients, localstack, subset_request_factory, mock_boto3_client
     ):
         _, _, ses_client = aws_clients
         config = Config.get_config()
