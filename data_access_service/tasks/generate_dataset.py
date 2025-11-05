@@ -37,6 +37,9 @@ def process_data_files(
     multi_polygon: str | None,
 ) -> str | None:
     if multi_polygon is not None:
+        if multi_polygon == "non-specified":
+            #    multi polygon dict is whole earth
+            multi_polygon = '{"type":"MultiPolygon","coordinates":[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}'
         multi_polygon_dict = json.loads(multi_polygon)
     else:
         multi_polygon_dict = None
