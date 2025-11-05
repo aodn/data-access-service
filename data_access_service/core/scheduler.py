@@ -19,23 +19,48 @@ class TaskScheduler:
 
     def hourly_task(self):
         """
-        Example task that runs every hour.
-        Replace this with your actual task logic.
+        Refreshes the wave buoy data table without blocking reads.
+        Uses a temporary table strategy to avoid locking the main table during refresh.
         """
         logger.info("Hourly task is running...")
+        temp_table_name = "wave_buoy_realtime_nonqc_temp"
+        target_table_name = "wave_buoy_realtime_nonqc"
+
         try:
             dataset = (
                 f"s3://{self._instance.bucket_name}/wave_buoy_realtime_nonqc.parquet"
             )
+
+            # Step 1: Create temp table with new data (non-blocking for readers)
+            logger.info(f"Creating temporary table '{temp_table_name}'...")
             self.memconn.execute(
                 f"""
-                CREATE OR REPLACE TABLE wave_buoy_realtime_nonqc AS
+                CREATE OR REPLACE TABLE {temp_table_name} AS
                 SELECT *
                 FROM read_parquet('{dataset}/**/*.parquet', hive_partitioning=true)"""
             )
-            logger.info("Hourly task completed")
+            logger.info(f"Temporary table '{temp_table_name}' created successfully")
+
+            # Step 2: Drop old table if it exists
+            logger.info(f"Dropping old table '{target_table_name}'...")
+            self.memconn.execute(
+                f"""
+                BEGIN TRANSACTION;
+                DROP TABLE IF EXISTS {target_table_name};
+                ALTER TABLE {temp_table_name} RENAME TO {target_table_name};
+                COMMIT;
+            """
+            )
+
+            logger.info("Hourly task completed successfully")
         except Exception as e:
             logger.error(f"Error in hourly task: {e}", exc_info=True)
+            # Clean up temp table if it exists
+            try:
+                self.memconn.execute(f"DROP TABLE IF EXISTS {temp_table_name}")
+                logger.info(f"Cleaned up temporary table '{temp_table_name}'")
+            except Exception as cleanup_error:
+                logger.error(f"Error cleaning up temp table: {cleanup_error}")
 
     def start(self):
         """Start the scheduler and add jobs."""
