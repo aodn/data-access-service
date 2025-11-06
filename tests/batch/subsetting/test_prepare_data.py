@@ -303,6 +303,11 @@ class TestDataGeneration(TestWithS3):
     def test_non_specified_multi_polygon(
         self, aws_clients, setup_resources, upload_test_case_to_s3
     ):
+        # Use a different master_job_id to avoid conflicts with other tests
+        parameters = PREPARATION_PARAMETERS.copy()
+        parameters[Parameters.MASTER_JOB_ID.value] = "998"
+        parameters[Parameters.MULTI_POLYGON.value] = "non-specified"
+
         s3_client, _, _ = aws_clients
         config = Config.get_config()
         config.set_s3_client(s3_client)
@@ -310,6 +315,7 @@ class TestDataGeneration(TestWithS3):
 
         with patch.object(AWSHelper, "send_email") as mock_send_email:
             try:
+                # List objects in S3
                 response = s3_client.list_objects_v2(
                     Bucket=DataQuery.BUCKET_OPTIMISED_DEFAULT,
                     Prefix=DataQuery.ROOT_PREFIX_CLOUD_OPTIMISED_PATH,
@@ -335,16 +341,16 @@ class TestDataGeneration(TestWithS3):
                     is not None
                 )
 
-                parameters = PREPARATION_PARAMETERS.copy()
-                parameters[Parameters.MULTI_POLYGON.value] = "non-specified"
-
+                # prepare data according to the test parameters
                 api = API()
                 api.initialize_metadata()
                 for i in range(5):
                     prepare_data(api, job_index=str(i), parameters=parameters)
 
                 bucket_name = config.get_csv_bucket_name()
-                response = s3_client.list_objects_v2(Bucket=bucket_name)
+                response = s3_client.list_objects_v2(
+                    Bucket=bucket_name, Prefix="998/temp/"
+                )
 
                 objects = []
                 if "Contents" in response:
@@ -354,11 +360,11 @@ class TestDataGeneration(TestWithS3):
                 assert len(objects) == 1
                 assert (
                     objects[0]
-                    == "999/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11/part.0.parquet"
+                    == "998/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11/part.0.parquet"
                 )
 
             except Exception as ex:
                 raise ex
             finally:
                 # Delete temp output folder as the name always same for testing
-                shutil.rmtree(config.get_temp_folder(INIT_JOB_ID), ignore_errors=True)
+                shutil.rmtree(config.get_temp_folder("998"), ignore_errors=True)
