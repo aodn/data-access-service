@@ -11,6 +11,7 @@ from data_access_service.batch.subsetting_helper import (
     get_subset_request,
 )
 from data_access_service.core.AWSHelper import AWSHelper
+from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.tasks.generate_dataset import process_data_files
 from data_access_service.tasks.subset_zarr import ZarrProcessor
@@ -18,6 +19,9 @@ from data_access_service.utils.date_time_utils import (
     supply_day_with_nano_precision,
     split_date_range,
     parse_date,
+)
+from data_access_service.utils.email_templates.download_email import (
+    get_download_email_html_body,
 )
 
 
@@ -65,6 +69,20 @@ def init(api: API, job_id_of_init, parameters):
         requested_start_date=requested_start_date,
         requested_end_date=requested_end_date,
     )
+    if requested_start_date is None or requested_end_date is None:
+        # requested date range does not overlap with data available
+        recipient = parameters[Parameters.RECIPIENT.value]
+        text_body = (
+            f"No data available for your subset request for dataset {uuid} with keys {keys} "
+            f"and date range from {start_date_str} to {end_date_str}."
+            f"and selected area is {parameters[Parameters.MULTI_POLYGON.value]}."
+        )
+        AWSHelper().send_email(
+            recipient=recipient,
+            subject="No Data Available for Your Subset Request",
+            text_body=text_body,
+        )
+        return
 
     date_ranges = split_date_range(
         start_date=requested_start_date,
