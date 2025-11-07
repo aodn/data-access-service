@@ -50,11 +50,17 @@ def trim_date_range_for_keys(
     keys: List[str],
     requested_start_date: pd.Timestamp,
     requested_end_date: pd.Timestamp,
-) -> tuple[pd.Timestamp, pd.Timestamp]:
+) -> tuple[pd.Timestamp, pd.Timestamp] | tuple[None, None]:
 
     # convert into utc:
     requested_start_date = ensure_timezone(requested_start_date)
     requested_end_date = ensure_timezone(requested_end_date)
+
+    # throw error if requested start date is after requested end date
+    if requested_start_date > requested_end_date:
+        raise ValueError(
+            f"Requested start date {requested_start_date} is after requested end date {requested_end_date}"
+        )
 
     min_date_of_keys = pd.Timestamp.now(tz="UTC")
     max_date_of_keys = pd.Timestamp("1970-01-01 00:00:00.000000000", tz="UTC")
@@ -72,7 +78,11 @@ def trim_date_range_for_keys(
         if end_date > max_date_of_keys:
             max_date_of_keys = end_date
 
-    # if the requested dates are outside the available range, trim them
+    # if the requested date range is completely outside the available range, return None
+    if requested_end_date < min_date_of_keys or requested_start_date > max_date_of_keys:
+        return None, None
+
+    # if the requested date ranges are bigger the available range, trim them
     trimmed_start_date = requested_start_date
     trimmed_end_date = requested_end_date
     if requested_start_date < min_date_of_keys:
