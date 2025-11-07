@@ -58,6 +58,20 @@ class ZarrProcessor:
             requested_start_date=start_date,
             requested_end_date=end_date,
         )
+        if trimmed_start_date is None or trimmed_end_date is None:
+            # requested date range does not overlap with data available
+            text_body = (
+                f"No data available for your subset request for dataset {uuid} with keys {keys} "
+                f"and date range from {start_date_str} to {end_date_str}."
+                f"and selected area is {multi_polygon}."
+            )
+            AWSHelper().send_email(
+                recipient=recipient,
+                subject="No Data Available for Your Subset Request",
+                text_body=text_body,
+            )
+            return
+
         self.start_date = trimmed_start_date
         self.end_date = trimmed_end_date
         self.multi_polygon = MultiPolygonHelper(multi_polygon=multi_polygon)
