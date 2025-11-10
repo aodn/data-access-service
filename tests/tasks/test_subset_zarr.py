@@ -186,6 +186,9 @@ class TestSubsetZarr(TestWithS3):
                         end_date_str="04-2012",
                         multi_polygon="non-specified",
                         recipient="example@@test.com",
+                        collection_title="Test Ocean Data Collection",
+                        full_metadata_link="https://metadata.imas.utas.edu.au/.../test-uuid-123",
+                        suggested_citation="Cite data as: Mazor, T., Watermeyer, K., Hobley, T., Grinter, V., Holden, R., MacDonald, K. and Ferns, L. (2023). Statewide Marine Habitat Map.",
                     )
 
                     zarr_processor.process()
