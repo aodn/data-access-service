@@ -298,3 +298,73 @@ class TestDataGeneration(TestWithS3):
                     shutil.rmtree(
                         config.get_temp_folder(INIT_JOB_ID), ignore_errors=True
                     )
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_non_specified_multi_polygon(
+        self, aws_clients, setup_resources, upload_test_case_to_s3
+    ):
+        # Use a different master_job_id to avoid conflicts with other tests
+        parameters = PREPARATION_PARAMETERS.copy()
+        parameters[Parameters.MASTER_JOB_ID.value] = "998"
+        parameters[Parameters.MULTI_POLYGON.value] = "non-specified"
+
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+        helper = AWSHelper()
+
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
+            try:
+                # List objects in S3
+                response = s3_client.list_objects_v2(
+                    Bucket=DataQuery.BUCKET_OPTIMISED_DEFAULT,
+                    Prefix=DataQuery.ROOT_PREFIX_CLOUD_OPTIMISED_PATH,
+                    Delimiter="/",
+                )
+
+                folders = [
+                    prefix["Prefix"][len(prefix) - 1 :]
+                    for prefix in response.get("CommonPrefixes", [])
+                    if prefix["Prefix"].endswith(".parquet/")
+                ]
+
+                assert len(folders) == 2
+                assert folders[0] == "animal_acoustic_tracking_delayed_qc.parquet/"
+
+                # Verify DataQuery functionality
+                aodn = DataQuery.GetAodn()
+                metadata: Metadata = aodn.get_metadata()
+                assert (
+                    metadata.metadata_catalog().get(
+                        "animal_acoustic_tracking_delayed_qc.parquet"
+                    )
+                    is not None
+                )
+
+                # prepare data according to the test parameters
+                api = API()
+                api.initialize_metadata()
+                for i in range(5):
+                    prepare_data(api, job_index=str(i), parameters=parameters)
+
+                bucket_name = config.get_csv_bucket_name()
+                response = s3_client.list_objects_v2(
+                    Bucket=bucket_name, Prefix="998/temp/"
+                )
+
+                objects = []
+                if "Contents" in response:
+                    for obj in response["Contents"]:
+                        objects.append(obj["Key"])
+                #  in test parquet, only 1 data csv for the provided range
+                assert len(objects) == 1
+                assert (
+                    objects[0]
+                    == "998/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11/part.0.parquet"
+                )
+
+            except Exception as ex:
+                raise ex
+            finally:
+                # Delete temp output folder as the name always same for testing
+                shutil.rmtree(config.get_temp_folder("998"), ignore_errors=True)
