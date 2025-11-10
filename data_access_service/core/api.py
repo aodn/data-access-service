@@ -467,7 +467,6 @@ class API(BaseAPI):
         return feature
 
     def fetch_wave_buoy_sites(self, start_date: str, end_date: str):
-        dataset = f"s3://{self._instance.bucket_name}/wave_buoy_realtime_nonqc.parquet"
         result = self.memconn.execute(
             f"""SELECT
             site_name,
