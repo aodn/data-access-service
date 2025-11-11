@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from tests.conftest import subset_request_factory
 import xarray
 from aodn_cloud_optimised.lib import DataQuery
 
@@ -55,6 +56,9 @@ class TestSubsetZarr(TestWithS3):
                         end_date_str="04-2012",
                         multi_polygon='{"type":"MultiPolygon","coordinates":[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}',
                         recipient="example@@test.com",
+                        collection_title="Test Ocean Data Collection",
+                        full_metadata_link="https://metadata.imas.utas.edu.au/.../test-uuid-123",
+                        suggested_citation="Cite data as: Mazor, T., Watermeyer, K., Hobley, T., Grinter, V., Holden, R., MacDonald, K. and Ferns, L. (2023). Statewide Marine Habitat Map.",
                     )
 
                     zarr_processor.process()
@@ -95,6 +99,69 @@ class TestSubsetZarr(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
+    ):
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        helper = AWSHelper()
+
+        api = API()
+        api.initialize_metadata()
+
+        with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
+            # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
+            with patch.object(AWSHelper, "send_email") as mock_send_email:
+
+                key = "radar_CoffsHarbour_wind_delayed_qc.zarr"
+                no_ext_key = key.replace(".zarr", "")
+                subset_request = subset_request_factory()
+                try:
+                    zarr_processor = ZarrProcessor(
+                        api,
+                        uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
+                        job_id="job_id_888",
+                        keys=[key],
+                        start_date_str="03-2012",
+                        end_date_str="04-2012",
+                        multi_polygon='{"type":"MultiPolygon","coordinates":[[[[201.73699345083196,-47.61820213929325],[221.7761315086342,-47.61820213929325],[221.7761315086342,-38.939085797521166],[201.73699345083196,-38.939085797521166],[201.73699345083196,-47.61820213929325]]],[[[157.7915152538971,-32.07902332926048],[174.31501505594503,-32.07902332926048],[174.31501505594503,-15.428394281587785],[157.7915152538971,-15.428394281587785],[157.7915152538971,-32.07902332926048]]]]}',
+                        recipient="example@@test.com",
+                        collection_title="Test Ocean Data Collection",
+                        full_metadata_link="https://metadata.imas.utas.edu.au/.../test-uuid-123",
+                        suggested_citation="Cite data as: Mazor, T., Watermeyer, K., Hobley, T., Grinter, V., Holden, R., MacDonald, K. and Ferns, L. (2023). Statewide Marine Habitat Map.",
+                    )
+
+                    zarr_processor.process()
+
+                    # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
+                    files = helper.list_all_s3_objects(
+                        config.get_csv_bucket_name(),
+                        "",
+                    )
+
+                    assert (
+                        "job_id_888/radar_CoffsHarbour_wind_delayed_qc.nc" in files
+                    ), "didn't find expected output file"
+
+                    # use tempfile to download an object from s3
+                    with tempfile.TemporaryDirectory() as tmpdirname:
+                        temp_file_path = Path(tmpdirname) / f"{no_ext_key}.nc"
+                        helper.download_file_from_s3(
+                            config.get_csv_bucket_name(),
+                            f"job_id_888/{no_ext_key}.nc",
+                            str(temp_file_path),
+                        )
+                except Exception as ex:
+                    # Should not have any errors
+                    assert False, f"{ex}"
+                finally:
+                    # Delete temp output folder as the name always same for testing
+                    shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
+
+    def test_non_specified_multi_polygon(
+        self,
+        aws_clients,
+        upload_test_case_to_s3,
+        mock_get_fs_token_paths,
     ):
         s3_client, _, _ = aws_clients
         config = Config.get_config()
@@ -117,8 +184,11 @@ class TestSubsetZarr(TestWithS3):
                         keys=[key],
                         start_date_str="03-2012",
                         end_date_str="04-2012",
-                        multi_polygon='{"type":"MultiPolygon","coordinates":[[[[201.73699345083196,-47.61820213929325],[221.7761315086342,-47.61820213929325],[221.7761315086342,-38.939085797521166],[201.73699345083196,-38.939085797521166],[201.73699345083196,-47.61820213929325]]],[[[157.7915152538971,-32.07902332926048],[174.31501505594503,-32.07902332926048],[174.31501505594503,-15.428394281587785],[157.7915152538971,-15.428394281587785],[157.7915152538971,-32.07902332926048]]]]}',
+                        multi_polygon="non-specified",
                         recipient="example@@test.com",
+                        collection_title="Test Ocean Data Collection",
+                        full_metadata_link="https://metadata.imas.utas.edu.au/.../test-uuid-123",
+                        suggested_citation="Cite data as: Mazor, T., Watermeyer, K., Hobley, T., Grinter, V., Holden, R., MacDonald, K. and Ferns, L. (2023). Statewide Marine Habitat Map.",
                     )
 
                     zarr_processor.process()

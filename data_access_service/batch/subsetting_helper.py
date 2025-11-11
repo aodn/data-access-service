@@ -30,6 +30,9 @@ def get_subset_request(parameters) -> SubsetRequest:
     start_date = parameters[Parameters.START_DATE.value]
     end_date = parameters[Parameters.END_DATE.value]
     recipient = parameters[Parameters.RECIPIENT.value]
+    collection_title = parameters.get(Parameters.COLLECTION_TITLE.value)
+    full_metadata_link = parameters.get(Parameters.FULL_METADATA_LINK.value)
+    suggested_citation = parameters.get(Parameters.SUGGESTED_CITATION.value)
     bboxes = MultiPolygonHelper(
         multi_polygon=(parameters[Parameters.MULTI_POLYGON.value])
     ).bboxes
@@ -41,6 +44,9 @@ def get_subset_request(parameters) -> SubsetRequest:
         end_date=end_date,
         bboxes=bboxes,
         recipient=recipient,
+        collection_title=collection_title,
+        full_metadata_link=full_metadata_link,
+        suggested_citation=suggested_citation,
     )
 
 
@@ -50,11 +56,17 @@ def trim_date_range_for_keys(
     keys: List[str],
     requested_start_date: pd.Timestamp,
     requested_end_date: pd.Timestamp,
-) -> tuple[pd.Timestamp, pd.Timestamp]:
+) -> tuple[pd.Timestamp, pd.Timestamp] | tuple[None, None]:
 
     # convert into utc:
     requested_start_date = ensure_timezone(requested_start_date)
     requested_end_date = ensure_timezone(requested_end_date)
+
+    # throw error if requested start date is after requested end date
+    if requested_start_date > requested_end_date:
+        raise ValueError(
+            f"Requested start date {requested_start_date} is after requested end date {requested_end_date}"
+        )
 
     min_date_of_keys = pd.Timestamp.now(tz="UTC")
     max_date_of_keys = pd.Timestamp("1970-01-01 00:00:00.000000000", tz="UTC")
@@ -72,7 +84,11 @@ def trim_date_range_for_keys(
         if end_date > max_date_of_keys:
             max_date_of_keys = end_date
 
-    # if the requested dates are outside the available range, trim them
+    # if the requested date range is completely outside the available range, return None
+    if requested_end_date < min_date_of_keys or requested_start_date > max_date_of_keys:
+        return None, None
+
+    # if the requested date ranges are bigger the available range, trim them
     trimmed_start_date = requested_start_date
     trimmed_end_date = requested_end_date
     if requested_start_date < min_date_of_keys:
