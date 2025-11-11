@@ -420,7 +420,7 @@ class API(BaseAPI):
             LATITUDE,
             LONGITUDE
             FROM wave_buoy_realtime_nonqc
-            WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (SSWMD IS NOT NULL OR WPFM IS NOT NULL OR WSSH IS NOT NULL)
+            WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (WPFM IS NOT NULL OR WPMH IS NOT NULL) AND (WHTH IS NOT NULL OR WSSH IS NOT NULL)
             LIMIT 1"""
         ).df()
 
@@ -440,9 +440,9 @@ class API(BaseAPI):
             return {}
 
         waveBuoyDataQueryResult = self.memconn.execute(
-            f"""SELECT SSWMD, WPFM, WSSH, TIME
+            f"""SELECT SSWMD, WPFM, WPMH, WHTH, WSSH, TIME
             FROM wave_buoy_realtime_nonqc
-            WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (SSWMD IS NOT NULL OR WPFM IS NOT NULL OR WSSH IS NOT NULL)
+            WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (WPFM IS NOT NULL OR WPMH IS NOT NULL) AND (WHTH IS NOT NULL OR WSSH IS NOT NULL)
             ORDER BY TIME"""
         ).df()
         feature = {
@@ -450,6 +450,8 @@ class API(BaseAPI):
             "properties": {
                 "SSWMD": [],
                 "WPFM": [],
+                "WPMH": [],
+                "WHTH": [],
                 "WSSH": [],
             },
             "geometry": {
@@ -460,9 +462,16 @@ class API(BaseAPI):
 
         for _, row in waveBuoyDataQueryResult.iterrows():
             time_sec = int(row["TIME"].timestamp() * 1000)
-            feature["properties"]["SSWMD"].append([time_sec, row["SSWMD"]])
-            feature["properties"]["WPFM"].append([time_sec, row["WPFM"]])
-            feature["properties"]["WSSH"].append([time_sec, row["WSSH"]])
+            if pd.notna(row["SSWMD"]):
+                feature["properties"]["SSWMD"].append([time_sec, row["SSWMD"]])
+            if pd.notna(row["WPFM"]):
+                feature["properties"]["WPFM"].append([time_sec, row["WPFM"]])
+            if pd.notna(row["WPMH"]):
+                feature["properties"]["WPMH"].append([time_sec, row["WPMH"]])
+            if pd.notna(row["WHTH"]):
+                feature["properties"]["WHTH"].append([time_sec, row["WHTH"]])
+            if pd.notna(row["WSSH"]):
+                feature["properties"]["WSSH"].append([time_sec, row["WSSH"]])
 
         return feature
 
@@ -474,7 +483,7 @@ class API(BaseAPI):
             first(LATITUDE) AS LATITUDE,
             first(LONGITUDE) AS LONGITUDE
             FROM wave_buoy_realtime_nonqc
-            WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND (SSWMD IS NOT NULL OR WPFM IS NOT NULL OR WSSH IS NOT NULL)
+            WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND (WPFM IS NOT NULL OR WPMH IS NOT NULL) AND (WHTH IS NOT NULL OR WSSH IS NOT NULL)
             GROUP BY site_name"""
         ).df()
         feature_collection = {
