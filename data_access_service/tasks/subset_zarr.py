@@ -127,6 +127,31 @@ class ZarrProcessor:
         merged_dataset: xarray.Dataset | None = None
         for bbox in self.bboxes:
 
+            ds = self.api._instance.get_dataset(key).zarr_store
+            conditions = self.get_all_subset_conditions(key, bbox)
+
+            dim_conditions = {}  # Conditions for dimensions of zarr
+            mask = None  # Conditions for variables (include coord and data_var) of zarr. Naming "mask" is for zarr convention
+            for k, v in conditions.items():
+                if is_dim(key=k, dataset=ds):
+                    dim_conditions[k] = slice(v[0], v[1])
+                elif is_var(key=k, dataset=ds):
+                    mask = form_mask(
+                        existing_mask=mask,
+                        new_mask=v,
+                        key=k,
+                        min_value=v[0],
+                        max_value=v[1],
+                        ds=ds,
+                    )
+
+                else:
+                    raise ValueError(
+                        f"Condition key: {k} is neither dimension, coord nor data_var in the dataset. Dataset: {key}"
+                    )
+
+            # todo: continue from here
+
             subset = self.api.get_dataset(
                 uuid=self.uuid,
                 key=key,
@@ -237,17 +262,17 @@ class ZarrProcessor:
         total_time_count = dataset.sizes[time_dim]
         return math.ceil(total_time_count / chunk_count)
 
-    def get_all_subset_conditions(self, key: str, bbox: BoundingBox):
+    def get_all_subset_conditions(self, key: str, bbox: BoundingBox) -> dict[str, list]:
         # Please add more conditions if they are supported in the future
         time_dim = self.api.map_column_names(
             uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
-        )
+        )[0]
         lat_dim = self.api.map_column_names(
             uuid=self.uuid, key=key, columns=[STR_LATITUDE_UPPER_CASE]
-        )
+        )[0]
         lon_dim = self.api.map_column_names(
             uuid=self.uuid, key=key, columns=[STR_LONGITUDE_UPPER_CASE]
-        )
+        )[0]
 
         return {
             time_dim: [self.start_date, self.end_date],
@@ -262,3 +287,27 @@ def ignore_invalid_unicode_in_attrs(dataset: xarray.Dataset) -> xarray.Dataset:
             dataset.attrs[k] = v.encode("utf-8", errors="ignore").decode("utf-8")
 
     return dataset
+
+
+def is_dim(key: str, dataset: xarray.Dataset) -> bool:
+    return key in dataset.dims
+
+
+def is_var(key: str, dataset: xarray.Dataset) -> bool:
+    # both coords and data_vars are in variables
+    return key in dataset.variables
+
+
+def form_mask(
+    existing_mask: any,
+    new_mask: any,
+    key: str,
+    min_value: any,
+    max_value: any,
+    ds: xarray.Dataset,
+) -> any:
+    var_mask = (ds[key] >= min_value) & (ds[key] <= max_value)
+    if existing_mask is None:
+        return var_mask
+    else:
+        return existing_mask & var_mask
