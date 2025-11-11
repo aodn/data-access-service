@@ -1,2 +1,2 @@
-GET http://localhost:5000/api/v1/das/data/feature-collection/wave-buoy/Sandringham?start_date=2022-11-01T00:00:00&end_date=2022-11-02T00:00:00.000000000Z
+GET http://localhost:5000/api/v1/das/data/feature-collection/wave-buoy/VICTOR-HARBOUROFFSHORE?start_date=2025-11-11T00:00:00&end_date=2025-11-12T00:00:00.000000000Z
 X-API-Key: 123
