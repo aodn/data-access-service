@@ -12,6 +12,12 @@ import xarray
 from data_access_service import init_log, Config, API
 from data_access_service.batch.subsetting_helper import trim_date_range_for_keys
 from data_access_service.core.AWSHelper import AWSHelper
+from data_access_service.core.constants import (
+    STR_TIME_UPPER_CASE,
+    STR_LATITUDE_UPPER_CASE,
+    STR_LONGITUDE_UPPER_CASE,
+)
+from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.models.multi_polygon_helper import MultiPolygonHelper
 from data_access_service.utils.date_time_utils import supply_day_with_nano_precision
 from data_access_service.utils.email_templates.download_email import (
@@ -230,6 +236,24 @@ class ZarrProcessor:
         self.log.info("Chunk count: %d", chunk_count)
         total_time_count = dataset.sizes[time_dim]
         return math.ceil(total_time_count / chunk_count)
+
+    def get_all_subset_conditions(self, key: str, bbox: BoundingBox):
+        # Please add more conditions if they are supported in the future
+        time_dim = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
+        )
+        lat_dim = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_LATITUDE_UPPER_CASE]
+        )
+        lon_dim = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_LONGITUDE_UPPER_CASE]
+        )
+
+        return {
+            time_dim: [self.start_date, self.end_date],
+            lat_dim: [bbox.min_lat, bbox.max_lat],
+            lon_dim: [bbox.min_lon, bbox.max_lon],
+        }
 
 
 def ignore_invalid_unicode_in_attrs(dataset: xarray.Dataset) -> xarray.Dataset:
