@@ -17,6 +17,7 @@ from data_access_service.utils.date_time_utils import supply_day_with_nano_preci
 from data_access_service.utils.email_templates.download_email import (
     get_download_email_html_body,
 )
+from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.process_logger import ProcessLogger
 
 
@@ -31,6 +32,9 @@ class ZarrProcessor:
         end_date_str: str,
         multi_polygon: str,
         recipient: str,
+        collection_title: str,
+        full_metadata_link: str,
+        suggested_citation: str,
     ):
         self.aws = AWSHelper()
         self.api = api
@@ -77,16 +81,6 @@ class ZarrProcessor:
         self.multi_polygon = MultiPolygonHelper(multi_polygon=multi_polygon)
         self.bboxes = self.multi_polygon.bboxes
 
-        # Create a subset_request-like object for email template
-        class SubsetRequest:
-            def __init__(self, uuid, keys, start_date, end_date, bboxes, recipient):
-                self.uuid = uuid
-                self.keys = keys
-                self.start_date = start_date
-                self.end_date = end_date
-                self.bboxes = bboxes
-                self.recipient = recipient
-
         self.subset_request = SubsetRequest(
             uuid=self.uuid,
             keys=self.keys,
@@ -94,6 +88,9 @@ class ZarrProcessor:
             end_date=end_date_str,
             bboxes=self.bboxes,
             recipient=self.recipient,
+            collection_title=collection_title,
+            full_metadata_link=full_metadata_link,
+            suggested_citation=suggested_citation,
         )
 
     def process(self):

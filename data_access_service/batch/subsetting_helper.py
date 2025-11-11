@@ -30,6 +30,9 @@ def get_subset_request(parameters) -> SubsetRequest:
     start_date = parameters[Parameters.START_DATE.value]
     end_date = parameters[Parameters.END_DATE.value]
     recipient = parameters[Parameters.RECIPIENT.value]
+    collection_title = parameters.get(Parameters.COLLECTION_TITLE.value)
+    full_metadata_link = parameters.get(Parameters.FULL_METADATA_LINK.value)
+    suggested_citation = parameters.get(Parameters.SUGGESTED_CITATION.value)
     bboxes = MultiPolygonHelper(
         multi_polygon=(parameters[Parameters.MULTI_POLYGON.value])
     ).bboxes
@@ -41,6 +44,9 @@ def get_subset_request(parameters) -> SubsetRequest:
         end_date=end_date,
         bboxes=bboxes,
         recipient=recipient,
+        collection_title=collection_title,
+        full_metadata_link=full_metadata_link,
+        suggested_citation=suggested_citation,
     )
 
 

@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import tempfile
+from tests.conftest import subset_request_factory
 import xarray
 
 from pathlib import Path
@@ -20,7 +21,6 @@ from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.utils.date_time_utils import split_date_range
 from tests.batch.batch_test_consts import PREPARATION_PARAMETERS, INIT_JOB_ID
 from tests.core.test_with_s3 import TestWithS3, REGION
-from tests.utils.test_email_generator import create_dummy_subset_request
 
 
 class TestDataGeneration(TestWithS3):
@@ -44,7 +44,11 @@ class TestDataGeneration(TestWithS3):
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_parquet_preparation_and_collection(
-        self, aws_clients, setup_resources, upload_test_case_to_s3
+        self,
+        aws_clients,
+        setup_resources,
+        upload_test_case_to_s3,
+        subset_request_factory,
     ):
         s3_client, _, _ = aws_clients
         config = Config.get_config()
@@ -105,13 +109,7 @@ class TestDataGeneration(TestWithS3):
                 compressed_s3_key = "999/autonomous_underwater_vehicle.zip"
 
                 # Create dummy subset_request
-                subset_request = create_dummy_subset_request(
-                    uuid="test-dataset-uuid",
-                    keys=["*"],
-                    start_date="2010-02-01",
-                    end_date="2011-04-30",
-                    recipient="test@example.com",
-                )
+                subset_request = subset_request_factory()
 
                 collect_data_files(
                     master_job_id="999",

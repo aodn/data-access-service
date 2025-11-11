@@ -189,6 +189,9 @@ def subset_zarr(api: API, job_id, parameters):
     start_date_str = parameters[Parameters.START_DATE.value]
     end_date_str = parameters[Parameters.END_DATE.value]
     multi_polygon = parameters[Parameters.MULTI_POLYGON.value]
+    collection_title = parameters.get(Parameters.COLLECTION_TITLE.value)
+    full_metadata_link = parameters.get(Parameters.FULL_METADATA_LINK.value)
+    suggested_citation = parameters.get(Parameters.SUGGESTED_CITATION.value)
 
     zarr_processor = ZarrProcessor(
         api=api,
@@ -199,6 +202,9 @@ def subset_zarr(api: API, job_id, parameters):
         end_date_str=end_date_str,
         multi_polygon=multi_polygon,
         recipient=parameters[Parameters.RECIPIENT.value],
+        collection_title=collection_title,
+        full_metadata_link=full_metadata_link,
+        suggested_citation=suggested_citation,
     )
 
     zarr_processor.process()
