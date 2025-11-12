@@ -125,6 +125,8 @@ class ZarrProcessor:
         )
 
     def __get_zarr_dataset_for_(self, key: str) -> xarray.Dataset | None:
+
+        # apply subsetting conditions for each bbox and merge them
         merged_dataset: xarray.Dataset | None = None
         for bbox in self.bboxes:
 
@@ -147,13 +149,13 @@ class ZarrProcessor:
 
                 else:
                     raise ValueError(
-                        f"Condition key: {k} is neither dimension, coord nor data_var in the dataset. Dataset: {key}"
+                        f"Condition key: {k} is neither dim, coord nor data_var in the dataset. Dataset: {key}"
                     )
 
             # apply dim conditions and mask (variable conditions)
             subset = dataset
             if dim_conditions:
-                subset = subset.sel(dim_conditions)
+                subset = subset.sel(**dim_conditions)
             if mask is not None:
 
                 # please use drop=False to keep lazy loading
