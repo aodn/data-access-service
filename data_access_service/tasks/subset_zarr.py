@@ -8,6 +8,7 @@ import dask
 import numcodecs
 import psutil
 import xarray
+from xarray import DataArray
 
 from data_access_service import init_log, Config, API
 from data_access_service.batch.subsetting_helper import trim_date_range_for_keys
@@ -127,22 +128,21 @@ class ZarrProcessor:
         merged_dataset: xarray.Dataset | None = None
         for bbox in self.bboxes:
 
-            ds = self.api._instance.get_dataset(key).zarr_store
+            dataset = self.api._instance.get_dataset(key).zarr_store
             conditions = self.get_all_subset_conditions(key, bbox)
 
             dim_conditions = {}  # Conditions for dimensions of zarr
             mask = None  # Conditions for variables (include coord and data_var) of zarr. Naming "mask" is for zarr convention
-            for k, v in conditions.items():
-                if is_dim(key=k, dataset=ds):
-                    dim_conditions[k] = slice(v[0], v[1])
-                elif is_var(key=k, dataset=ds):
+            for k, val_range in conditions.items():
+                if is_dim(key=k, dataset=dataset):
+                    dim_conditions[k] = slice(val_range[0], val_range[1])
+                elif is_var(key=k, dataset=dataset):
                     mask = form_mask(
                         existing_mask=mask,
-                        new_mask=v,
                         key=k,
-                        min_value=v[0],
-                        max_value=v[1],
-                        ds=ds,
+                        min_value=val_range[0],
+                        max_value=val_range[1],
+                        ds=dataset,
                     )
 
                 else:
@@ -150,20 +150,15 @@ class ZarrProcessor:
                         f"Condition key: {k} is neither dimension, coord nor data_var in the dataset. Dataset: {key}"
                     )
 
-            # todo: continue from here
+            # apply dim conditions and mask (variable conditions)
+            subset = dataset
+            if dim_conditions:
+                subset = subset.sel(dim_conditions)
+            if mask is not None:
 
-            subset = self.api.get_dataset(
-                uuid=self.uuid,
-                key=key,
-                date_start=self.start_date,
-                date_end=self.end_date,
-                lat_min=bbox.min_lat,
-                lat_max=bbox.max_lat,
-                lon_min=bbox.min_lon,
-                lon_max=bbox.max_lon,
-            )
-            if subset is None:
-                continue
+                # please use drop=False to keep lazy loading
+                subset = subset.where(mask, drop=False)
+                subset = subset.dropna(dim=list(mask.dims), how="all")
 
             if not isinstance(subset, xarray.Dataset):
                 raise TypeError(
@@ -299,8 +294,7 @@ def is_var(key: str, dataset: xarray.Dataset) -> bool:
 
 
 def form_mask(
-    existing_mask: any,
-    new_mask: any,
+    existing_mask: DataArray | None,
     key: str,
     min_value: any,
     max_value: any,
