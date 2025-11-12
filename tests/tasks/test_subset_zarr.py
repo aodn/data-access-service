@@ -217,3 +217,72 @@ class TestSubsetZarr(TestWithS3):
                 finally:
                     # Delete temp output folder as the name always same for testing
                     shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
+
+    # for the dataset vessel_satellite_radiance_delayed_qc.zarr, the LATITUDE and LONGITUDE are not dimensions
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_lat_lon_not_dim(
+        self,
+        aws_clients,
+        upload_test_case_to_s3,
+        mock_get_fs_token_paths,
+    ):
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        helper = AWSHelper()
+
+        api = API()
+        api.initialize_metadata()
+
+        with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
+            # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
+            with patch.object(AWSHelper, "send_email") as mock_send_email:
+
+                key = "vessel_satellite_radiance_delayed_qc.zarr"
+                no_ext_key = key.replace(".zarr", "")
+                try:
+                    zarr_processor = ZarrProcessor(
+                        api,
+                        uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                        job_id="job_id_888",
+                        keys=[key],
+                        start_date_str="07-2011",
+                        end_date_str="07-2011",
+                        multi_polygon='{"type":"MultiPolygon","coordinates":[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}',
+                        recipient="example@@test.com",
+                        collection_title="Test Ocean Data Collection",
+                        full_metadata_link="https://metadata.imas.utas.edu.au/.../test-uuid-123",
+                        suggested_citation="Cite data as: Mazor, T., Watermeyer, K., Hobley, T., Grinter, V., Holden, R., MacDonald, K. and Ferns, L. (2023). Statewide Marine Habitat Map.",
+                    )
+
+                    zarr_processor.process()
+
+                    # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
+                    files = helper.list_all_s3_objects(
+                        config.get_csv_bucket_name(),
+                        "",
+                    )
+
+                    assert (
+                        f"job_id_888/{no_ext_key}.nc" in files
+                    ), "didn't find expected output file"
+
+                    # use tempfile to download an object from s3
+                    with tempfile.TemporaryDirectory() as tmpdirname:
+                        temp_file_path = Path(tmpdirname) / f"{no_ext_key}.nc"
+                        helper.download_file_from_s3(
+                            config.get_csv_bucket_name(),
+                            f"job_id_888/{no_ext_key}.nc",
+                            str(temp_file_path),
+                        )
+
+                        netcdf_xarray = xarray.open_dataset(temp_file_path)
+                        assert (
+                            netcdf_xarray.sizes["TIME"] == 4519
+                        ), f"TIME dimension size expected to be 4519, but got {netcdf_xarray.dims['TIME']}"
+
+                except Exception as ex:
+                    # Should not land here
+                    assert False, f"{ex}"
+                finally:
+                    # Delete temp output folder as the name always same for testing
+                    shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)

@@ -160,7 +160,9 @@ class ZarrProcessor:
 
                 # please use drop=False to keep lazy loading
                 subset = subset.where(mask, drop=False)
-                subset = subset.dropna(dim=list(mask.dims), how="all")
+                # dropna for each dimension separately (dropna doesn't accept a list of dims)
+                for dim in mask.dims:
+                    subset = subset.dropna(dim=dim, how="all")
 
             if not isinstance(subset, xarray.Dataset):
                 raise TypeError(
@@ -271,8 +273,13 @@ class ZarrProcessor:
             uuid=self.uuid, key=key, columns=[STR_LONGITUDE_UPPER_CASE]
         )[0]
 
+        print("tz-aware?", self.start_date.tzinfo, self.end_date.tzinfo)
+
         return {
-            time_dim: [self.start_date, self.end_date],
+            time_dim: [
+                self.start_date.tz_convert("UTC").tz_localize(None),
+                self.end_date.tz_convert("UTC").tz_localize(None),
+            ],
             lat_dim: [bbox.min_lat, bbox.max_lat],
             lon_dim: [bbox.min_lon, bbox.max_lon],
         }
