@@ -109,6 +109,7 @@ class ZarrProcessor:
         for key in self.keys:
 
             dataset = self.__get_zarr_dataset_for_(key=key)
+            print("already got dataset for key", key)
             if dataset is None:
                 continue
 
@@ -131,11 +132,24 @@ class ZarrProcessor:
         for bbox in self.bboxes:
 
             dataset = self.api._instance.get_dataset(key).zarr_store
+
+            # Ensure the dataset is dask-backed (lazy loading)
+            # If it's not already chunked, rechunk it with automatic chunk sizing
+            if not any(
+                hasattr(var.data, "chunks") or hasattr(var.data, "__dask_graph__")
+                for var in dataset.data_vars.values()
+            ):
+                self.log.warning(
+                    f"Dataset {key} is not dask-backed, rechunking with 'auto'"
+                )
+                dataset = dataset.chunk("auto")
+
             conditions = self.get_all_subset_conditions(key, bbox)
 
             dim_conditions = {}  # Conditions for dimensions of zarr
             mask = None  # Conditions for variables (include coord and data_var) of zarr. Naming "mask" is for zarr convention
             for k, val_range in conditions.items():
+                print("forming condition for key", k, "with range", val_range)
                 if is_dim(key=k, dataset=dataset):
                     dim_conditions[k] = slice(val_range[0], val_range[1])
                 elif is_var(key=k, dataset=dataset):
@@ -153,6 +167,7 @@ class ZarrProcessor:
                     )
 
             # apply dim conditions and mask (variable conditions)
+            print("Applying conditions for key", key)
             subset = dataset
             if dim_conditions:
                 subset = subset.sel(**dim_conditions)
@@ -160,9 +175,11 @@ class ZarrProcessor:
 
                 # please use drop=False to keep lazy loading
                 subset = subset.where(mask, drop=False)
+                print("subset after where", subset)
                 # dropna for each dimension separately (dropna doesn't accept a list of dims)
                 for dim in mask.dims:
                     subset = subset.dropna(dim=dim, how="all")
+                print("subset after dropna", subset)
 
             if not isinstance(subset, xarray.Dataset):
                 raise TypeError(
@@ -181,6 +198,7 @@ class ZarrProcessor:
                 f"No data found for key: {key} in the specified conditions."
             )
             return None
+        print("final merged dataset for key", key, "is", merged_dataset)
         return merged_dataset
 
     def __write_to_s3_as_netcdf(self, dataset: xarray.Dataset, key: str):
@@ -255,8 +273,24 @@ class ZarrProcessor:
         self.log.info(
             "Chunk size: %d GB per thread", safe_memory_per_thread / (1024**3)
         )
-        total_size = sum(var.nbytes for var in dataset.values())
-        chunk_count = max(1, math.ceil(total_size / safe_memory_per_thread))
+
+        # CRITICAL FIX: Use metadata to estimate size WITHOUT forcing computation
+        # var.nbytes forces computation - use size * itemsize instead
+        estimated_size = 0
+        for var_name, var_data in dataset.data_vars.items():
+            if hasattr(var_data, "dtype") and hasattr(var_data, "size"):
+                estimated_size += var_data.size * var_data.dtype.itemsize
+
+        # Fallback: use conservative estimate based on dimensions
+        if estimated_size == 0:
+            total_elements = 1
+            for dim_size in dataset.sizes.values():
+                total_elements *= dim_size
+            # Assume average 8 bytes per element (float64)
+            estimated_size = total_elements * 8
+
+        self.log.info(f"Estimated dataset size: {estimated_size / (1024**3):.2f} GB")
+        chunk_count = max(1, math.ceil(estimated_size / safe_memory_per_thread))
         self.log.info("Chunk count: %d", chunk_count)
         total_time_count = dataset.sizes[time_dim]
         return math.ceil(total_time_count / chunk_count)
