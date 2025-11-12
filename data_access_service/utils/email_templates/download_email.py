@@ -279,20 +279,20 @@ def get_download_email_html_body(
                      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#fffffe;background-color:#fffffe;width:100%;">
                         <tbody>
                            <tr>
-                              <td style="border:none;direction:ltr;font-size:0;padding:16px 8px 16px 8px;text-align:center;">
+                              <td style="border:none;direction:ltr;font-size:0;padding:16px 16px 16px 16px;text-align:center;">
                                  <!--[if mso | IE]>
                                  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
                                     <tr>
                                        <td width="1280px">
-                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1264px;" width="1264">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
                                              <tr>
                                                 <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
                                                    <![endif]-->
-                                                   <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;border-radius:16px 16px 0px 0px;max-width:1264px;">
+                                                   <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;border-radius:16px 16px 0px 0px;max-width:1248px;">
                                                       <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#fffffe;background-color:#fffffe;width:100%;border-radius:16px 16px 0px 0px;">
                                                          <tbody>
                                                             <tr>
-                                                               <td style="border:none;direction:ltr;font-size:0;padding:32px 20px 32px 20px;text-align:center;">
+                                                               <td style="border:none;direction:ltr;font-size:0;padding:24px 20px 24px 20px;text-align:center;">
                                                                   <!--[if mso | IE]>
                                                                   <table role="presentation" border="0" cellpadding="0" cellspacing="0">
                                                                      <tr>
@@ -332,11 +332,11 @@ def get_download_email_html_body(
                                     </tr>
                                     <tr>
                                        <td width="1280px">
-                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1264px;" width="1264">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
                                              <tr>
                                                 <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
                                                    <![endif]-->
-                                                   <div style="margin:0px auto;max-width:1264px;">
+                                                   <div style="margin:0px auto;max-width:1248px;">
                                                       <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">
                                                          <tbody>
                                                             <tr>
@@ -344,7 +344,7 @@ def get_download_email_html_body(
                                                                   <!--[if mso | IE]>
                                                                   <table role="presentation" border="0" cellpadding="0" cellspacing="0">
                                                                      <tr>
-                                                                        <td style="vertical-align:top;width:1264px;">
+                                                                        <td style="vertical-align:top;width:1248px;">
                                                                            <![endif]-->
                                                                            <div class="o h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:top;width:100%;">
                                                                               <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
@@ -383,11 +383,11 @@ def get_download_email_html_body(
                                     </tr>
                                     <tr>
                                        <td width="1280px">
-                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1264px;" width="1264">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
                                              <tr>
                                                 <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
                                                    <![endif]-->
-                                                   <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:1264px;">
+                                                   <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:1248px;">
                                                       <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#fffffe;background-color:#fffffe;width:100%;">
                                                          <tbody>
                                                             <tr>
@@ -408,8 +408,8 @@ def get_download_email_html_body(
                                                                                                    <table border="0" cellpadding="0" cellspacing="0" width="100%">
                                                                                                       <tr>
                                                                                                          <td align="left" width="100%">
-                                                                                                            <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 16px; font-weight: 500; line-height: 150%; text-align: left; color: #090c02">
-                                                                                                               <p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;">Collection: {collection_title}</p>
+                                                                                                            <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 17px; font-weight: 500; line-height: 141%; text-align: left; color: #090c02">
+                                                                                                               <p style="Margin:0;mso-line-height-alt:24px;font-size:17px;line-height:141%;">Collection</p>
                                                                                                             </div>
                                                                                                          </td>
                                                                                                       </tr>
@@ -440,11 +440,11 @@ def get_download_email_html_body(
                                     </tr>
                                     <tr>
                                        <td width="1280px">
-                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1264px;" width="1264">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
                                              <tr>
                                                 <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
                                                    <![endif]-->
-                                                   <div style="margin:0px auto;max-width:1264px;">
+                                                   <div style="margin:0px auto;max-width:1248px;">
                                                       <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">
                                                          <tbody>
                                                             <tr>
@@ -452,7 +452,115 @@ def get_download_email_html_body(
                                                                   <!--[if mso | IE]>
                                                                   <table role="presentation" border="0" cellpadding="0" cellspacing="0">
                                                                      <tr>
-                                                                        <td style="vertical-align:top;width:1264px;">
+                                                                        <td style="vertical-align:top;width:1248px;">
+                                                                           <![endif]-->
+                                                                           <div class="o h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:top;width:100%;">
+                                                                              <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
+                                                                                 <tbody>
+                                                                                    <tr>
+                                                                                       <td style="vertical-align:top;padding:0;">
+                                                                                          <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
+                                                                                             <tbody>
+                                                                                                <tr>
+                                                                                                   <td style="font-size:0;padding:0;word-break:break-word;" aria-hidden="true">
+                                                                                                      <div style="height:0;line-height:0;">&#8202;</div>
+                                                                                                   </td>
+                                                                                                </tr>
+                                                                                             </tbody>
+                                                                                          </table>
+                                                                                       </td>
+                                                                                    </tr>
+                                                                                 </tbody>
+                                                                              </table>
+                                                                           </div>
+                                                                           <!--[if mso | IE]>
+                                                                        </td>
+                                                                     </tr>
+                                                                  </table>
+                                                                  <![endif]-->
+                                                               </td>
+                                                            </tr>
+                                                         </tbody>
+                                                      </table>
+                                                   </div>
+                                                   <!--[if mso | IE]>
+                                                </td>
+                                             </tr>
+                                          </table>
+                                       </td>
+                                    </tr>
+                                    <tr>
+                                       <td width="1280px">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
+                                             <tr>
+                                                <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
+                                                   <![endif]-->
+                                                   <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:1248px;">
+                                                      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#fffffe;background-color:#fffffe;width:100%;">
+                                                         <tbody>
+                                                            <tr>
+                                                               <td style="border:none;direction:ltr;font-size:0;padding:4px 20px 4px 20px;text-align:center;">
+                                                                  <!--[if mso | IE]>
+                                                                  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                                                                     <tr>
+                                                                        <td style="vertical-align:middle;width:600px;">
+                                                                           <![endif]-->
+                                                                           <div class="c h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:middle;width:100%;">
+                                                                              <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border:none;vertical-align:middle;" width="100%">
+                                                                                 <tbody>
+                                                                                    <tr>
+                                                                                       <td align="center" class="tr-0" style="background:transparent;font-size:0;padding:0;word-break:break-word;">
+                                                                                          <table cellpadding="0" cellspacing="0" width="100%" border="0" style="color:#000000;line-height:normal;table-layout:fixed;width:100%;border:none;">
+                                                                                             <tr>
+                                                                                                <td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="auto">
+                                                                                                   <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                                                                                      <tr>
+                                                                                                         <td align="left" width="100%">
+                                                                                                            <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 16px; font-weight: 400; line-height: 150%; text-align: left; color: #090c02">
+                                                                                                               <p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;">{collection_title}</p>
+                                                                                                            </div>
+                                                                                                         </td>
+                                                                                                      </tr>
+                                                                                                   </table>
+                                                                                                </td>
+                                                                                             </tr>
+                                                                                          </table>
+                                                                                       </td>
+                                                                                    </tr>
+                                                                                 </tbody>
+                                                                              </table>
+                                                                           </div>
+                                                                           <!--[if mso | IE]>
+                                                                        </td>
+                                                                     </tr>
+                                                                  </table>
+                                                                  <![endif]-->
+                                                               </td>
+                                                            </tr>
+                                                         </tbody>
+                                                      </table>
+                                                   </div>
+                                                   <!--[if mso | IE]>
+                                                </td>
+                                             </tr>
+                                          </table>
+                                       </td>
+                                    </tr>
+                                    <tr>
+                                       <td width="1280px">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
+                                             <tr>
+                                                <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
+                                                   <![endif]-->
+                                                   <div style="margin:0px auto;max-width:1248px;">
+                                                      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">
+                                                         <tbody>
+                                                            <tr>
+                                                               <td style="direction:ltr;font-size:0;padding:0;text-align:center;">
+                                                                  <!--[if mso | IE]>
+                                                                  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                                                                     <tr>
+                                                                        <td style="vertical-align:top;width:1248px;">
                                                                            <![endif]-->
                                                                            <div class="o h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:top;width:100%;">
                                                                               <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
@@ -492,113 +600,11 @@ def get_download_email_html_body(
                                     {subsetting_section}
                                     <tr>
                                        <td width="1280px">
-                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1264px;" width="1264">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
                                              <tr>
                                                 <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
                                                    <![endif]-->
-                                                   <div style="margin:0px auto;max-width:1264px;">
-                                                      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">
-                                                         <tbody>
-                                                            <tr>
-                                                               <td style="direction:ltr;font-size:0;padding:0;text-align:center;">
-                                                                  <!--[if mso | IE]>
-                                                                  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
-                                                                     <tr>
-                                                                        <td style="vertical-align:top;width:1264px;">
-                                                                           <![endif]-->
-                                                                           <div class="o h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:top;width:100%;">
-                                                                              <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
-                                                                                 <tbody>
-                                                                                    <tr>
-                                                                                       <td style="vertical-align:top;padding:0;">
-                                                                                          <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
-                                                                                             <tbody>
-                                                                                                <tr>
-                                                                                                   <td style="font-size:0;padding:0;word-break:break-word;" aria-hidden="true">
-                                                                                                      <div style="height:0;line-height:0;">&#8202;</div>
-                                                                                                   </td>
-                                                                                                </tr>
-                                                                                             </tbody>
-                                                                                          </table>
-                                                                                       </td>
-                                                                                    </tr>
-                                                                                 </tbody>
-                                                                              </table>
-                                                                           </div>
-                                                                           <!--[if mso | IE]>
-                                                                        </td>
-                                                                     </tr>
-                                                                  </table>
-                                                                  <![endif]-->
-                                                               </td>
-                                                            </tr>
-                                                         </tbody>
-                                                      </table>
-                                                   </div>
-                                                   <!--[if mso | IE]>
-                                                </td>
-                                             </tr>
-                                          </table>
-                                       </td>
-                                    </tr>
-                                    <tr>
-                                       <td width="1280px">
-                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1264px;" width="1264">
-                                             <tr>
-                                                <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
-                                                   <![endif]-->
-                                                   <div style="margin:0px auto;max-width:1264px;">
-                                                      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">
-                                                         <tbody>
-                                                            <tr>
-                                                               <td style="direction:ltr;font-size:0;padding:0;text-align:center;">
-                                                                  <!--[if mso | IE]>
-                                                                  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
-                                                                     <tr>
-                                                                        <td style="vertical-align:top;width:1264px;">
-                                                                           <![endif]-->
-                                                                           <div class="o h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:top;width:100%;">
-                                                                              <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
-                                                                                 <tbody>
-                                                                                    <tr>
-                                                                                       <td style="vertical-align:top;padding:0;">
-                                                                                          <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
-                                                                                             <tbody>
-                                                                                                <tr>
-                                                                                                   <td style="font-size:0;padding:0;word-break:break-word;" aria-hidden="true">
-                                                                                                      <div style="height:0;line-height:0;">&#8202;</div>
-                                                                                                   </td>
-                                                                                                </tr>
-                                                                                             </tbody>
-                                                                                          </table>
-                                                                                       </td>
-                                                                                    </tr>
-                                                                                 </tbody>
-                                                                              </table>
-                                                                           </div>
-                                                                           <!--[if mso | IE]>
-                                                                        </td>
-                                                                     </tr>
-                                                                  </table>
-                                                                  <![endif]-->
-                                                               </td>
-                                                            </tr>
-                                                         </tbody>
-                                                      </table>
-                                                   </div>
-                                                   <!--[if mso | IE]>
-                                                </td>
-                                             </tr>
-                                          </table>
-                                       </td>
-                                    </tr>
-                                    <tr>
-                                       <td width="1280px">
-                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1264px;" width="1264">
-                                             <tr>
-                                                <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
-                                                   <![endif]-->
-                                                   <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:1264px;">
+                                                   <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:1248px;">
                                                       <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#fffffe;background-color:#fffffe;width:100%;">
                                                          <tbody>
                                                             <tr>
@@ -651,11 +657,11 @@ def get_download_email_html_body(
                                     </tr>
                                     <tr>
                                        <td width="1280px">
-                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1264px;" width="1264">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
                                              <tr>
                                                 <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
                                                    <![endif]-->
-                                                   <div style="margin:0px auto;max-width:1264px;">
+                                                   <div style="margin:0px auto;max-width:1248px;">
                                                       <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">
                                                          <tbody>
                                                             <tr>
@@ -663,7 +669,7 @@ def get_download_email_html_body(
                                                                   <!--[if mso | IE]>
                                                                   <table role="presentation" border="0" cellpadding="0" cellspacing="0">
                                                                      <tr>
-                                                                        <td style="vertical-align:top;width:1264px;">
+                                                                        <td style="vertical-align:top;width:1248px;">
                                                                            <![endif]-->
                                                                            <div class="o h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:top;width:100%;">
                                                                               <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
@@ -702,15 +708,15 @@ def get_download_email_html_body(
                                     </tr>
                                     <tr>
                                        <td width="1280px">
-                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1264px;" width="1264">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
                                              <tr>
                                                 <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
                                                    <![endif]-->
-                                                   <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:1264px;">
+                                                   <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:1248px;">
                                                       <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#fffffe;background-color:#fffffe;width:100%;">
                                                          <tbody>
                                                             <tr>
-                                                               <td style="border:none;direction:ltr;font-size:0;padding:10px 20px 0px 20px;text-align:center;">
+                                                               <td style="border:none;direction:ltr;font-size:0;padding:16px 20px 4px 20px;text-align:center;">
                                                                   <!--[if mso | IE]>
                                                                   <table role="presentation" border="0" cellpadding="0" cellspacing="0">
                                                                      <tr>
@@ -720,7 +726,115 @@ def get_download_email_html_body(
                                                                               <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border:none;vertical-align:middle;" width="100%">
                                                                                  <tbody>
                                                                                     <tr>
-                                                                                       <td align="center" class="tr-0" style="background:transparent;font-size:0;padding:6px 0px 6px 0px;word-break:break-word;">
+                                                                                       <td align="center" class="tr-0" style="background:transparent;font-size:0;padding:0;word-break:break-word;">
+                                                                                          <table cellpadding="0" cellspacing="0" width="100%" border="0" style="color:#000000;line-height:normal;table-layout:fixed;width:100%;border:none;">
+                                                                                             <tr>
+                                                                                                <td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="auto">
+                                                                                                   <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                                                                                      <tr>
+                                                                                                         <td align="left" width="100%">
+                                                                                                            <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 17px; font-weight: 500; line-height: 141%; text-align: left; color: #090c02">
+                                                                                                               <p style="Margin:0;mso-line-height-alt:24px;font-size:17px;line-height:141%;">Suggested Citation</p>
+                                                                                                            </div>
+                                                                                                         </td>
+                                                                                                      </tr>
+                                                                                                   </table>
+                                                                                                </td>
+                                                                                             </tr>
+                                                                                          </table>
+                                                                                       </td>
+                                                                                    </tr>
+                                                                                 </tbody>
+                                                                              </table>
+                                                                           </div>
+                                                                           <!--[if mso | IE]>
+                                                                        </td>
+                                                                     </tr>
+                                                                  </table>
+                                                                  <![endif]-->
+                                                               </td>
+                                                            </tr>
+                                                         </tbody>
+                                                      </table>
+                                                   </div>
+                                                   <!--[if mso | IE]>
+                                                </td>
+                                             </tr>
+                                          </table>
+                                       </td>
+                                    </tr>
+                                    <tr>
+                                       <td width="1280px">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
+                                             <tr>
+                                                <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
+                                                   <![endif]-->
+                                                   <div style="margin:0px auto;max-width:1248px;">
+                                                      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">
+                                                         <tbody>
+                                                            <tr>
+                                                               <td style="direction:ltr;font-size:0;padding:0;text-align:center;">
+                                                                  <!--[if mso | IE]>
+                                                                  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                                                                     <tr>
+                                                                        <td style="vertical-align:top;width:1248px;">
+                                                                           <![endif]-->
+                                                                           <div class="o h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:top;width:100%;">
+                                                                              <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
+                                                                                 <tbody>
+                                                                                    <tr>
+                                                                                       <td style="vertical-align:top;padding:0;">
+                                                                                          <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
+                                                                                             <tbody>
+                                                                                                <tr>
+                                                                                                   <td style="font-size:0;padding:0;word-break:break-word;" aria-hidden="true">
+                                                                                                      <div style="height:0;line-height:0;">&#8202;</div>
+                                                                                                   </td>
+                                                                                                </tr>
+                                                                                             </tbody>
+                                                                                          </table>
+                                                                                       </td>
+                                                                                    </tr>
+                                                                                 </tbody>
+                                                                              </table>
+                                                                           </div>
+                                                                           <!--[if mso | IE]>
+                                                                        </td>
+                                                                     </tr>
+                                                                  </table>
+                                                                  <![endif]-->
+                                                               </td>
+                                                            </tr>
+                                                         </tbody>
+                                                      </table>
+                                                   </div>
+                                                   <!--[if mso | IE]>
+                                                </td>
+                                             </tr>
+                                          </table>
+                                       </td>
+                                    </tr>
+                                    <tr>
+                                       <td width="1280px">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
+                                             <tr>
+                                                <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
+                                                   <![endif]-->
+                                                   <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:1248px;">
+                                                      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#fffffe;background-color:#fffffe;width:100%;">
+                                                         <tbody>
+                                                            <tr>
+                                                               <td style="border:none;direction:ltr;font-size:0;padding:4px 20px 4px 20px;text-align:center;">
+                                                                  <!--[if mso | IE]>
+                                                                  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                                                                     <tr>
+                                                                        <td style="vertical-align:middle;width:600px;">
+                                                                           <![endif]-->
+                                                                           <div class="c h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:middle;width:100%;">
+                                                                              <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border:none;vertical-align:middle;" width="100%">
+                                                                                 <tbody>
+                                                                                    <tr>
+                                                                                       <td align="center" class="tr-0" style="background:transparent;font-size:0;padding:0;word-break:break-word;">
                                                                                           <table cellpadding="0" cellspacing="0" width="100%" border="0" style="color:#000000;line-height:normal;table-layout:fixed;width:100%;border:none;">
                                                                                              <tr>
                                                                                                 <td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="auto">
@@ -759,11 +873,11 @@ def get_download_email_html_body(
                                     </tr>
                                     <tr>
                                        <td width="1280px">
-                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1264px;" width="1264">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
                                              <tr>
                                                 <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
                                                    <![endif]-->
-                                                   <div style="margin:0px auto;max-width:1264px;">
+                                                   <div style="margin:0px auto;max-width:1248px;">
                                                       <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">
                                                          <tbody>
                                                             <tr>
@@ -771,7 +885,7 @@ def get_download_email_html_body(
                                                                   <!--[if mso | IE]>
                                                                   <table role="presentation" border="0" cellpadding="0" cellspacing="0">
                                                                      <tr>
-                                                                        <td style="vertical-align:top;width:1264px;">
+                                                                        <td style="vertical-align:top;width:1248px;">
                                                                            <![endif]-->
                                                                            <div class="o h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:top;width:100%;">
                                                                               <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
@@ -810,15 +924,340 @@ def get_download_email_html_body(
                                     </tr>
                                     <tr>
                                        <td width="1280px">
-                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1264px;" width="1264">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
                                              <tr>
                                                 <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
                                                    <![endif]-->
-                                                   <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;border-radius:0px 0px 16px 16px;max-width:1264px;">
+                                                   <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:1248px;">
+                                                      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#fffffe;background-color:#fffffe;width:100%;">
+                                                         <tbody>
+                                                            <tr>
+                                                               <td style="border:none;direction:ltr;font-size:0;padding:16px 20px 4px 20px;text-align:center;">
+                                                                  <!--[if mso | IE]>
+                                                                  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                                                                     <tr>
+                                                                        <td style="vertical-align:middle;width:600px;">
+                                                                           <![endif]-->
+                                                                           <div class="c h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:middle;width:100%;">
+                                                                              <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border:none;vertical-align:middle;" width="100%">
+                                                                                 <tbody>
+                                                                                    <tr>
+                                                                                       <td align="center" class="tr-0" style="background:transparent;font-size:0;padding:0;word-break:break-word;">
+                                                                                          <table cellpadding="0" cellspacing="0" width="100%" border="0" style="color:#000000;line-height:normal;table-layout:fixed;width:100%;border:none;">
+                                                                                             <tr>
+                                                                                                <td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="auto">
+                                                                                                   <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                                                                                      <tr>
+                                                                                                         <td align="left" width="100%">
+                                                                                                            <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 17px; font-weight: 500; line-height: 141%; text-align: left; color: #090c02">
+                                                                                                               <p style="Margin:0;mso-line-height-alt:24px;font-size:17px;line-height:141%;">Usage Constrains</p>
+                                                                                                            </div>
+                                                                                                         </td>
+                                                                                                      </tr>
+                                                                                                   </table>
+                                                                                                </td>
+                                                                                             </tr>
+                                                                                          </table>
+                                                                                       </td>
+                                                                                    </tr>
+                                                                                 </tbody>
+                                                                              </table>
+                                                                           </div>
+                                                                           <!--[if mso | IE]>
+                                                                        </td>
+                                                                     </tr>
+                                                                  </table>
+                                                                  <![endif]-->
+                                                               </td>
+                                                            </tr>
+                                                         </tbody>
+                                                      </table>
+                                                   </div>
+                                                   <!--[if mso | IE]>
+                                                </td>
+                                             </tr>
+                                          </table>
+                                       </td>
+                                    </tr>
+                                    <tr>
+                                       <td width="1280px">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
+                                             <tr>
+                                                <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
+                                                   <![endif]-->
+                                                   <div style="margin:0px auto;max-width:1248px;">
+                                                      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">
+                                                         <tbody>
+                                                            <tr>
+                                                               <td style="direction:ltr;font-size:0;padding:0;text-align:center;">
+                                                                  <!--[if mso | IE]>
+                                                                  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                                                                     <tr>
+                                                                        <td style="vertical-align:top;width:1248px;">
+                                                                           <![endif]-->
+                                                                           <div class="o h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:top;width:100%;">
+                                                                              <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
+                                                                                 <tbody>
+                                                                                    <tr>
+                                                                                       <td style="vertical-align:top;padding:0;">
+                                                                                          <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
+                                                                                             <tbody>
+                                                                                                <tr>
+                                                                                                   <td style="font-size:0;padding:0;word-break:break-word;" aria-hidden="true">
+                                                                                                      <div style="height:0;line-height:0;">&#8202;</div>
+                                                                                                   </td>
+                                                                                                </tr>
+                                                                                             </tbody>
+                                                                                          </table>
+                                                                                       </td>
+                                                                                    </tr>
+                                                                                 </tbody>
+                                                                              </table>
+                                                                           </div>
+                                                                           <!--[if mso | IE]>
+                                                                        </td>
+                                                                     </tr>
+                                                                  </table>
+                                                                  <![endif]-->
+                                                               </td>
+                                                            </tr>
+                                                         </tbody>
+                                                      </table>
+                                                   </div>
+                                                   <!--[if mso | IE]>
+                                                </td>
+                                             </tr>
+                                          </table>
+                                       </td>
+                                    </tr>
+                                    <tr>
+                                       <td width="1280px">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
+                                             <tr>
+                                                <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
+                                                   <![endif]-->
+                                                   <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:1248px;">
+                                                      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#fffffe;background-color:#fffffe;width:100%;">
+                                                         <tbody>
+                                                            <tr>
+                                                               <td style="border:none;direction:ltr;font-size:0;padding:4px 20px 4px 20px;text-align:center;">
+                                                                  <!--[if mso | IE]>
+                                                                  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                                                                     <tr>
+                                                                        <td style="vertical-align:middle;width:600px;">
+                                                                           <![endif]-->
+                                                                           <div class="c h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:middle;width:100%;">
+                                                                              <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border:none;vertical-align:middle;" width="100%">
+                                                                                 <tbody>
+                                                                                    <tr>
+                                                                                       <td align="center" class="tr-0" style="background:transparent;font-size:0;padding:0;word-break:break-word;">
+                                                                                          <table cellpadding="0" cellspacing="0" width="100%" border="0" style="color:#000000;line-height:normal;table-layout:fixed;width:100%;border:none;">
+                                                                                             <tr>
+                                                                                                <td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="auto">
+                                                                                                   <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                                                                                      <tr>
+                                                                                                         <td align="left" width="100%">
+                                                                                                            <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 16px; font-weight: 400; line-height: 150%; text-align: left; color: #090c02">
+                                                                                                               <p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;">Any users of IMOS data are required to clearly acknowledge the source of the material derived from IMOS in the format: "Data was sourced from Australia's Integrated Marine Observing System (IMOS) - IMOS is enabled by the National Collaborative Research Infrastructure strategy (NCRIS)." If relevant, also credit other organisations involved in collection of this particular datastream (as listed in 'credit' in the metadata record).</p>
+                                                                                                            </div>
+                                                                                                         </td>
+                                                                                                      </tr>
+                                                                                                   </table>
+                                                                                                </td>
+                                                                                             </tr>
+                                                                                          </table>
+                                                                                       </td>
+                                                                                    </tr>
+                                                                                 </tbody>
+                                                                              </table>
+                                                                           </div>
+                                                                           <!--[if mso | IE]>
+                                                                        </td>
+                                                                     </tr>
+                                                                  </table>
+                                                                  <![endif]-->
+                                                               </td>
+                                                            </tr>
+                                                         </tbody>
+                                                      </table>
+                                                   </div>
+                                                   <!--[if mso | IE]>
+                                                </td>
+                                             </tr>
+                                          </table>
+                                       </td>
+                                    </tr>
+                                    <tr>
+                                       <td width="1280px">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
+                                             <tr>
+                                                <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
+                                                   <![endif]-->
+                                                   <div style="margin:0px auto;max-width:1248px;">
+                                                      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">
+                                                         <tbody>
+                                                            <tr>
+                                                               <td style="direction:ltr;font-size:0;padding:0;text-align:center;">
+                                                                  <!--[if mso | IE]>
+                                                                  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                                                                     <tr>
+                                                                        <td style="vertical-align:top;width:1248px;">
+                                                                           <![endif]-->
+                                                                           <div class="o h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:top;width:100%;">
+                                                                              <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
+                                                                                 <tbody>
+                                                                                    <tr>
+                                                                                       <td style="vertical-align:top;padding:0;">
+                                                                                          <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
+                                                                                             <tbody>
+                                                                                                <tr>
+                                                                                                   <td style="font-size:0;padding:0;word-break:break-word;" aria-hidden="true">
+                                                                                                      <div style="height:0;line-height:0;">&#8202;</div>
+                                                                                                   </td>
+                                                                                                </tr>
+                                                                                             </tbody>
+                                                                                          </table>
+                                                                                       </td>
+                                                                                    </tr>
+                                                                                 </tbody>
+                                                                              </table>
+                                                                           </div>
+                                                                           <!--[if mso | IE]>
+                                                                        </td>
+                                                                     </tr>
+                                                                  </table>
+                                                                  <![endif]-->
+                                                               </td>
+                                                            </tr>
+                                                         </tbody>
+                                                      </table>
+                                                   </div>
+                                                   <!--[if mso | IE]>
+                                                </td>
+                                             </tr>
+                                          </table>
+                                       </td>
+                                    </tr>
+                                    <tr>
+                                       <td width="1280px">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
+                                             <tr>
+                                                <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
+                                                   <![endif]-->
+                                                   <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:1248px;">
+                                                      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#fffffe;background-color:#fffffe;width:100%;">
+                                                         <tbody>
+                                                            <tr>
+                                                               <td style="border:none;direction:ltr;font-size:0;padding:4px 20px 4px 20px;text-align:center;">
+                                                                  <!--[if mso | IE]>
+                                                                  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                                                                     <tr>
+                                                                        <td style="vertical-align:middle;width:600px;">
+                                                                           <![endif]-->
+                                                                           <div class="c h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:middle;width:100%;">
+                                                                              <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border:none;vertical-align:middle;" width="100%">
+                                                                                 <tbody>
+                                                                                    <tr>
+                                                                                       <td align="center" class="tr-0" style="background:transparent;font-size:0;padding:0;word-break:break-word;">
+                                                                                          <table cellpadding="0" cellspacing="0" width="100%" border="0" style="color:#000000;line-height:normal;table-layout:fixed;width:100%;border:none;">
+                                                                                             <tr>
+                                                                                                <td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="600">
+                                                                                                   <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                                                                                      <tr>
+                                                                                                         <td align="left" width="100%">
+                                                                                                            <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 16px; font-weight: 400; line-height: 150%; text-align: left; color: #090c02">
+                                                                                                               <p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;">If using data from the Ningaloo (TAN100) mooring, please add to the citation - "Department of Jobs, Tourism, Science and Innovation (DJTSI), Western Australian Government". If using data from the Ocean Reference Station 65m (ORS065) mooring, please add to the citation - "Sydney Water Corporation".</p>
+                                                                                                               <p style="Margin:0;mso-line-height-alt:24px;font-size:16px;line-height:150%;">Data, products and services from IMOS are provided "as is" without any warranty as to fitness for a particular purpose. By using this data you are accepting the license agreement and terms specified above. You accept all risks and responsibility for losses, damages, costs and other consequences resulting directly or indirectly from using this site and any information or material available from it.</p>
+                                                                                                            </div>
+                                                                                                         </td>
+                                                                                                      </tr>
+                                                                                                   </table>
+                                                                                                </td>
+                                                                                             </tr>
+                                                                                          </table>
+                                                                                       </td>
+                                                                                    </tr>
+                                                                                 </tbody>
+                                                                              </table>
+                                                                           </div>
+                                                                           <!--[if mso | IE]>
+                                                                        </td>
+                                                                     </tr>
+                                                                  </table>
+                                                                  <![endif]-->
+                                                               </td>
+                                                            </tr>
+                                                         </tbody>
+                                                      </table>
+                                                   </div>
+                                                   <!--[if mso | IE]>
+                                                </td>
+                                             </tr>
+                                          </table>
+                                       </td>
+                                    </tr>
+                                    <tr>
+                                       <td width="1280px">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
+                                             <tr>
+                                                <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
+                                                   <![endif]-->
+                                                   <div style="margin:0px auto;max-width:1248px;">
+                                                      <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">
+                                                         <tbody>
+                                                            <tr>
+                                                               <td style="direction:ltr;font-size:0;padding:0;text-align:center;">
+                                                                  <!--[if mso | IE]>
+                                                                  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                                                                     <tr>
+                                                                        <td style="vertical-align:top;width:1248px;">
+                                                                           <![endif]-->
+                                                                           <div class="o h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:top;width:100%;">
+                                                                              <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
+                                                                                 <tbody>
+                                                                                    <tr>
+                                                                                       <td style="vertical-align:top;padding:0;">
+                                                                                          <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
+                                                                                             <tbody>
+                                                                                                <tr>
+                                                                                                   <td style="font-size:0;padding:0;word-break:break-word;" aria-hidden="true">
+                                                                                                      <div style="height:0;line-height:0;">&#8202;</div>
+                                                                                                   </td>
+                                                                                                </tr>
+                                                                                             </tbody>
+                                                                                          </table>
+                                                                                       </td>
+                                                                                    </tr>
+                                                                                 </tbody>
+                                                                              </table>
+                                                                           </div>
+                                                                           <!--[if mso | IE]>
+                                                                        </td>
+                                                                     </tr>
+                                                                  </table>
+                                                                  <![endif]-->
+                                                               </td>
+                                                            </tr>
+                                                         </tbody>
+                                                      </table>
+                                                   </div>
+                                                   <!--[if mso | IE]>
+                                                </td>
+                                             </tr>
+                                          </table>
+                                       </td>
+                                    </tr>
+                                    <tr>
+                                       <td width="1280px">
+                                          <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:1248px;" width="1248">
+                                             <tr>
+                                                <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
+                                                   <![endif]-->
+                                                   <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;border-radius:0px 0px 16px 16px;max-width:1248px;">
                                                       <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#fffffe;background-color:#fffffe;width:100%;border-radius:0px 0px 16px 16px;">
                                                          <tbody>
                                                             <tr>
-                                                               <td style="border:none;direction:ltr;font-size:0;padding:20px 20px 40px 20px;text-align:center;">
+                                                               <td style="border:none;direction:ltr;font-size:0;padding:24px 20px 40px 20px;text-align:center;">
                                                                   <!--[if mso | IE]>
                                                                   <table role="presentation" border="0" cellpadding="0" cellspacing="0">
                                                                      <tr>
@@ -1050,7 +1489,7 @@ def get_download_email_html_body(
                                                             <tbody>
                                                                <tr>
                                                                   <td align="center" bgcolor="transparent" role="presentation" style="background:transparent;border:none;border-radius:8px 8px 8px 8px;cursor:auto;mso-padding-alt:12px 0px 12px 0px;vertical-align:middle;" valign="middle">
-                                                                     <a href="{TERMS_OF_USE_URL}" style="display:inline-block;width:112px;color:#ffffff;font-family:'Open Sans', 'Arial', sans-serif;font-size:13px;font-weight:normal;line-height:100%;margin:0;text-decoration:none;text-transform:none;padding:12px 0px 12px 0px;mso-padding-alt:0;border-radius:8px 8px 8px 8px;" target="_blank">
+                                                                     <a href="#insertUrlLink" style="display:inline-block;width:112px;color:#ffffff;font-family:'Open Sans', 'Arial', sans-serif;font-size:13px;font-weight:normal;line-height:100%;margin:0;text-decoration:none;text-transform:none;padding:12px 0px 12px 0px;mso-padding-alt:0;border-radius:8px 8px 8px 8px;" target="_blank">
                                                                      <span style="font-size:14px;font-family:'Open Sans', 'Arial', sans-serif;font-weight:500;color:#000000;line-height:157%;mso-line-height-alt:22px;">Terms of Use</span>
                                                                      </a>
                                                                   </td>
@@ -1092,7 +1531,7 @@ def get_download_email_html_body(
                                                             <tbody>
                                                                <tr>
                                                                   <td align="center" bgcolor="transparent" role="presentation" style="background:transparent;border:none;border-radius:8px 8px 8px 8px;cursor:auto;mso-padding-alt:12px 0px 12px 0px;vertical-align:middle;" valign="middle">
-                                                                     <a href="{CONDITIONS_OF_USE_URL}" style="display:inline-block;width:142px;color:#ffffff;font-family:'Open Sans', 'Arial', sans-serif;font-size:13px;font-weight:normal;line-height:100%;margin:0;text-decoration:none;text-transform:none;padding:12px 0px 12px 0px;mso-padding-alt:0;border-radius:8px 8px 8px 8px;" target="_blank">
+                                                                     <a href="#insertUrlLink" style="display:inline-block;width:142px;color:#ffffff;font-family:'Open Sans', 'Arial', sans-serif;font-size:13px;font-weight:normal;line-height:100%;margin:0;text-decoration:none;text-transform:none;padding:12px 0px 12px 0px;mso-padding-alt:0;border-radius:8px 8px 8px 8px;" target="_blank">
                                                                      <span style="font-size:14px;font-family:'Open Sans', 'Arial', sans-serif;font-weight:500;color:#000000;line-height:157%;mso-line-height-alt:22px;">Conditions of Use</span>
                                                                      </a>
                                                                   </td>
