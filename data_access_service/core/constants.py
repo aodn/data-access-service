@@ -4,7 +4,7 @@ COORDINATE_INDEX_PRECISION = 1
 DEPTH_INDEX_PRECISION = -1
 RECORD_PER_PARTITION: int = 1000
 
-STR_TIME = sys.intern("TIME")
+STR_TIME_UPPER_CASE = sys.intern("TIME")
 STR_TIME_LOWER_CASE = sys.intern("time")
 STR_LONGITUDE_LOWER_CASE = sys.intern("longitude")
 STR_LATITUDE_LOWER_CASE = sys.intern("latitude")
