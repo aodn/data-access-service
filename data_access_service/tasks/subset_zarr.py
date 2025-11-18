@@ -133,19 +133,35 @@ class ZarrProcessor:
 
             dataset = self.api._instance.get_dataset(key).zarr_store
 
-            # Ensure the dataset is dask-backed (lazy loading)
-            # If it's not already chunked, rechunk it with automatic chunk sizing
-            if not any(
-                hasattr(var.data, "chunks") or hasattr(var.data, "__dask_graph__")
-                for var in dataset.data_vars.values()
-            ):
-                self.log.warning(
-                    f"Dataset {key} is not dask-backed, rechunking with 'auto'"
-                )
-                dataset = dataset.chunk("auto")
+            print("easily got zarr store for key", key)
+            print(
+                "memory usage here:",
+                psutil.Process(os.getpid()).memory_info().rss / (1024**3),
+                "GB",
+            )
 
+            # Ensure the dataset is dask-backed (lazy loading)
+            # Check if dataset is dask-backed WITHOUT loading data into memory
+            # import dask.array as da
+            # if not any(
+            #     isinstance(var.data, da.Array)
+            #     for var in dataset.data_vars.values()
+            # ):
+            #     self.log.warning(
+            #         f"Dataset {key} is not dask-backed, rechunking with 'auto'"
+            #     )
+            #     dataset = dataset.chunk("auto")
+            # print("dataset after chunking", dataset)
             conditions = self.get_all_subset_conditions(key, bbox)
 
+            time_dim = self.api.map_column_names(
+                uuid=self.uuid, key=key, columns=["TIME"]
+            )[0]
+            time_per_chunk = self.__get_time_steps_per_chunk(dataset, time_dim)
+            self.log.info(
+                "Chunking dataset with %d time steps per chunk", time_per_chunk
+            )
+            dataset = dataset.chunk({time_dim: time_per_chunk})
             dim_conditions = {}  # Conditions for dimensions of zarr
             mask = None  # Conditions for variables (include coord and data_var) of zarr. Naming "mask" is for zarr convention
             for k, val_range in conditions.items():
@@ -166,6 +182,11 @@ class ZarrProcessor:
                         f"Condition key: {k} is neither dim, coord nor data_var in the dataset. Dataset: {key}"
                     )
 
+            print(
+                "current memory usage before applying conditions:",
+                psutil.Process(os.getpid()).memory_info().rss / (1024**3),
+                "GB",
+            )
             # apply dim conditions and mask (variable conditions)
             print("Applying conditions for key", key)
             subset = dataset
@@ -176,10 +197,6 @@ class ZarrProcessor:
                 # please use drop=False to keep lazy loading
                 subset = subset.where(mask, drop=False)
                 print("subset after where", subset)
-                # dropna for each dimension separately (dropna doesn't accept a list of dims)
-                for dim in mask.dims:
-                    subset = subset.dropna(dim=dim, how="all")
-                print("subset after dropna", subset)
 
             if not isinstance(subset, xarray.Dataset):
                 raise TypeError(
@@ -343,8 +360,12 @@ def form_mask(
     max_value: any,
     ds: xarray.Dataset,
 ) -> any:
+    print("forming mask for key", key, "with min", min_value, "and max", max_value)
     var_mask = (ds[key] >= min_value) & (ds[key] <= max_value)
+    print("var_mask for key", key, "is", var_mask)
     if existing_mask is None:
+        print("returning new mask for key", key)
         return var_mask
     else:
+        print("combining with existing mask for key", key)
         return existing_mask & var_mask
