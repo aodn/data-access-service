@@ -106,7 +106,9 @@ class ZarrProcessor:
         )
         urls: List[str] = []
 
+        self.log.info("Processing keys: %s", self.keys)
         for key in self.keys:
+            self.log.info("Processing key: %s", key)
 
             dataset = self.__get_zarr_dataset_for_(key=key)
             print("already got dataset for key", key)
@@ -263,15 +265,15 @@ class ZarrProcessor:
 
     def get_available_thread_count(self):
         if os.getenv("PROFILE") in (None, "dev", "testing"):
-            self.log.info("Running in dev or testing mode, using 2 threads")
-            return 2
+            self.log.info("Running in dev or testing mode, using 1 thread")
+            return 1
 
         cpu_count = psutil.cpu_count(logical=True)
         self.log.info(f"Available thread count: {cpu_count}")
         return cpu_count
 
     def __get_time_steps_per_chunk(
-        self, dataset: xarray.Dataset, time_dim: str, memory_fraction: float = 0.5
+        self, dataset: xarray.Dataset, time_dim: str, memory_fraction: float = 0.3
     ) -> int:
         """
         Calculate the number of time steps per chunk based on available memory and dataset size.
