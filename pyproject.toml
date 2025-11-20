@@ -7,7 +7,7 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 # Dependency from a GitHub repository, use tag = "v0.1.32" or branch = "xxx"
-aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", tag = "v0.1.60" }
+aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", tag = "v0.1.53" }
 black = "^24.8.0"
 blosc = "^1.11.3"
 boto3 = "^1.28.0"
