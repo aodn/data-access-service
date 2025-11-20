@@ -283,7 +283,7 @@ def get_download_email_html_body(
                     </table>
                     </td>
                     </tr>
-                    {generate_download_button_html(object_url_str)}
+                    {generate_download_button_html(object_urls)}
                     <tr>
                         <td width="600px">
                             <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:568px;" width="568">
@@ -853,7 +853,7 @@ def get_download_email_html_body(
                                                                     <tr>
                                                                         <td align="left" width="100%">
                                                                             <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 17px; font-weight: 500; line-height: 141%; text-align: left; color: #090c02">
-                                                                                <p style="Margin:0;mso-line-height-alt:24px;font-size:17px;line-height:141%;">Usage Constrains</p>
+                                                                                <p style="Margin:0;mso-line-height-alt:24px;font-size:17px;line-height:141%;">Usage Constraints</p>
                                                                             </div>
                                                                         </td>
                                                                     </tr>
