@@ -242,22 +242,24 @@ class ZarrProcessor:
         self.log.info(f"  Memory freed: {(mem_before - memory_after):.2f} GB")
 
         with tempfile.TemporaryDirectory() as tempdirname:
-            with ProcessLogger(logger=self.log, task_name="Writing to s3 as netcdf"):
-                temp_netcdf_path = Path(tempdirname) / key.replace(".zarr", ".nc")
+            # with ProcessLogger(logger=self.log, task_name="Writing to s3 as netcdf"):
+            temp_netcdf_path = Path(tempdirname) / key.replace(".zarr", ".nc")
 
-                # Write variables one by one to manage memory better
-                data_var_names = list(dataset.data_vars.keys())
-                self.log.info(
-                    f"Writing {len(data_var_names)} variables incrementally: {data_var_names}"
-                )
+            # Write variables one by one to manage memory better
+            data_var_names = list(dataset.data_vars.keys())
+            self.log.info(
+                f"Writing {len(data_var_names)} variables incrementally: {data_var_names}"
+            )
 
+            with ProcessLogger(
+                logger=self.log, task_name="Step 1: Writing coordinates to NetCDF file"
+            ):
                 # First write: Create file with coordinates only (no data variables)
-                self.log.info("Step 1: Writing coordinates to NetCDF file")
                 coords_only_ds = xarray.Dataset(
                     coords=dataset.coords, attrs=dataset.attrs
                 )
 
-                # CRITICAL: Compute coordinates to avoid OOM during write
+                # Compute coordinates to avoid OOM during write
                 coords_only_ds = coords_only_ds.compute()
 
                 coords_only_ds.to_netcdf(
@@ -268,15 +270,18 @@ class ZarrProcessor:
                     compute=True,
                 )
 
-                # Clean up after writing coordinates
+                # Clean up after writing coordinates to avoid edge case unexpected memory management
                 del coords_only_ds
                 gc.collect()
 
-                # Append each data variable one by one
-                for idx, var_name in enumerate(data_var_names, start=1):
-                    self.log.info(
-                        f"Step {idx + 1}/{len(data_var_names) + 1}: Appending variable '{var_name}'"
-                    )
+            # Append each data variable one by one since xr.Dataset.to_netcdf() only supports mode "w" and "a"
+            # and "a" mode appends to existing file will overwrite existing variables.
+            # doc: https://docs.xarray.dev/en/stable/generated/xarray.Dataset.to_netcdf.html
+            for idx, var_name in enumerate(data_var_names, start=1):
+                with ProcessLogger(
+                    logger=self.log,
+                    task_name=f"Step {idx + 1}/{len(data_var_names) + 1}: Appending variable '{var_name}'",
+                ):
 
                     # Create a dataset with only this variable
                     # CRITICAL: Do NOT include coords when appending - they already exist in the file
@@ -309,15 +314,15 @@ class ZarrProcessor:
                         f"  Memory after writing '{var_name}': {current_mem:.2f} GB"
                     )
 
-                self.log.info("All variables written successfully")
+            self.log.info("All variables written successfully")
 
-                s3_key = f"{self.job_id}/{key.replace('.zarr', '.nc')}"
-                self.log.info(
-                    "Start uploading to s3 bucket: %s, key: %s", bucket_name, s3_key
-                )
-                self.aws.upload_file_to_s3(str(temp_netcdf_path), bucket_name, s3_key)
-                region = self.aws.s3.meta.region_name
-                return f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"
+            s3_key = f"{self.job_id}/{key.replace('.zarr', '.nc')}"
+            self.log.info(
+                "Start uploading to s3 bucket: %s, key: %s", bucket_name, s3_key
+            )
+            self.aws.upload_file_to_s3(str(temp_netcdf_path), bucket_name, s3_key)
+            region = self.aws.s3.meta.region_name
+            return f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"
 
     def get_available_thread_count(self):
         if os.getenv("PROFILE") in (None, "dev", "testing"):
@@ -349,7 +354,6 @@ class ZarrProcessor:
             "Chunk size: %d GB per thread", safe_memory_per_thread / (1024**3)
         )
 
-        # CRITICAL FIX: Use metadata to estimate size WITHOUT forcing computation
         # var.nbytes forces computation - use size * itemsize instead
         estimated_size = 0
         for var_name, var_data in dataset.data_vars.items():
@@ -440,7 +444,6 @@ def convert_object_dtype_variables(dataset: xarray.Dataset, logger) -> xarray.Da
                     chunk_max = max(chunk_lengths) if chunk_lengths else 0
                     max_length = max(max_length, chunk_max)
 
-                    logger.info(f"    Chunk {chunk_idx}: max length = {chunk_max}")
                 except Exception as e:
                     logger.warning(f"    Error processing chunk {chunk_idx}: {e}")
                     # If we can't process chunks individually, fall back to computing all
@@ -476,6 +479,10 @@ def convert_object_dtype_variables(dataset: xarray.Dataset, logger) -> xarray.Da
         elif safe_length <= 256:
             dtype = "S256"
         else:
+            logger.warning(
+                f"  Very long strings detected in variable {var_name} (length: {safe_length}). "
+                f"Using dtype S{safe_length}, which may increase file size."
+            )
             dtype = f"S{safe_length}"
 
         logger.info(f"  Max length found: {max_length}, using dtype: {dtype}")
@@ -511,12 +518,8 @@ def form_mask(
     max_value: any,
     ds: xarray.Dataset,
 ) -> any:
-    print("forming mask for key", key, "with min", min_value, "and max", max_value)
     var_mask = (ds[key] >= min_value) & (ds[key] <= max_value)
-    print("var_mask for key", key, "is", var_mask)
     if existing_mask is None:
-        print("returning new mask for key", key)
         return var_mask
     else:
-        print("combining with existing mask for key", key)
         return existing_mask & var_mask
