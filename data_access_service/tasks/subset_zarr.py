@@ -112,13 +112,12 @@ class ZarrProcessor:
         )
         urls: List[str] = []
 
-        self.log.info("Processing keys: %s", self.keys)
+        self.log.info("Processing datasets: %s", self.keys)
         for key in self.keys:
-            self.log.info("Processing key: %s", key)
-
+            self.log.info("Processing dataset: %s", key)
             dataset = self.__get_zarr_dataset_for_(key=key)
-            print("already got dataset for key", key)
             if dataset is None:
+                self.log.info("No data found for dataset: %s, skipping...", key)
                 continue
 
             download_uri = self.__write_to_s3_as_netcdf(dataset=dataset, key=key)
@@ -141,29 +140,10 @@ class ZarrProcessor:
 
             dataset = self.api._instance.get_dataset(key).zarr_store
 
-            print("easily got zarr store for key", key)
-            print(
-                "memory usage here:",
-                psutil.Process(os.getpid()).memory_info().rss / (1024**3),
-                "GB",
-            )
-
-            # Ensure the dataset is dask-backed (lazy loading)
-            # Check if dataset is dask-backed WITHOUT loading data into memory
-            # import dask.array as da
-            # if not any(
-            #     isinstance(var.data, da.Array)
-            #     for var in dataset.data_vars.values()
-            # ):
-            #     self.log.warning(
-            #         f"Dataset {key} is not dask-backed, rechunking with 'auto'"
-            #     )
-            #     dataset = dataset.chunk("auto")
-            # print("dataset after chunking", dataset)
             conditions = self.get_all_subset_conditions(key, bbox)
 
             time_dim = self.api.map_column_names(
-                uuid=self.uuid, key=key, columns=["TIME"]
+                uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
             )[0]
             time_per_chunk = self.__get_time_steps_per_chunk(dataset, time_dim)
             self.log.info(
@@ -172,6 +152,11 @@ class ZarrProcessor:
             dataset = dataset.chunk({time_dim: time_per_chunk})
             dim_conditions = {}  # Conditions for dimensions of zarr
             mask = None  # Conditions for variables (include coord and data_var) of zarr. Naming "mask" is for zarr convention
+
+            # conditions (time range, lat range, lon range etc.) may be dimensions or variables for different zarr datasets
+            # Below loop forms the conditions accordingly
+            # if it is a dimension, it will be added to dim_conditions for sel()
+            # if it is a variable, it will be used to form a mask for where()
             for k, val_range in conditions.items():
                 print("forming condition for key", k, "with range", val_range)
                 if is_dim(key=k, dataset=dataset):
@@ -190,20 +175,13 @@ class ZarrProcessor:
                         f"Condition key: {k} is neither dim, coord nor data_var in the dataset. Dataset: {key}"
                     )
 
-            print(
-                "current memory usage before applying conditions:",
-                psutil.Process(os.getpid()).memory_info().rss / (1024**3),
-                "GB",
-            )
             # apply dim conditions and mask (variable conditions)
-            print("Applying conditions for key", key)
             subset = dataset
             if dim_conditions:
                 subset = subset.sel(**dim_conditions)
             if mask is not None:
                 # please use drop=False to keep lazy loading
                 subset = subset.where(mask, drop=False)
-                print("subset after where", subset)
 
             if not isinstance(subset, xarray.Dataset):
                 raise TypeError(
@@ -222,36 +200,20 @@ class ZarrProcessor:
                 f"No data found for key: {key} in the specified conditions."
             )
             return None
-        print("final merged dataset for key", key, "is", merged_dataset)
         return merged_dataset
 
     def __write_to_s3_as_netcdf(self, dataset: xarray.Dataset, key: str):
         dataset = ignore_invalid_unicode_in_attrs(dataset)
 
-        print("RLIMIT_AS:", resource.getrlimit(resource.RLIMIT_AS))
-        print("RLIMIT_DATA:", resource.getrlimit(resource.RLIMIT_DATA))
-        print(
-            "Process RSS:",
-            psutil.Process(os.getpid()).memory_info().rss / (1024**3),
-            "GB",
-        )
-        print("System available:", psutil.virtual_memory().available / (1024**3), "GB")
-        pid = os.getpid()
-        with open(f"/proc/{pid}/status") as f:
-            for line in f:
-                if line.startswith("Vm"):
-                    print(line.strip())
-
-        # Convert object dtype variables to appropriate fixed-size strings
+        # Convert object dtype variables to appropriate fixed-size strings, because NetCDF does not support object dtype
         dataset = convert_object_dtype_variables(dataset, logger=self.log)
 
-        time_dim = self.api.map_column_names(uuid=self.uuid, key=key, columns=["TIME"])[
-            0
-        ]
+        time_dim = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
+        )[0]
         time_per_chunk = self.__get_time_steps_per_chunk(dataset, time_dim)
         self.log.info("Chunking dataset with %d time steps per chunk", time_per_chunk)
         dataset = dataset.chunk({time_dim: time_per_chunk})
-
         netcdf_compression = {
             var: {"zlib": True, "complevel": 5}
             for var, da in dataset.data_vars.items()
@@ -263,20 +225,21 @@ class ZarrProcessor:
         dask.config.set(num_workers=thread_count)
         bucket_name = self.config.get_csv_bucket_name()
 
-        # Free memory before to_netcdf to prevent allocation errors
+        # Free memory before to_netcdf to prevent allocation errors.
+        # Don't skip this step even though most of the situations no memory is freed,
+        # There might be some edge cases that memory is not well managed.
+        # So it is safer to keep this step here.
         self.log.info("Freeing memory before to_netcdf()...")
         mem_before = psutil.Process(os.getpid()).memory_info().rss / (1024**3)
         self.log.info(f"  Memory before cleanup: {mem_before:.2f} GB")
-
         # Force garbage collection to free unused memory
         gc.collect()
-
         # Give Python a moment to release memory back to OS
         time.sleep(0.5)
 
-        mem_after = psutil.Process(os.getpid()).memory_info().rss / (1024**3)
-        self.log.info(f"  Memory after cleanup: {mem_after:.2f} GB")
-        self.log.info(f"  Memory freed: {(mem_before - mem_after):.2f} GB")
+        memory_after = psutil.Process(os.getpid()).memory_info().rss / (1024**3)
+        self.log.info(f"  Memory after cleanup: {memory_after:.2f} GB")
+        self.log.info(f"  Memory freed: {(mem_before - memory_after):.2f} GB")
 
         with tempfile.TemporaryDirectory() as tempdirname:
             with ProcessLogger(logger=self.log, task_name="Writing to s3 as netcdf"):
