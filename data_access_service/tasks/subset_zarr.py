@@ -112,7 +112,7 @@ class ZarrProcessor:
         )
         urls: List[str] = []
 
-        self.log.info("Processing datasets: %s", self.keys)
+        self.log.info("Datasets to process: %s", self.keys)
         for key in self.keys:
             self.log.info("Processing dataset: %s", key)
             dataset = self.__get_zarr_dataset_for_(key=key)
@@ -351,7 +351,7 @@ class ZarrProcessor:
             available_memory * memory_fraction / self.get_available_thread_count()
         )
         self.log.info(
-            "Chunk size: %d GB per thread", safe_memory_per_thread / (1024**3)
+            "Chunk size: %d MB per thread", safe_memory_per_thread / (1024**2)
         )
 
         # var.nbytes forces computation - use size * itemsize instead
@@ -421,7 +421,9 @@ def convert_object_dtype_variables(dataset: xarray.Dataset, logger) -> xarray.Da
 
         if isinstance(var.data, da.Array):
             # Dask array - process chunk by chunk
-            logger.info(f"  Processing dask array in chunks...")
+            logger.info(
+                f"  Finding max length for var: {var_name} using Dask chunks..."
+            )
 
             # Process each chunk to find max length
             for chunk_idx in range(
