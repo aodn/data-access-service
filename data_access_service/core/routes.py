@@ -13,7 +13,7 @@ from data_access_service.core.api import API
 from data_access_service.core.constants import (
     STR_LATITUDE_UPPER_CASE,
     STR_LONGITUDE_UPPER_CASE,
-    STR_TIME,
+    STR_TIME_UPPER_CASE,
 )
 from data_access_service.models.ExtendedFeatureCollection import (
     ExtendedFeatureCollection,
@@ -166,7 +166,9 @@ async def get_indexing_values(
     lon_key = api.map_column_names(
         uuid=uuid, key=key, columns=[STR_LONGITUDE_UPPER_CASE]
     )[0]
-    time_key = api.map_column_names(uuid=uuid, key=key, columns=[STR_TIME])[0]
+    time_key = api.map_column_names(uuid=uuid, key=key, columns=[STR_TIME_UPPER_CASE])[
+        0
+    ]
 
     if (
         lat_key not in data_source.coords
@@ -235,7 +237,9 @@ async def get_zarr_rectangles(
     lon_key = api.map_column_names(
         uuid=uuid, key=key, columns=[STR_LONGITUDE_UPPER_CASE]
     )[0]
-    time_key = api.map_column_names(uuid=uuid, key=key, columns=[STR_TIME])[0]
+    time_key = api.map_column_names(uuid=uuid, key=key, columns=[STR_TIME_UPPER_CASE])[
+        0
+    ]
 
     if (
         lat_key not in data_source.coords

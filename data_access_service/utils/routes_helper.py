@@ -35,7 +35,7 @@ from data_access_service.core.constants import (
     COORDINATE_INDEX_PRECISION,
     DEPTH_INDEX_PRECISION,
     RECORD_PER_PARTITION,
-    STR_TIME,
+    STR_TIME_UPPER_CASE,
     STR_TIME_LOWER_CASE,
     STR_LONGITUDE_LOWER_CASE,
     STR_LATITUDE_LOWER_CASE,
@@ -93,8 +93,10 @@ def _generate_partial_json_array(
             # here we unify it and call it time
             #
             # Use sys.intern to compress string usage to reduce memory
-            if STR_TIME in record:
-                filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(record[STR_TIME])
+            if STR_TIME_UPPER_CASE in record:
+                filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
+                    record[STR_TIME_UPPER_CASE]
+                )
             elif STR_TIME_LOWER_CASE in record:
                 filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
                     record[STR_TIME_LOWER_CASE]
