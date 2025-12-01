@@ -54,6 +54,27 @@ class AWSHelper:
             temp_dir_path = Path(temp_dir)
             zip_path = temp_dir_path / "output.zip"
 
+            # build dataschema.json path
+            parts = key.split('/')
+            if len(parts) >= 2:
+                master_job_id = parts[0]
+                dataset_name = parts[1].replace('.zip', '')
+                schema_key = f"temp/{master_job_id}/{dataset_name}.parquet/dataschema.json"
+
+                try:
+                    response = self.s3.get_object(Bucket=bucket_name, Key=schema_key)
+                    schema_content = response['Body'].read().decode('utf-8')
+                    with zipfile.ZipFile(
+                            zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+                    ) as zf:
+                        zf.writestr('dataschema.json', schema_content)
+                        self.log.info(f"Added dataschema.json to ZIP from {schema_key}")
+
+                except self.s3.exceptions.NoSuchKey:
+                    self.log.warning(f"Schema file not found: {schema_key}")
+                except Exception as e:
+                    self.log.warning(f"Failed to read schema file: {e}")
+
             try:
                 with zipfile.ZipFile(
                     zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
