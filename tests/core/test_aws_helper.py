@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import zipfile
 
@@ -197,6 +198,35 @@ class TestAWSHelper(TestWithS3):
                 PARTITION_KEY: [202001, 202001, 202002, 202002, 202003],
             }
         )
+
+        mock_schema = {
+            'DATA_TYPE': {
+                'type': 'string',
+                'long_name': 'Data type',
+                'conventions': 'Argo reference table 1'
+            },
+            'FORMAT_VERSION': {
+                'type': 'string',
+                'long_name': 'File format version'
+            },
+            'HANDBOOK_VERSION': {
+                'type': 'string',
+                'long_name': 'Data handbook version'
+            },
+            'global_attributes': {
+                'metadata_uuid': '4402cb50-e20a-44ee-93e6-4728259250d2',
+                'title': 'Argo Core'
+            }
+        }
+
+        mock_response = {
+            'Body': MagicMock()
+        }
+        mock_response['Body'].read = MagicMock(
+            return_value=json.dumps(mock_schema).encode('utf-8')
+        )
+        helper.s3.get_object = MagicMock(return_value=mock_response)
+
         # create 2 partitions
         ddf = dd.from_pandas(pdf, npartitions=2)
 
@@ -209,14 +239,28 @@ class TestAWSHelper(TestWithS3):
                 assert os.path.exists(file_path)
                 with zipfile.ZipFile(file_path, "r") as zf:
                     namelist = zf.namelist()
-                    assert len(namelist) == 1
+                    # should have two files, one is data file part_000000000.csv, one is dataschema file dataschema.csv
+                    assert len(namelist) == 2
                     assert "part_000000000.csv" in namelist
+                    assert "dataschema.csv" in namelist
+
+                    # validate dataschema content
+                    schema_content = zf.read("dataschema.csv").decode("utf-8")
+                    schema_df = pd.read_csv(io.StringIO(schema_content), index_col=0)
+                    assert "DATA_TYPE" in schema_df.index
+                    assert "global_attributes" in schema_df.index
+                    assert "long_name" in schema_df.columns
+                    assert "conventions" in schema_df.columns
+                    assert "metadata_uuid" in schema_df.columns
+                    assert schema_df.loc["global_attributes", "metadata_uuid"] == "4402cb50-e20a-44ee-93e6-4728259250d2"
 
                     # content validation - the concat csvs should match the original dataframe
                     dfs = []
                     for name in sorted(namelist):
-                        content = zf.read(name).decode()
-                        dfs.append(pd.read_csv(io.StringIO(content)))
+                        # skip dataschema.csv
+                        if name.endswith(".csv") and name != "dataschema.csv":
+                            content = zf.read(name).decode()
+                            dfs.append(pd.read_csv(io.StringIO(content)))
                     combined_df = pd.concat(dfs, ignore_index=True)
 
                     expected_df = pdf.drop(columns=[PARTITION_KEY]).reset_index(
