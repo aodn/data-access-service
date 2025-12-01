@@ -1,4 +1,6 @@
 import csv
+import json
+import pandas as pd
 import os
 import shutil
 import tempfile
@@ -67,8 +69,12 @@ class AWSHelper:
                     with zipfile.ZipFile(
                             zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
                     ) as zf:
-                        zf.writestr('dataschema.json', schema_content)
-                        self.log.info(f"Added dataschema.json to ZIP from {schema_key}")
+                        schema_json = json.loads(schema_content)
+                        schema_df = pd.DataFrame(schema_json)
+                        schema_csv = schema_df.to_csv(index=False)
+
+                        zf.writestr('dataschema.csv', schema_csv)
+                        self.log.info(f"Added dataschema.csv to ZIP from {schema_key}")
 
                 except self.s3.exceptions.NoSuchKey:
                     self.log.warning(f"Schema file not found: {schema_key}")
