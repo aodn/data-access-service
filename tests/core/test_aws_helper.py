@@ -282,6 +282,7 @@ class TestAWSHelper(TestWithS3):
         helper.s3 = MagicMock()
         helper.s3.meta.region_name = "us-east-1"
         helper.log = MagicMock()
+        helper.s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
 
         helper.upload_file_to_s3 = MagicMock()
 
