@@ -100,8 +100,14 @@ class TestDataGeneration(TestWithS3):
                         objects.append(obj["Key"])
                 #  in test parquet, only 1 data csv for the provided range and 1 dataschema csv for the parquet dataset
                 assert len(objects) == 2
-                assert "999/temp/autonomous_underwater_vehicle.parquet/dataschema.json" in objects
-                assert "999/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11/part.0.parquet" in objects
+                assert (
+                    "999/temp/autonomous_underwater_vehicle.parquet/dataschema.json"
+                    in objects
+                )
+                assert (
+                    "999/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11/part.0.parquet"
+                    in objects
+                )
 
                 # Check if the files are compressed and uploaded correctly
                 compressed_s3_key = "999/autonomous_underwater_vehicle.zip"
@@ -136,10 +142,14 @@ class TestDataGeneration(TestWithS3):
                     bucket_name, compressed_s3_key, "/tmp"
                 )
 
-                assert len(names) == 2, "contain single data file plus one table schema file"
+                assert (
+                    len(names) == 2
+                ), "contain single data file plus one table schema file"
 
-                schema_files = [f for f in names if 'dataschema.csv' in f]
-                data_files = [f for f in names if f.endswith('.csv') and 'dataschema' not in f]
+                schema_files = [f for f in names if "dataschema.csv" in f]
+                data_files = [
+                    f for f in names if f.endswith(".csv") and "dataschema" not in f
+                ]
 
                 # Check values
                 schema_df = pd.read_csv(f"/tmp/{schema_files[0]}", index_col=0)
@@ -360,8 +370,14 @@ class TestDataGeneration(TestWithS3):
                         objects.append(obj["Key"])
                 #  in test parquet, only 1 data csv for the provided range and 1 dataschema.csv file for the parquet dataset
                 assert len(objects) == 2
-                assert "998/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11/part.0.parquet" in objects
-                assert "998/temp/autonomous_underwater_vehicle.parquet/dataschema.json" in objects
+                assert (
+                    "998/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11/part.0.parquet"
+                    in objects
+                )
+                assert (
+                    "998/temp/autonomous_underwater_vehicle.parquet/dataschema.json"
+                    in objects
+                )
 
             except Exception as ex:
                 raise ex

@@ -58,7 +58,7 @@ class AWSHelper:
 
             try:
                 with zipfile.ZipFile(
-                        zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+                    zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
                 ) as zf:
                     # build dataschema.json path
                     parts = key.split("/")
@@ -68,7 +68,9 @@ class AWSHelper:
                         schema_key = f"temp/{master_job_id}/{dataset_name}.parquet/dataschema.json"
 
                         try:
-                            response = self.s3.get_object(Bucket=bucket_name, Key=schema_key)
+                            response = self.s3.get_object(
+                                Bucket=bucket_name, Key=schema_key
+                            )
                             schema_content = response["Body"].read().decode("utf-8")
                             schema_json = json.loads(schema_content)
 
@@ -77,7 +79,9 @@ class AWSHelper:
                             schema_csv = schema_df.to_csv(index=True)
                             # save parquet metadate in dataschema.csv file
                             zf.writestr("dataschema.csv", schema_csv)
-                            self.log.info(f"Added dataschema.csv to ZIP from {schema_key}")
+                            self.log.info(
+                                f"Added dataschema.csv to ZIP from {schema_key}"
+                            )
 
                         except self.s3.exceptions.NoSuchKey:
                             self.log.warning(f"Schema file not found: {schema_key}")
