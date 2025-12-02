@@ -134,7 +134,7 @@ def _generate_partition_output(
             if not Path(schema_path).exists():
                 table_schema = datasource.get_tableschema()
                 os.makedirs(os.path.dirname(schema_path), exist_ok=True)
-                with open(schema_path, 'w') as f:
+                with open(schema_path, "w") as f:
                     json.dump(table_schema, f, indent=2)
 
                 log.info(f"Saved table schema to {schema_path}")

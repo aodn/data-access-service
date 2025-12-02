@@ -200,30 +200,25 @@ class TestAWSHelper(TestWithS3):
         )
 
         mock_schema = {
-            'DATA_TYPE': {
-                'type': 'string',
-                'long_name': 'Data type',
-                'conventions': 'Argo reference table 1'
+            "DATA_TYPE": {
+                "type": "string",
+                "long_name": "Data type",
+                "conventions": "Argo reference table 1",
             },
-            'FORMAT_VERSION': {
-                'type': 'string',
-                'long_name': 'File format version'
+            "FORMAT_VERSION": {"type": "string", "long_name": "File format version"},
+            "HANDBOOK_VERSION": {
+                "type": "string",
+                "long_name": "Data handbook version",
             },
-            'HANDBOOK_VERSION': {
-                'type': 'string',
-                'long_name': 'Data handbook version'
+            "global_attributes": {
+                "metadata_uuid": "4402cb50-e20a-44ee-93e6-4728259250d2",
+                "title": "Argo Core",
             },
-            'global_attributes': {
-                'metadata_uuid': '4402cb50-e20a-44ee-93e6-4728259250d2',
-                'title': 'Argo Core'
-            }
         }
 
-        mock_response = {
-            'Body': MagicMock()
-        }
-        mock_response['Body'].read = MagicMock(
-            return_value=json.dumps(mock_schema).encode('utf-8')
+        mock_response = {"Body": MagicMock()}
+        mock_response["Body"].read = MagicMock(
+            return_value=json.dumps(mock_schema).encode("utf-8")
         )
         helper.s3.get_object = MagicMock(return_value=mock_response)
 
@@ -252,7 +247,10 @@ class TestAWSHelper(TestWithS3):
                     assert "long_name" in schema_df.columns
                     assert "conventions" in schema_df.columns
                     assert "metadata_uuid" in schema_df.columns
-                    assert schema_df.loc["global_attributes", "metadata_uuid"] == "4402cb50-e20a-44ee-93e6-4728259250d2"
+                    assert (
+                        schema_df.loc["global_attributes", "metadata_uuid"]
+                        == "4402cb50-e20a-44ee-93e6-4728259250d2"
+                    )
 
                     # content validation - the concat csvs should match the original dataframe
                     dfs = []
