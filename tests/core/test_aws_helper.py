@@ -188,6 +188,7 @@ class TestAWSHelper(TestWithS3):
         helper.log = MagicMock()
 
         helper.upload_file_to_s3 = MagicMock()
+        helper.s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
 
         helper.get_free_space = lambda path: 8 * 1024**3
 
@@ -227,7 +228,7 @@ class TestAWSHelper(TestWithS3):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             bucket = "test-bucket"
-            key = "output/test.zip"
+            key = "123/test.zip"
 
             # mock upload so to investigate csv files within zip file
             def fake_upload(file_path, bucket, key):

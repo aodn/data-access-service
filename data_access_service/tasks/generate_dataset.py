@@ -132,7 +132,7 @@ def _generate_partition_output(
             # save to the root_fodler/{key}/dataschema.json
             schema_path = f"{root_folder_path}/{key}/dataschema.json"
             if not Path(schema_path).exists():
-                table_schema = datasource.get_tableschema()
+                table_schema = datasource.get_metadata()
                 os.makedirs(os.path.dirname(schema_path), exist_ok=True)
                 with open(schema_path, "w") as f:
                     json.dump(table_schema, f, indent=2)
