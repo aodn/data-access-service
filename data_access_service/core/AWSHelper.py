@@ -1,4 +1,6 @@
 import csv
+import json
+import pandas as pd
 import os
 import shutil
 import tempfile
@@ -58,6 +60,35 @@ class AWSHelper:
                 with zipfile.ZipFile(
                     zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
                 ) as zf:
+                    # build dataschema.json path
+                    parts = key.split("/")
+                    if len(parts) >= 2:
+                        master_job_id = parts[0]
+                        dataset_name = parts[1].replace(".zip", "")
+                        schema_key = f"{master_job_id}/temp/{dataset_name}.parquet/dataschema.json"
+
+                        try:
+                            response = self.s3.get_object(
+                                Bucket=bucket_name, Key=schema_key
+                            )
+                            schema_content = response["Body"].read().decode("utf-8")
+                            schema_json = json.loads(schema_content)
+
+                            # the row of a csv is a key in dataschema.json, while each column is an attribute of this key
+                            schema_df = pd.DataFrame(schema_json).T
+                            schema_csv = schema_df.to_csv(index=True)
+                            # save parquet metadate in dataschema.csv file
+                            zf.writestr("dataschema.csv", schema_csv)
+                            self.log.info(
+                                f"Added dataschema.csv to ZIP from {schema_key}"
+                            )
+
+                        except self.s3.exceptions.NoSuchKey:
+                            self.log.warning(f"Schema file not found: {schema_key}")
+                        except Exception as e:
+                            self.log.warning(f"Failed to read/convert schema file: {e}")
+
+                    # add data csv files
                     csv_file_index = 0
                     current_csv_file = None
                     current_csv_rows = 0
@@ -135,7 +166,7 @@ class AWSHelper:
                         self._close_and_add_to_zip(
                             current_csv_file, zf, csv_file_index, temp_dir
                         )
-
+                # upload this zip file to s3
                 self.upload_file_to_s3(str(zip_path), bucket_name, key)
 
             except Exception as e:

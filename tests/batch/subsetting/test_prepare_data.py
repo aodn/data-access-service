@@ -98,11 +98,15 @@ class TestDataGeneration(TestWithS3):
                 if "Contents" in response:
                     for obj in response["Contents"]:
                         objects.append(obj["Key"])
-                #  in test parquet, only 1 data csv for the provided range
-                assert len(objects) == 1
+                #  in test parquet, only 1 data csv for the provided range and 1 dataschema csv for the parquet dataset
+                assert len(objects) == 2
                 assert (
-                    objects[0]
-                    == "999/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11/part.0.parquet"
+                    "999/temp/autonomous_underwater_vehicle.parquet/dataschema.json"
+                    in objects
+                )
+                assert (
+                    "999/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11/part.0.parquet"
+                    in objects
                 )
 
                 # Check if the files are compressed and uploaded correctly
@@ -138,12 +142,22 @@ class TestDataGeneration(TestWithS3):
                     bucket_name, compressed_s3_key, "/tmp"
                 )
 
-                # Expect a csv in this case so we can load it back with panda
-                assert len(names) == 1, "contain single file"
+                assert (
+                    len(names) == 2
+                ), "contain single data file plus one table schema file"
+
+                schema_files = [f for f in names if "dataschema.csv" in f]
+                data_files = [
+                    f for f in names if f.endswith(".csv") and "dataschema" not in f
+                ]
 
                 # Check values
-                csv = pd.read_csv(f"/tmp/{names[0]}")
-                assert len(csv) == 16703, "line contain correct"
+                schema_df = pd.read_csv(f"/tmp/{schema_files[0]}", index_col=0)
+                assert len(schema_df) > 0, "Schema should not be empty"
+
+                # Expect a csv in this case so we can load it back with panda
+                csv = pd.read_csv(f"/tmp/{data_files[0]}")
+                assert len(csv) == 16703, f"Expected 16703 rows, got {len(csv)}"
 
             except Exception as ex:
                 raise ex
@@ -354,11 +368,15 @@ class TestDataGeneration(TestWithS3):
                 if "Contents" in response:
                     for obj in response["Contents"]:
                         objects.append(obj["Key"])
-                #  in test parquet, only 1 data csv for the provided range
-                assert len(objects) == 1
+                #  in test parquet, only 1 data csv for the provided range and 1 dataschema.csv file for the parquet dataset
+                assert len(objects) == 2
                 assert (
-                    objects[0]
-                    == "998/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11/part.0.parquet"
+                    "998/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11/part.0.parquet"
+                    in objects
+                )
+                assert (
+                    "998/temp/autonomous_underwater_vehicle.parquet/dataschema.json"
+                    in objects
                 )
 
             except Exception as ex:
