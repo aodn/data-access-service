@@ -100,10 +100,7 @@ class TestDataGeneration(TestWithS3):
                         objects.append(obj["Key"])
                 #  in test parquet, only 1 data csv for the provided range and 1 dataschema csv for the parquet dataset
                 assert len(objects) == 2
-                assert (
-                    "999/temp/dataschema.json"
-                    in objects
-                )
+                assert "999/temp/dataschema.json" in objects
                 assert (
                     "999/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11/part.0.parquet"
                     in objects
@@ -374,10 +371,7 @@ class TestDataGeneration(TestWithS3):
                     "998/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11/part.0.parquet"
                     in objects
                 )
-                assert (
-                    "998/temp/dataschema.json"
-                    in objects
-                )
+                assert "998/temp/dataschema.json" in objects
 
             except Exception as ex:
                 raise ex
