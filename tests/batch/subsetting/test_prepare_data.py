@@ -101,7 +101,7 @@ class TestDataGeneration(TestWithS3):
                 #  in test parquet, only 1 data csv for the provided range and 1 dataschema csv for the parquet dataset
                 assert len(objects) == 2
                 assert (
-                    "999/temp/autonomous_underwater_vehicle.parquet/dataschema.json"
+                    "999/temp/dataschema.json"
                     in objects
                 )
                 assert (
@@ -375,7 +375,7 @@ class TestDataGeneration(TestWithS3):
                     in objects
                 )
                 assert (
-                    "998/temp/autonomous_underwater_vehicle.parquet/dataschema.json"
+                    "998/temp/dataschema.json"
                     in objects
                 )
 
