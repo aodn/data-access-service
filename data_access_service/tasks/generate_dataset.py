@@ -129,8 +129,8 @@ def _generate_partition_output(
         datasource = api.get_datasource(uuid, key)
         # extract table schema for parquet dataset
         if isinstance(datasource, ParquetDataSource):
-            # save to the root_fodler/{key}/dataschema.json
-            schema_path = f"{root_folder_path}/{key}/dataschema.json"
+            # save to the root_folder/dataschema.json
+            schema_path = f"{root_folder_path}/dataschema.json"
             if not Path(schema_path).exists():
                 table_schema = datasource.get_metadata()
                 os.makedirs(os.path.dirname(schema_path), exist_ok=True)
@@ -173,6 +173,7 @@ def _generate_partition_output(
                         engine="pyarrow",  # Use pyarrow for performance
                         write_index=False,  # Exclude index to save space
                     )
+                    log.info(f"Saved partition to {output_path}")
                 else:
                     # Zarr do not support directory partition hence we need to consolidate
                     # it before write to disk.

@@ -64,8 +64,7 @@ class AWSHelper:
                     parts = key.split("/")
                     if len(parts) >= 2:
                         master_job_id = parts[0]
-                        dataset_name = parts[1].replace(".zip", "")
-                        schema_key = f"{master_job_id}/temp/{dataset_name}.parquet/dataschema.json"
+                        schema_key = f"{master_job_id}/temp/dataschema.json"
 
                         try:
                             response = self.s3.get_object(
