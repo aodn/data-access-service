@@ -61,6 +61,15 @@ class TestApi(unittest.TestCase):
                 col, ["detection_timestamp", "latitude", "longitude"], "TIME mapped"
             )
 
+            # the lon_varname and lat_varname should map correctly, they are expected to be lowercases
+            col = api.map_column_names(uuid, key, ["LATITUDE"])
+            lat_varname = col[0]
+            self.assertEqual(lat_varname, "latitude")
+
+            col = api.map_column_names(uuid, key, ["LONGITUDE"])
+            lon_varname = col[0]
+            self.assertEqual(lon_varname, "longitude")
+
             # This uuid have time so it will not map
             col = api.map_column_names(
                 "af5d0ff9-bb9c-4b7c-a63c-854a630b6984",
