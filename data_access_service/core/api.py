@@ -746,6 +746,17 @@ class API(BaseAPI):
             try:
                 # All precision to nanosecond
                 if isinstance(ds, ParquetDataSource):
+                    # map variable names
+                    lat_mapped = self.map_column_names(
+                        uuid, key, [STR_LATITUDE_UPPER_CASE]
+                    )
+                    lon_mapped = self.map_column_names(
+                        uuid, key, [STR_LONGITUDE_UPPER_CASE]
+                    )
+
+                    lat_varname = lat_mapped[0] if lat_mapped else None
+                    lon_varname = lon_mapped[0] if lon_mapped else None
+
                     # Accuracy to nanoseconds
                     result = ds.get_data(
                         f"{date_start.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_start.nanosecond:03d}",
@@ -756,6 +767,8 @@ class API(BaseAPI):
                         lon_max,
                         scalar_filter,
                         self.map_column_names(uuid, key, columns),
+                        lat_varname=lat_varname,
+                        lon_varname=lon_varname,
                     )
 
                     return ddf.from_pandas(
