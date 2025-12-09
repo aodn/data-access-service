@@ -1,10 +1,13 @@
 import json
+import os
 from typing import List, Dict, Optional
 
 import dask.dataframe as ddf
 import pandas as pd
 import xarray
 from numcodecs import Zlib
+from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
+from pathlib import Path
 
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
@@ -124,6 +127,18 @@ def _generate_partition_output(
             start_date=start_date, end_date=end_date
         )
         datasource = api.get_datasource(uuid, key)
+        # extract table schema for parquet dataset
+        if isinstance(datasource, ParquetDataSource):
+            # save to the root_folder/dataschema.json
+            schema_path = f"{root_folder_path}/dataschema.json"
+            if not Path(schema_path).exists():
+                table_schema = datasource.get_metadata()
+                os.makedirs(os.path.dirname(schema_path), exist_ok=True)
+                with open(schema_path, "w") as f:
+                    json.dump(table_schema, f, indent=2)
+
+                log.info(f"Saved table schema to {schema_path}")
+
         checked_date_ranges = check_rows_with_date_range(datasource, date_ranges)
 
         need_append = False
@@ -158,6 +173,7 @@ def _generate_partition_output(
                         engine="pyarrow",  # Use pyarrow for performance
                         write_index=False,  # Exclude index to save space
                     )
+                    log.info(f"Saved partition to {output_path}")
                 else:
                     # Zarr do not support directory partition hence we need to consolidate
                     # it before write to disk.
