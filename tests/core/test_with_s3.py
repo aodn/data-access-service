@@ -71,16 +71,17 @@ class TestWithS3:
         automatically
         """
         with LocalStackContainer(image="localstack/localstack:4.3.0") as localstack:
+            url = localstack.get_url()
             localstack.start()
             time = wait_for_logs(localstack, "Ready.")
             log.info(
-                f"Create localstack S3 at port {localstack.get_url()}, time = {time}"
+                f"Create localstack S3 at port {url}, time = {time}"
             )
 
             # Tier down automatically
             yield localstack
 
-            log.info(f"Close localstack S3 at port {localstack.get_url()}")
+            log.info(f"Close localstack S3 at port {url}")
 
     @pytest.fixture(scope="class")
     def aws_clients(self, localstack):
