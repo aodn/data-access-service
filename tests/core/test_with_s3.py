@@ -70,16 +70,25 @@ class TestWithS3:
         using with scope cause the call to localstack.stop() happen
         automatically
         """
-        with LocalStackContainer(image="localstack/localstack:4.3.0") as localstack:
-            url = localstack.get_url()
-            localstack.start()
-            time = wait_for_logs(localstack, "Ready.")
-            log.info(f"Create localstack S3 at port {url}, time = {time}")
+        # create and start local stack container
+        container = LocalStackContainer(image="localstack/localstack:4.3.0")
+        container.start()
 
-            # Tier down automatically
-            yield localstack
+        # get container details
+        container_url = container.get_url()
 
-            log.info(f"Close localstack S3 at port {url}")
+        # wait for container ready
+        time = wait_for_logs(container, "Ready.")
+        log.info(f"Create localstack S3 at port {container_url}, time = {time}")
+
+        try:
+            yield container
+        finally:
+            try:
+                container.stop()
+                log.info(f"Close localstack S3 at port {container_url}")
+            except Exception as e:
+                log.error(f"Error during container cleanup: {e}")
 
     @pytest.fixture(scope="class")
     def aws_clients(self, localstack):
