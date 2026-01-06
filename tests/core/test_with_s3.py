@@ -85,28 +85,29 @@ class TestWithS3:
     @pytest.fixture(scope="class")
     def aws_clients(self, localstack):
         """Initialize AWS S3 and SQS clients pointing to LocalStack."""
+        endpoint_url = localstack.get_url()
         s3_client = boto3.client(
             "s3",
-            endpoint_url=localstack.get_url(),
+            endpoint_url=endpoint_url,
             aws_access_key_id=IntTestConfig.get_s3_test_key(),
             aws_secret_access_key=IntTestConfig.get_s3_secret(),
             region_name=REGION,
         )
         sqs_client = boto3.client(
             "sqs",
-            endpoint_url=localstack.get_url(),
+            endpoint_url=endpoint_url,
             aws_access_key_id=IntTestConfig.get_s3_test_key(),
             aws_secret_access_key=IntTestConfig.get_s3_secret(),
             region_name=REGION,
         )
         ses_client = boto3.client(
             "ses",
-            endpoint_url=localstack.get_url(),
+            endpoint_url=endpoint_url,
             aws_access_key_id=IntTestConfig.get_s3_test_key(),
             aws_secret_access_key=IntTestConfig.get_s3_secret(),
             region_name=REGION,
         )
-        log.info(f"Bind S3 client to {localstack.get_url()}")
+        log.info(f"Bind S3 client to {endpoint_url}")
         yield s3_client, sqs_client, ses_client
 
     @pytest.fixture(scope="class")
@@ -117,10 +118,11 @@ class TestWithS3:
         """
         monkeypatch = MonkeyPatch()  # Create manual MonkeyPatch instance
         original_client = boto3.client
+        endpoint_url = localstack.get_url()
 
         def wrapped_client(*args, **kwargs):
             if args and args[0] in ["s3", "ses", "batch"]:
-                kwargs["endpoint_url"] = localstack.get_url()
+                kwargs["endpoint_url"] = endpoint_url
                 kwargs["region_name"] = REGION
                 kwargs["config"] = BotoConfig(
                     signature_version=UNSIGNED, s3={"addressing_style": "path"}
@@ -135,7 +137,7 @@ class TestWithS3:
 
         def wrapped_get_mapper(path, **kwargs):
             # Inject/update endpoint_url for LocalStack
-            kwargs["endpoint_url"] = localstack.get_url()
+            kwargs["endpoint_url"] = endpoint_url
             kwargs["anon"] = kwargs.get("anon", True)  # Preserve anon=True from lib
 
             # Call the REAL fsspec.get_mapper with modified kwargs
@@ -144,7 +146,7 @@ class TestWithS3:
 
         monkeypatch.setattr(DataQuery.fsspec, "get_mapper", wrapped_get_mapper)
 
-        monkeypatch.setattr(DataQuery, "ENDPOINT_URL", localstack.get_url())
+        monkeypatch.setattr(DataQuery, "ENDPOINT_URL", endpoint_url)
         monkeypatch.setattr(DataQuery, "REGION", REGION)
 
         # Other test may have call this get_s3_filesystem() this function is cached and
