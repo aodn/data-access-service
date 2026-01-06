@@ -74,9 +74,7 @@ class TestWithS3:
             url = localstack.get_url()
             localstack.start()
             time = wait_for_logs(localstack, "Ready.")
-            log.info(
-                f"Create localstack S3 at port {url}, time = {time}"
-            )
+            log.info(f"Create localstack S3 at port {url}, time = {time}")
 
             # Tier down automatically
             yield localstack
