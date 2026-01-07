@@ -9,6 +9,7 @@ import os
 
 from _pytest.monkeypatch import MonkeyPatch
 from testcontainers.core.waiting_utils import wait_for_logs
+import requests
 
 from data_access_service.config.config import EnvType, Config, IntTestConfig
 from aodn_cloud_optimised.lib import DataQuery
@@ -81,6 +82,35 @@ class TestWithS3:
         time = wait_for_logs(container, "Ready.")
         log.info(f"Create localstack S3 at port {container_url}, time = {time}")
 
+        # wait for HTTP connection
+        max_attempts = 30
+        is_successed = False
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = requests.get(
+                    f"{container_url}/_localstack/health", timeout=3
+                )
+                if response.status_code == 200:
+                    log.info(f"HTTP service ready after {attempt} attempts")
+                    is_successed = True
+                    time.sleep(1)  # Extra second for stability
+                    break
+            except (
+                requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout,
+                requests.exceptions.RequestException,
+            ):
+                if attempt < max_attempts:
+                    log.debug(f"Attempt {attempt}/{max_attempts}: waiting...")
+                    time.sleep(1)
+            if not is_successed:
+                container.stop()
+                raise RuntimeError(
+                    f"LocalStack failed to become ready after {max_attempts} seconds"
+                )
+
+            log.info(f"LocalStack fully ready at {container_url}")
+
         try:
             yield container
         finally:
@@ -148,7 +178,7 @@ class TestWithS3:
             kwargs["endpoint_url"] = endpoint_url
             kwargs["anon"] = kwargs.get("anon", True)  # Preserve anon=True from lib
 
-            # Call the REAL fsspec.get_mapper with modified kwargs
+            # Call the REAL fsspec.get_mapper with modified wargs
             real_mapper = original_get_mapper(path, **kwargs)
             return real_mapper
 
