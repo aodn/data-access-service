@@ -10,6 +10,7 @@ import os
 from _pytest.monkeypatch import MonkeyPatch
 from testcontainers.core.waiting_utils import wait_for_logs
 import requests
+import time
 
 from data_access_service.config.config import EnvType, Config, IntTestConfig
 from aodn_cloud_optimised.lib import DataQuery
@@ -79,8 +80,8 @@ class TestWithS3:
         container_url = container.get_url()
 
         # wait for container ready
-        time = wait_for_logs(container, "Ready.")
-        log.info(f"Create localstack S3 at port {container_url}, time = {time}")
+        log_time = wait_for_logs(container, "Ready.")
+        log.info(f"Create localstack S3 at port {container_url}, time = {log_time}")
 
         # wait for HTTP connection
         max_attempts = 30
