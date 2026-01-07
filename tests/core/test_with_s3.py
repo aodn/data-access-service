@@ -104,13 +104,13 @@ class TestWithS3:
                 if attempt < max_attempts:
                     log.debug(f"Attempt {attempt}/{max_attempts}: waiting...")
                     time.sleep(1)
-            if not is_successed:
-                container.stop()
-                raise RuntimeError(
-                    f"LocalStack failed to become ready after {max_attempts} seconds"
-                )
+        if not  is_successed:
+            container.stop()
+            raise RuntimeError(
+                f"LocalStack failed to become ready after {max_attempts} seconds"
+            )
 
-            log.info(f"LocalStack fully ready at {container_url}")
+        log.info(f"LocalStack fully ready at {container_url}")
 
         try:
             yield container
