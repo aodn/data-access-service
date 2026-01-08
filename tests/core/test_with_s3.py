@@ -64,23 +64,29 @@ class TestWithS3:
         os.environ["PROFILE"] = EnvType.TESTING.value
 
     @pytest.fixture(scope="class")
-    def localstack(self, request) -> Generator[LocalStackContainer, Any, None]:
+    def localstack(self) -> Generator[LocalStackContainer, None, None]:
         """
         Start LocalStack container with SQS and S3 services.
-        using with scope cause the call to localstack.stop() happen
-        automatically
         """
-        with LocalStackContainer(image="localstack/localstack:4.3.0") as localstack:
-            localstack.start()
-            time = wait_for_logs(localstack, "Ready.")
+        container = None
+        try:
+            container = LocalStackContainer(image="localstack/localstack:4.3.0")
+            container.start()
+
+            time = wait_for_logs(container, "Ready.")
             log.info(
-                f"Create localstack S3 at port {localstack.get_url()}, time = {time}"
+                f"Create localstack S3 at port {container.get_url()}, time = {time}"
             )
 
-            # Tier down automatically
-            yield localstack
+            yield container
 
-            log.info(f"Close localstack S3 at port {localstack.get_url()}")
+        finally:
+            if container is not None:
+                try:
+                    log.info(f"Stopping localstack S3 at port {container.get_url()}")
+                    container.stop()
+                except Exception as e:
+                    log.warning(f"Error stopping localstack: {e}")
 
     @pytest.fixture(scope="class")
     def aws_clients(self, localstack):
@@ -150,7 +156,8 @@ class TestWithS3:
         # Other test may have call this get_s3_filesystem() this function is cached and
         # may use different ENDPOINT_URL other than the one above
         # so we need to clear it now before the next call happens
-        DataQuery.get_s3_filesystem.cache_clear()
+        # commented this line as current co lib did not support it.
+        # DataQuery.get_s3_filesystem.cache_clear()
         # Force a load so its cache value use the test value
         DataQuery.get_s3_filesystem()
 
