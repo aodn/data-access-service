@@ -615,11 +615,6 @@ class API(BaseAPI):
             if column.casefold() == "TIME".casefold() and (
                 "TIME" not in meta or "time" not in meta
             ):
-                log.debug(f"Mapping TIME for {key}")
-                log.debug(f"  'TIME' in meta: {'TIME' in meta}")
-                log.debug(f"  'time' in meta: {'time' in meta}")
-                log.debug(f"  'JULD' in meta: {'JULD' in meta}")
-                log.debug(f"  meta keys (first 10): {list(meta.keys())[:10]}")
                 match meta:
                     case meta if "JULD" in meta:
                         output.append("JULD")
