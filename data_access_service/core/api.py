@@ -26,6 +26,7 @@ from data_access_service.core.constants import (
     STR_LATITUDE_LOWER_CASE,
     STR_LONGITUDE_UPPER_CASE,
     STR_LONGITUDE_LOWER_CASE,
+    STR_TIME_UPPER_CASE,
 )
 from data_access_service.core.descriptor import Depth, Descriptor, Coordinate
 from urllib.parse import unquote_plus
@@ -614,6 +615,11 @@ class API(BaseAPI):
             if column.casefold() == "TIME".casefold() and (
                 "TIME" not in meta or "time" not in meta
             ):
+                log.debug(f"Mapping TIME for {key}")
+                log.debug(f"  'TIME' in meta: {'TIME' in meta}")
+                log.debug(f"  'time' in meta: {'time' in meta}")
+                log.debug(f"  'JULD' in meta: {'JULD' in meta}")
+                log.debug(f"  meta keys (first 10): {list(meta.keys())[:10]}")
                 match meta:
                     case meta if "JULD" in meta:
                         output.append("JULD")
@@ -753,7 +759,6 @@ class API(BaseAPI):
                     lon_mapped = self.map_column_names(
                         uuid, key, [STR_LONGITUDE_UPPER_CASE]
                     )
-
                     lat_varname = lat_mapped[0] if lat_mapped else None
                     lon_varname = lon_mapped[0] if lon_mapped else None
 

@@ -16,6 +16,7 @@ from aodn_cloud_optimised.lib.DataQuery import (
     get_timestamps_boundary_values,
     create_time_filter,
 )
+from aodn_cloud_optimised.lib.exceptions import DateOutOfRangeError
 
 from data_access_service import init_log, Config
 from dateutil.relativedelta import relativedelta
@@ -109,7 +110,6 @@ def check_rows_with_date_range(ds: DataSource, date_ranges: list[dict]) -> list[
         return date_ranges
 
     dataset = ds.dataset
-
     checked_date_ranges = []
     q = []
 
@@ -134,7 +134,8 @@ def check_rows_with_date_range(ds: DataSource, date_ranges: list[dict]) -> list[
             time_filter = create_time_filter(
                 dataset, date_start=start_str, date_end=end_str
             )
-        except ValueError as e:
+
+        except DateOutOfRangeError as e:
             if "is out of range of dataset." in str(e):
                 try:
                     time_filter = create_customised_time_filter(
