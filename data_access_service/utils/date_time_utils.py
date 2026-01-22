@@ -113,7 +113,19 @@ def check_rows_with_date_range(ds: DataSource, date_ranges: list[dict]) -> list[
     checked_date_ranges = []
     q = []
 
-    # go through monthly interval
+    # Determine time column name from schema
+    if "JULD" in dataset.schema.names:
+        time_column = "JULD"
+    elif "TIME" in dataset.schema.names:
+        time_column = "TIME"
+    elif "detection_timestamp" in dataset.schema.names:
+        time_column = "detection_timestamp"
+    elif "time" in dataset.schema.names:
+        time_column = "time"
+    else:
+        raise ValueError(f"Cannot find time column in schema: {dataset.schema.names}")
+
+    # Go through monthly interval
     for date_range in date_ranges:
         month_start, month_end = date_range["start_date"], date_range["end_date"]
         if month_end < month_start:
@@ -132,14 +144,16 @@ def check_rows_with_date_range(ds: DataSource, date_ranges: list[dict]) -> list[
 
         try:
             time_filter = create_time_filter(
-                dataset, date_start=start_str, date_end=end_str
+                dataset,
+                date_start=start_str,
+                date_end=end_str,
+                time_varname=time_column,
             )
-
         except DateOutOfRangeError as e:
             if "is out of range of dataset." in str(e):
                 try:
                     time_filter = create_customised_time_filter(
-                        dataset, start=start, end=end
+                        dataset, start=start, end=end, time_varname=time_column
                     )
                 except ValueError as e:
                     log.warning(
@@ -187,7 +201,7 @@ def check_rows_with_date_range(ds: DataSource, date_ranges: list[dict]) -> list[
 
 
 def create_customised_time_filter(
-    dataset, start: pd.Timestamp, end: pd.Timestamp
+    dataset, start: pd.Timestamp, end: pd.Timestamp, time_varname: str = None
 ) -> pyarrow.dataset.Expression:
     """
     Creates a time filter using actual dataset temporal extent instead of partition boundaries.
@@ -200,6 +214,7 @@ def create_customised_time_filter(
         dataset: PyArrow dataset object
         start: Query start timestamp
         end: Query end timestamp
+        time_varname: time variable name (e.g., "JULD", "TIME", "detection_timestamp") if provided, otherwise is None
 
     Returns:
         PyArrow filter expression
@@ -209,7 +224,7 @@ def create_customised_time_filter(
     if end.tz is None:
         end = ensure_timezone(end)
 
-    timestamp_start, timestamp_end = get_temporal_extent(dataset)
+    timestamp_start, timestamp_end = get_temporal_extent(dataset, time_varname)
     timestamp_start = pd.to_datetime(timestamp_start)
     timestamp_end = pd.to_datetime(timestamp_end)
 

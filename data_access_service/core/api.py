@@ -754,8 +754,12 @@ class API(BaseAPI):
                     lon_mapped = self.map_column_names(
                         uuid, key, [STR_LONGITUDE_UPPER_CASE]
                     )
+                    time_mapped = self.map_column_names(
+                        uuid, key, [STR_TIME_UPPER_CASE]
+                    )
                     lat_varname = lat_mapped[0] if lat_mapped else None
                     lon_varname = lon_mapped[0] if lon_mapped else None
+                    time_varname = time_mapped[0] if time_mapped else None
 
                     # Accuracy to nanoseconds
                     result = ds.get_data(
@@ -769,6 +773,7 @@ class API(BaseAPI):
                         self.map_column_names(uuid, key, columns),
                         lat_varname=lat_varname,
                         lon_varname=lon_varname,
+                        time_varname=time_varname,
                     )
 
                     return ddf.from_pandas(

@@ -72,7 +72,7 @@ class TestKeyMapping(TestWithS3):
 
                     target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name('888')}argo.parquet"
                     subset = helper.read_parquet_from_s3(target_path)
-                    assert len(subset) == 44364
+                    assert len(subset) == 77555
                 except Exception as ex:
                     # Should not land here
                     assert False, f"{ex}"
