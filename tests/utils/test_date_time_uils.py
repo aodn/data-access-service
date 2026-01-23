@@ -1164,6 +1164,8 @@ class TestDateTimeUtils(unittest.TestCase):
         mock_ds = Mock()
         mock_ds.dname = "test_data.parquet"
         mock_ds.dataset = Mock()
+        mock_ds.dataset.schema = Mock()
+        mock_ds.dataset.schema.names = ["JULD", "LATITUDE", "LONGITUDE", "TEMP", "PSAL"]
 
         mock_filter = Mock()
         mock_create_filter.return_value = mock_filter
@@ -1191,6 +1193,12 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(len(result), 2)
         mock_split.assert_called_once()
         mock_log.info.assert_called_once()
+
+        # Verify that create_time_filter was called with time_varname="JULD"
+        assert mock_create_filter.call_count == 3  # Called 3 times (initial + 2 splits)
+        # Check that all calls include time_varname parameter
+        for call_args in mock_create_filter.call_args_list:
+            assert call_args[1]['time_varname'] == 'JULD'
 
     def test_supply_day(self):
         # test supply day to a year-month string
