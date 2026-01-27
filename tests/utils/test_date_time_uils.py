@@ -1171,6 +1171,9 @@ class TestDateTimeUtils(unittest.TestCase):
         mock_create_filter.return_value = mock_filter
         mock_ds.dataset.count_rows.side_effect = [2000, 400, 400]
 
+        mock_api = Mock()
+        mock_api.map_column_names.return_value = ["JULD"]
+
         mock_date_ranges = [
             {
                 "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc),
@@ -1187,7 +1190,13 @@ class TestDateTimeUtils(unittest.TestCase):
         mid_date = datetime(2023, 1, 15, tzinfo=timezone.utc)
         mock_split.return_value = (start_date, mid_date, end_date)
 
-        result = check_rows_with_date_range(mock_ds, [mock_date_ranges[0]])
+        result = check_rows_with_date_range(
+            api=mock_api,
+            uuid="mock_uuid",
+            key="mock_key",
+            ds=mock_ds,
+            date_ranges=[mock_date_ranges[0]],
+        )
 
         # Should result in 2 split ranges
         self.assertEqual(len(result), 2)

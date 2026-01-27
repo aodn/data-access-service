@@ -24,6 +24,7 @@ from data_access_service.core.api import BaseAPI
 from data_access_service.core.constants import (
     PARQUET_SUBSET_ROW_NUMBER,
     MAX_PARQUET_SPLIT,
+    STR_TIME_UPPER_CASE,
 )
 
 YEAR_MONTH_DAY = "%Y-%m-%d"
@@ -91,13 +92,18 @@ def next_month_first_day(date: pd.Timestamp) -> pd.Timestamp:
     )
 
 
-def check_rows_with_date_range(ds: DataSource, date_ranges: list[dict]) -> list[dict]:
+def check_rows_with_date_range(
+    api: BaseAPI, uuid: str, key: str, ds: DataSource, date_ranges: list[dict]
+) -> list[dict]:
     """
     Count number of rows with specific monthly range. ignore bbox.
     If rows number exceeds PARQUET_SUBSET_ROW_NUMBER, split this date range with binary division, until rows number
     under the safe threshold.
     If rows number is 0, remove this date range from the list of date_ranges so that to skip further querying data.
     Args:
+        api: BaseAPI instance for column name mapping
+        uuid: Dataset UUID for metadata lookup
+        key: Metadata key for column mapping
         ds: DataSource fetched from cloud optimised library
         date_ranges: List of monthly intervals as dictionaries with 'start_date' and 'end_date' as UTC timestamps in
                     'YYYY-MM-DD HH:MM:SS.fffffffff+00:00' format.
@@ -113,17 +119,9 @@ def check_rows_with_date_range(ds: DataSource, date_ranges: list[dict]) -> list[
     checked_date_ranges = []
     q = []
 
-    # Determine time column name from schema
-    if "JULD" in dataset.schema.names:
-        time_column = "JULD"
-    elif "TIME" in dataset.schema.names:
-        time_column = "TIME"
-    elif "detection_timestamp" in dataset.schema.names:
-        time_column = "detection_timestamp"
-    elif "time" in dataset.schema.names:
-        time_column = "time"
-    else:
-        raise ValueError(f"Cannot find time column in schema: {dataset.schema.names}")
+    time_dim = api.map_column_names(uuid=uuid, key=key, columns=[STR_TIME_UPPER_CASE])[
+        0
+    ]
 
     # Go through monthly interval
     for date_range in date_ranges:
@@ -144,31 +142,19 @@ def check_rows_with_date_range(ds: DataSource, date_ranges: list[dict]) -> list[
 
         try:
             time_filter = create_time_filter(
-                dataset,
+                dataset=dataset,
                 date_start=start_str,
                 date_end=end_str,
-                time_varname=time_column,
+                time_varname=time_dim,
             )
-        except DateOutOfRangeError as e:
-            if "is out of range of dataset." in str(e):
-                try:
-                    time_filter = create_customised_time_filter(
-                        dataset, start=start, end=end, time_varname=time_column
-                    )
-                except ValueError as e:
-                    log.warning(
-                        f"Warning: Could not create time filter for range {start} to {end}: {e}"
-                    )
-                    continue
-            else:
-                raise ValueError(f"Could not create time filter: {e}")
-
+        except DateOutOfRangeError:
+            time_filter = create_customised_time_filter(
+                dataset=dataset, start=start, end=end, time_varname=time_dim
+            )
         try:
             num_rows = dataset.count_rows(filter=time_filter)
         except Exception as e:
-            log.warning(
-                f"Warning: Could not count rows for range {start} to {end}: {e}"
-            )
+            log.warning(f"Could not count rows for range {start} to {end}: {e}")
             continue
 
         if num_rows == 0:
@@ -189,7 +175,7 @@ def check_rows_with_date_range(ds: DataSource, date_ranges: list[dict]) -> list[
                 heapq.heappush(q, (split_mid, split_end, times_of_split + 1))
 
             except Exception as e:
-                log.warning(f"Warning: Could not split range {start} to {end}: {e}")
+                log.warning(f"Could not split range {start} to {end}: {e}")
                 checked_date_ranges.append(
                     {
                         "start_date": start,
@@ -201,7 +187,10 @@ def check_rows_with_date_range(ds: DataSource, date_ranges: list[dict]) -> list[
 
 
 def create_customised_time_filter(
-    dataset, start: pd.Timestamp, end: pd.Timestamp, time_varname: str = None
+    dataset: pyarrow.dataset.Dataset,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    time_varname: str = None,
 ) -> pyarrow.dataset.Expression:
     """
     Creates a time filter using actual dataset temporal extent instead of partition boundaries.
