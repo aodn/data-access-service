@@ -11,7 +11,7 @@ from pathlib import Path
 
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.core.constants import PARTITION_KEY
+from data_access_service.core.constants import PARTITION_KEY, STR_TIME_UPPER_CASE
 from data_access_service.core.descriptor import Descriptor
 from data_access_service.tasks.data_file_upload import (
     upload_all_files_in_folder_to_temp_s3,
@@ -139,7 +139,9 @@ def _generate_partition_output(
 
                 log.info(f"Saved table schema to {schema_path}")
 
-        checked_date_ranges = check_rows_with_date_range(datasource, date_ranges)
+        checked_date_ranges = check_rows_with_date_range(
+            api, uuid, key, datasource, date_ranges
+        )
 
         need_append = False
         for date_range in checked_date_ranges:
@@ -162,7 +164,7 @@ def _generate_partition_output(
 
                     # Derive partition key without time
                     time_key = api.map_column_names(
-                        uuid=uuid, key=key, columns=["TIME"]
+                        uuid=uuid, key=key, columns=[STR_TIME_UPPER_CASE]
                     )[0]
                     result[PARTITION_KEY] = result[time_key].dt.strftime("%Y-%m")
 
@@ -192,7 +194,7 @@ def _generate_partition_output(
                         need_append = True
                     else:
                         time_dim = api.map_column_names(
-                            uuid=uuid, key=key, columns=["TIME"]
+                            uuid=uuid, key=key, columns=[STR_TIME_UPPER_CASE]
                         )[0]
                         result.to_zarr(
                             output_path, mode="a", append_dim=time_dim, compute=True

@@ -63,6 +63,44 @@ class TestWithS3:
         """Set environment variable for testing profile."""
         os.environ["PROFILE"] = EnvType.TESTING.value
 
+    @pytest.fixture(autouse=True, scope="function")
+    def clear_api_cache(self):
+        """
+        Placeholder fixture for test isolation.
+        API._cached_metadata is an instance variable, so creating a new
+        API instance automatically provides a clean cache. This fixture
+        ensures tests use the api_instance fixture properly.
+        """
+        yield
+
+    @pytest.fixture(scope="function")
+    def api_instance(self):
+        """
+        Provide a fresh API instance for each test.
+        Each test gets a new instance with
+        empty _cached_metadata
+        """
+        from data_access_service.core.api import API
+
+        log.debug("Creating fresh API instance")
+        api = API()
+
+        # Just to be extra safe, explicitly clear if it somehow got data because we have self._cached_metadata: Dict[str, Dict[str, Descriptor]] = dict() in code
+        if hasattr(api, "_cached_metadata") and api._cached_metadata:
+            log.warning("API instance had cached metadata, clearing it")
+            api._cached_metadata.clear()
+
+        api.initialize_metadata()
+        log.debug(
+            f"API initialized with {len(getattr(api, '_cached_metadata', {}))} cached items"
+        )
+
+        yield api
+
+        # post-test cleanup
+        if hasattr(API, "_instance"):
+            API._instance = None
+
     @pytest.fixture(scope="class")
     def localstack(self, request) -> Generator[LocalStackContainer, Any, None]:
         """
@@ -116,6 +154,27 @@ class TestWithS3:
         so that the cloud optimized lib points to local stack s3 instead of the real cloud data.
         """
         monkeypatch = MonkeyPatch()  # Create manual MonkeyPatch instance
+        localstack_endpoint = localstack.get_url()
+
+        # patch get_s3_filesystem to use localstack
+        import pyarrow.fs as fs
+
+        def wrapped_get_s3_filesystem(s3_fs_opts=None):
+            """Always return S3FileSystem configured for LocalStack"""
+            log.debug(f"get_s3_filesystem called, returning LocalStack filesystem")
+            return fs.S3FileSystem(
+                endpoint_override=localstack_endpoint,
+                region=REGION,
+                anonymous=False,
+                access_key="test",
+                secret_key="test",
+            )
+
+        monkeypatch.setattr(
+            "aodn_cloud_optimised.lib.DataQuery.get_s3_filesystem",
+            wrapped_get_s3_filesystem,
+        )
+
         original_client = boto3.client
 
         def wrapped_client(*args, **kwargs):
@@ -150,9 +209,10 @@ class TestWithS3:
         # Other test may have call this get_s3_filesystem() this function is cached and
         # may use different ENDPOINT_URL other than the one above
         # so we need to clear it now before the next call happens
-        DataQuery.get_s3_filesystem.cache_clear()
+        # this function is not applicable anymore so temperately commented this line
+        # DataQuery.get_s3_filesystem.cache_clear()
         # Force a load so its cache value use the test value
-        DataQuery.get_s3_filesystem()
+        # DataQuery.get_s3_filesystem()
 
         yield wrapped_client
         monkeypatch.undo()
