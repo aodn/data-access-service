@@ -69,7 +69,8 @@ if __name__ == "__main__":
     uvicorn.run(
         "data_access_service.server:app",
         host="0.0.0.0",
-        port=5000,
+        # TODO: change back to 5000 before pr.
+        port=5001,
         reload=True,
         workers=1,
         log_config=log_config_path,

@@ -20,9 +20,9 @@ Host will be `http://localhost:8000`.
 
 2. **Create Conda virtual environment:**
 
-    ```bash
-    $ conda env create -f environment.yml
-    ```
+   ```bash
+   $ conda env create -f environment.yml
+   ```
 
 ### Dependency management
 
@@ -47,7 +47,9 @@ aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git
 ```
 
 ### Error in dependencies
+
 You may try to clean the cache by using the following command
+
 ```commandline
 poetry cache clear --all PyPI
 poetry env remove --all
@@ -59,16 +61,18 @@ poetry install
 
 1. **Activate Conda virtual environment:**
 
-    ```bash
-    $ conda activate data-access-service
-    ```
+   ```bash
+   $ conda activate data-access-service
+   ```
 
 2. **Install dependencies using Poetry:**
-    ```bash
-    # after cloning the repo with git clone command
-    $ cd data-access-service
-    $ poetry install
-    ```
+
+   ```bash
+   # after cloning the repo with git clone command
+   $ cd data-access-service
+   $ poetry install
+   ```
+
    ```bash
    # You should not need to install lib locally, if your python version is correct.
    # https://arrow.apache.org/install/
@@ -91,19 +95,20 @@ poetry install
    sudo apt install -y -V libparquet-dev # For Apache Parquet C++
    sudo apt install -y -V libparquet-glib-dev # For Apache Parquet GLib (C)
    sudo apt install -y ninja-build
-    ```
+   ```
 
 3. **Run the app:**
-    In project root folder, create a '.env' file, which contains your API key, e.g.:
-    ```
-    API_KEY="your_actual_api_key_here"
-    ```
+   In project root folder, create a '.env' file, which contains your API key, e.g.:
+
+   ```
+   API_KEY="your_actual_api_key_here"
+   ```
 
    Host will be `http://localhost:5000` and default profile is DEV
 
-    ```bash
-    $ python -m data_access_service.server
-    ```
+   ```bash
+   $ python -m data_access_service.server
+   ```
 
 ### Code formatting
 
@@ -149,33 +154,41 @@ PROFILE=edge
 | Get values for indexing                                         | /api/v1/das/data/{uuid}/{key}/indexing_values             | key=radar_CoffsHarbour_wind_delayed_qc.zarr, start_date=2023-12-25T14:30:00, end_date=2024-02-25T14:30:00                                                                                 |             |
 | Get buoys and its locations that contains data in a time window | /api/v1/das/data/feature-collection/wave-buoy             | start_date=2023-12-25T14:30:00, end_date=2024-02-25T14:30:00                                                                                                                              | ALL         |
 | Gets SSWMD,WPFM,WSSH from a buoy in a time window               | /api/v1/das/data/feature-collection/wave-buoy/{buoy_name} | start_date=2023-12-25T14:30:00, end_date=2024-02-25T14:30:00                                                                                                                              | ALL         |
+| Gets latest available wave buoy date                            | /api/v1/das/data/feature-collection/wave-buoy/latest      |                                                                                                                                                                                           | ALL         |
 
 ### Running Tests
 
 To run the tests for the project:
+
 ```shell
 poetry run python -m unittest discover
 ```
+
 This will discover and run all the test cases in your project.
 
 If you have "ModuleNotFoundError" or similar issues, you may need to install dependencies before running the tests:
+
 ```shell
 poetry install
 ```
 
 # Batch jobs
+
 Another part of this project is to run batch jobs for dataset subsetting.
 
 ### Local running testing
+
 - If you want to test the batch job codes locally, (running in your local machine)
-Please export aws environment variables first (or use profile etc..) (for example, if use edge, please go to aws access portal, and pick AODN-Edge -> AodnAdminAccess)
-and also export `AWS_BATCH_JOB_ID` (please go to batch console to copy an existing job id).
-After several exporting, make sure your terminal is at the root folder of this project. Then please run:
+  Please export aws environment variables first (or use profile etc..) (for example, if use edge, please go to aws access portal, and pick AODN-Edge -> AodnAdminAccess)
+  and also export `AWS_BATCH_JOB_ID` (please go to batch console to copy an existing job id).
+  After several exporting, make sure your terminal is at the root folder of this project. Then please run:
+
 ```shell
 ./entry_point.py
 ```
 
 ### aws running testing
+
 - If you want to test the batch job codes in AWS, (running in AWS Batch), please :
   1. Build the docker image and push it to ECR (havier-test-ecr). Please do it by following the instructions in the havier-test-ecr repo by clicking button "View push commands" at the top right corner.
   2. Open the ogc-api project locally
