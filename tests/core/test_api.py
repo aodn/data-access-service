@@ -261,9 +261,7 @@ class TestApi(unittest.TestCase):
 
     def test_fetch_wave_buoy_data(self):
         api = API()
-        position_df = pd.DataFrame(
-            {"LATITUDE": [-27.47], "LONGITUDE": [153.03]}
-        )
+        position_df = pd.DataFrame({"LATITUDE": [-27.47], "LONGITUDE": [153.03]})
         data_df = pd.DataFrame(
             {
                 "TIME": [
@@ -301,5 +299,3 @@ class TestApi(unittest.TestCase):
 
         # WSSH: both NaN, so empty
         self.assertEqual(len(result["properties"]["WSSH"]), 0)
-
-
