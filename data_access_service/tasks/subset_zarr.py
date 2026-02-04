@@ -525,3 +525,27 @@ def form_mask(
         return var_mask
     else:
         return existing_mask & var_mask
+
+
+def form_dim_conditions(
+    existing_conditions: dict[str, slice] | None,
+    key: str,
+    min_value: any,
+    max_value: any,
+    ds: xarray.Dataset,
+) -> dict[str, slice]:
+    # try to know in the dataset, the dim is ascending or descending
+    slice_from = min_value
+    slice_to = max_value
+
+    # if descending, swap
+    if ds[key][0] > ds[key][-1]:
+        slice_from = max_value
+        slice_to = min_value
+
+    dim_condition = {key: slice(slice_from, slice_to)}
+    if existing_conditions is None:
+        return dim_condition
+    else:
+        existing_conditions.update(dim_condition)
+        return existing_conditions
