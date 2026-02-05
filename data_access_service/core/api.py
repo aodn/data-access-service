@@ -476,6 +476,15 @@ class API(BaseAPI):
 
         return feature
 
+    def fetch_wave_buoy_latest_date(self):
+        result = self.memconn.execute(
+            f"""SELECT
+            MAX(TIME) AS TIME
+            FROM wave_buoy_realtime_nonqc"""
+        ).df()
+        DATE_FORMAT = "%Y-%m-%d"
+        return result["TIME"].item().strftime(DATE_FORMAT)
+
     def fetch_wave_buoy_sites(self, start_date: str, end_date: str):
         result = self.memconn.execute(
             f"""SELECT

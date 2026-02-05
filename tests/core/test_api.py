@@ -6,7 +6,7 @@ import dask.dataframe as ddf
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from aodn_cloud_optimised import DataQuery
 
@@ -214,3 +214,88 @@ class TestApi(unittest.TestCase):
             with self.assertRaises(TypeError):
                 api.normalize_to_0_360_if_needed(uuid, key, 370)
                 api.normalize_to_0_360_if_needed(uuid, key, -370.0)
+
+    def test_fetch_wave_buoy_latest_date(self):
+        api = API()
+        mock_df = pd.DataFrame({"TIME": [pd.Timestamp("2025-01-15 12:30:00")]})
+        api.memconn = MagicMock()
+        api.memconn.execute.return_value.df.return_value = mock_df
+
+        result = api.fetch_wave_buoy_latest_date()
+
+        self.assertEqual(result, "2025-01-15")
+        api.memconn.execute.assert_called_once()
+
+    def test_fetch_wave_buoy_sites(self):
+        api = API()
+        mock_df = pd.DataFrame(
+            {
+                "site_name": ["Brisbane", "Sydney"],
+                "TIME": [
+                    pd.Timestamp("2025-01-10 08:00:00"),
+                    pd.Timestamp("2025-01-11 09:00:00"),
+                ],
+                "LATITUDE": [-27.47, -33.87],
+                "LONGITUDE": [153.03, 151.21],
+            }
+        )
+        api.memconn = MagicMock()
+        api.memconn.execute.return_value.df.return_value = mock_df
+
+        result = api.fetch_wave_buoy_sites("2025-01-10", "2025-01-12")
+
+        self.assertEqual(result["type"], "FeatureCollection")
+        self.assertEqual(len(result["features"]), 2)
+
+        feature0 = result["features"][0]
+        self.assertEqual(feature0["type"], "Feature")
+        self.assertEqual(feature0["properties"]["buoy"], "Brisbane")
+        self.assertEqual(feature0["properties"]["date"], "2025-01-10")
+        self.assertEqual(feature0["geometry"]["type"], "Point")
+        self.assertEqual(feature0["geometry"]["coordinates"], [153.03, -27.47])
+
+        feature1 = result["features"][1]
+        self.assertEqual(feature1["properties"]["buoy"], "Sydney")
+        self.assertEqual(feature1["properties"]["date"], "2025-01-11")
+        self.assertEqual(feature1["geometry"]["coordinates"], [151.21, -33.87])
+
+    def test_fetch_wave_buoy_data(self):
+        api = API()
+        position_df = pd.DataFrame({"LATITUDE": [-27.47], "LONGITUDE": [153.03]})
+        data_df = pd.DataFrame(
+            {
+                "TIME": [
+                    pd.Timestamp("2025-01-10 08:00:00"),
+                    pd.Timestamp("2025-01-10 09:00:00"),
+                ],
+                "SSWMD": [180.0, np.nan],
+                "WPFM": [0.08, 0.09],
+                "WPMH": [np.nan, 5.0],
+                "WHTH": [1.2, 1.3],
+                "WSSH": [np.nan, np.nan],
+            }
+        )
+        api.memconn = MagicMock()
+        api.memconn.execute.return_value.df.side_effect = [position_df, data_df]
+
+        result = api.fetch_wave_buoy_data("Brisbane", "2025-01-10", "2025-01-11")
+
+        self.assertEqual(result["type"], "Feature")
+        self.assertEqual(result["geometry"]["coordinates"], [153.03, -27.47])
+
+        # SSWMD: first row has value, second is NaN
+        self.assertEqual(len(result["properties"]["SSWMD"]), 1)
+        self.assertAlmostEqual(result["properties"]["SSWMD"][0][1], 180.0)
+
+        # WPFM: both rows have values
+        self.assertEqual(len(result["properties"]["WPFM"]), 2)
+
+        # WPMH: only second row has value
+        self.assertEqual(len(result["properties"]["WPMH"]), 1)
+        self.assertAlmostEqual(result["properties"]["WPMH"][0][1], 5.0)
+
+        # WHTH: both rows have values
+        self.assertEqual(len(result["properties"]["WHTH"]), 2)
+
+        # WSSH: both NaN, so empty
+        self.assertEqual(len(result["properties"]["WSSH"]), 0)
