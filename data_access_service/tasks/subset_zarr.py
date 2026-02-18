@@ -160,7 +160,6 @@ class ZarrProcessor:
             for k, val_range in conditions.items():
                 print("forming condition for key", k, "with range", val_range)
                 if is_dim(key=k, dataset=dataset):
-                    # dim_conditions[k] = slice(val_range[0], val_range[1])
                     form_dim_conditions(
                         existing_conditions=dim_conditions,
                         key=k,
