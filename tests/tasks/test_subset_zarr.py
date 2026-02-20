@@ -94,6 +94,12 @@ class TestSubsetZarr(TestWithS3):
                     # Delete temp output folder as the name always same for testing
                     shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
 
+    """
+    This test is to cover a special case where the dimensions in ZARR are in descending order.
+    Dimensions must be monotonic, but may be either ascending or descending.
+    So the system should work for both ascending and descending dimensions.
+    """
+
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_zarr_descending_dims(
         self,
