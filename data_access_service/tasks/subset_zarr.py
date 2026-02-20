@@ -160,7 +160,13 @@ class ZarrProcessor:
             for k, val_range in conditions.items():
                 print("forming condition for key", k, "with range", val_range)
                 if is_dim(key=k, dataset=dataset):
-                    dim_conditions[k] = slice(val_range[0], val_range[1])
+                    form_dim_conditions(
+                        existing_conditions=dim_conditions,
+                        key=k,
+                        min_value=val_range[0],
+                        max_value=val_range[1],
+                        dataset=dataset,
+                    )
                 elif is_var(key=k, dataset=dataset):
                     mask = form_mask(
                         existing_mask=mask,
@@ -525,3 +531,27 @@ def form_mask(
         return var_mask
     else:
         return existing_mask & var_mask
+
+
+def form_dim_conditions(
+    existing_conditions: dict[str, slice] | None,
+    key: str,
+    min_value: any,
+    max_value: any,
+    dataset: xarray.Dataset,
+) -> dict[str, slice]:
+    # try to know the dim is ascending or descending
+    slice_from = min_value
+    slice_to = max_value
+
+    # if descending, swap
+    if dataset[key][0] > dataset[key][-1]:
+        slice_from = max_value
+        slice_to = min_value
+
+    dim_condition = {key: slice(slice_from, slice_to)}
+    if existing_conditions is None:
+        return dim_condition
+    else:
+        existing_conditions.update(dim_condition)
+        return existing_conditions
