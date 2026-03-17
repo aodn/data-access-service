@@ -3,7 +3,6 @@ aws:
     bucket_name:
       csv: aodn-cloud-optimized-subset-prod
       wave_buoy_backup: datavis-apps-prod-data
-
   ses:
     sender_email: no.reply@aodn.org.au
   batch:

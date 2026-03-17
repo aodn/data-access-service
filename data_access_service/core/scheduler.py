@@ -13,13 +13,16 @@ logger = logging.getLogger(__name__)
 
 class TaskScheduler:
     """Manages scheduled tasks for the application."""
+
     WAVE_BUOY_TABLE_NAME = "wave_buoy_realtime_nonqc"
 
     def __init__(self):
         self.memconn = duckdb.connect(":memory:cloud_optimized")
         self.scheduler = AsyncIOScheduler()
         self._instance = DataQuery.GetAodn()
-        self.wave_buoy_backup_bucket = Config.get_config().get_wave_buoy_backup_bucket_name()
+        self.wave_buoy_backup_bucket = (
+            Config.get_config().get_wave_buoy_backup_bucket_name()
+        )
         self.wave_buoy_backup_s3_path = f"s3://{self.wave_buoy_backup_bucket}/imoslive/BUOY/{self.WAVE_BUOY_TABLE_NAME}.parquet"
         self._configure_duckdb_s3()
 
@@ -38,7 +41,8 @@ class TaskScheduler:
         session = boto3.Session()
         creds = session.get_credentials().get_frozen_credentials()
         region = session.region_name or "ap-southeast-2"
-        self.memconn.execute(f"""
+        self.memconn.execute(
+            f"""
             CREATE OR REPLACE SECRET wave_buoy_s3 (
                 TYPE S3,
                 KEY_ID '{creds.access_key}',
@@ -47,7 +51,8 @@ class TaskScheduler:
                 REGION '{region}',
                 SCOPE 's3://{self.wave_buoy_backup_bucket}'
             )
-        """)
+        """
+        )
 
     def hourly_task(self):
         """
