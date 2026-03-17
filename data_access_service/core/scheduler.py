@@ -1,10 +1,12 @@
 import logging
+import boto3
 import duckdb
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from aodn_cloud_optimised import DataQuery
+from data_access_service.config.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -12,10 +14,45 @@ logger = logging.getLogger(__name__)
 class TaskScheduler:
     """Manages scheduled tasks for the application."""
 
+    WAVE_BUOY_TABLE_NAME = "wave_buoy_realtime_nonqc"
+
     def __init__(self):
         self.memconn = duckdb.connect(":memory:cloud_optimized")
         self.scheduler = AsyncIOScheduler()
         self._instance = DataQuery.GetAodn()
+        self.wave_buoy_backup_bucket = (
+            Config.get_config().get_wave_buoy_backup_bucket_name()
+        )
+        self.wave_buoy_backup_s3_path = f"s3://{self.wave_buoy_backup_bucket}/imoslive/BUOY/{self.WAVE_BUOY_TABLE_NAME}.parquet"
+        self._configure_duckdb_s3()
+
+    def _configure_duckdb_s3(self):
+        # The source bucket (aodn-cloud-optimised) is public, so DuckDB can read it
+        # without credentials. The backup bucket is private, so DuckDB needs explicit
+        # credentials for both read and write.
+        #
+        # DuckDB's own credential chain does not reliably handle SSO locally or ECS
+        # task roles on deployed environments. Instead, we resolve credentials via
+        # boto3 — which handles all providers correctly (SSO locally, task role on ECS)
+        # — and pass them to DuckDB as a named secret.
+        #
+        # ECS task role credentials expire after ~6 hours. This method is called at
+        # startup and before every hourly_task run to keep the secret current.
+        session = boto3.Session()
+        creds = session.get_credentials().get_frozen_credentials()
+        region = session.region_name or "ap-southeast-2"
+        self.memconn.execute(
+            f"""
+            CREATE OR REPLACE SECRET wave_buoy_s3 (
+                TYPE S3,
+                KEY_ID '{creds.access_key}',
+                SECRET '{creds.secret_key}',
+                SESSION_TOKEN '{creds.token or ""}',
+                REGION '{region}',
+                SCOPE 's3://{self.wave_buoy_backup_bucket}'
+            )
+        """
+        )
 
     def hourly_task(self):
         """
@@ -23,8 +60,12 @@ class TaskScheduler:
         Uses a temporary table strategy to avoid locking the main table during refresh.
         """
         logger.info("Hourly task is running...")
-        temp_table_name = "wave_buoy_realtime_nonqc_temp"
-        target_table_name = "wave_buoy_realtime_nonqc"
+        # Refresh S3 credentials before each run so the DuckDB secret never expires
+        # (ECS task role credentials are valid for ~6 hours and boto3 always returns
+        # fresh ones, so calling this every 2 hours keeps the secret current)
+        self._configure_duckdb_s3()
+        temp_table_name = f"{self.WAVE_BUOY_TABLE_NAME}_temp"
+        target_table_name = self.WAVE_BUOY_TABLE_NAME
 
         try:
             dataset = (
@@ -52,6 +93,11 @@ class TaskScheduler:
             """
             )
 
+            # Keep backup fresh
+            self.memconn.execute(
+                f"COPY {target_table_name} TO '{self.wave_buoy_backup_s3_path}' (FORMAT PARQUET)"
+            )
+            logger.info("Backup written to S3 successfully")
             logger.info("Hourly task completed successfully")
         except Exception as e:
             logger.error(f"Error in hourly task: {e}", exc_info=True)
@@ -61,6 +107,20 @@ class TaskScheduler:
                 logger.info(f"Cleaned up temporary table '{temp_table_name}'")
             except Exception as cleanup_error:
                 logger.error(f"Error cleaning up temp table: {cleanup_error}")
+
+            # Fallback: restore from backup so the endpoint stays healthy
+            try:
+                self.memconn.execute(
+                    f"""
+                    CREATE OR REPLACE TABLE {target_table_name} AS
+                    SELECT * FROM read_parquet('{self.wave_buoy_backup_s3_path}')
+                    """
+                )
+                logger.info("Loaded from S3 backup successfully")
+            except Exception as backup_error:
+                logger.error(
+                    f"Failed to load from S3 backup: {backup_error}", exc_info=True
+                )
 
     def start(self):
         """Start the scheduler and add jobs."""
@@ -80,10 +140,21 @@ class TaskScheduler:
 
     async def start_with_initial_run(self):
         """Start the scheduler and run the hourly task immediately."""
-        # Use ThreadPoolExecutor to run blocking calls in a separate thread
+        # Pre-load from backup so the endpoint is available while the full S3 refresh runs
+        try:
+            self.memconn.execute(
+                f"""
+                CREATE OR REPLACE TABLE {self.WAVE_BUOY_TABLE_NAME} AS
+                SELECT * FROM read_parquet('{self.wave_buoy_backup_s3_path}')
+                """
+            )
+            logger.info("Pre-loaded wave buoy data from S3 backup")
+        except Exception as e:
+            logger.warning(f"No S3 backup found, will rely on initial S3 fetch: {e}")
+
+        # Full refresh from main S3
         loop = asyncio.get_event_loop()
         with ThreadPoolExecutor() as executor:
-            # Schedule the blocking calls in a thread
             await loop.run_in_executor(executor, lambda: self.hourly_task())
         self.start()
         logger.info("Running hourly task on startup...")
