@@ -86,6 +86,13 @@ class Config:
             if self.config is not None
             else None
         )
+    
+    def get_wave_buoy_backup_bucket_name(self):
+        return (
+            self.config["aws"]["s3"]["bucket_name"]["wave_buoy_backup"]
+            if self.config is not None
+            else None
+        )
 
     def get_job_queue_name(self):
         return (

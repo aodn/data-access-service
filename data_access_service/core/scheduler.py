@@ -6,21 +6,21 @@ from concurrent.futures import ThreadPoolExecutor
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from aodn_cloud_optimised import DataQuery
+from data_access_service.config.config import Config
 
 logger = logging.getLogger(__name__)
 
 
 class TaskScheduler:
     """Manages scheduled tasks for the application."""
-
-    WAVE_BUOY_BACKUP_BUCKET = "aodn-cloud-optimized-wave-buoy-backup-testing"
     WAVE_BUOY_TABLE_NAME = "wave_buoy_realtime_nonqc"
-    WAVE_BUOY_BACKUP_S3_PATH = f"s3://{WAVE_BUOY_BACKUP_BUCKET}/{WAVE_BUOY_TABLE_NAME}.parquet"
 
     def __init__(self):
         self.memconn = duckdb.connect(":memory:cloud_optimized")
         self.scheduler = AsyncIOScheduler()
         self._instance = DataQuery.GetAodn()
+        self.wave_buoy_backup_bucket = Config.get_config().get_wave_buoy_backup_bucket_name()
+        self.wave_buoy_backup_s3_path = f"s3://{self.wave_buoy_backup_bucket}/imoslive/BUOY/{self.WAVE_BUOY_TABLE_NAME}.parquet"
         self._configure_duckdb_s3()
 
     def _configure_duckdb_s3(self):
@@ -44,7 +44,8 @@ class TaskScheduler:
                 KEY_ID '{creds.access_key}',
                 SECRET '{creds.secret_key}',
                 SESSION_TOKEN '{creds.token or ""}',
-                REGION '{region}'
+                REGION '{region}',
+                SCOPE 's3://{self.wave_buoy_backup_bucket}'
             )
         """)
 
@@ -89,7 +90,7 @@ class TaskScheduler:
 
             # Keep backup fresh
             self.memconn.execute(
-                f"COPY {target_table_name} TO '{self.WAVE_BUOY_BACKUP_S3_PATH}' (FORMAT PARQUET)"
+                f"COPY {target_table_name} TO '{self.wave_buoy_backup_s3_path}' (FORMAT PARQUET)"
             )
             logger.info("Backup written to S3 successfully")
             logger.info("Hourly task completed successfully")
@@ -107,7 +108,7 @@ class TaskScheduler:
                 self.memconn.execute(
                     f"""
                     CREATE OR REPLACE TABLE {target_table_name} AS
-                    SELECT * FROM read_parquet('{self.WAVE_BUOY_BACKUP_S3_PATH}')
+                    SELECT * FROM read_parquet('{self.wave_buoy_backup_s3_path}')
                     """
                 )
                 logger.info("Loaded from S3 backup successfully")
@@ -139,7 +140,7 @@ class TaskScheduler:
             self.memconn.execute(
                 f"""
                 CREATE OR REPLACE TABLE {self.WAVE_BUOY_TABLE_NAME} AS
-                SELECT * FROM read_parquet('{self.WAVE_BUOY_BACKUP_S3_PATH}')
+                SELECT * FROM read_parquet('{self.wave_buoy_backup_s3_path}')
                 """
             )
             logger.info("Pre-loaded wave buoy data from S3 backup")
