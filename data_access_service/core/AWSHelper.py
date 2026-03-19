@@ -9,14 +9,10 @@ import dask.dataframe
 import dask.dataframe as dd
 import xarray
 from pathlib import Path
-from typing import List
 from data_access_service import init_log
 from data_access_service.config.config import Config, IntTestConfig
 from io import BytesIO
 from data_access_service.core.constants import PARTITION_KEY, MAX_CSV_ROW
-from data_access_service.utils.email_templates.download_email import (
-    get_download_email_html_body,
-)
 
 
 class AWSHelper:
@@ -50,6 +46,9 @@ class AWSHelper:
         target = data.drop(PARTITION_KEY, axis=1).reset_index(drop=True)
         # the max row should be the max excel row limit exclude the header row
         max_excel_row = MAX_CSV_ROW - 1
+
+        # Extract the dataset key name for CSV filenames inside the zip
+        csv_base_name = Path(key).stem
 
         # Create temporary directory with tempfile
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -102,7 +101,11 @@ class AWSHelper:
                                 # if row size exceeds max row limit, close current csv and work with a new one
                                 if current_csv_file:
                                     self._close_and_add_to_zip(
-                                        current_csv_file, zf, csv_file_index, temp_dir
+                                        current_csv_file,
+                                        zf,
+                                        csv_file_index,
+                                        temp_dir,
+                                        csv_base_name,
                                     )
                                     csv_file_index += 1
                                     current_csv_file = None
@@ -112,7 +115,11 @@ class AWSHelper:
                                     end = min(start + max_excel_row, partition_rows)
                                     chunk_df = partition_df.iloc[start:end]
                                     self._write_single_partition_to_zip(
-                                        chunk_df, zf, csv_file_index, temp_dir
+                                        chunk_df,
+                                        zf,
+                                        csv_file_index,
+                                        temp_dir,
+                                        csv_base_name,
                                     )
                                     csv_file_index += 1
 
@@ -127,7 +134,11 @@ class AWSHelper:
                                 and current_csv_file is not None
                             ):
                                 self._close_and_add_to_zip(
-                                    current_csv_file, zf, csv_file_index, temp_dir
+                                    current_csv_file,
+                                    zf,
+                                    csv_file_index,
+                                    temp_dir,
+                                    csv_base_name,
                                 )
                                 csv_file_index += 1
                                 current_csv_file = None
@@ -163,8 +174,15 @@ class AWSHelper:
                     # Handle remaining csv
                     if current_csv_file:
                         self._close_and_add_to_zip(
-                            current_csv_file, zf, csv_file_index, temp_dir
+                            current_csv_file,
+                            zf,
+                            csv_file_index,
+                            temp_dir,
+                            csv_base_name,
                         )
+                # If only one CSV part, rename to remove the part suffix
+                self._rename_single_csv_in_zip(zip_path, csv_base_name)
+
                 # upload this zip file to s3
                 self.upload_file_to_s3(str(zip_path), bucket_name, key)
 
@@ -457,10 +475,15 @@ class AWSHelper:
         ds.to_netcdf(file_path, engine=engine)
 
     def _write_single_partition_to_zip(
-        self, df, zf: zipfile.ZipFile, file_index: int, temp_dir: str
+        self,
+        df,
+        zf: zipfile.ZipFile,
+        file_index: int,
+        temp_dir: str,
+        csv_base_name: str,
     ) -> None:
         """Helper method to write partition to a single CSV file in the ZIP"""
-        filename = f"part_{file_index:09d}.csv"
+        filename = f"{csv_base_name}_part_{file_index:09d}.csv"
         with tempfile.NamedTemporaryFile("w+", dir=temp_dir, delete=False) as tmpfile:
             try:
                 df.to_csv(
@@ -488,9 +511,14 @@ class AWSHelper:
                 os.remove(tmpfile.name)
 
     def _close_and_add_to_zip(
-        self, csv_file, zf: zipfile.ZipFile, file_index: int, temp_dir: str
+        self,
+        csv_file,
+        zf: zipfile.ZipFile,
+        file_index: int,
+        temp_dir: str,
+        csv_base_name: str,
     ) -> None:
-        filename = f"part_{file_index:09d}.csv"
+        filename = f"{csv_base_name}_part_{file_index:09d}.csv"
         try:
             csv_file.flush()
 
@@ -508,6 +536,30 @@ class AWSHelper:
         finally:
             csv_file.close()
             os.remove(csv_file.name)
+
+    def _rename_single_csv_in_zip(self, zip_path: Path, csv_base_name: str) -> None:
+        """If the zip contains only one data CSV, rewrite it without the part suffix."""
+        with zipfile.ZipFile(zip_path, "r") as zf_read:
+            csv_entries = [
+                n
+                for n in zf_read.namelist()
+                if n.endswith(".csv") and n != "dataschema.csv"
+            ]
+            if len(csv_entries) != 1:
+                return
+
+            tmp_path = zip_path.with_suffix(".tmp.zip")
+            with zipfile.ZipFile(
+                tmp_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+            ) as zf_write:
+                for item in zf_read.infolist():
+                    data = zf_read.read(item.filename)
+                    if item.filename == csv_entries[0]:
+                        item.filename = f"{csv_base_name}.csv"
+                    zf_write.writestr(item, data)
+
+        os.replace(str(tmp_path), str(zip_path))
+        self.log.info(f"Renamed single CSV to {csv_base_name}.csv")
 
     @staticmethod
     def get_free_space(path: str) -> int:

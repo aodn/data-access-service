@@ -7,7 +7,6 @@ import pandas as pd
 import dask.dataframe as dd
 import requests
 
-from tests.conftest import subset_request_factory
 import xarray as xr
 from pathlib import Path
 from unittest.mock import patch, MagicMock, ANY
@@ -15,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 from botocore.exceptions import ClientError
-from data_access_service.config.config import IntTestConfig, Config
+from data_access_service.config.config import Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.constants import PARTITION_KEY
 from data_access_service.utils.email_templates.download_email import (
@@ -175,11 +174,11 @@ class TestAWSHelper(TestWithS3):
             zip_path = os.path.join(temp_dir, "test.zip")
 
             with zipfile.ZipFile(zip_path, "w") as zf:
-                helper._write_single_partition_to_zip(mock_df, zf, 0, temp_dir)
+                helper._write_single_partition_to_zip(mock_df, zf, 0, temp_dir, "test")
 
             with zipfile.ZipFile(zip_path, "r") as zf:
                 namelist = zf.namelist()
-                assert "part_000000000.csv" in namelist
+                assert "test_part_000000000.csv" in namelist
 
     def test_write_csv_to_s3(self, setup, aws_clients, localstack, mock_boto3_client):
         helper = AWSHelper()
@@ -235,9 +234,9 @@ class TestAWSHelper(TestWithS3):
                 assert os.path.exists(file_path)
                 with zipfile.ZipFile(file_path, "r") as zf:
                     namelist = zf.namelist()
-                    # should have two files, one is data file part_000000000.csv, one is dataschema file dataschema.csv
+                    # should have two files, one is data file test.csv (renamed from part_000000000.csv), one is dataschema file dataschema.csv
                     assert len(namelist) == 2
-                    assert "part_000000000.csv" in namelist
+                    assert "test.csv" in namelist
                     assert "dataschema.csv" in namelist
 
                     # validate dataschema content
@@ -307,11 +306,11 @@ class TestAWSHelper(TestWithS3):
                 assert os.path.exists(file_path)
                 with zipfile.ZipFile(file_path, "r") as zf:
                     namelist = zf.namelist()
-                    # should generate 6 files, each under 9 rows
+                    # should generate 6 files, each under 9 rows, with dataset name prefix
                     assert len(namelist) == 6
-                    assert "part_000000000.csv" in namelist
-                    assert "part_000000005.csv" in namelist
-                    content = zf.read("part_000000000.csv").decode()
+                    assert "test_edge_case_part_000000000.csv" in namelist
+                    assert "test_edge_case_part_000000005.csv" in namelist
+                    content = zf.read("test_edge_case_part_000000000.csv").decode()
                     assert "id" in content
                     assert "value" in content
                     assert "0" in content
