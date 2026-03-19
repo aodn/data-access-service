@@ -174,9 +174,7 @@ class TestAWSHelper(TestWithS3):
             zip_path = os.path.join(temp_dir, "test.zip")
 
             with zipfile.ZipFile(zip_path, "w") as zf:
-                helper._write_single_partition_to_zip(
-                    mock_df, zf, 0, temp_dir, "test"
-                )
+                helper._write_single_partition_to_zip(mock_df, zf, 0, temp_dir, "test")
 
             with zipfile.ZipFile(zip_path, "r") as zf:
                 namelist = zf.namelist()
