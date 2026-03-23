@@ -216,7 +216,9 @@ class ZarrProcessor:
         # GeoTIFF path: skip the expensive NetCDF write entirely and convert directly
         # from the in-memory xarray Dataset. This avoids doubling I/O and memory usage.
         if self.output_format == "geotiff":
-            self.log.info("Output format is GeoTIFF — converting directly from zarr (skipping NetCDF)...")
+            self.log.info(
+                "Output format is GeoTIFF — converting directly from zarr (skipping NetCDF)..."
+            )
             return self.__convert_to_geotiff(dataset=dataset, key=key)
 
         # Convert object dtype variables to appropriate fixed-size strings, because NetCDF does not support object dtype
@@ -380,7 +382,8 @@ class ZarrProcessor:
 
         # Get gridded numeric data variables (skip string/object vars like 'filename')
         data_vars = [
-            var for var in dataset.data_vars
+            var
+            for var in dataset.data_vars
             if dataset[var].dtype.kind in ("i", "u", "f")
             and lat_name in dataset[var].dims
             and lon_name in dataset[var].dims
@@ -422,9 +425,7 @@ class ZarrProcessor:
                 work_dir=work_dir,
             )
 
-        self.log.info(
-            f"Exported {len(urls)} ZIP archive(s) for {key}"
-        )
+        self.log.info(f"Exported {len(urls)} ZIP archive(s) for {key}")
         return urls
 
     def __slice_to_geotiff(
@@ -496,14 +497,13 @@ class ZarrProcessor:
 
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
                 for t in timestamps:
-                    date_str = str(np.datetime_as_string(t, unit="D"))  # e.g. "2024-07-21"
+                    date_str = str(
+                        np.datetime_as_string(t, unit="D")
+                    )  # e.g. "2024-07-21"
 
                     for var_name in data_vars:
                         slice_data = (
-                            dataset[var_name]
-                            .sel({time_name: t})
-                            .squeeze()
-                            .compute()
+                            dataset[var_name].sel({time_name: t}).squeeze().compute()
                         )
 
                         tif_name = f"{dataset_base}_{var_name}_{date_str}.tif"
