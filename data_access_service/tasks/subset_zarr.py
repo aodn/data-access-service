@@ -1,15 +1,15 @@
 import math
 import os
 import tempfile
+import zipfile
+from collections import defaultdict
 from pathlib import Path
 from typing import List
 
 import gc
 import time
 import dask
-import numcodecs
 import psutil
-import resource
 import xarray
 
 import numpy as np
@@ -48,11 +48,13 @@ class ZarrProcessor:
         collection_title: str,
         full_metadata_link: str,
         suggested_citation: str,
+        output_format: str = "netcdf",
     ):
         self.aws = AWSHelper()
         self.api = api
         self.config = Config.get_config()
         self.log = init_log(self.config)
+        self.output_format = output_format
         self.job_id = job_id
         self.uuid = uuid
         self.recipient = recipient
@@ -121,7 +123,7 @@ class ZarrProcessor:
                 continue
 
             download_uri = self.__write_to_s3_as_netcdf(dataset=dataset, key=key)
-            urls.append(download_uri)
+            urls.extend(download_uri)
         subject = f"Finish processing data file whose uuid is:  {self.uuid}"
 
         html_content = get_download_email_html_body(
@@ -210,6 +212,12 @@ class ZarrProcessor:
 
     def __write_to_s3_as_netcdf(self, dataset: xarray.Dataset, key: str):
         dataset = ignore_invalid_unicode_in_attrs(dataset)
+
+        # GeoTIFF path: skip the expensive NetCDF write entirely and convert directly
+        # from the in-memory xarray Dataset. This avoids doubling I/O and memory usage.
+        if self.output_format == "geotiff":
+            self.log.info("Output format is GeoTIFF — converting directly from zarr (skipping NetCDF)...")
+            return self.__convert_to_geotiff(dataset=dataset, key=key)
 
         # Convert object dtype variables to appropriate fixed-size strings, because NetCDF does not support object dtype
         dataset = convert_object_dtype_variables(dataset, logger=self.log)
@@ -328,7 +336,202 @@ class ZarrProcessor:
             )
             self.aws.upload_file_to_s3(str(temp_netcdf_path), bucket_name, s3_key)
             region = self.aws.s3.meta.region_name
-            return f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"
+            return [f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"]
+
+    def __convert_to_geotiff(self, dataset: xarray.Dataset, key: str) -> List[str]:
+        """Convert an xarray Dataset to GeoTIFF files, grouped into monthly ZIP archives.
+
+        Output structure (uploaded to S3):
+            {dataset}_geotiff_{YYYY-MM}.zip
+              ├── {dataset}_{variable}_{YYYY-MM-DD}.tif
+              └── ...
+
+        Handles rioxarray requirements:
+        - set_spatial_dims: x_dim and y_dim mapped via API metadata
+        - CRS: AODN zarr datasets don't embed CRS, so we write EPSG:4326 (WGS84)
+        - y-axis ordering: rasterio expects descending latitude (north-to-south);
+          if ascending, we sort descending before export
+        - nodata: NaN values written with explicit nodata sentinel
+        - _FillValue: cleared from attrs/encoding before rio.write_nodata to avoid
+          xarray encoding conflict
+        """
+        import rioxarray  # noqa: F401
+
+        bucket_name = self.config.get_csv_bucket_name()
+        urls = []
+
+        # Use the API's column name mapping (already knows the real dim names per dataset)
+        lat_name = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_LATITUDE_UPPER_CASE]
+        )[0]
+        lon_name = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_LONGITUDE_UPPER_CASE]
+        )[0]
+        time_name = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
+        )[0]
+
+        # Validate that lat/lon are actual dimensions (gridded data)
+        if lat_name not in dataset.dims or lon_name not in dataset.dims:
+            raise ValueError(
+                f"Dataset {key} is not gridded ({lat_name}/{lon_name} not found as dimensions). "
+                "GeoTIFF export requires gridded data with lat/lon as dimensions."
+            )
+
+        # Get gridded numeric data variables (skip string/object vars like 'filename')
+        data_vars = [
+            var for var in dataset.data_vars
+            if dataset[var].dtype.kind in ("i", "u", "f")
+            and lat_name in dataset[var].dims
+            and lon_name in dataset[var].dims
+        ]
+
+        if not data_vars:
+            raise ValueError(
+                f"No gridded numeric variables found in dataset {key} for GeoTIFF export."
+            )
+
+        self.log.info(
+            f"GeoTIFF export: lat_dim={lat_name}, lon_dim={lon_name}, "
+            f"time_dim={time_name}, vars={data_vars}"
+        )
+
+        # Check latitude ordering: rasterio expects descending (north-to-south).
+        lat_values = dataset[lat_name].values
+        lat_ascending = lat_values[0] < lat_values[-1] if len(lat_values) > 1 else False
+        if lat_ascending:
+            self.log.info(
+                f"Latitude is ascending ({lat_values[0]} -> {lat_values[-1]}), "
+                "will sort descending for rasterio"
+            )
+
+        dataset_base = key.replace(".zarr", "")
+
+        with tempfile.TemporaryDirectory() as work_dir:
+            work_dir = Path(work_dir)
+
+            urls = self.__export_geotiff_with_time(
+                dataset=dataset,
+                dataset_base=dataset_base,
+                data_vars=data_vars,
+                time_name=time_name,
+                lat_name=lat_name,
+                lon_name=lon_name,
+                lat_ascending=lat_ascending,
+                bucket_name=bucket_name,
+                work_dir=work_dir,
+            )
+
+        self.log.info(
+            f"Exported {len(urls)} ZIP archive(s) for {key}"
+        )
+        return urls
+
+    def __slice_to_geotiff(
+        self,
+        slice_data: xarray.DataArray,
+        tif_path: Path,
+        lat_name: str,
+        lon_name: str,
+        lat_ascending: bool,
+    ) -> None:
+        """Write a single 2D DataArray slice to a GeoTIFF file.
+
+        Handles all rioxarray requirements (spatial dims, CRS, nodata, _FillValue conflict).
+        """
+        if lat_ascending:
+            slice_data = slice_data.sortby(lat_name, ascending=False)
+
+        slice_data.attrs.pop("_FillValue", None)
+        slice_data.encoding.pop("_FillValue", None)
+
+        slice_data = slice_data.rio.set_spatial_dims(x_dim=lon_name, y_dim=lat_name)
+        slice_data = slice_data.rio.write_crs("EPSG:4326")
+        slice_data = slice_data.rio.write_nodata(np.nan)
+
+        slice_data.rio.to_raster(str(tif_path))
+
+    def __export_geotiff_with_time(
+        self,
+        dataset: xarray.Dataset,
+        dataset_base: str,
+        data_vars: List[str],
+        time_name: str,
+        lat_name: str,
+        lon_name: str,
+        lat_ascending: bool,
+        bucket_name: str,
+        work_dir: Path,
+    ) -> List[str]:
+        """Export GeoTIFFs grouped into monthly ZIP archives.
+
+        Produces one ZIP per month:
+            {dataset}_geotiff_{YYYY-MM}.zip
+              ├── {dataset}_{var}_{YYYY-MM-DD}.tif
+              └── ...
+        """
+        urls = []
+
+        # Group time steps by month (YYYY-MM)
+        time_values = dataset[time_name].values
+        month_groups: dict[str, list] = defaultdict(list)
+        for t in time_values:
+            month_key = str(np.datetime_as_string(t, unit="M"))  # e.g. "2024-07"
+            month_groups[month_key].append(t)
+
+        self.log.info(
+            f"GeoTIFF: {len(time_values)} time steps across "
+            f"{len(month_groups)} month(s): {sorted(month_groups.keys())}"
+        )
+
+        for month_key in sorted(month_groups.keys()):
+            timestamps = month_groups[month_key]
+            zip_name = f"{dataset_base}_geotiff_{month_key}.zip"
+            zip_path = work_dir / zip_name
+
+            self.log.info(
+                f"Building {zip_name} ({len(timestamps)} day(s), "
+                f"{len(data_vars)} variable(s))..."
+            )
+
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for t in timestamps:
+                    date_str = str(np.datetime_as_string(t, unit="D"))  # e.g. "2024-07-21"
+
+                    for var_name in data_vars:
+                        slice_data = (
+                            dataset[var_name]
+                            .sel({time_name: t})
+                            .squeeze()
+                            .compute()
+                        )
+
+                        tif_name = f"{dataset_base}_{var_name}_{date_str}.tif"
+                        arcname = tif_name
+
+                        tif_path = work_dir / tif_name
+                        self.__slice_to_geotiff(
+                            slice_data, tif_path, lat_name, lon_name, lat_ascending
+                        )
+
+                        zf.write(tif_path, arcname=arcname)
+                        tif_path.unlink(missing_ok=True)
+
+                        del slice_data
+                        gc.collect()
+
+            # Upload the monthly ZIP
+            s3_key = f"{self.job_id}/{zip_name}"
+            self.aws.upload_file_to_s3(str(zip_path), bucket_name, s3_key)
+            region = self.aws.s3.meta.region_name
+            url = f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"
+            urls.append(url)
+            self.log.info(f"Uploaded: {s3_key}")
+
+            # Remove ZIP after upload to free disk
+            zip_path.unlink(missing_ok=True)
+
+        return urls
 
     def get_available_thread_count(self):
         if os.getenv("PROFILE") in (None, "dev", "testing"):
