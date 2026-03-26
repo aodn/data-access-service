@@ -338,9 +338,15 @@ class TestSubsetZarr(TestWithS3):
                     )
 
                     # Should have exactly one geotiff ZIP (all TIFs bundled together)
-                    zip_files = [f for f in files if f.endswith(".zip") and "geotiff" in f]
-                    assert len(zip_files) == 1, f"Expected exactly 1 geotiff ZIP, got: {zip_files}"
-                    assert zip_files[0].endswith("_geotiff.zip"), f"Expected {{dataset}}_geotiff.zip, got: {zip_files[0]}"
+                    zip_files = [
+                        f for f in files if f.endswith(".zip") and "geotiff" in f
+                    ]
+                    assert (
+                        len(zip_files) == 1
+                    ), f"Expected exactly 1 geotiff ZIP, got: {zip_files}"
+                    assert zip_files[0].endswith(
+                        "_geotiff.zip"
+                    ), f"Expected {{dataset}}_geotiff.zip, got: {zip_files[0]}"
 
                     # Download and verify the ZIP contents
                     with tempfile.TemporaryDirectory() as tmpdirname:
@@ -355,23 +361,31 @@ class TestSubsetZarr(TestWithS3):
                         # Verify it's a valid ZIP containing .tif files
                         with zipfile.ZipFile(local_zip, "r") as zf:
                             tif_names = [n for n in zf.namelist() if n.endswith(".tif")]
-                            assert len(tif_names) > 0, f"ZIP should contain .tif files, got: {zf.namelist()}"
+                            assert (
+                                len(tif_names) > 0
+                            ), f"ZIP should contain .tif files, got: {zf.namelist()}"
 
                             # Verify TIF naming convention: {dataset}_{variable}_{YYYY-MM-DD}.tif
                             dataset_base = key.replace(".zarr", "")
                             for tif_name in tif_names:
-                                assert tif_name.startswith(dataset_base), (
-                                    f"TIF name should start with '{dataset_base}', got: {tif_name}"
-                                )
-                                assert tif_name.endswith(".tif"), f"Expected .tif extension, got: {tif_name}"
+                                assert tif_name.startswith(
+                                    dataset_base
+                                ), f"TIF name should start with '{dataset_base}', got: {tif_name}"
+                                assert tif_name.endswith(
+                                    ".tif"
+                                ), f"Expected .tif extension, got: {tif_name}"
 
                             # Extract and verify a .tif is a valid GeoTIFF with correct CRS
                             zf.extractall(tmpdirname)
                             tif_path = Path(tmpdirname) / tif_names[0]
                             with rasterio.open(tif_path) as src:
                                 assert src.crs is not None, "GeoTIFF should have a CRS"
-                                assert src.crs.to_epsg() == 4326, f"Expected EPSG:4326, got {src.crs}"
-                                assert src.width > 0 and src.height > 0, "GeoTIFF should have valid dimensions"
+                                assert (
+                                    src.crs.to_epsg() == 4326
+                                ), f"Expected EPSG:4326, got {src.crs}"
+                                assert (
+                                    src.width > 0 and src.height > 0
+                                ), "GeoTIFF should have valid dimensions"
 
                 except Exception as ex:
                     assert False, f"{ex}"
