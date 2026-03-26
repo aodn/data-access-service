@@ -77,7 +77,7 @@ class TaskScheduler:
             self.memconn.execute(
                 f"""
                 CREATE OR REPLACE TABLE {temp_table_name} AS
-                SELECT *
+                SELECT LATITUDE, LONGITUDE, TIME, SSWMD, WPFM, WPMH, WHTH, WSSH, site_name
                 FROM read_parquet('{dataset}/**/*.parquet', hive_partitioning=true)"""
             )
             logger.info(f"Temporary table '{temp_table_name}' created successfully")
