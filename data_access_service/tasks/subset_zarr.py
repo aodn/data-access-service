@@ -1,15 +1,14 @@
 import math
 import os
 import tempfile
+import zipfile
 from pathlib import Path
 from typing import List
 
 import gc
 import time
 import dask
-import numcodecs
 import psutil
-import resource
 import xarray
 
 import numpy as np
@@ -48,11 +47,13 @@ class ZarrProcessor:
         collection_title: str,
         full_metadata_link: str,
         suggested_citation: str,
+        output_format: str = "netcdf",
     ):
         self.aws = AWSHelper()
         self.api = api
         self.config = Config.get_config()
         self.log = init_log(self.config)
+        self.output_format = output_format
         self.job_id = job_id
         self.uuid = uuid
         self.recipient = recipient
@@ -121,7 +122,7 @@ class ZarrProcessor:
                 continue
 
             download_uri = self.__write_to_s3_as_netcdf(dataset=dataset, key=key)
-            urls.append(download_uri)
+            urls.extend(download_uri)
         subject = f"Finish processing data file whose uuid is:  {self.uuid}"
 
         html_content = get_download_email_html_body(
@@ -210,6 +211,14 @@ class ZarrProcessor:
 
     def __write_to_s3_as_netcdf(self, dataset: xarray.Dataset, key: str):
         dataset = ignore_invalid_unicode_in_attrs(dataset)
+
+        # GeoTIFF path: skip the expensive NetCDF write entirely and convert directly
+        # from the in-memory xarray Dataset. This avoids doubling I/O and memory usage.
+        if self.output_format == "geotiff":
+            self.log.info(
+                "Output format is GeoTIFF — converting directly from zarr (skipping NetCDF)..."
+            )
+            return self.__convert_to_geotiff(dataset=dataset, key=key)
 
         # Convert object dtype variables to appropriate fixed-size strings, because NetCDF does not support object dtype
         dataset = convert_object_dtype_variables(dataset, logger=self.log)
@@ -328,7 +337,197 @@ class ZarrProcessor:
             )
             self.aws.upload_file_to_s3(str(temp_netcdf_path), bucket_name, s3_key)
             region = self.aws.s3.meta.region_name
-            return f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"
+            return [f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"]
+
+    def __convert_to_geotiff(self, dataset: xarray.Dataset, key: str) -> List[str]:
+        """Convert an xarray Dataset to GeoTIFF files in a single ZIP archive.
+
+        Output structure (uploaded to S3):
+            {dataset}_geotiff.zip
+              ├── {dataset}_{variable}_{YYYY-MM-DD}.tif
+              └── ...
+
+        GeoTIFF requires gridded data (lat/lon as dimensions) with:
+        - CRS set to EPSG:4326 (WGS84), since AODN zarr datasets don't embed CRS
+        - Descending latitude (north-to-south) for rasterio's affine transform
+        - Explicit nodata sentinel for NaN values
+        """
+        import rioxarray  # noqa: F401
+
+        lat_name, lon_name, time_name = self.__get_spatial_temporal_dim_names(key)
+        self.__validate_gridded_dataset(dataset, key, lat_name, lon_name)
+        data_vars = self.__get_gridded_numeric_vars(dataset, lat_name, lon_name)
+
+        if not data_vars:
+            raise ValueError(
+                f"No gridded numeric variables found in dataset {key} for GeoTIFF export."
+            )
+
+        self.log.info(
+            f"GeoTIFF export: lat_dim={lat_name}, lon_dim={lon_name}, "
+            f"time_dim={time_name}, vars={data_vars}"
+        )
+
+        lat_ascending = self.__is_lat_ascending(dataset, lat_name)
+        dataset_base = key.replace(".zarr", "")
+        zip_name = f"{dataset_base}_geotiff.zip"
+
+        with tempfile.TemporaryDirectory() as work_dir:
+            work_dir = Path(work_dir)
+            zip_path = work_dir / zip_name
+
+            self.__write_all_tifs_to_zip(
+                zip_path=zip_path,
+                dataset=dataset,
+                dataset_base=dataset_base,
+                data_vars=data_vars,
+                time_name=time_name,
+                lat_name=lat_name,
+                lon_name=lon_name,
+                lat_ascending=lat_ascending,
+                work_dir=work_dir,
+            )
+
+            url = self.__upload_zip_to_s3(zip_path, zip_name)
+
+        self.log.info(f"Exported GeoTIFF ZIP for {key}")
+        return [url]
+
+    def __get_spatial_temporal_dim_names(self, key: str):
+        """Resolve the actual lat, lon, and time dimension names for a dataset."""
+        lat_name = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_LATITUDE_UPPER_CASE]
+        )[0]
+        lon_name = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_LONGITUDE_UPPER_CASE]
+        )[0]
+        time_name = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
+        )[0]
+        return lat_name, lon_name, time_name
+
+    def __validate_gridded_dataset(
+        self, dataset: xarray.Dataset, key: str, lat_name: str, lon_name: str
+    ) -> None:
+        """Raise ValueError if lat/lon are not dimensions (non-gridded data)."""
+        if lat_name not in dataset.dims or lon_name not in dataset.dims:
+            raise ValueError(
+                f"Dataset {key} is not gridded ({lat_name}/{lon_name} not found as dimensions). "
+                "GeoTIFF export requires gridded data with lat/lon as dimensions."
+            )
+
+    def __get_gridded_numeric_vars(
+        self, dataset: xarray.Dataset, lat_name: str, lon_name: str
+    ) -> List[str]:
+        """Return numeric data variable names that have lat/lon as dimensions."""
+        return [
+            var
+            for var in dataset.data_vars
+            if dataset[var].dtype.kind in ("i", "u", "f")
+            and lat_name in dataset[var].dims
+            and lon_name in dataset[var].dims
+        ]
+
+    def __is_lat_ascending(self, dataset: xarray.Dataset, lat_name: str) -> bool:
+        """Check if latitude is ascending (south-to-north). Rasterio expects descending."""
+        lat_values = dataset[lat_name].values
+        ascending = lat_values[0] < lat_values[-1] if len(lat_values) > 1 else False
+        if ascending:
+            self.log.info(
+                f"Latitude is ascending ({lat_values[0]} -> {lat_values[-1]}), "
+                "will sort descending for rasterio"
+            )
+        return ascending
+
+    def __write_all_tifs_to_zip(
+        self,
+        zip_path: Path,
+        dataset: xarray.Dataset,
+        dataset_base: str,
+        data_vars: List[str],
+        time_name: str,
+        lat_name: str,
+        lon_name: str,
+        lat_ascending: bool,
+        work_dir: Path,
+    ) -> None:
+        """Write one TIF per variable per time step into a single ZIP archive."""
+        time_values = dataset[time_name].values
+
+        self.log.info(
+            f"GeoTIFF: {len(time_values)} time step(s), "
+            f"{len(data_vars)} variable(s) -> {zip_path.name}"
+        )
+
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for t in sorted(time_values):
+                date_str = str(np.datetime_as_string(t, unit="D"))
+
+                for var_name in data_vars:
+                    slice_data = (
+                        dataset[var_name].sel({time_name: t}).squeeze().compute()
+                    )
+
+                    tif_name = f"{dataset_base}_{var_name}_{date_str}.tif"
+                    tif_path = work_dir / tif_name
+
+                    self.__slice_to_geotiff(
+                        slice_data, tif_path, lat_name, lon_name, lat_ascending
+                    )
+
+                    zf.write(tif_path, arcname=tif_name)
+                    tif_path.unlink(missing_ok=True)
+
+                    del slice_data
+                    gc.collect()
+
+    def __slice_to_geotiff(
+        self,
+        slice_data: xarray.DataArray,
+        tif_path: Path,
+        lat_name: str,
+        lon_name: str,
+        lat_ascending: bool,
+    ) -> None:
+        """Write a single 2D DataArray slice to a GeoTIFF file."""
+        if lat_ascending:
+            slice_data = slice_data.sortby(lat_name, ascending=False)
+
+        # Ensure the slice is exactly 2D (lat, lon). Extra dims left after
+        # squeeze() (e.g. depth, level) would produce a multi-band TIF that
+        # QGIS may not open correctly.
+        if slice_data.ndim != 2:
+            extra_dims = [d for d in slice_data.dims if d not in (lat_name, lon_name)]
+            for dim in extra_dims:
+                slice_data = slice_data.isel({dim: 0})
+            self.log.warning(
+                f"Slice had {slice_data.ndim + len(extra_dims)} dims, "
+                f"selected first index for extra dims: {extra_dims}"
+            )
+
+        # Convert integer data to float so NaN nodata is representable
+        if slice_data.dtype.kind in ("i", "u"):
+            slice_data = slice_data.astype(np.float32)
+
+        slice_data.attrs.pop("_FillValue", None)
+        slice_data.encoding.pop("_FillValue", None)
+
+        slice_data = slice_data.rio.set_spatial_dims(x_dim=lon_name, y_dim=lat_name)
+        slice_data = slice_data.rio.write_crs("EPSG:4326")
+        slice_data = slice_data.rio.write_nodata(np.nan)
+
+        slice_data.rio.to_raster(str(tif_path))
+
+    def __upload_zip_to_s3(self, zip_path: Path, zip_name: str) -> str:
+        """Upload a ZIP file to S3 and return the download URL."""
+        bucket_name = self.config.get_csv_bucket_name()
+        s3_key = f"{self.job_id}/{zip_name}"
+        self.aws.upload_file_to_s3(str(zip_path), bucket_name, s3_key)
+        region = self.aws.s3.meta.region_name
+        url = f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"
+        self.log.info(f"Uploaded: {s3_key}")
+        zip_path.unlink(missing_ok=True)
+        return url
 
     def get_available_thread_count(self):
         if os.getenv("PROFILE") in (None, "dev", "testing"):
