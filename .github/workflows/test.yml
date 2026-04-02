@@ -26,7 +26,6 @@ jobs:
           version: "2.1.4"
       - name: Install dependencies
         run: |
-          poetry lock
           poetry install
       - name: Run pre-commit checks
         run: |
