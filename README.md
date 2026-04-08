@@ -35,9 +35,7 @@ $ poetry add <pypi-dependency-name> # e.g poetry add numpy
 $ poetry remove <pypi-dependency-name> # e.g. poetry remove numpy
 ```
 
-After manually modifying `pyproject.toml`, you must update `poetry.lock` by run `poetry lock` and commit it, otherwise CI and Docker builds will fail:
-
-To update all dependencies to their latest allowed versions, use `poetry update` command.
+You might want to update the `poetry.lock` file after manually modifying `pyproject.toml` with `poetry lock` command. To update all dependencies, use `poetry update` command.
 
 There is a library `aodn_cloud_optimised`, which referencing direct AODN's GitHub repository as source instead of `PyPi`. It is written by PO to access
 cloud optimized data. Please do not access S3 directly and should via this library.
@@ -118,8 +116,22 @@ The command below is for manual checks; checks are also executed when you run `g
 
 The configurations for pre-commit hooks are defined in `.pre-commit-config.yaml`.
 
+To install hooks:
+
+```shell
+pre-commit install --install-hooks -t post-checkout -t post-merge
+```
+
+To run checks manually:
+
 ```shell
 pre-commit run --all-files
+```
+
+To verify `poetry.lock` is in sync with `pyproject.toml`:
+
+```shell
+pre-commit run poetry-lock --all-files
 ```
 
 ## Environment variables
