@@ -116,8 +116,22 @@ The command below is for manual checks; checks are also executed when you run `g
 
 The configurations for pre-commit hooks are defined in `.pre-commit-config.yaml`.
 
+To install hooks:
+
+```shell
+pre-commit install --install-hooks -t post-checkout -t post-merge
+```
+
+To run checks manually:
+
 ```shell
 pre-commit run --all-files
+```
+
+To verify `poetry.lock` is in sync with `pyproject.toml`:
+
+```shell
+pre-commit run poetry-lock --all-files
 ```
 
 ## Environment variables
