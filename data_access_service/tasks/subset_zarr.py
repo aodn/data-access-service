@@ -412,8 +412,7 @@ class ZarrProcessor:
         lons = dataset[lon_name].mean(dim="I").values
 
         self.log.info(
-            f"Converting I({len(lats)})→{lat_name}, "
-            f"J({len(lons)})→{lon_name}"
+            f"Converting I({len(lats)})→{lat_name}, " f"J({len(lons)})→{lon_name}"
         )
 
         # Replace 2D index dims (I,J) with 1D coordinate dims (lat,lon)
