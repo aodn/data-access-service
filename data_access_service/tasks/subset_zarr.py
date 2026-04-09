@@ -128,6 +128,7 @@ class ZarrProcessor:
             writer = FORMAT_WRITERS.get(self.output_format)
             if writer is None:
                 raise ValueError(f"Unsupported format: {self.output_format}")
+
             download_uri = writer(dataset=dataset, key=key)
             urls.extend(download_uri)
         subject = f"Finish processing data file whose uuid is:  {self.uuid}"
@@ -406,10 +407,8 @@ class ZarrProcessor:
 
         lat_name, lon_name, _ = self.__get_spatial_temporal_dim_names(key)
 
-        # LATITUDE(I,J) is constant across J, so any column gives the same lat values
-        lats = dataset[lat_name].mean(dim="J").values
-        # LONGITUDE(I,J) is constant across I, so any row gives the same lon values
-        lons = dataset[lon_name].mean(dim="I").values
+        lats = dataset[lat_name].values[:, 0]
+        lons = dataset[lon_name].values[0, :]
 
         self.log.info(
             f"Converting I({len(lats)})→{lat_name}, " f"J({len(lons)})→{lon_name}"
