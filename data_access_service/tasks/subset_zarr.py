@@ -121,7 +121,14 @@ class ZarrProcessor:
                 self.log.info("No data found for dataset: %s, skipping...", key)
                 continue
 
-            download_uri = self.__write_to_s3_as_netcdf(dataset=dataset, key=key)
+            FORMAT_WRITERS = {
+                "netcdf": self.__write_to_s3_as_netcdf,
+                "geotiff": self.__convert_to_geotiff,
+            }
+            writer = FORMAT_WRITERS.get(self.output_format)
+            if writer is None:
+                raise ValueError(f"Unsupported format: {self.output_format}")
+            download_uri = writer(dataset=dataset, key=key)
             urls.extend(download_uri)
         subject = f"Finish processing data file whose uuid is:  {self.uuid}"
 
@@ -211,14 +218,6 @@ class ZarrProcessor:
 
     def __write_to_s3_as_netcdf(self, dataset: xarray.Dataset, key: str):
         dataset = ignore_invalid_unicode_in_attrs(dataset)
-
-        # GeoTIFF path: skip the expensive NetCDF write entirely and convert directly
-        # from the in-memory xarray Dataset. This avoids doubling I/O and memory usage.
-        if self.output_format == "geotiff":
-            self.log.info(
-                "Output format is GeoTIFF — converting directly from zarr (skipping NetCDF)..."
-            )
-            return self.__convert_to_geotiff(dataset=dataset, key=key)
 
         # Convert object dtype variables to appropriate fixed-size strings, because NetCDF does not support object dtype
         dataset = convert_object_dtype_variables(dataset, logger=self.log)
