@@ -142,11 +142,14 @@ class ZarrProcessor:
 
     def __get_zarr_dataset_for_(self, key: str) -> xarray.Dataset | None:
 
+        zarr_store = self.api._instance.get_dataset(key).zarr_store
+        zarr_store = self.__convert_ij_dims_to_latlon(zarr_store, key)
+
         # apply subsetting conditions for each bbox and merge them
         merged_dataset: xarray.Dataset | None = None
         for bbox in self.bboxes:
 
-            dataset = self.api._instance.get_dataset(key).zarr_store
+            dataset = zarr_store
 
             conditions = self.get_all_subset_conditions(key, bbox)
 
@@ -393,6 +396,32 @@ class ZarrProcessor:
 
         self.log.info(f"Exported GeoTIFF ZIP for {key}")
         return [url]
+
+    def __convert_ij_dims_to_latlon(
+        self, dataset: xarray.Dataset, key: str
+    ) -> xarray.Dataset:
+        """Convert (TIME, I, J) datasets to (TIME, LATITUDE, LONGITUDE)."""
+        if "I" not in dataset.dims or "J" not in dataset.dims:
+            return dataset
+
+        lat_name, lon_name, _ = self.__get_spatial_temporal_dim_names(key)
+
+        # LATITUDE(I,J) is constant across J, so any column gives the same lat values
+        lats = dataset[lat_name].mean(dim="J").values
+        # LONGITUDE(I,J) is constant across I, so any row gives the same lon values
+        lons = dataset[lon_name].mean(dim="I").values
+
+        self.log.info(
+            f"Converting I({len(lats)})→{lat_name}, "
+            f"J({len(lons)})→{lon_name}"
+        )
+
+        # Replace 2D index dims (I,J) with 1D coordinate dims (lat,lon)
+        dataset = dataset.drop_vars([lat_name, lon_name])
+        dataset = dataset.rename({"I": lat_name, "J": lon_name})
+        dataset = dataset.assign_coords({lat_name: lats, lon_name: lons})
+
+        return dataset
 
     def __get_spatial_temporal_dim_names(self, key: str):
         """Resolve the actual lat, lon, and time dimension names for a dataset."""
