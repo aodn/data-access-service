@@ -343,7 +343,9 @@ class ZarrProcessor:
 
         Output structure (uploaded to S3):
             {dataset}_geotiff.zip
-              ├── {dataset}_{variable}_{YYYY-MM-DD}.tif
+              ├── {variable}/
+              │     ├── {dataset}_{variable}_{YYYY-MM-DD}.tif
+              │     └── ...
               └── ...
 
         GeoTIFF requires gridded data (lat/lon as dimensions) with:
@@ -474,7 +476,7 @@ class ZarrProcessor:
                         slice_data, tif_path, lat_name, lon_name, lat_ascending
                     )
 
-                    zf.write(tif_path, arcname=tif_name)
+                    zf.write(tif_path, arcname=f"{var_name}/{tif_name}")
                     tif_path.unlink(missing_ok=True)
 
                     del slice_data
