@@ -55,6 +55,9 @@ async def sse_wrapper(
         )  # Number of records consume before chunks
 
         try:
+            # debug the sse process
+            logger.debug("SSE started the initial processing, request_id=%s", request_id)
+
             # Send initial processing message
             yield format_sse(
                 {
