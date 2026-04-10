@@ -536,7 +536,7 @@ class TestSubsetZarr(TestWithS3):
         # Mock the processor (we only need log and dim name lookup)
         mock_processor = MagicMock(spec=ZarrProcessor)
         mock_processor.log = MagicMock()
-        mock_processor._ZarrProcessor__get_spatial_temporal_dim_names.return_value = (
+        mock_processor._ZarrProcessor__get_dim_names.return_value = (
             "LATITUDE",
             "LONGITUDE",
             "TIME",
