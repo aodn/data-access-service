@@ -403,8 +403,8 @@ class TestSubsetZarr(TestWithS3):
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
     ):
-        """GeoTIFF export should raise ValueError for non-gridded datasets
-        where LATITUDE/LONGITUDE are not dimensions."""
+        """GeoTIFF export should raise ValueError for datasets without
+        gridded numeric variables (e.g. vessel radiance with TIME/WAVELENGTH dims)."""
         s3_client, _, _ = aws_clients
         config = Config.get_config()
 
@@ -431,7 +431,9 @@ class TestSubsetZarr(TestWithS3):
                         output_format="geotiff",
                     )
 
-                    with pytest.raises(ValueError, match="not gridded"):
+                    with pytest.raises(
+                        ValueError, match="No gridded numeric variables"
+                    ):
                         zarr_processor.process()
 
                 finally:
@@ -455,7 +457,7 @@ class TestSubsetZarr(TestWithS3):
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
             # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
             with patch.object(AWSHelper, "send_email") as mock_send_email:
-
+                # todo: mock function validation content
                 key = "vessel_satellite_radiance_delayed_qc.zarr"
                 no_ext_key = key.replace(".zarr", "")
                 try:

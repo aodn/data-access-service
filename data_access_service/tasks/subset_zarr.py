@@ -113,6 +113,14 @@ class ZarrProcessor:
         )
         urls: List[str] = []
 
+        FORMAT_WRITERS = {
+            "netcdf": self.__write_to_s3_as_netcdf,
+            "geotiff": self.__write_to_s3_as_geotiff,
+        }
+        format_writer = FORMAT_WRITERS.get(self.output_format)
+        if format_writer is None:
+            raise ValueError(f"Unsupported format: {self.output_format}")
+
         self.log.info("Datasets to process: %s", self.keys)
         for key in self.keys:
             self.log.info("Processing dataset: %s", key)
@@ -121,15 +129,7 @@ class ZarrProcessor:
                 self.log.info("No data found for dataset: %s, skipping...", key)
                 continue
 
-            FORMAT_WRITERS = {
-                "netcdf": self.__write_to_s3_as_netcdf,
-                "geotiff": self.__convert_to_geotiff,
-            }
-            writer = FORMAT_WRITERS.get(self.output_format)
-            if writer is None:
-                raise ValueError(f"Unsupported format: {self.output_format}")
-
-            download_uri = writer(dataset=dataset, key=key)
+            download_uri = format_writer(dataset=dataset, key=key)
             urls.extend(download_uri)
         subject = f"Finish processing data file whose uuid is:  {self.uuid}"
 
@@ -144,7 +144,8 @@ class ZarrProcessor:
     def __get_zarr_dataset_for_(self, key: str) -> xarray.Dataset | None:
 
         zarr_store = self.api._instance.get_dataset(key).zarr_store
-        zarr_store = self.__convert_ij_dims_to_latlon(zarr_store, key)
+        if "I" in zarr_store.dims and "J" in zarr_store.dims:
+            zarr_store = self.__convert_ij_dims_to_latlon(zarr_store, key)
 
         # apply subsetting conditions for each bbox and merge them
         merged_dataset: xarray.Dataset | None = None
@@ -170,7 +171,7 @@ class ZarrProcessor:
             # if it is a dimension, it will be added to dim_conditions for sel()
             # if it is a variable, it will be used to form a mask for where()
             for k, val_range in conditions.items():
-                print("forming condition for key", k, "with range", val_range)
+                self.log.info("forming condition for key %s with range %s", k, val_range)
                 if is_dim(key=k, dataset=dataset):
                     form_dim_conditions(
                         existing_conditions=dim_conditions,
@@ -342,7 +343,7 @@ class ZarrProcessor:
             region = self.aws.s3.meta.region_name
             return [f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"]
 
-    def __convert_to_geotiff(self, dataset: xarray.Dataset, key: str) -> List[str]:
+    def __write_to_s3_as_geotiff(self, dataset: xarray.Dataset, key: str) -> List[str]:
         """Convert an xarray Dataset to GeoTIFF files in a single ZIP archive.
 
         Output structure (uploaded to S3):
@@ -359,9 +360,8 @@ class ZarrProcessor:
         """
         import rioxarray  # noqa: F401
 
-        lat_name, lon_name, time_name = self.__get_spatial_temporal_dim_names(key)
-        self.__validate_gridded_dataset(dataset, key, lat_name, lon_name)
-        data_vars = self.__get_gridded_numeric_vars(dataset, lat_name, lon_name)
+        lat_name, lon_name, time_name = self.__get_dim_names(key)
+        data_vars = self.__get_geotiff_compatible_vars(dataset, lat_name, lon_name)
 
         if not data_vars:
             raise ValueError(
@@ -402,10 +402,7 @@ class ZarrProcessor:
         self, dataset: xarray.Dataset, key: str
     ) -> xarray.Dataset:
         """Convert (TIME, I, J) datasets to (TIME, LATITUDE, LONGITUDE)."""
-        if "I" not in dataset.dims or "J" not in dataset.dims:
-            return dataset
-
-        lat_name, lon_name, _ = self.__get_spatial_temporal_dim_names(key)
+        lat_name, lon_name, _ = self.__get_dim_names(key)
 
         lats = dataset[lat_name].values[:, 0]
         lons = dataset[lon_name].values[0, :]
@@ -421,7 +418,7 @@ class ZarrProcessor:
 
         return dataset
 
-    def __get_spatial_temporal_dim_names(self, key: str):
+    def __get_dim_names(self, key: str):
         """Resolve the actual lat, lon, and time dimension names for a dataset."""
         lat_name = self.api.map_column_names(
             uuid=self.uuid, key=key, columns=[STR_LATITUDE_UPPER_CASE]
@@ -434,27 +431,17 @@ class ZarrProcessor:
         )[0]
         return lat_name, lon_name, time_name
 
-    def __validate_gridded_dataset(
-        self, dataset: xarray.Dataset, key: str, lat_name: str, lon_name: str
-    ) -> None:
-        """Raise ValueError if lat/lon are not dimensions (non-gridded data)."""
-        if lat_name not in dataset.dims or lon_name not in dataset.dims:
-            raise ValueError(
-                f"Dataset {key} is not gridded ({lat_name}/{lon_name} not found as dimensions). "
-                "GeoTIFF export requires gridded data with lat/lon as dimensions."
-            )
-
-    def __get_gridded_numeric_vars(
+    def __get_geotiff_compatible_vars(
         self, dataset: xarray.Dataset, lat_name: str, lon_name: str
     ) -> List[str]:
-        """Return numeric data variable names that have lat/lon as dimensions."""
-        return [
-            var
-            for var in dataset.data_vars
-            if dataset[var].dtype.kind in ("i", "u", "f")
-            and lat_name in dataset[var].dims
-            and lon_name in dataset[var].dims
-        ]
+        """Filter variables that can be exported as GeoTIFF: must be numeric and have lat/lon dims."""
+        results = []
+        for var in dataset.data_vars:
+            is_numeric = dataset[var].dtype.kind in ("i", "u", "f")
+            has_latlon = lat_name in dataset[var].dims and lon_name in dataset[var].dims
+            if is_numeric and has_latlon:
+                results.append(var)
+        return results
 
     def __is_lat_ascending(self, dataset: xarray.Dataset, lat_name: str) -> bool:
         """Check if latitude is ascending (south-to-north). Rasterio expects descending."""
