@@ -6,6 +6,11 @@ from typing import AsyncGenerator, Callable, Generator, Any
 from fastapi.responses import StreamingResponse
 from data_access_service.core.constants import STATUS, MESSAGE, DATA
 
+# debugging purpose, will use application logger later.
+import logging
+
+logger = logging.getLogger(__name__)
+
 DEFAULT_CHUNK_SIZE: int = 5000
 
 
@@ -23,7 +28,9 @@ def split_list(lst, chunk_size=DEFAULT_CHUNK_SIZE) -> Generator[Any, Any, None]:
 
 
 async def sse_wrapper(
-    async_function: Callable[..., AsyncGenerator[dict, None]], *function_args
+    request_id: str,
+    async_function: Callable[..., AsyncGenerator[dict, None]],
+    *function_args,
 ):
     """
     SSE Wrapper function with periodic processing messages, it accepts a function of return type AsyncGenerator[dict, None]
@@ -34,6 +41,7 @@ async def sse_wrapper(
     the result to the last SSE message and terminate connection. So any function can warp with
     this function to get SSE support
 
+    :param request_id: for debug purpose to track request
     :param async_function:
     :param function_args:
     :return:
@@ -49,7 +57,11 @@ async def sse_wrapper(
         try:
             # Send initial processing message
             yield format_sse(
-                {STATUS: "processing", MESSAGE: "Processing your request..."},
+                {
+                    STATUS: "processing",
+                    MESSAGE: "Processing your request...",
+                    "request_id": request_id,
+                },
                 "processing",
             )
             start_time = time.time()
@@ -80,9 +92,14 @@ async def sse_wrapper(
                     # Send periodic processing message
                     if time.time() - start_time >= processing_interval:
                         yield format_sse(
-                            {STATUS: "processing", MESSAGE: "Still processing..."},
+                            {
+                                STATUS: "processing",
+                                MESSAGE: "Still processing...",
+                                "request_id": request_id,
+                            },
                             "processing",
                         )
+                        logger.debug("SSE still processing, request_id=%s", request_id)
                         start_time = time.time()
                 # The generator might yield None to indicate no more data so we break the loop
                 else:
@@ -110,11 +127,15 @@ async def sse_wrapper(
                     },
                     "result",
                 )
-
+            logger.debug("SSE request completed, request_id=%s", request_id)
         except CancelledError as ge:
+            logger.debug("SSE request cancelled, request_id=%s", request_id)
             raise
 
         except Exception as e:
+            logger.error(
+                "SSE request failed, request_id=%s, error=%s", request_id, str(e)
+            )
             yield format_sse({STATUS: "error", MESSAGE: str(e)}, "error")
 
     return StreamingResponse(
