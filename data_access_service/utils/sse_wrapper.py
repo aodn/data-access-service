@@ -56,7 +56,9 @@ async def sse_wrapper(
 
         try:
             # debug the sse process
-            logger.debug("SSE started the initial processing, request_id=%s", request_id)
+            logger.debug(
+                "SSE started the initial processing, request_id=%s", request_id
+            )
 
             # Send initial processing message
             yield format_sse(
