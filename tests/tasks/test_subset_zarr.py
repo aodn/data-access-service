@@ -457,7 +457,6 @@ class TestSubsetZarr(TestWithS3):
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
             # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
             with patch.object(AWSHelper, "send_email") as mock_send_email:
-                # todo: mock function validation content
                 key = "vessel_satellite_radiance_delayed_qc.zarr"
                 no_ext_key = key.replace(".zarr", "")
                 try:

@@ -171,7 +171,9 @@ class ZarrProcessor:
             # if it is a dimension, it will be added to dim_conditions for sel()
             # if it is a variable, it will be used to form a mask for where()
             for k, val_range in conditions.items():
-                self.log.info("forming condition for key %s with range %s", k, val_range)
+                self.log.info(
+                    "forming condition for key %s with range %s", k, val_range
+                )
                 if is_dim(key=k, dataset=dataset):
                     form_dim_conditions(
                         existing_conditions=dim_conditions,
