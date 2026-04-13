@@ -365,13 +365,17 @@ class TestSubsetZarr(TestWithS3):
                                 len(tif_names) > 0
                             ), f"ZIP should contain .tif files, got: {zf.namelist()}"
 
-                            # Verify TIF naming convention: {dataset}_{variable}_{YYYY-MM-DD}.tif
+                            # Verify zip structure: {variable}/{dataset}_{variable}_{date}.tif
                             dataset_base = key.replace(".zarr", "")
                             for tif_name in tif_names:
-                                assert tif_name.startswith(
+                                assert (
+                                    "/" in tif_name
+                                ), f"TIF should be in a variable subfolder, got: {tif_name}"
+                                filename = tif_name.split("/")[-1]
+                                assert filename.startswith(
                                     dataset_base
                                 ), f"TIF name should start with '{dataset_base}', got: {tif_name}"
-                                assert tif_name.endswith(
+                                assert filename.endswith(
                                     ".tif"
                                 ), f"Expected .tif extension, got: {tif_name}"
 
@@ -399,8 +403,8 @@ class TestSubsetZarr(TestWithS3):
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
     ):
-        """GeoTIFF export should raise ValueError for non-gridded datasets
-        where LATITUDE/LONGITUDE are not dimensions."""
+        """GeoTIFF export should raise ValueError for datasets without
+        gridded numeric variables (e.g. vessel radiance with TIME/WAVELENGTH dims)."""
         s3_client, _, _ = aws_clients
         config = Config.get_config()
 
@@ -427,7 +431,9 @@ class TestSubsetZarr(TestWithS3):
                         output_format="geotiff",
                     )
 
-                    with pytest.raises(ValueError, match="not gridded"):
+                    with pytest.raises(
+                        ValueError, match="No gridded numeric variables"
+                    ):
                         zarr_processor.process()
 
                 finally:
@@ -451,7 +457,6 @@ class TestSubsetZarr(TestWithS3):
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
             # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
             with patch.object(AWSHelper, "send_email") as mock_send_email:
-
                 key = "vessel_satellite_radiance_delayed_qc.zarr"
                 no_ext_key = key.replace(".zarr", "")
                 try:
@@ -501,3 +506,54 @@ class TestSubsetZarr(TestWithS3):
                 finally:
                     # Delete temp output folder as the name always same for testing
                     shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
+
+    def test_convert_ij_dims_to_latlon(self):
+        """
+        Some radar datasets use (TIME, I, J) as dims instead of (TIME, LATITUDE, LONGITUDE).
+        This test checks that we can convert them so the rest of the pipeline works.
+
+        Before:  UCUR(TIME, I, J),  LATITUDE(I, J),  LONGITUDE(I, J)
+        After:   UCUR(TIME, LATITUDE, LONGITUDE)
+        """
+        import numpy as np
+        from unittest.mock import MagicMock
+
+        # Build a fake radar-like dataset with I,J dims
+        expected_lats = np.array([-30.0, -29.0, -28.0])
+        expected_lons = np.array([110.0, 111.0, 112.0, 113.0])
+        lat_2d, lon_2d = np.meshgrid(expected_lats, expected_lons, indexing="ij")
+        original_data = np.random.rand(2, 3, 4)
+
+        ds = xarray.Dataset(
+            {
+                "UCUR": (["TIME", "I", "J"], original_data),
+                "LATITUDE": (["I", "J"], lat_2d),
+                "LONGITUDE": (["I", "J"], lon_2d),
+            },
+            coords={"TIME": [0, 1]},
+        )
+
+        # Mock the processor (we only need log and dim name lookup)
+        mock_processor = MagicMock(spec=ZarrProcessor)
+        mock_processor.log = MagicMock()
+        mock_processor._ZarrProcessor__get_dim_names.return_value = (
+            "LATITUDE",
+            "LONGITUDE",
+            "TIME",
+        )
+
+        # Run the conversion
+        converted = ZarrProcessor._ZarrProcessor__convert_ij_dims_to_latlon(
+            mock_processor, ds, "test.zarr"
+        )
+
+        # I,J should be replaced by LATITUDE/LONGITUDE
+        assert "I" not in converted.dims
+        assert "LATITUDE" in converted.dims and "LONGITUDE" in converted.dims
+
+        # Lat/lon values should be correct
+        np.testing.assert_array_equal(converted.LATITUDE.values, expected_lats)
+        np.testing.assert_array_equal(converted.LONGITUDE.values, expected_lons)
+
+        # Data should not change
+        np.testing.assert_array_equal(converted["UCUR"].values, original_data)
