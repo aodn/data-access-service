@@ -13,6 +13,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 DEFAULT_CHUNK_SIZE: int = 5000
+HEART_BEAT_INTERVAL: float = 10.0
 
 
 # Helper function to format SSE messages
@@ -67,7 +68,9 @@ async def sse_wrapper(
     :param function_args: Arguments to pass to async_function
     """
     # Processing interval for periodic messages
-    processing_interval: float = 10.0  # Send processing message every 10 seconds
+    processing_interval: float = (
+        HEART_BEAT_INTERVAL  # Send processing message every 10 seconds
+    )
     chunk_size: int = DEFAULT_CHUNK_SIZE * 2  # Number of records consume before chunks
 
     async def sse_stream():
@@ -89,7 +92,16 @@ async def sse_wrapper(
 
             # Run the data fetching as an independent asyncio task to allow heartbeat loop below to run concurrently
             # instead of being blocked waiting for the first record.
-            task = asyncio.create_task(_collect_records(async_function, function_args))
+            def collect_sync():
+                loop = asyncio.new_event_loop()
+                try:
+                    return loop.run_until_complete(
+                        _collect_records(async_function, function_args)
+                    )
+                finally:
+                    loop.close()
+
+            task = asyncio.create_task(asyncio.to_thread(collect_sync))
 
             # Heartbeat loop: runs while the data fetch task is in progress.
             # Sends a 'processing' message every processing_interval seconds.
