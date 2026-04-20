@@ -35,7 +35,7 @@ $ poetry add <pypi-dependency-name> # e.g poetry add numpy
 $ poetry remove <pypi-dependency-name> # e.g. poetry remove numpy
 ```
 
-You might want to update the `poetry.lock` file after manually modifying `pyproject.toml` with `poetry lock` command. To update all dependencies, use `poetry update` command.
+You must update the `poetry.lock` file after modifying `pyproject.toml` with `poetry lock` command and commit it, otherwise CI and Docker builds will fail. To update all dependencies, use `poetry update` command.
 
 There is a library `aodn_cloud_optimised`, which referencing direct AODN's GitHub repository as source instead of `PyPi`. It is written by PO to access
 cloud optimized data. Please do not access S3 directly and should via this library.

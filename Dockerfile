@@ -18,7 +18,9 @@ RUN apt update && \
     pip3 install virtualenv==20.28.1 && \
     pip3 install poetry && \
     poetry config virtualenvs.create false && \
-    poetry lock && \
+    # Do NOT add `poetry lock` here — that would regenerate the lock against
+    # the latest PyPI on every build. May cause version conflict, please run
+    # locally and commit.
     poetry install --no-root
 
 COPY das_site.conf  /etc/nginx/sites-available/
