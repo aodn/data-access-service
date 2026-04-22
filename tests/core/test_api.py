@@ -223,7 +223,7 @@ class TestApi(unittest.TestCase):
 
         result = api.fetch_wave_buoy_latest_date()
 
-        self.assertEqual(result, "2025-01-15")
+        self.assertEqual(result, "2025-01-15T12:30:00Z")
         api.memconn.execute.assert_called_once()
 
     def test_fetch_wave_buoy_sites(self):
@@ -250,13 +250,13 @@ class TestApi(unittest.TestCase):
         feature0 = result["features"][0]
         self.assertEqual(feature0["type"], "Feature")
         self.assertEqual(feature0["properties"]["buoy"], "Brisbane")
-        self.assertEqual(feature0["properties"]["date"], "2025-01-10")
+        self.assertEqual(feature0["properties"]["date"], "2025-01-10T08:00:00Z")
         self.assertEqual(feature0["geometry"]["type"], "Point")
         self.assertEqual(feature0["geometry"]["coordinates"], [153.03, -27.47])
 
         feature1 = result["features"][1]
         self.assertEqual(feature1["properties"]["buoy"], "Sydney")
-        self.assertEqual(feature1["properties"]["date"], "2025-01-11")
+        self.assertEqual(feature1["properties"]["date"], "2025-01-11T09:00:00Z")
         self.assertEqual(feature1["geometry"]["coordinates"], [151.21, -33.87])
 
     def test_fetch_wave_buoy_data(self):
