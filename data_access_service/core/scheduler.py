@@ -54,12 +54,12 @@ class TaskScheduler:
         """
         )
 
-    def hourly_task(self):
+    def _refresh_task(self):
         """
         Refreshes the wave buoy data table without blocking reads.
         Uses a temporary table strategy to avoid locking the main table during refresh.
         """
-        logger.info("Hourly task is running...")
+        logger.info("Refresh task is running...")
         # Refresh S3 credentials before each run so the DuckDB secret never expires
         # (ECS task role credentials are valid for ~6 hours and boto3 always returns
         # fresh ones, so calling this every 2 hours keeps the secret current)
@@ -69,7 +69,7 @@ class TaskScheduler:
 
         try:
             dataset = (
-                f"s3://{self._instance.bucket_name}/wave_buoy_realtime_nonqc.parquet"
+                f"s3://{self._instance.bucket_name}/{self.WAVE_BUOY_TABLE_NAME}.parquet"
             )
 
             # Step 1: Create temp table with new data (non-blocking for readers)
@@ -82,8 +82,8 @@ class TaskScheduler:
             )
             logger.info(f"Temporary table '{temp_table_name}' created successfully")
 
-            # Step 2: Drop old table if it exists
-            logger.info(f"Dropping old table '{target_table_name}'...")
+            # Step 2: Drop old table if it exists and rename temp table to target name (atomic operation)
+            logger.info(f"Drop old table '{target_table_name}' if it exists and rename '{temp_table_name}' to '{target_table_name}'...")
             self.memconn.execute(
                 f"""
                 BEGIN TRANSACTION;
@@ -98,9 +98,9 @@ class TaskScheduler:
                 f"COPY {target_table_name} TO '{self.wave_buoy_backup_s3_path}' (FORMAT PARQUET)"
             )
             logger.info("Backup written to S3 successfully")
-            logger.info("Hourly task completed successfully")
+            logger.info("Refresh task completed successfully")
         except Exception as e:
-            logger.error(f"Error in hourly task: {e}", exc_info=True)
+            logger.error(f"Error in refresh task: {e}", exc_info=True)
             # Clean up temp table if it exists
             try:
                 self.memconn.execute(f"DROP TABLE IF EXISTS {temp_table_name}")
@@ -108,27 +108,14 @@ class TaskScheduler:
             except Exception as cleanup_error:
                 logger.error(f"Error cleaning up temp table: {cleanup_error}")
 
-            # Fallback: restore from backup so the endpoint stays healthy
-            try:
-                self.memconn.execute(
-                    f"""
-                    CREATE OR REPLACE TABLE {target_table_name} AS
-                    SELECT * FROM read_parquet('{self.wave_buoy_backup_s3_path}')
-                    """
-                )
-                logger.info("Loaded from S3 backup successfully")
-            except Exception as backup_error:
-                logger.error(
-                    f"Failed to load from S3 backup: {backup_error}", exc_info=True
-                )
 
-    def start(self):
+    def _start(self):
         """Start the scheduler and add jobs."""
         self.scheduler.add_job(
-            self.hourly_task,
+            self._refresh_task,
             trigger=CronTrigger(hour="*/2", minute="0"),  # Every 2 hours at :00
-            id="hourly_task",
-            name="Hourly scheduled task",
+            id="refresh_task",
+            name="Wave buoy data refresh task",
             replace_existing=True,
             coalesce=True,
             misfire_grace_time=None,
@@ -138,9 +125,8 @@ class TaskScheduler:
         self.scheduler.start()
         logger.info("Task scheduler started successfully")
 
-    async def start_with_initial_run(self):
-        """Start the scheduler and run the hourly task immediately."""
-        # Pre-load from backup so the endpoint is available while the full S3 refresh runs
+    def _preload_from_backup(self):
+        """Load wave buoy data from S3 backup into DuckDB (blocking, run in executor)."""
         try:
             self.memconn.execute(
                 f"""
@@ -152,12 +138,16 @@ class TaskScheduler:
         except Exception as e:
             logger.warning(f"No S3 backup found, will rely on initial S3 fetch: {e}")
 
-        # Full refresh from main S3
-        loop = asyncio.get_event_loop()
+    async def start_with_initial_run(self):
+        """Start the scheduler and run the refresh task immediately."""
+        loop = asyncio.get_running_loop()
         with ThreadPoolExecutor() as executor:
-            await loop.run_in_executor(executor, lambda: self.hourly_task())
-        self.start()
-        logger.info("Running hourly task on startup...")
+            # Pre-load from backup so the endpoint is available while the full S3 refresh runs
+            # Both are blocking S3 reads — run in executor to avoid blocking the event loop
+            logger.info("Running refresh task on startup...")
+            await loop.run_in_executor(executor, self._preload_from_backup)
+            await loop.run_in_executor(executor, self._refresh_task)
+        self._start()
 
     def shutdown(self):
         """Shutdown the scheduler gracefully."""
