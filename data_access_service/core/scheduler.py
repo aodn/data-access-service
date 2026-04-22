@@ -83,7 +83,9 @@ class TaskScheduler:
             logger.info(f"Temporary table '{temp_table_name}' created successfully")
 
             # Step 2: Drop old table if it exists and rename temp table to target name (atomic operation)
-            logger.info(f"Drop old table '{target_table_name}' if it exists and rename '{temp_table_name}' to '{target_table_name}'...")
+            logger.info(
+                f"Drop old table '{target_table_name}' if it exists and rename '{temp_table_name}' to '{target_table_name}'..."
+            )
             self.memconn.execute(
                 f"""
                 BEGIN TRANSACTION;
@@ -107,7 +109,6 @@ class TaskScheduler:
                 logger.info(f"Cleaned up temporary table '{temp_table_name}'")
             except Exception as cleanup_error:
                 logger.error(f"Error cleaning up temp table: {cleanup_error}")
-
 
     def _start(self):
         """Start the scheduler and add jobs."""
