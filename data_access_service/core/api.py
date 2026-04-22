@@ -31,6 +31,7 @@ from data_access_service.core.constants import (
 from data_access_service.core.descriptor import Depth, Descriptor, Coordinate
 from urllib.parse import unquote_plus
 
+from data_access_service.models.CO_data_source.co_data_registory import CODataRegistry
 
 log = logging.getLogger(__name__)
 
@@ -363,7 +364,8 @@ class API(BaseAPI):
         self._cached_metadata: Dict[str, Dict[str, Descriptor]] = dict()
 
         # UUID to metadata mapper
-        self._instance = DataQuery.GetAodn()
+        # self._instance = DataQuery.GetAodn()
+        self._instance = CODataRegistry()
         self._metadata = None
         self._is_ready = False
         self.memconn = duckdb.connect(":memory:cloud_optimized")

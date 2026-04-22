@@ -5,7 +5,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from aodn_cloud_optimised import DataQuery
+from aodn_cloud_optimised.lib import DataQuery
 from data_access_service.config.config import Config
 
 logger = logging.getLogger(__name__)
