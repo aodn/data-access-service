@@ -16,3 +16,4 @@ class Parameters(Enum):
     COLLECTION_TITLE = "collection_title"
     FULL_METADATA_LINK = "full_metadata_link"
     SUGGESTED_CITATION = "suggested_citation"
+    OUTPUT_FORMAT = "output_format"

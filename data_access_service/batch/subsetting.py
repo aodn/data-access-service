@@ -192,6 +192,7 @@ def subset_zarr(api: API, job_id, parameters):
     collection_title = parameters.get(Parameters.COLLECTION_TITLE.value)
     full_metadata_link = parameters.get(Parameters.FULL_METADATA_LINK.value)
     suggested_citation = parameters.get(Parameters.SUGGESTED_CITATION.value)
+    output_format = parameters.get(Parameters.OUTPUT_FORMAT.value, "netcdf")
 
     zarr_processor = ZarrProcessor(
         api=api,
@@ -205,6 +206,7 @@ def subset_zarr(api: API, job_id, parameters):
         collection_title=collection_title,
         full_metadata_link=full_metadata_link,
         suggested_citation=suggested_citation,
+        output_format=output_format,
     )
 
     zarr_processor.process()

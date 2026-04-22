@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Optional, List
+import uuid as uuid_module
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import Response
@@ -344,6 +345,11 @@ async def get_data(
     f: Optional[str] = Query(default="json"),
 ):
     api_instance = get_api_instance(request)
+
+    # for debug purpose: track request with an assigned id which is ranomly generated
+    request_id = str(uuid_module.uuid4())
+    logger.debug("Receiving request: %s", request_id)
+
     logger.info(
         """
         Request details:
@@ -368,7 +374,10 @@ async def get_data(
     compress = "gzip" in request.headers.get("Accept-Encoding", "")
 
     if sse:
+        # for debug purpose, we need the request id as well
+        logger.debug("SSE request started, request_id=%s", request_id)
         return await sse_wrapper(
+            request_id,
             fetch_data,
             api_instance,
             uuid,
@@ -380,6 +389,8 @@ async def get_data(
             columns,
         )
     else:
+        # for debug purpose, we need the request id as well
+        logger.debug("Not a SSE request, request_id=%s", request_id)
         result = fetch_data(
             api_instance,
             uuid,
