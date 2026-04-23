@@ -38,6 +38,9 @@ class CsiroDataSrc(AbstractDataSrc):
     def get_dataset(self, dataset_name_with_ext: str) -> DataSource:
         pass
 
+    def get_name(self) -> str:
+        return self.name
+
     def __get_csiro_co_dataset_catalog(self) -> dict:
         single_metadata = self.__data_src.get_dataset(
             self.THE_ONLY_DATASET_NAME

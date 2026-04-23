@@ -16,3 +16,7 @@ class AbstractDataSrc(ABC):
     @abstractmethod
     def get_dataset(self, dataset_name_with_ext: str) -> DataSource:
         pass
+
+    @abstractmethod
+    def get_name(self) -> str:
+        pass

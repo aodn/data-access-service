@@ -14,6 +14,9 @@ class AodnDataSrc(AbstractDataSrc):
         self.__metadata = self.__data_src.get_metadata()
         self.__metadata_catalog = self.__metadata.catalog
 
+    def get_name(self) -> str:
+        return self.name
+
     def get_metadata(self) -> Metadata:
         return self.__metadata
 
