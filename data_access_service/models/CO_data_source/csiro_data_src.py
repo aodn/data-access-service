@@ -2,7 +2,10 @@ import logging
 import requests
 from aodn_cloud_optimised.lib.DataQuery import Metadata, DataSource, GetAodn
 
-from data_access_service.models.CO_data_source.abstract_data_src import AbstractDataSrc
+from data_access_service.models.CO_data_source.abstract_data_src import (
+    AbstractDataSrc,
+    CSIRO,
+)
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +26,7 @@ class CsiroDataSrc(AbstractDataSrc):
     )
 
     def __init__(self):
-        self.name = "csiro"
+        self.name = CSIRO
         self.__data_src = self.__get_csiro_co_data_src()
         self.__metadata_catalog = self.__get_csiro_co_dataset_catalog()
 
@@ -36,10 +39,13 @@ class CsiroDataSrc(AbstractDataSrc):
         return self.__metadata_catalog
 
     def get_dataset(self, dataset_name_with_ext: str) -> DataSource:
-        pass
+        return super().get_dataset(dataset_name_with_ext=dataset_name_with_ext)
 
     def get_name(self) -> str:
         return self.name
+
+    def get_data_src(self) -> GetAodn:
+        return self.__data_src
 
     def __get_csiro_co_dataset_catalog(self) -> dict:
         single_metadata = self.__data_src.get_dataset(
