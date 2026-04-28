@@ -49,7 +49,7 @@ class TaskScheduler:
                 SECRET '{creds.secret_key}',
                 SESSION_TOKEN '{creds.token or ""}',
                 REGION '{region}',
-                SCOPE 's3://{self.wave_buoy_backup_bucket}'
+                SCOPE 's3://{self.wave_buoy_backup_bucket},s3://{self._instance.bucket_name}'
             )
         """
         )
