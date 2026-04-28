@@ -15,6 +15,10 @@ from data_access_service.tasks.generate_dataset import (
 from tests.core.test_with_s3 import TestWithS3, REGION
 
 
+def _request(subset_request_factory, uuid: str, keys: list[str]):
+    return subset_request_factory(uuid=uuid, keys=keys, multi_polygon=None)
+
+
 class TestKeyMapping(TestWithS3):
 
     @pytest.fixture(scope="function")
@@ -40,6 +44,7 @@ class TestKeyMapping(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
     ):
         s3_client, _, _ = aws_clients
         config = Config.get_config()
@@ -58,11 +63,13 @@ class TestKeyMapping(TestWithS3):
                         job_id_of_init="888",
                         job_index="1",
                         intermediate_output_folder=config.get_temp_folder("888"),
-                        uuid="4402cb50-e20a-44ee-93e6-4728259250d2",
-                        keys=["argo.parquet"],
+                        subset_request=_request(
+                            subset_request_factory,
+                            uuid="4402cb50-e20a-44ee-93e6-4728259250d2",
+                            keys=["argo.parquet"],
+                        ),
                         start_date=pd.Timestamp("2000-01-01 00:00:00"),
                         end_date=pd.Timestamp("2013-01-01 23:59:59.999999999"),
-                        multi_polygon=None,
                     )
                     names = helper.list_s3_folders(
                         config.get_csv_bucket_name(),
@@ -86,6 +93,7 @@ class TestKeyMapping(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
     ):
         """
         this dataset has a special TIME dimension
@@ -109,11 +117,13 @@ class TestKeyMapping(TestWithS3):
                         job_id_of_init="888",
                         job_index="1",
                         intermediate_output_folder=config.get_temp_folder("888"),
-                        uuid="2d496463-600c-465a-84a1-8a4ab76bd505",
-                        keys=[dname],
+                        subset_request=_request(
+                            subset_request_factory,
+                            uuid="2d496463-600c-465a-84a1-8a4ab76bd505",
+                            keys=[dname],
+                        ),
                         start_date=pd.Timestamp("2015-01-31 00:00:00.000000000"),
                         end_date=pd.Timestamp("2015-02-01 23:59:59.999999999"),
-                        multi_polygon=None,
                     )
                     names = helper.list_s3_folders(
                         config.get_csv_bucket_name(),
