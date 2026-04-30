@@ -69,7 +69,7 @@ class CsiroDataSrc(AbstractDataSrc):
         log.info(
             "Requesting temporary access keys for CSIRO cloud optimized dataset..."
         )
-        response = requests.get(self.CSIRO_KEY_REQUEST_URL, timeout=10)
+        response = requests.get(self.CSIRO_KEY_REQUEST_URL, timeout=30)
         log.info(
             "Received response from CSIRO for temporary access keys, status code: %s",
             response.status_code,

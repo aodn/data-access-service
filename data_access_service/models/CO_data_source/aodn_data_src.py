@@ -31,9 +31,3 @@ class AodnDataSrc(AbstractDataSrc):
 
     def get_data_src(self) -> GetAodn:
         return self.__data_src
-
-
-if __name__ == "__main__":
-    aodn = AodnDataSrc()
-    catalog = aodn.get_metadata_catalog()
-    pprint(catalog)

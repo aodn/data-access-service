@@ -143,7 +143,7 @@ class ZarrProcessor:
 
     def __get_zarr_dataset_for_(self, key: str) -> xarray.Dataset | None:
 
-        zarr_store = self.api._aodn_data_src.get_dataset(key).zarr_store
+        zarr_store = self.api._instance.get_dataset(key).zarr_store
         if "I" in zarr_store.dims and "J" in zarr_store.dims:
             zarr_store = self.__convert_ij_dims_to_latlon(zarr_store, key)
 
