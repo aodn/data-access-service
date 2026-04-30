@@ -431,6 +431,8 @@ class TestSubsetZarr(TestWithS3):
                         subset_request=subset_request_factory(
                             uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
                             keys=[key],
+                            start_date="07-2011",
+                            end_date="07-2011",
                         ),
                     )
 

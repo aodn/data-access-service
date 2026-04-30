@@ -19,9 +19,6 @@ from data_access_service.utils.date_time_utils import (
     split_date_range,
     parse_date,
 )
-from data_access_service.utils.email_templates.download_email import (
-    get_download_email_html_body,
-)
 
 
 # The only purpose is to create suitable number of child job, we can fine tune the value
