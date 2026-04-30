@@ -16,10 +16,6 @@ from tests.conftest import subset_request_factory
 from tests.core.test_with_s3 import TestWithS3, REGION
 
 
-def _request(subset_request_factory, uuid: str, keys: list[str]):
-    return subset_request_factory(uuid=uuid, keys=keys, multi_polygon=None)
-
-
 class TestGenerateZarrFile(TestWithS3):
 
     @pytest.fixture(scope="function")
@@ -70,8 +66,7 @@ class TestGenerateZarrFile(TestWithS3):
                         job_id_of_init=INIT_JOB_ID,
                         job_index="10",
                         intermediate_output_folder=config.get_temp_folder(INIT_JOB_ID),
-                        subset_request=_request(
-                            subset_request_factory,
+                        subset_request=subset_request_factory(
                             uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
                             keys=["*"],
                         ),
@@ -128,8 +123,7 @@ class TestGenerateZarrFile(TestWithS3):
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
             # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
             with patch.object(AWSHelper, "send_email") as mock_send_email:
-                req = _request(
-                    subset_request_factory,
+                req = subset_request_factory(
                     uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
                     keys=["*"],
                 )
@@ -214,11 +208,7 @@ class TestGenerateZarrFile(TestWithS3):
                         job_id_of_init="888",
                         job_index="1",
                         intermediate_output_folder=config.get_temp_folder("888"),
-                        subset_request=_request(
-                            subset_request_factory,
-                            uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
-                            keys=["radar_CoffsHarbour_wind_delayed_qc.zarr"],
-                        ),
+                        subset_request=subset_request_factory(),
                         start_date=pd.Timestamp("2012-03-01 00:00:00"),
                         end_date=pd.Timestamp("2012-04-30 23:59:59.999999999"),
                     )

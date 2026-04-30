@@ -11,42 +11,8 @@ from aodn_cloud_optimised.lib import DataQuery
 
 from data_access_service import Config, API
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.batch.subsetting_helper import get_subset_request
-from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.tasks.subset_zarr import ZarrProcessor
 from tests.core.test_with_s3 import TestWithS3, REGION
-
-
-_DEFAULT_MULTI_POLYGON = '{"type":"MultiPolygon","coordinates":[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}'
-_DEFAULT_CITATION = "Cite data as: Mazor, T., Watermeyer, K., Hobley, T., Grinter, V., Holden, R., MacDonald, K. and Ferns, L. (2023). Statewide Marine Habitat Map."
-
-
-def _build_request(
-    uuid: str,
-    keys: list[str],
-    start_date_str: str = "03-2012",
-    end_date_str: str = "04-2012",
-    multi_polygon: str = _DEFAULT_MULTI_POLYGON,
-    recipient: str = "example@test.com",
-    collection_title: str = "Test Ocean Data Collection",
-    full_metadata_link: str = "https://metadata.imas.utas.edu.au/.../test-uuid-123",
-    suggested_citation: str = _DEFAULT_CITATION,
-    output_format: str = "netcdf",
-) -> SubsetRequest:
-    return get_subset_request(
-        {
-            "uuid": uuid,
-            "key": ",".join(keys),
-            "start_date": start_date_str,
-            "end_date": end_date_str,
-            "multi_polygon": multi_polygon,
-            "recipient": recipient,
-            "collection_title": collection_title,
-            "full_metadata_link": full_metadata_link,
-            "suggested_citation": suggested_citation,
-            "output_format": output_format,
-        }
-    )
 
 
 class TestSubsetZarr(TestWithS3):
@@ -67,6 +33,7 @@ class TestSubsetZarr(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
     ):
         s3_client, _, _ = aws_clients
         config = Config.get_config()
@@ -85,10 +52,7 @@ class TestSubsetZarr(TestWithS3):
                     zarr_processor = ZarrProcessor(
                         api,
                         job_id="job_id_888",
-                        subset_request=_build_request(
-                            uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
-                            keys=[key],
-                        ),
+                        subset_request=subset_request_factory(),
                     )
 
                     zarr_processor.process()
@@ -136,6 +100,7 @@ class TestSubsetZarr(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
     ):
         s3_client, _, _ = aws_clients
         config = Config.get_config()
@@ -154,10 +119,7 @@ class TestSubsetZarr(TestWithS3):
                     zarr_processor = ZarrProcessor(
                         api,
                         job_id="job_id_888",
-                        subset_request=_build_request(
-                            uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
-                            keys=[key],
-                        ),
+                        subset_request=subset_request_factory(),
                     )
 
                     zarr_processor.process()
@@ -213,14 +175,11 @@ class TestSubsetZarr(TestWithS3):
 
                 key = "radar_CoffsHarbour_wind_delayed_qc.zarr"
                 no_ext_key = key.replace(".zarr", "")
-                subset_request = subset_request_factory()
                 try:
                     zarr_processor = ZarrProcessor(
                         api,
                         job_id="job_id_888",
-                        subset_request=_build_request(
-                            uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
-                            keys=[key],
+                        subset_request=subset_request_factory(
                             multi_polygon='{"type":"MultiPolygon","coordinates":[[[[201.73699345083196,-47.61820213929325],[221.7761315086342,-47.61820213929325],[221.7761315086342,-38.939085797521166],[201.73699345083196,-38.939085797521166],[201.73699345083196,-47.61820213929325]]],[[[157.7915152538971,-32.07902332926048],[174.31501505594503,-32.07902332926048],[174.31501505594503,-15.428394281587785],[157.7915152538971,-15.428394281587785],[157.7915152538971,-32.07902332926048]]]]}',
                         ),
                     )
@@ -257,6 +216,7 @@ class TestSubsetZarr(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
     ):
         s3_client, _, _ = aws_clients
         config = Config.get_config()
@@ -275,9 +235,7 @@ class TestSubsetZarr(TestWithS3):
                     zarr_processor = ZarrProcessor(
                         api,
                         job_id="job_id_888",
-                        subset_request=_build_request(
-                            uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
-                            keys=[key],
+                        subset_request=subset_request_factory(
                             multi_polygon="non-specified",
                         ),
                     )
@@ -315,6 +273,7 @@ class TestSubsetZarr(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
     ):
         """GeoTIFF export should produce a single ZIP with all TIF files.
         TIF naming follows {dataset}_{variable}_{YYYY-MM-DD}.tif convention."""
@@ -333,10 +292,7 @@ class TestSubsetZarr(TestWithS3):
                     zarr_processor = ZarrProcessor(
                         api,
                         job_id="job_id_888",
-                        subset_request=_build_request(
-                            uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
-                            keys=[key],
-                            suggested_citation="Cite data as: Test Citation.",
+                        subset_request=subset_request_factory(
                             output_format="geotiff",
                         ),
                     )
@@ -414,6 +370,7 @@ class TestSubsetZarr(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
     ):
         """GeoTIFF export should raise ValueError for datasets without
         gridded numeric variables (e.g. vessel radiance with TIME/WAVELENGTH dims)."""
@@ -431,12 +388,9 @@ class TestSubsetZarr(TestWithS3):
                     zarr_processor = ZarrProcessor(
                         api,
                         job_id="job_id_888",
-                        subset_request=_build_request(
+                        subset_request=subset_request_factory(
                             uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
                             keys=[key],
-                            start_date_str="07-2011",
-                            end_date_str="07-2011",
-                            suggested_citation="Cite data as: Test Citation.",
                             output_format="geotiff",
                         ),
                     )
@@ -456,6 +410,7 @@ class TestSubsetZarr(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
     ):
         s3_client, _, _ = aws_clients
         config = Config.get_config()
@@ -473,11 +428,9 @@ class TestSubsetZarr(TestWithS3):
                     zarr_processor = ZarrProcessor(
                         api,
                         job_id="job_id_888",
-                        subset_request=_build_request(
+                        subset_request=subset_request_factory(
                             uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
                             keys=[key],
-                            start_date_str="07-2011",
-                            end_date_str="07-2011",
                         ),
                     )
 

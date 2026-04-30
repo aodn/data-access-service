@@ -2,9 +2,84 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 import pandas as pd
+import pytest
 
-from data_access_service.batch.subsetting_helper import trim_date_range_for_keys
+from data_access_service.batch.subsetting_helper import (
+    get_subset_request,
+    trim_date_range_for_keys,
+)
 from data_access_service.utils.date_time_utils import supply_day_with_nano_precision
+
+
+_GLOBAL_POLYGON = (
+    '{"type":"MultiPolygon","coordinates":'
+    "[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}"
+)
+
+_VALID_PARAMETERS = {
+    "uuid": "test-uuid",
+    "key": "file_a.zarr",
+    "start_date": "2024-01-01",
+    "end_date": "2024-12-31",
+    "recipient": "test@example.com",
+    "multi_polygon": _GLOBAL_POLYGON,
+}
+
+
+class TestGetSubsetRequest:
+    def test_comma_separated_key_is_split(self):
+        req = get_subset_request({**_VALID_PARAMETERS, "key": "a.zarr,b.zarr,c.zarr"})
+        assert req.keys == ["a.zarr", "b.zarr", "c.zarr"]
+
+    def test_whitespace_around_keys_is_stripped(self):
+        req = get_subset_request(
+            {**_VALID_PARAMETERS, "key": "a.zarr, b.zarr , c.zarr"}
+        )
+        assert req.keys == ["a.zarr", "b.zarr", "c.zarr"]
+
+    def test_missing_key_defaults_to_wildcard(self):
+        params = {**_VALID_PARAMETERS}
+        del params["key"]
+        req = get_subset_request(params)
+        assert req.keys == ["*"]
+
+    def test_multi_polygon_is_parsed_into_bboxes(self):
+        req = get_subset_request(_VALID_PARAMETERS)
+        assert len(req.bboxes) == 1
+        bbox = req.bboxes[0]
+        assert (bbox.min_lat, bbox.max_lat) == (-90, 90)
+        assert (bbox.min_lon, bbox.max_lon) == (-180, 180)
+
+    def test_non_specified_multi_polygon_yields_global_bbox(self):
+        req = get_subset_request(
+            {**_VALID_PARAMETERS, "multi_polygon": "non-specified"}
+        )
+        assert len(req.bboxes) == 1
+        bbox = req.bboxes[0]
+        assert (bbox.min_lat, bbox.max_lat) == (-90, 90)
+        assert (bbox.min_lon, bbox.max_lon) == (-180, 180)
+
+    def test_optional_fields_default_to_none(self):
+        req = get_subset_request(_VALID_PARAMETERS)
+        assert req.collection_title is None
+        assert req.full_metadata_link is None
+        assert req.suggested_citation is None
+
+    def test_output_format_defaults_to_netcdf(self):
+        req = get_subset_request(_VALID_PARAMETERS)
+        assert req.output_format == "netcdf"
+
+    def test_explicit_output_format_is_respected(self):
+        req = get_subset_request({**_VALID_PARAMETERS, "output_format": "geotiff"})
+        assert req.output_format == "geotiff"
+
+    def test_invalid_output_format_is_rejected_via_validation(self):
+        with pytest.raises(ValueError, match="output_format"):
+            get_subset_request({**_VALID_PARAMETERS, "output_format": "parquet"})
+
+    def test_invalid_recipient_is_rejected_via_validation(self):
+        with pytest.raises(ValueError, match="recipient"):
+            get_subset_request({**_VALID_PARAMETERS, "recipient": "not-an-email"})
 
 
 class TestTrimDateRangeForKeys(unittest.TestCase):

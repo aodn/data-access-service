@@ -15,10 +15,6 @@ from data_access_service.tasks.generate_dataset import (
 from tests.core.test_with_s3 import TestWithS3, REGION
 
 
-def _request(subset_request_factory, uuid: str, keys: list[str]):
-    return subset_request_factory(uuid=uuid, keys=keys, multi_polygon=None)
-
-
 class TestKeyMapping(TestWithS3):
 
     @pytest.fixture(scope="function")
@@ -63,8 +59,7 @@ class TestKeyMapping(TestWithS3):
                         job_id_of_init="888",
                         job_index="1",
                         intermediate_output_folder=config.get_temp_folder("888"),
-                        subset_request=_request(
-                            subset_request_factory,
+                        subset_request=subset_request_factory(
                             uuid="4402cb50-e20a-44ee-93e6-4728259250d2",
                             keys=["argo.parquet"],
                         ),
@@ -117,8 +112,7 @@ class TestKeyMapping(TestWithS3):
                         job_id_of_init="888",
                         job_index="1",
                         intermediate_output_folder=config.get_temp_folder("888"),
-                        subset_request=_request(
-                            subset_request_factory,
+                        subset_request=subset_request_factory(
                             uuid="2d496463-600c-465a-84a1-8a4ab76bd505",
                             keys=[dname],
                         ),
