@@ -464,6 +464,7 @@ class API(BaseAPI):
         }
 
         for _, row in waveBuoyDataQueryResult.iterrows():
+            # make it milliseconds since epoch, compatible with Highcharts, the time is in UTC because the data source is in UTC, so we can just use timestamp without timezone conversion
             time_sec = int(row["TIME"].timestamp() * 1000)
             if pd.notna(row["SSWMD"]):
                 feature["properties"]["SSWMD"].append([time_sec, row["SSWMD"]])
@@ -484,8 +485,8 @@ class API(BaseAPI):
             MAX(TIME) AS TIME
             FROM wave_buoy_realtime_nonqc"""
         ).df()
-        DATE_FORMAT = "%Y-%m-%d"
-        return result["TIME"].item().strftime(DATE_FORMAT)
+        # DuckDB return pandas Timestamp which is timezone-naive like 2026-04-21 23:25:00, we need to convert it to ISO format with Z. The time is in UTC because the data source is in UTC, so we can just add Z at the end to indicate it is UTC time.
+        return result["TIME"].item().isoformat() + "Z"
 
     def fetch_wave_buoy_sites(self, start_date: str, end_date: str):
         result = self.memconn.execute(
@@ -502,13 +503,13 @@ class API(BaseAPI):
             "type": "FeatureCollection",
             "features": [],
         }
-        DATE_FORMAT = "%Y-%m-%d"
         for _, row in result.iterrows():
             feature = {
                 "type": "Feature",
                 "properties": {
                     "buoy": row["site_name"],
-                    "date": row["TIME"].strftime(DATE_FORMAT),
+                    # DuckDB return pandas Timestamp which is timezone-naive like 2026-04-21 23:25:00, we need to convert it to ISO format with Z. The time is in UTC because the data source is in UTC, so we can just add Z at the end to indicate it is UTC time.
+                    "date": row["TIME"].isoformat() + "Z",
                 },
                 "geometry": {
                     "type": "Point",

@@ -1,5 +1,6 @@
 import json
 import time
+import asyncio
 from asyncio import CancelledError
 from typing import AsyncGenerator, Callable, Generator, Any
 
@@ -12,6 +13,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 DEFAULT_CHUNK_SIZE: int = 5000
+HEART_BEAT_INTERVAL: float = 10.0
 
 
 # Helper function to format SSE messages
@@ -27,33 +29,51 @@ def split_list(lst, chunk_size=DEFAULT_CHUNK_SIZE) -> Generator[Any, Any, None]:
     return (lst[i : i + chunk_size] for i in range(0, len(lst), chunk_size))
 
 
+async def _collect_records(
+    async_function: Callable[..., AsyncGenerator[dict, None]],
+    function_args: tuple,
+) -> list:
+    """
+    Collect all records from the async generator into a list.
+    This allows the data fetching to run as an independent asyncio task,
+    so a heartbeat loop can run concurrently while data is being fetched.
+    """
+    result = []
+    async for record in async_function(*function_args):
+        result.append(record)
+    return result
+
+
 async def sse_wrapper(
     request_id: str,
     async_function: Callable[..., AsyncGenerator[dict, None]],
     *function_args,
 ):
     """
-    SSE Wrapper function with periodic processing messages, it accepts a function of return type AsyncGenerator[dict, None]
-    which is the function that you want to execute and generate result with yield (Generator) return, this help to
-    reduce the memory use (aka avoid big list)
+    SSE Wrapper function that streams results from an async generator over SSE.
 
-    Then this wrapper just send processing message out via SSE when the function call completed, it attached
-    the result to the last SSE message and terminate connection. So any function can warp with
-    this function to get SSE support
+    Key behavior:
+    - Sends an initial 'processing' message immediately on connection.
+    - Runs the data fetching function as an independent asyncio task.
+    - While the task is running, sends periodic heartbeat messages to keep
+      the connection alive. This prevents ALB / reverse proxies from closing
+      the connection during long-running data fetches (> 30s) before the
+      first data record is produced.
+    - Once the task completes, streams the collected records in chunks.
+    - Sends a final chunk with '/end' suffix so the caller knows all data
+      has been delivered.
 
-    :param request_id: for debug purpose to track request
-    :param async_function:
-    :param function_args:
-    :return:
+    :param request_id: Unique ID for debug tracing
+    :param async_function: Async generator function that produces data records
+    :param function_args: Arguments to pass to async_function
     """
+    # Processing interval for periodic messages
+    processing_interval: float = (
+        HEART_BEAT_INTERVAL  # Send processing message every 10 seconds
+    )
+    chunk_size: int = DEFAULT_CHUNK_SIZE * 2  # Number of records consume before chunks
 
     async def sse_stream():
-        # Processing interval for periodic messages
-        processing_interval: float = 20.0  # Send processing message every 20 seconds
-        chunk_size: int = (
-            DEFAULT_CHUNK_SIZE * 2
-        )  # Number of records consume before chunks
-
         try:
             # debug the sse process
             logger.debug(
@@ -69,51 +89,74 @@ async def sse_wrapper(
                 },
                 "processing",
             )
-            start_time = time.time()
 
-            # Initialize chunk buffer
+            # Run the data fetching as an independent asyncio task to allow heartbeat loop below to run concurrently
+            # instead of being blocked waiting for the first record.
+            def collect_sync():
+                loop = asyncio.new_event_loop()
+                try:
+                    return loop.run_until_complete(
+                        _collect_records(async_function, function_args)
+                    )
+                finally:
+                    loop.close()
+
+            task = asyncio.create_task(asyncio.to_thread(collect_sync))
+
+            # Heartbeat loop: runs while the data fetch task is in progress.
+            # Sends a 'processing' message every processing_interval seconds.
+            # This keeps the SSE connection alive through long data fetch operations
+            # and prevents intermediate proxies from timing out the connection.
+            last_sent_sse = time.time()
+            while not task.done():
+                if time.time() - last_sent_sse >= processing_interval:
+                    yield format_sse(
+                        {
+                            STATUS: "processing",
+                            MESSAGE: "Still processing...",
+                            "request_id": request_id,
+                        },
+                        "processing",
+                    )
+                    logger.debug("SSE heartbeat sent, request_id=%s", request_id)
+                    last_sent_sse = time.time()
+                # Small sleep to prevent busy-waiting while still checking task completion frequently enough.
+                await asyncio.sleep(0.1)
+
+            # Task is done — retrieve the result.
+            # task.result() will re-raise any exception that occurred inside the task.
+            all_records = task.result()
+
+            # Stream collected records in chunks
             chunk = []
             chunk_count = 0
-            # Iterate over the async generator
-            async for record in async_function(*function_args):
-                if record is not None:
-                    chunk.append(record)
 
-                    # When chunk reaches chunk_size, split and yield
-                    if len(chunk) >= chunk_size:
-                        chunks = split_list(chunk, chunk_size)
-                        for i, small_chunk in enumerate(chunks):
-                            chunk_count += 1
-                            yield format_sse(
-                                {
-                                    STATUS: "completed",
-                                    MESSAGE: f"chunk {chunk_count}",
-                                    DATA: small_chunk,
-                                },
-                                "result",
-                            )
-                        chunk = []  # Reset chunk
-
-                    # Send periodic processing message
-                    if time.time() - start_time >= processing_interval:
-                        yield format_sse(
-                            {
-                                STATUS: "processing",
-                                MESSAGE: "Still processing...",
-                                "request_id": request_id,
-                            },
-                            "processing",
-                        )
-                        logger.debug("SSE still processing, request_id=%s", request_id)
-                        start_time = time.time()
-                # The generator might yield None to indicate no more data so we break the loop
-                else:
+            for record in all_records:
+                # None signals no more data from the generator
+                if record is None:
                     break
 
-            # Yield any remaining records
+                chunk.append(record)
+
+                # When the chunk buffer is full, flush it as an SSE event
+                if len(chunk) >= chunk_size:
+                    for small_chunk in split_list(chunk, chunk_size):
+                        chunk_count += 1
+                        yield format_sse(
+                            {
+                                STATUS: "completed",
+                                MESSAGE: f"chunk {chunk_count}",
+                                DATA: small_chunk,
+                            },
+                            "result",
+                        )
+                    chunk = []
+
+            # Flush any remaining records in the buffer.
+            # The '/end' suffix in the message tells the caller that all data
+            # has been sent and the stream is complete.
             if chunk:
-                chunks = split_list(chunk, chunk_size)
-                for i, small_chunk in enumerate(chunks):
+                for small_chunk in split_list(chunk, chunk_size):
                     chunk_count += 1
                     yield format_sse(
                         {
@@ -133,7 +176,8 @@ async def sse_wrapper(
                     "result",
                 )
             logger.debug("SSE request completed, request_id=%s", request_id)
-        except CancelledError as ge:
+
+        except CancelledError:
             logger.debug("SSE request cancelled, request_id=%s", request_id)
             raise
 
