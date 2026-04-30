@@ -55,6 +55,11 @@ class CsiroDataSrc(AbstractDataSrc):
             raise Exception(
                 f"Unexpected metadata format for CSIRO dataset {self.THE_ONLY_DATASET_NAME}: {single_metadata}"
             )
+
+        #  hardcode uuid until csiro add uuid into their global attributes in parquet
+        # if single_metadata.get("global_attributes") is not None:
+        #     if single_metadata["global_attributes"].get("metadata_uuid") is None:
+        #         single_metadata["global_attributes"]["metadata_uuid"] = "154a59da-b88a-4231-97df-c0407a6f0ec4"
         return {self.THE_ONLY_DATASET_NAME: single_metadata}
 
     def __get_csiro_co_data_src(self) -> GetAodn:
