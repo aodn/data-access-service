@@ -1,7 +1,13 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
+import pandas as pd
+
 from data_access_service.models.bounding_box import BoundingBox
+
+
+DEFAULT_DATE = "non-specified"
+SUPPORTED_OUTPUT_FORMATS = frozenset({"netcdf", "geotiff"})
 
 
 @dataclass(frozen=True)
@@ -17,8 +23,8 @@ class SubsetRequest:
     keys: list[str]  # file names within the dataset; ["*"] means "all files"
 
     # --- time window ---
-    start_date: str  # "YYYY-MM-DD" / "MM-YYYY" / "non-specified" for open-start
-    end_date: str  # same formats; "non-specified" for open-end
+    start_date: str  # "YYYY-MM-DD" / "MM-YYYY" / DEFAULT_DATE to use default
+    end_date: str  # same formats; DEFAULT_DATE to use default
 
     # --- where to send the result ---
     recipient: str  # email address
@@ -38,3 +44,43 @@ class SubsetRequest:
 
     # --- output preferences ---
     output_format: str = "netcdf"  # "netcdf" or "geotiff"
+
+    def __post_init__(self) -> None:
+        self._validate()
+
+    def _validate(self) -> None:
+        if not self.uuid:
+            raise ValueError("uuid must be a non-empty string")
+        if not self.keys:
+            raise ValueError("keys must be a non-empty list")
+        if "@" not in (self.recipient or ""):
+            raise ValueError(
+                f"recipient must be a valid email address, got {self.recipient!r}"
+            )
+        if self.output_format not in SUPPORTED_OUTPUT_FORMATS:
+            raise ValueError(
+                f"output_format must be one of {sorted(SUPPORTED_OUTPUT_FORMATS)}, "
+                f"got {self.output_format!r}"
+            )
+
+        start = self._parse_date_or_default(self.start_date, field_name="start_date")
+        end = self._parse_date_or_default(self.end_date, field_name="end_date")
+        if start is not None and end is not None and start > end:
+            raise ValueError(
+                f"start_date ({self.start_date}) must be on or before "
+                f"end_date ({self.end_date})"
+            )
+
+    @staticmethod
+    def _parse_date_or_default(
+        value: str, *, field_name: str
+    ) -> Optional[pd.Timestamp]:
+        if value == DEFAULT_DATE:
+            return None
+        try:
+            return pd.Timestamp(value)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                f"{field_name} must be a parseable date or "
+                f"{DEFAULT_DATE!r}, got {value!r}"
+            ) from exc

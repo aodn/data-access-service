@@ -10,7 +10,7 @@ from data_access_service.batch.subsetting_helper import (
     get_subset_request,
 )
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.models.subset_request import SubsetRequest
+from data_access_service.models.subset_request import DEFAULT_DATE, SubsetRequest
 from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.tasks.generate_dataset import process_data_files
 from data_access_service.tasks.subset_zarr import ZarrProcessor
@@ -36,9 +36,9 @@ def init(api: API, job_id_of_init, parameters):
     # Users may not specify start date and end date
     start_date_str = request.start_date
     end_date_str = request.end_date
-    if start_date_str == "non-specified":
+    if start_date_str == DEFAULT_DATE:
         start_date_str = "1970-01-01"
-    if end_date_str == "non-specified":
+    if end_date_str == DEFAULT_DATE:
         end_date_str = pandas.Timestamp.today().strftime("%Y-%m-%d")
     if start_date_str != request.start_date or end_date_str != request.end_date:
         request = replace(request, start_date=start_date_str, end_date=end_date_str)

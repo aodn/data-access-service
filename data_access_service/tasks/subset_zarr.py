@@ -44,10 +44,7 @@ class ZarrProcessor:
         self.api = api
         self.config = Config.get_config()
         self.log = init_log(self.config)
-        self.output_format = subset_request.output_format
         self.job_id = job_id
-        self.uuid = subset_request.uuid
-        self.recipient = subset_request.recipient
         self.subset_request = subset_request
 
         start_date, end_date = supply_day_with_nano_precision(
@@ -56,14 +53,14 @@ class ZarrProcessor:
         )
 
         if "*" in subset_request.keys:
-            md = self.api.get_mapped_meta_data(self.uuid)
+            md = self.api.get_mapped_meta_data(subset_request.uuid)
             self.keys = list(md.keys())
         else:
             self.keys = subset_request.keys
 
         trimmed_start_date, trimmed_end_date = trim_date_range_for_keys(
             api=api,
-            uuid=self.uuid,
+            uuid=subset_request.uuid,
             keys=self.keys,
             requested_start_date=start_date,
             requested_end_date=end_date,
@@ -71,12 +68,12 @@ class ZarrProcessor:
         if trimmed_start_date is None or trimmed_end_date is None:
             # requested date range does not overlap with data available
             text_body = (
-                f"No data available for your subset request for dataset {self.uuid} with keys {self.keys} "
+                f"No data available for your subset request for dataset {subset_request.uuid} with keys {self.keys} "
                 f"and date range from {subset_request.start_date} to {subset_request.end_date}."
                 f"and selected area is {subset_request.multi_polygon}."
             )
             AWSHelper().send_email(
-                recipient=self.recipient,
+                recipient=subset_request.recipient,
                 subject="No Data Available for Your Subset Request",
                 text_body=text_body,
             )
@@ -88,6 +85,19 @@ class ZarrProcessor:
             multi_polygon=subset_request.multi_polygon
         )
         self.bboxes = self.multi_polygon.bboxes
+
+    # Read-through views onto subset_request — single source of truth, no drift.
+    @property
+    def uuid(self) -> str:
+        return self.subset_request.uuid
+
+    @property
+    def recipient(self) -> str:
+        return self.subset_request.recipient
+
+    @property
+    def output_format(self) -> str:
+        return self.subset_request.output_format
 
     def process(self):
         self.log.info(

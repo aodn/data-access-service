@@ -10,7 +10,7 @@ INIT_PARAMETERS = {
     Parameters.START_DATE.value: "02-2010",
     Parameters.END_DATE.value: "04-2011",
     Parameters.MULTI_POLYGON.value: '{"type":"MultiPolygon","coordinates":[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}',
-    Parameters.RECIPIENT.value: "test-recipient",
+    Parameters.RECIPIENT.value: "test-recipient@example.com",
 }
 
 PREPARATION_PARAMETERS = {

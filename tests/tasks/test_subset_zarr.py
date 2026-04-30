@@ -27,7 +27,7 @@ def _build_request(
     start_date_str: str = "03-2012",
     end_date_str: str = "04-2012",
     multi_polygon: str = _DEFAULT_MULTI_POLYGON,
-    recipient: str = "example@@test.com",
+    recipient: str = "example@test.com",
     collection_title: str = "Test Ocean Data Collection",
     full_metadata_link: str = "https://metadata.imas.utas.edu.au/.../test-uuid-123",
     suggested_citation: str = _DEFAULT_CITATION,
