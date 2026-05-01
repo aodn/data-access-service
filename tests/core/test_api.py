@@ -259,6 +259,46 @@ class TestApi(unittest.TestCase):
         self.assertEqual(feature1["properties"]["date"], "2025-01-11T09:00:00Z")
         self.assertEqual(feature1["geometry"]["coordinates"], [151.21, -33.87])
 
+    def test_fetch_all_unique_wave_buoy_sites(self):
+        api = API()
+        mock_df = pd.DataFrame(
+            {
+                "site_name": ["Brisbane", "Sydney", "Perth"],
+                "TIME": [
+                    pd.Timestamp("2025-03-01 10:00:00"),
+                    pd.Timestamp("2025-02-15 06:00:00"),
+                    pd.Timestamp("2025-01-20 14:00:00"),
+                ],
+                "LATITUDE": [-27.47, -33.87, -31.95],
+                "LONGITUDE": [153.03, 151.21, 115.86],
+            }
+        )
+        api.memconn = MagicMock()
+        api.memconn.execute.return_value.df.return_value = mock_df
+
+        result = api.fetch_all_unique_wave_buoy_sites()
+
+        self.assertEqual(result["type"], "FeatureCollection")
+        self.assertEqual(len(result["features"]), 3)
+        api.memconn.execute.assert_called_once()
+
+        feature0 = result["features"][0]
+        self.assertEqual(feature0["type"], "Feature")
+        self.assertEqual(feature0["properties"]["buoy"], "Brisbane")
+        self.assertEqual(feature0["properties"]["date"], "2025-03-01T10:00:00Z")
+        self.assertEqual(feature0["geometry"]["type"], "Point")
+        self.assertEqual(feature0["geometry"]["coordinates"], [153.03, -27.47])
+
+        feature1 = result["features"][1]
+        self.assertEqual(feature1["properties"]["buoy"], "Sydney")
+        self.assertEqual(feature1["properties"]["date"], "2025-02-15T06:00:00Z")
+        self.assertEqual(feature1["geometry"]["coordinates"], [151.21, -33.87])
+
+        feature2 = result["features"][2]
+        self.assertEqual(feature2["properties"]["buoy"], "Perth")
+        self.assertEqual(feature2["properties"]["date"], "2025-01-20T14:00:00Z")
+        self.assertEqual(feature2["geometry"]["coordinates"], [115.86, -31.95])
+
     def test_fetch_wave_buoy_data(self):
         api = API()
         position_df = pd.DataFrame({"LATITUDE": [-27.47], "LONGITUDE": [153.03]})
