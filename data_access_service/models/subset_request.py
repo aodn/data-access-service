@@ -6,8 +6,9 @@ import pandas as pd
 from data_access_service.models.bounding_box import BoundingBox
 
 
-DEFAULT_DATE = "non-specified"
-SUPPORTED_OUTPUT_FORMATS = frozenset({"netcdf", "geotiff"})
+# Marker value for start_date / end_date when the user did not pick one.
+NON_SPECIFIED_DATE = "non-specified"
+SUPPORTED_OUTPUT_FORMATS = frozenset({"netcdf", "geotiff", "csv"})
 
 
 @dataclass(frozen=True)
@@ -23,11 +24,14 @@ class SubsetRequest:
     keys: list[str]  # file names within the dataset; ["*"] means "all files"
 
     # --- time window ---
-    start_date: str  # "YYYY-MM-DD" / "MM-YYYY" / DEFAULT_DATE to use default
-    end_date: str  # same formats; DEFAULT_DATE to use default
+    start_date: str  # "YYYY-MM-DD" / "MM-YYYY" / NON_SPECIFIED_DATE to use default
+    end_date: str  # same formats; NON_SPECIFIED_DATE to use default
 
     # --- where to send the result ---
     recipient: str  # email address
+
+    # --- output preferences ---
+    output_format: str  # one of SUPPORTED_OUTPUT_FORMATS
 
     # --- spatial filter (optional) ---
     multi_polygon: Optional[str] = (
@@ -41,9 +45,6 @@ class SubsetRequest:
     collection_title: Optional[str] = None
     full_metadata_link: Optional[str] = None
     suggested_citation: Optional[str] = None
-
-    # --- output preferences ---
-    output_format: str = "netcdf"  # "netcdf" or "geotiff"
 
     def __post_init__(self) -> None:
         self._validate()
@@ -75,12 +76,12 @@ class SubsetRequest:
     def _parse_date_or_default(
         value: str, *, field_name: str
     ) -> Optional[pd.Timestamp]:
-        if value == DEFAULT_DATE:
+        if value == NON_SPECIFIED_DATE:
             return None
         try:
             return pd.Timestamp(value)
         except (ValueError, TypeError) as exc:
             raise ValueError(
                 f"{field_name} must be a parseable date or "
-                f"{DEFAULT_DATE!r}, got {value!r}"
+                f"{NON_SPECIFIED_DATE!r}, got {value!r}"
             ) from exc

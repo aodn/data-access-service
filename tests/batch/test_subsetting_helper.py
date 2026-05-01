@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 import pandas as pd
+import pytest
 
 from data_access_service.batch.subsetting_helper import (
     get_subset_request,
@@ -22,6 +23,7 @@ _VALID_PARAMETERS = {
     "end_date": "2024-12-31",
     "recipient": "test@example.com",
     "multi_polygon": _GLOBAL_POLYGON,
+    "output_format": "netcdf",
 }
 
 
@@ -69,6 +71,12 @@ class TestGetSubsetRequest:
     def test_explicit_output_format_is_respected(self):
         req = get_subset_request({**_VALID_PARAMETERS, "output_format": "geotiff"})
         assert req.output_format == "geotiff"
+
+    def test_missing_output_format_raises(self):
+        params = {**_VALID_PARAMETERS}
+        del params["output_format"]
+        with pytest.raises(ValueError, match="output_format"):
+            get_subset_request(params)
 
 
 class TestTrimDateRangeForKeys(unittest.TestCase):

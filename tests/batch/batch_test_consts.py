@@ -11,6 +11,7 @@ INIT_PARAMETERS = {
     Parameters.END_DATE.value: "04-2011",
     Parameters.MULTI_POLYGON.value: '{"type":"MultiPolygon","coordinates":[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}',
     Parameters.RECIPIENT.value: "test-recipient@example.com",
+    Parameters.OUTPUT_FORMAT.value: "netcdf",
 }
 
 PREPARATION_PARAMETERS = {

@@ -4,7 +4,7 @@ import pytest
 
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.models.subset_request import (
-    DEFAULT_DATE,
+    NON_SPECIFIED_DATE,
     SubsetRequest,
 )
 
@@ -16,6 +16,7 @@ def _valid_kwargs(**overrides):
         "start_date": "2024-01-01",
         "end_date": "2024-12-31",
         "recipient": "test@example.com",
+        "output_format": "netcdf",
         "multi_polygon": None,
         "bboxes": [BoundingBox(min_lat=-10, max_lat=10, min_lon=-20, max_lon=20)],
     }
@@ -30,11 +31,13 @@ class TestSubsetRequestValidation:
         SubsetRequest(**_valid_kwargs())
 
     def test_default_date_is_accepted_for_both_bounds(self):
-        SubsetRequest(**_valid_kwargs(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE))
+        SubsetRequest(
+            **_valid_kwargs(start_date=NON_SPECIFIED_DATE, end_date=NON_SPECIFIED_DATE)
+        )
 
     def test_mixed_default_marker_and_concrete_date_is_accepted(self):
-        SubsetRequest(**_valid_kwargs(start_date=DEFAULT_DATE))
-        SubsetRequest(**_valid_kwargs(end_date=DEFAULT_DATE))
+        SubsetRequest(**_valid_kwargs(start_date=NON_SPECIFIED_DATE))
+        SubsetRequest(**_valid_kwargs(end_date=NON_SPECIFIED_DATE))
 
     def test_empty_uuid_raises(self):
         with pytest.raises(ValueError, match="uuid"):
@@ -52,9 +55,13 @@ class TestSubsetRequestValidation:
         with pytest.raises(ValueError, match="output_format"):
             SubsetRequest(**_valid_kwargs(output_format="parquet"))
 
-    def test_default_output_format_is_netcdf(self):
-        req = SubsetRequest(**_valid_kwargs())
-        assert req.output_format == "netcdf"
+    def test_csv_output_format_is_supported(self):
+        req = SubsetRequest(**_valid_kwargs(output_format="csv"))
+        assert req.output_format == "csv"
+
+    def test_geotiff_output_format_is_supported(self):
+        req = SubsetRequest(**_valid_kwargs(output_format="geotiff"))
+        assert req.output_format == "geotiff"
 
     def test_unparseable_date_raises(self):
         with pytest.raises(ValueError, match="start_date"):

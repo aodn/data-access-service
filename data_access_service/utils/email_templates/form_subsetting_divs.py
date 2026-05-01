@@ -1,5 +1,5 @@
 import pandas
-from data_access_service.models.subset_request import DEFAULT_DATE
+from data_access_service.models.subset_request import NON_SPECIFIED_DATE
 from data_access_service.utils.email_templates.form_bbox_divs import form_bbox_divs
 from data_access_service.utils.email_templates.email_images import (
     TIME_RANGE_IMG,
@@ -9,14 +9,16 @@ from data_access_service.utils.email_templates.email_images import (
 def form_subsetting_divs(start_date, end_date, bboxes):
     """Form subsetting section with time range and bounding boxes"""
 
-    # Hide if dates are DEFAULT_DATE or match default values (1970-01-01 to today)
+    # Hide if dates are NON_SPECIFIED_DATE or match default values (1970-01-01 to today)
     has_dates = False
     if start_date and end_date:
         start_str = str(start_date).lower()
         end_str = str(end_date).lower()
 
-        # Check if not DEFAULT_DATE and not default values
-        is_non_specified = start_str == DEFAULT_DATE or end_str == DEFAULT_DATE
+        # Check if not NON_SPECIFIED_DATE and not default values
+        is_non_specified = (
+            start_str == NON_SPECIFIED_DATE or end_str == NON_SPECIFIED_DATE
+        )
         is_default = (
             start_str == "1970-01-01"
             and end_str == pandas.Timestamp.today().strftime("%Y-%m-%d").lower()

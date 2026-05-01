@@ -31,7 +31,7 @@ def get_subset_request(parameters: dict) -> SubsetRequest:
         collection_title=parameters.get(Parameters.COLLECTION_TITLE.value),
         full_metadata_link=parameters.get(Parameters.FULL_METADATA_LINK.value),
         suggested_citation=parameters.get(Parameters.SUGGESTED_CITATION.value),
-        output_format=parameters.get(Parameters.OUTPUT_FORMAT.value, "netcdf"),
+        output_format=parameters.get(Parameters.OUTPUT_FORMAT.value),
     )
 
 

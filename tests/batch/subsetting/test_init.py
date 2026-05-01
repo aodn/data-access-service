@@ -8,7 +8,7 @@ from data_access_service import API
 from data_access_service.batch.subsetting import init
 from data_access_service.config.config import EnvType, Config
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.models.subset_request import DEFAULT_DATE
+from data_access_service.models.subset_request import NON_SPECIFIED_DATE
 from tests.batch.batch_test_consts import (
     INIT_JOB_ID,
     INIT_PARAMETERS,
@@ -132,8 +132,8 @@ class TestInit(TestWithS3):
                     # Create parameters with non-specified dates
                     non_specified_parameters = {
                         **INIT_PARAMETERS,
-                        "start_date": DEFAULT_DATE,
-                        "end_date": DEFAULT_DATE,
+                        "start_date": NON_SPECIFIED_DATE,
+                        "end_date": NON_SPECIFIED_DATE,
                     }
 
                     # Call the init function
@@ -153,8 +153,8 @@ class TestInit(TestWithS3):
                         parameters={
                             **PREPARATION_JOB_SUBMISSION_ARGS["parameters"],
                             # it is ok that start_date and end_date are non-specified here, because we already used them to generate date_ranges
-                            "start_date": DEFAULT_DATE,
-                            "end_date": DEFAULT_DATE,
+                            "start_date": NON_SPECIFIED_DATE,
+                            "end_date": NON_SPECIFIED_DATE,
                             "date_ranges": expected_date_ranges,
                         },
                         array_size=1,
@@ -168,8 +168,8 @@ class TestInit(TestWithS3):
                         parameters={
                             **COLLECTION_JOB_SUBMISSION_ARGS["parameters"],
                             # it is ok that start_date and end_date are non-specified here, because we already used them to generate date_ranges
-                            "start_date": DEFAULT_DATE,
-                            "end_date": DEFAULT_DATE,
+                            "start_date": NON_SPECIFIED_DATE,
+                            "end_date": NON_SPECIFIED_DATE,
                             "date_ranges": expected_date_ranges,
                         },
                         dependency_job_id=COLLECTION_JOB_SUBMISSION_ARGS[
