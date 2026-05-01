@@ -294,6 +294,15 @@ async def get_feature_collection_of_items_with_data_between_dates(
         media_type="application/json",
     )
 
+@router.get(
+    "/data/feature-collection/wave-buoy/all", dependencies=[Depends(api_key_auth)]
+)
+async def get_feature_collection_of_items_all(request: Request):
+    api_instance = get_api_instance(request)
+    return Response(
+        content=json.dumps(api_instance.fetch_all_unique_wave_buoy_sites()),
+        media_type="application/json",
+    )
 
 @router.get(
     "/data/feature-collection/wave-buoy/latest", dependencies=[Depends(api_key_auth)]
