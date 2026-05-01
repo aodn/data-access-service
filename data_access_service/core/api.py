@@ -86,6 +86,9 @@ class BaseAPI:
     ) -> Coordinate | None:
 
         if data is not None:
+            mapped_col = self.map_column_names(uuid, key, [column])
+            if mapped_col is None or len(mapped_col) == 0:
+                return None
             # Translate to the correct column name for dataset
             mapped_col = self.map_column_names(uuid, key, [column])
             if not mapped_col:
