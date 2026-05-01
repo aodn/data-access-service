@@ -473,9 +473,11 @@ class ZarrProcessor:
                 date_str = str(np.datetime_as_string(t, unit="D"))
 
                 for var_name in data_vars:
-                    slice_data = (
-                        dataset[var_name].sel({time_name: t}).squeeze().compute()
-                    )
+                    # Don't .squeeze() here: a bbox that selects a single
+                    # lat or lon cell would collapse that dim away, breaking
+                    # set_spatial_dims later. Extra non-spatial dims are
+                    # handled explicitly in __slice_to_geotiff.
+                    slice_data = dataset[var_name].sel({time_name: t}).compute()
 
                     tif_name = f"{dataset_base}_{var_name}_{date_str}.tif"
                     tif_path = work_dir / tif_name
