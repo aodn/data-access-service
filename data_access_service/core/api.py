@@ -488,7 +488,7 @@ class API(BaseAPI):
         ).df()
         # DuckDB return pandas Timestamp which is timezone-naive like 2026-04-21 23:25:00, we need to convert it to ISO format with Z. The time is in UTC because the data source is in UTC, so we can just add Z at the end to indicate it is UTC time.
         return result["TIME"].item().isoformat() + "Z"
-    
+
     def fetch_all_unique_wave_buoy_sites(self):
         result = self.memconn.execute(
             """SELECT
