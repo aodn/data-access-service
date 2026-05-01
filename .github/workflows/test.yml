@@ -2,8 +2,8 @@ name: Test
 on:
   pull_request:
     paths-ignore:
-      - '**/*.md'
-      - '.github/environment/**'
+      - "**/*.md"
+      - ".github/environment/**"
 permissions:
   id-token: write
   contents: read
@@ -26,7 +26,6 @@ jobs:
           version: "2.1.4"
       - name: Install dependencies
         run: |
-          poetry lock
           poetry install
       - name: Run pre-commit checks
         run: |
