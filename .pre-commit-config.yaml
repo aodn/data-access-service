@@ -27,4 +27,5 @@ repos:
     rev: "2.2.1"
     hooks:
       - id: poetry-lock
+        args: ["--check"]
       - id: poetry-install
