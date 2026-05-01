@@ -9,7 +9,7 @@ from tests.core.test_with_s3 import TestWithS3, REGION
 from data_access_service.core.AWSHelper import AWSHelper
 from starlette.status import HTTP_200_OK
 from httpx import AsyncClient, ASGITransport
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 
 class TestApiWithS3BigZarr(TestWithS3):
@@ -28,7 +28,14 @@ class TestApiWithS3BigZarr(TestWithS3):
     def client(self, upload_test_case_to_s3):
         # Use LifespanManager to ensure lifespan events are triggered
         # Make sure file uploaded before init the app
-        api = api_setup(app)
+        mock_csiro = MagicMock()
+        mock_csiro.get_name.return_value = "csiro"
+        mock_csiro.get_metadata_catalog.return_value = {}
+        with patch(
+            "data_access_service.models.CO_data_source.co_data_registory.CsiroDataSrc",
+            return_value=mock_csiro,
+        ):
+            api_setup(app)
         return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
     @pytest.mark.asyncio

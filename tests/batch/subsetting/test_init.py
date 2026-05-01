@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 import os
 
-from unittest.mock import patch, call
+from unittest.mock import patch, call, MagicMock
 
 from data_access_service import API
 from data_access_service.batch.subsetting import init
@@ -25,7 +25,12 @@ class TestInit(TestWithS3):
         yield
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    def test_init(self, upload_test_case_to_s3):
+    @patch("data_access_service.models.CO_data_source.co_data_registory.CsiroDataSrc")
+    def test_init(self, mock_csiro_cls, upload_test_case_to_s3):
+        mock_csiro = MagicMock()
+        mock_csiro.get_name.return_value = "csiro"
+        mock_csiro.get_metadata_catalog.return_value = {}
+        mock_csiro_cls.return_value = mock_csiro
         with patch.object(Config, "get_month_count_per_job") as get_month_count_per_job:
             with patch.object(AWSHelper, "submit_a_job") as submit_a_job:
                 get_month_count_per_job.return_value = 3
@@ -64,7 +69,14 @@ class TestInit(TestWithS3):
                 ), "call arg list 2"
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    def test_init_with_very_narrow_date_range(self, upload_test_case_to_s3):
+    @patch("data_access_service.models.CO_data_source.co_data_registory.CsiroDataSrc")
+    def test_init_with_very_narrow_date_range(
+        self, mock_csiro_cls, upload_test_case_to_s3
+    ):
+        mock_csiro = MagicMock()
+        mock_csiro.get_name.return_value = "csiro"
+        mock_csiro.get_metadata_catalog.return_value = {}
+        mock_csiro_cls.return_value = mock_csiro
         with patch.object(Config, "get_month_count_per_job") as get_month_count_per_job:
             with patch.object(API, "get_temporal_extent") as get_temporal_extent:
                 with patch.object(AWSHelper, "submit_a_job") as submit_a_job:
@@ -115,7 +127,14 @@ class TestInit(TestWithS3):
                     assert expected_call_2 in submit_a_job.call_args_list
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    def test_init_with_non_specified_dates(self, upload_test_case_to_s3):
+    @patch("data_access_service.models.CO_data_source.co_data_registory.CsiroDataSrc")
+    def test_init_with_non_specified_dates(
+        self, mock_csiro_cls, upload_test_case_to_s3
+    ):
+        mock_csiro = MagicMock()
+        mock_csiro.get_name.return_value = "csiro"
+        mock_csiro.get_metadata_catalog.return_value = {}
+        mock_csiro_cls.return_value = mock_csiro
         with patch.object(Config, "get_month_count_per_job") as get_month_count_per_job:
             with patch.object(API, "get_temporal_extent") as get_temporal_extent:
                 with patch.object(AWSHelper, "submit_a_job") as submit_a_job:

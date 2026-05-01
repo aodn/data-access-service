@@ -8,7 +8,7 @@ import numpy as np
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from aodn_cloud_optimised import DataQuery
+from aodn_cloud_optimised.lib import DataQuery
 
 from data_access_service import API
 from data_access_service.core.api import BaseAPI
