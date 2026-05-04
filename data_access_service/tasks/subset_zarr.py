@@ -37,41 +37,30 @@ class ZarrProcessor:
     def __init__(
         self,
         api: API,
-        uuid: str,
         job_id: str,
-        keys: List[str],
-        start_date_str: str,
-        end_date_str: str,
-        multi_polygon: str,
-        recipient: str,
-        collection_title: str,
-        full_metadata_link: str,
-        suggested_citation: str,
-        output_format: str = "netcdf",
+        subset_request: SubsetRequest,
     ):
         self.aws = AWSHelper()
         self.api = api
         self.config = Config.get_config()
         self.log = init_log(self.config)
-        self.output_format = output_format
         self.job_id = job_id
-        self.uuid = uuid
-        self.recipient = recipient
+        self.subset_request = subset_request
 
         start_date, end_date = supply_day_with_nano_precision(
-            start_date_str=start_date_str,
-            end_date_str=end_date_str,
+            start_date_str=subset_request.start_date,
+            end_date_str=subset_request.end_date,
         )
 
-        if "*" in keys:
-            md = self.api.get_mapped_meta_data(self.uuid)
+        if "*" in subset_request.keys:
+            md = self.api.get_mapped_meta_data(subset_request.uuid)
             self.keys = list(md.keys())
         else:
-            self.keys = keys
+            self.keys = subset_request.keys
 
         trimmed_start_date, trimmed_end_date = trim_date_range_for_keys(
             api=api,
-            uuid=uuid,
+            uuid=subset_request.uuid,
             keys=self.keys,
             requested_start_date=start_date,
             requested_end_date=end_date,
@@ -79,12 +68,12 @@ class ZarrProcessor:
         if trimmed_start_date is None or trimmed_end_date is None:
             # requested date range does not overlap with data available
             text_body = (
-                f"No data available for your subset request for dataset {uuid} with keys {keys} "
-                f"and date range from {start_date_str} to {end_date_str}."
-                f"and selected area is {multi_polygon}."
+                f"No data available for your subset request for dataset {subset_request.uuid} with keys {self.keys} "
+                f"and date range from {subset_request.start_date} to {subset_request.end_date}."
+                f"and selected area is {subset_request.multi_polygon}."
             )
             AWSHelper().send_email(
-                recipient=recipient,
+                recipient=subset_request.recipient,
                 subject="No Data Available for Your Subset Request",
                 text_body=text_body,
             )
@@ -92,20 +81,23 @@ class ZarrProcessor:
 
         self.start_date = trimmed_start_date
         self.end_date = trimmed_end_date
-        self.multi_polygon = MultiPolygonHelper(multi_polygon=multi_polygon)
+        self.multi_polygon = MultiPolygonHelper(
+            multi_polygon=subset_request.multi_polygon
+        )
         self.bboxes = self.multi_polygon.bboxes
 
-        self.subset_request = SubsetRequest(
-            uuid=self.uuid,
-            keys=self.keys,
-            start_date=start_date_str,
-            end_date=end_date_str,
-            bboxes=self.bboxes,
-            recipient=self.recipient,
-            collection_title=collection_title,
-            full_metadata_link=full_metadata_link,
-            suggested_citation=suggested_citation,
-        )
+    # Read-through views onto subset_request — single source of truth, no drift.
+    @property
+    def uuid(self) -> str:
+        return self.subset_request.uuid
+
+    @property
+    def recipient(self) -> str:
+        return self.subset_request.recipient
+
+    @property
+    def output_format(self) -> str:
+        return self.subset_request.output_format
 
     def process(self):
         self.log.info(
@@ -481,9 +473,11 @@ class ZarrProcessor:
                 date_str = str(np.datetime_as_string(t, unit="D"))
 
                 for var_name in data_vars:
-                    slice_data = (
-                        dataset[var_name].sel({time_name: t}).squeeze().compute()
-                    )
+                    # Don't .squeeze() here: a bbox that selects a single
+                    # lat or lon cell would collapse that dim away, breaking
+                    # set_spatial_dims later. Extra non-spatial dims are
+                    # handled explicitly in __slice_to_geotiff.
+                    slice_data = dataset[var_name].sel({time_name: t}).compute()
 
                     tif_name = f"{dataset_base}_{var_name}_{date_str}.tif"
                     tif_path = work_dir / tif_name

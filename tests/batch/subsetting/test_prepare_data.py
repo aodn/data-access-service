@@ -110,12 +110,13 @@ class TestDataGeneration(TestWithS3):
                 compressed_s3_key = "999/autonomous_underwater_vehicle.zip"
 
                 # Create dummy subset_request
-                subset_request = subset_request_factory()
+                subset_request = subset_request_factory(
+                    uuid="test-dataset-uuid",
+                    recipient="test@example.com",
+                )
 
                 collect_data_files(
                     master_job_id="999",
-                    dataset_uuid="test-dataset-uuid",
-                    recipient="test@example.com",
                     subset_request=subset_request,
                 )
 

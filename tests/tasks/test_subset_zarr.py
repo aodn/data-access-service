@@ -33,6 +33,7 @@ class TestSubsetZarr(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
     ):
         s3_client, _, _ = aws_clients
         config = Config.get_config()
@@ -50,16 +51,8 @@ class TestSubsetZarr(TestWithS3):
                 try:
                     zarr_processor = ZarrProcessor(
                         api,
-                        uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
                         job_id="job_id_888",
-                        keys=[key],
-                        start_date_str="03-2012",
-                        end_date_str="04-2012",
-                        multi_polygon='{"type":"MultiPolygon","coordinates":[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}',
-                        recipient="example@@test.com",
-                        collection_title="Test Ocean Data Collection",
-                        full_metadata_link="https://metadata.imas.utas.edu.au/.../test-uuid-123",
-                        suggested_citation="Cite data as: Mazor, T., Watermeyer, K., Hobley, T., Grinter, V., Holden, R., MacDonald, K. and Ferns, L. (2023). Statewide Marine Habitat Map.",
+                        subset_request=subset_request_factory(),
                     )
 
                     zarr_processor.process()
@@ -107,6 +100,7 @@ class TestSubsetZarr(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
     ):
         s3_client, _, _ = aws_clients
         config = Config.get_config()
@@ -124,16 +118,8 @@ class TestSubsetZarr(TestWithS3):
                 try:
                     zarr_processor = ZarrProcessor(
                         api,
-                        uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
                         job_id="job_id_888",
-                        keys=[key],
-                        start_date_str="03-2012",
-                        end_date_str="04-2012",
-                        multi_polygon='{"type":"MultiPolygon","coordinates":[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}',
-                        recipient="example@@test.com",
-                        collection_title="Test Ocean Data Collection",
-                        full_metadata_link="https://metadata.imas.utas.edu.au/.../test-uuid-123",
-                        suggested_citation="Cite data as: Mazor, T., Watermeyer, K., Hobley, T., Grinter, V., Holden, R., MacDonald, K. and Ferns, L. (2023). Statewide Marine Habitat Map.",
+                        subset_request=subset_request_factory(),
                     )
 
                     zarr_processor.process()
@@ -189,20 +175,13 @@ class TestSubsetZarr(TestWithS3):
 
                 key = "radar_CoffsHarbour_wind_delayed_qc.zarr"
                 no_ext_key = key.replace(".zarr", "")
-                subset_request = subset_request_factory()
                 try:
                     zarr_processor = ZarrProcessor(
                         api,
-                        uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
                         job_id="job_id_888",
-                        keys=[key],
-                        start_date_str="03-2012",
-                        end_date_str="04-2012",
-                        multi_polygon='{"type":"MultiPolygon","coordinates":[[[[201.73699345083196,-47.61820213929325],[221.7761315086342,-47.61820213929325],[221.7761315086342,-38.939085797521166],[201.73699345083196,-38.939085797521166],[201.73699345083196,-47.61820213929325]]],[[[157.7915152538971,-32.07902332926048],[174.31501505594503,-32.07902332926048],[174.31501505594503,-15.428394281587785],[157.7915152538971,-15.428394281587785],[157.7915152538971,-32.07902332926048]]]]}',
-                        recipient="example@@test.com",
-                        collection_title="Test Ocean Data Collection",
-                        full_metadata_link="https://metadata.imas.utas.edu.au/.../test-uuid-123",
-                        suggested_citation="Cite data as: Mazor, T., Watermeyer, K., Hobley, T., Grinter, V., Holden, R., MacDonald, K. and Ferns, L. (2023). Statewide Marine Habitat Map.",
+                        subset_request=subset_request_factory(
+                            multi_polygon='{"type":"MultiPolygon","coordinates":[[[[201.73699345083196,-47.61820213929325],[221.7761315086342,-47.61820213929325],[221.7761315086342,-38.939085797521166],[201.73699345083196,-38.939085797521166],[201.73699345083196,-47.61820213929325]]],[[[157.7915152538971,-32.07902332926048],[174.31501505594503,-32.07902332926048],[174.31501505594503,-15.428394281587785],[157.7915152538971,-15.428394281587785],[157.7915152538971,-32.07902332926048]]]]}',
+                        ),
                     )
 
                     zarr_processor.process()
@@ -237,6 +216,7 @@ class TestSubsetZarr(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
     ):
         s3_client, _, _ = aws_clients
         config = Config.get_config()
@@ -254,16 +234,10 @@ class TestSubsetZarr(TestWithS3):
                 try:
                     zarr_processor = ZarrProcessor(
                         api,
-                        uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
                         job_id="job_id_888",
-                        keys=[key],
-                        start_date_str="03-2012",
-                        end_date_str="04-2012",
-                        multi_polygon="non-specified",
-                        recipient="example@@test.com",
-                        collection_title="Test Ocean Data Collection",
-                        full_metadata_link="https://metadata.imas.utas.edu.au/.../test-uuid-123",
-                        suggested_citation="Cite data as: Mazor, T., Watermeyer, K., Hobley, T., Grinter, V., Holden, R., MacDonald, K. and Ferns, L. (2023). Statewide Marine Habitat Map.",
+                        subset_request=subset_request_factory(
+                            multi_polygon="non-specified",
+                        ),
                     )
 
                     zarr_processor.process()
@@ -299,6 +273,7 @@ class TestSubsetZarr(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
     ):
         """GeoTIFF export should produce a single ZIP with all TIF files.
         TIF naming follows {dataset}_{variable}_{YYYY-MM-DD}.tif convention."""
@@ -316,17 +291,10 @@ class TestSubsetZarr(TestWithS3):
                 try:
                     zarr_processor = ZarrProcessor(
                         api,
-                        uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
                         job_id="job_id_888",
-                        keys=[key],
-                        start_date_str="03-2012",
-                        end_date_str="04-2012",
-                        multi_polygon='{"type":"MultiPolygon","coordinates":[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}',
-                        recipient="example@@test.com",
-                        collection_title="Test Ocean Data Collection",
-                        full_metadata_link="https://metadata.imas.utas.edu.au/.../test-uuid-123",
-                        suggested_citation="Cite data as: Test Citation.",
-                        output_format="geotiff",
+                        subset_request=subset_request_factory(
+                            output_format="geotiff",
+                        ),
                     )
 
                     zarr_processor.process()
@@ -402,6 +370,7 @@ class TestSubsetZarr(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
     ):
         """GeoTIFF export should raise ValueError for datasets without
         gridded numeric variables (e.g. vessel radiance with TIME/WAVELENGTH dims)."""
@@ -418,17 +387,12 @@ class TestSubsetZarr(TestWithS3):
                 try:
                     zarr_processor = ZarrProcessor(
                         api,
-                        uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
                         job_id="job_id_888",
-                        keys=[key],
-                        start_date_str="07-2011",
-                        end_date_str="07-2011",
-                        multi_polygon='{"type":"MultiPolygon","coordinates":[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}',
-                        recipient="example@@test.com",
-                        collection_title="Test Ocean Data Collection",
-                        full_metadata_link="https://metadata.imas.utas.edu.au/.../test-uuid-123",
-                        suggested_citation="Cite data as: Test Citation.",
-                        output_format="geotiff",
+                        subset_request=subset_request_factory(
+                            uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                            keys=[key],
+                            output_format="geotiff",
+                        ),
                     )
 
                     with pytest.raises(
@@ -446,6 +410,7 @@ class TestSubsetZarr(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
     ):
         s3_client, _, _ = aws_clients
         config = Config.get_config()
@@ -462,16 +427,13 @@ class TestSubsetZarr(TestWithS3):
                 try:
                     zarr_processor = ZarrProcessor(
                         api,
-                        uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
                         job_id="job_id_888",
-                        keys=[key],
-                        start_date_str="07-2011",
-                        end_date_str="07-2011",
-                        multi_polygon='{"type":"MultiPolygon","coordinates":[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}',
-                        recipient="example@@test.com",
-                        collection_title="Test Ocean Data Collection",
-                        full_metadata_link="https://metadata.imas.utas.edu.au/.../test-uuid-123",
-                        suggested_citation="Cite data as: Mazor, T., Watermeyer, K., Hobley, T., Grinter, V., Holden, R., MacDonald, K. and Ferns, L. (2023). Statewide Marine Habitat Map.",
+                        subset_request=subset_request_factory(
+                            uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                            keys=[key],
+                            start_date="07-2011",
+                            end_date="07-2011",
+                        ),
                     )
 
                     zarr_processor.process()

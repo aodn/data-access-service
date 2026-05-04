@@ -66,11 +66,12 @@ class TestGenerateZarrFile(TestWithS3):
                         job_id_of_init=INIT_JOB_ID,
                         job_index="10",
                         intermediate_output_folder=config.get_temp_folder(INIT_JOB_ID),
-                        uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
-                        keys=["*"],
+                        subset_request=subset_request_factory(
+                            uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                            keys=["*"],
+                        ),
                         start_date=pd.Timestamp("2011-07-01 00:00:00"),
                         end_date=pd.Timestamp("2011-09-01 00:00:00"),
-                        multi_polygon=None,
                     )
                     # This is a zarr file, we should be able to read the result from S3
                     target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name(INIT_JOB_ID)}vessel_satellite_radiance_delayed_qc.zarr/part-*.zarr"
@@ -79,12 +80,13 @@ class TestGenerateZarrFile(TestWithS3):
 
                     # At least we can convert it to netcdf
                     # Create dummy subset_request
-                    subset_request = subset_request_factory()
+                    subset_request = subset_request_factory(
+                        uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                        recipient="testreceipt@something.com",
+                    )
 
                     collect_data_files(
                         master_job_id=INIT_JOB_ID,
-                        dataset_uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
-                        recipient="testreceipt@something.com",
                         subset_request=subset_request,
                     )
                 except Exception as ex:
@@ -101,6 +103,7 @@ class TestGenerateZarrFile(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
     ):
         """
         Test the process_data_files function and submit three job index 1, 2, 3, this make sure
@@ -120,6 +123,10 @@ class TestGenerateZarrFile(TestWithS3):
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
             # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
             with patch.object(AWSHelper, "send_email") as mock_send_email:
+                req = subset_request_factory(
+                    uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                    keys=["*"],
+                )
                 try:
                     # Job 1, use different job id to avoid read same folder
                     process_data_files(
@@ -127,11 +134,9 @@ class TestGenerateZarrFile(TestWithS3):
                         job_id_of_init="888",
                         job_index="1",
                         intermediate_output_folder=config.get_temp_folder("888"),
-                        uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
-                        keys=["*"],
+                        subset_request=req,
                         start_date=pd.Timestamp("2011-07-01 00:00:00"),
                         end_date=pd.Timestamp("2011-07-31 23:59:59.999999999"),
-                        multi_polygon=None,
                     )
                     # Job 2
                     process_data_files(
@@ -139,22 +144,18 @@ class TestGenerateZarrFile(TestWithS3):
                         job_id_of_init="888",
                         job_index="2",
                         intermediate_output_folder=config.get_temp_folder("888"),
-                        uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
-                        keys=["*"],
+                        subset_request=req,
                         start_date=pd.Timestamp("2011-08-01 00:00:00"),
                         end_date=pd.Timestamp("2011-08-15 23:59:59.999999999"),
-                        multi_polygon=None,
                     )
                     process_data_files(
                         api,
                         job_id_of_init="888",
                         job_index="3",
                         intermediate_output_folder=config.get_temp_folder("888"),
-                        uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
-                        keys=["*"],
+                        subset_request=req,
                         start_date=pd.Timestamp("2011-08-16 00:00:00"),
                         end_date=pd.Timestamp("2011-09-01 00:00:00"),
-                        multi_polygon=None,
                     )
                     # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
                     names = helper.list_s3_folders(
@@ -184,6 +185,7 @@ class TestGenerateZarrFile(TestWithS3):
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
+        subset_request_factory,
     ):
         """
         We hit a case where this dataset result in empty netcdf, we want to make sure it
@@ -206,11 +208,9 @@ class TestGenerateZarrFile(TestWithS3):
                         job_id_of_init="888",
                         job_index="1",
                         intermediate_output_folder=config.get_temp_folder("888"),
-                        uuid="ffe8f19c-de4a-4362-89be-7605b2dd6b8c",
-                        keys=["radar_CoffsHarbour_wind_delayed_qc.zarr"],
+                        subset_request=subset_request_factory(),
                         start_date=pd.Timestamp("2012-03-01 00:00:00"),
                         end_date=pd.Timestamp("2012-04-30 23:59:59.999999999"),
-                        multi_polygon=None,
                     )
                     # This is a zarr file, we should be able to read the result from S3, and have part-1
                     names = helper.list_s3_folders(
