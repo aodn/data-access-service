@@ -90,6 +90,18 @@ class TestApi(unittest.TestCase):
             )
             self.assertListEqual(col, ["JULD", "LATITUDE", "LONGITUDE"], "TIME mapped")
 
+            # This uuid uses eventDate as temporal field
+            col = api.map_column_names(
+                "ec2c0ef9-3645-4ded-b617-c8297f6eb250",
+                "aggregated_seabird_nonqc.parquet",
+                ["TIME", "LATITUDE", "LONGITUDE"],
+            )
+            self.assertListEqual(
+                col,
+                ["eventDate", "decimalLatitude", "decimalLongitude"],
+                "TIME mapped to eventDate, LATITUDE mapped to decimalLatitude, LONGITUDE mapped to decimalLongitude",
+            )
+
     def test_nan_to_none_conversion(self):
         # Create a sample pandas DataFrame with NaN values
         data = {
