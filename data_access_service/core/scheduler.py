@@ -41,15 +41,27 @@ class TaskScheduler:
         session = boto3.Session()
         creds = session.get_credentials().get_frozen_credentials()
         region = session.region_name or "ap-southeast-2"
-        self.memconn.execute(
-            f"""
-            CREATE OR REPLACE SECRET wave_buoy_s3 (
+        secret_params = f"""
                 TYPE S3,
                 KEY_ID '{creds.access_key}',
                 SECRET '{creds.secret_key}',
                 SESSION_TOKEN '{creds.token or ""}',
-                REGION '{region}',
+                REGION '{region}'"""
+        
+        self.memconn.execute(
+            f"""
+            CREATE OR REPLACE SECRET wave_buoy_s3 (
+                {secret_params},
                 SCOPE 's3://{self.wave_buoy_backup_bucket}'
+            )
+        """
+        )
+
+        self.memconn.execute(
+            f"""
+            CREATE OR REPLACE SECRET wave_buoy_s3_instance (
+                {secret_params},
+                SCOPE 's3://{self._instance.bucket_name}'
             )
         """
         )
