@@ -47,7 +47,7 @@ class TaskScheduler:
                 SECRET '{creds.secret_key}',
                 SESSION_TOKEN '{creds.token or ""}',
                 REGION '{region}'"""
-        
+
         self.memconn.execute(
             f"""
             CREATE OR REPLACE SECRET wave_buoy_s3 (
