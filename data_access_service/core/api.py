@@ -15,7 +15,7 @@ import xarray
 from datetime import timedelta, timezone
 from io import BytesIO
 from typing import Optional, Dict, Any, List, Tuple, Hashable
-from aodn_cloud_optimised import DataQuery
+from aodn_cloud_optimised.lib import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, ZarrDataSource
 from aodn_cloud_optimised.lib.config import get_notebook_url
 from bokeh.server.tornado import psutil
@@ -672,6 +672,8 @@ class API(BaseAPI):
                         output.append("TIME")
                     case meta if "time" in meta:
                         output.append("time")
+                    case meta if "eventDate" in meta:
+                        output.append("eventDate")
                     case meta if "timestamp" in meta:
                         log.error(
                             f"For most datasets, timestamp should not be the field to express the accurate time. "
@@ -696,6 +698,9 @@ class API(BaseAPI):
                         output.append(STR_LATITUDE_UPPER_CASE)
                     case meta if "lat" in meta:
                         output.append("lat")
+                    # some data-uplift datasets use this, e.g., "aggregated_seabird_nonqc.parquet"
+                    case meta if "decimalLatitude" in meta:
+                        output.append("decimalLatitude")
             elif column.casefold() == STR_LONGITUDE_UPPER_CASE.casefold() and (
                 STR_LONGITUDE_UPPER_CASE not in meta
                 or STR_LONGITUDE_LOWER_CASE not in meta
@@ -707,6 +712,9 @@ class API(BaseAPI):
                         output.append(STR_LONGITUDE_UPPER_CASE)
                     case meta if "lon" in meta:
                         output.append("lon")
+                    # some data-uplift datasets use this, e.g., "aggregated_seabird_nonqc.parquet"
+                    case meta if "decimalLongitude" in meta:
+                        output.append("decimalLongitude")
             else:
                 output.append(column)
 

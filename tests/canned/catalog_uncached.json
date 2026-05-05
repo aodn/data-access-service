@@ -827,5 +827,378 @@
       "long_name": "reference time of SST field",
       "standard_name": "time"
     }
+  },
+  "aggregated_seabird_nonqc.parquet": {
+    "id": {
+      "type": "string",
+      "nullable": "False",
+      "definition": "Unique identifier of the row of a given dataset"
+    },
+    "sex": {
+      "url": "http://rs.tdwg.org/dwc/terms/sex",
+      "type": "string",
+      "nullable": "True",
+      "definition": "The sex of the biological individual(s) represented in the dwc:Occurrence."
+    },
+    "class": {
+      "url": "http://rs.tdwg.org/dwc/terms/class",
+      "type": "string",
+      "nullable": "True",
+      "definition": "The full scientific name of the class in which the dwc:Taxon is classified."
+    },
+    "depth": {
+      "url": "https://vocabs.ardc.edu.au/repository/api/lda/aodn/aodn-discovery-parameter-vocabulary/version-1-7/resource?uri=http%3A%2F%2Fvocab.aodn.org.au%2Fdef%2Fdiscovery_parameter%2Fentity%2F574",
+      "type": "double",
+      "units": "m",
+      "nullable": "True",
+      "long_name": "Sea-floor depth below surface of the water body",
+      "units_url": "https://vocabs.ardc.edu.au/repository/api/lda/aodn/aodn-units-of-measure-vocabulary/version-1-1/resource?uri=http%3A%2F%2Fvocab.nerc.ac.uk%2Fcollection%2FP06%2Fcurrent%2FULAA",
+      "units_long_name": "Metres"
+    },
+    "genus": {
+      "url": "http://rs.tdwg.org/dwc/terms/genus",
+      "type": "string",
+      "nullable": "True",
+      "definition": "The full scientific name of the genus in which the dwc:Taxon is classified."
+    },
+    "order": {
+      "url": "http://rs.tdwg.org/dwc/terms/order",
+      "type": "string",
+      "nullable": "True",
+      "definition": "The full scientific name of the order in which the dwc:Taxon is classified."
+    },
+    "family": {
+      "url": "http://rs.tdwg.org/dwc/terms/family",
+      "type": "string",
+      "nullable": "True",
+      "definition": "The full scientific name of the family in which the dwc:Taxon is classified."
+    },
+    "phylum": {
+      "url": "http://rs.tdwg.org/dwc/terms/phylum",
+      "type": "string",
+      "nullable": "True",
+      "definition": "The full scientific name of the phylum or division in which the dwc:Taxon is classified."
+    },
+    "country": {
+      "url": "http://rs.tdwg.org/dwc/terms/country",
+      "type": "string",
+      "nullable": "True",
+      "definition": "The name of the country or major administrative unit in which the dcterms:Location occurs."
+    },
+    "h3Index": {
+      "type": "string",
+      "nullable": "False",
+      "definition": "A hexadecimal string representing a H3 polygon, derived from the `decimalLatitude` and `decimalLongitude`.",
+      "resolution": "4"
+    },
+    "kingdom": {
+      "url": "http://rs.tdwg.org/dwc/terms/kingdom",
+      "type": "string",
+      "nullable": "True",
+      "definition": "The full scientific name of the kingdom in which the dwc:Taxon is classified."
+    },
+    "locality": {
+      "url": "http://rs.tdwg.org/dwc/terms/locality",
+      "type": "string",
+      "nullable": "True",
+      "definition": "The specific description of the place."
+    },
+    "modified": {
+      "url": "http://purl.org/dc/terms/modified",
+      "type": "timestamp[ms]",
+      "nullable": "False",
+      "definition": "Date on which the resource was changed."
+    },
+    "salinity": {
+      "url": "https://vocabs.ardc.edu.au/repository/api/lda/aodn/aodn-discovery-parameter-vocabulary/version-1-7/resource?uri=http%3A%2F%2Fvocab.nerc.ac.uk%2Fcollection%2FP01%2Fcurrent%2FPSLTZZ01",
+      "type": "double",
+      "units": "PSU",
+      "nullable": "True",
+      "long_name": "Practical salinity of the water body",
+      "units_url": "https://vocabs.ardc.edu.au/repository/api/lda/aodn/aodn-units-of-measure-vocabulary/version-1-1/resource?uri=http%3A%2F%2Fvocab.aodn.org.au%2Fdef%2Funitsofmeasure%2Fentity%2F481",
+      "units_long_name": "Practical Salinity Unit"
+    },
+    "seaState": {
+      "url": "https://vocabs.ardc.edu.au/repository/api/lda/aodn/aodn-discovery-parameter-vocabulary/version-1-7/resource?uri=http%3A%2F%2Fvocab.aodn.org.au%2Fdef%2Fdiscovery_parameter%2Fentity%2F412",
+      "type": "string",
+      "units": "m",
+      "nullable": "True",
+      "long_name": "Average height of waves on the water body",
+      "units_url": "https://vocabs.ardc.edu.au/repository/api/lda/aodn/aodn-units-of-measure-vocabulary/version-1-1/resource?uri=http%3A%2F%2Fvocab.nerc.ac.uk%2Fcollection%2FP06%2Fcurrent%2FULAA",
+      "units_long_name": "Metres"
+    },
+    "eventDate": {
+      "url": "http://rs.tdwg.org/dwc/terms/eventDate",
+      "type": "date32[day]",
+      "nullable": "False",
+      "definition": "The date-time or interval during which a dwc:Event occurred. For occurrences, this is the date-time when the dwc:Event was recorded. Not suitable for a time in a geological context."
+    },
+    "lifeStage": {
+      "url": "http://rs.tdwg.org/dwc/terms/lifeStage",
+      "type": "string",
+      "nullable": "True",
+      "definition": "The age class or life stage of the dwc:Organism(s) at the time the dwc:Occurrence was recorded."
+    },
+    "taxonRank": {
+      "url": "http://rs.tdwg.org/dwc/terms/taxonRank",
+      "type": "string",
+      "nullable": "True",
+      "definition": "The taxonomic rank of the most specific name in the dwc:scientificName."
+    },
+    "windSpeed": {
+      "url": "https://vocabs.ardc.edu.au/repository/api/lda/aodn/aodn-discovery-parameter-vocabulary/version-1-7/resource?uri=http%3A%2F%2Fvocab.nerc.ac.uk%2Fcollection%2FP01%2Fcurrent%2FESSAZZ01",
+      "type": "double",
+      "units": "Knots",
+      "nullable": "True",
+      "long_name": "Wind speed in the atmosphere",
+      "units_url": "https://vocabs.ardc.edu.au/repository/api/lda/aodn/aodn-units-of-measure-vocabulary/version-1-1/resource?uri=http%3A%2F%2Fvocab.nerc.ac.uk%2Fcollection%2FP06%2Fcurrent%2FUKNT",
+      "units_long_name": "Knots (nautical miles per hour)"
+    },
+    "cloudCover": {
+      "url": "https://vocabs.ardc.edu.au/repository/api/lda/neii/cloud-cover-observation-measurements/version-2-0-agldwg-pid/resource?uri=https%3A%2F%2Flinked.data.gov.au%2Fdef%2Fcloud-cover-observation-measurements",
+      "type": "string",
+      "nullable": "True",
+      "long_name": "Cloud Cover Observation Measurements",
+      "definition": "Cloud cover observations are measured in oktas (eighths). The sky is visually inspected to produce an estimate of the number of eighths of the dome of the sky covered by cloud. The presence of any trace of cloud in an otherwise blue sky is recorded as 1 okta, and similarly any trace of blue on an otherwise cloudy sky is recorded as 7."
+    },
+    "organismID": {
+      "url": "http://rs.tdwg.org/dwc/terms/organismID",
+      "type": "string",
+      "nullable": "True",
+      "definition": "An identifier for the dwc:Organism instance (as opposed to a particular digital record of the dwc:Organism). May be a globally unique identifier or an identifier specific to the data set."
+    },
+    "recordedBy": {
+      "url": "http://rs.tdwg.org/dwc/terms/recordedBy",
+      "type": "string",
+      "nullable": "True",
+      "definition": "A list (concatenated and separated) of names of people, groups, or organizations responsible for recording the original dwc:Occurrence. The primary collector or observer, especially one who applies a personal identifier (dwc:recordNumber), should be listed first."
+    },
+    "surveyType": {
+      "type": "string",
+      "nullable": "False",
+      "definition": "The type of survey, one of `Tracking` or `At-sea observations`"
+    },
+    "airPressure": {
+      "url": "https://vocabs.ardc.edu.au/repository/api/lda/aodn/aodn-discovery-parameter-vocabulary/version-1-7/resource?uri=http%3A%2F%2Fvocab.nerc.ac.uk%2Fcollection%2FP01%2Fcurrent%2FCAPHZZ01",
+      "type": "double",
+      "units": "hPa",
+      "nullable": "True",
+      "long_name": "Pressure (measured variable) exerted by the atmosphere",
+      "units_url": "https://vocabs.ardc.edu.au/repository/api/lda/aodn/aodn-units-of-measure-vocabulary/version-1-1/resource?uri=http%3A%2F%2Fvocab.nerc.ac.uk%2Fcollection%2FP06%2Fcurrent%2FHPAX",
+      "definition": "Measurement as a phenomenon (as opposed to a co-ordinate) of the force per unit area exerted by the atmosphere determined in-situ at a known altitude.",
+      "units_long_name": "Hectopascals"
+    },
+    "datasetName": {
+      "type": "string",
+      "nullable": "False",
+      "definition": "The name identifying the data set from which the record was derived."
+    },
+    "fieldNumber": {
+      "url": "http://rs.tdwg.org/dwc/terms/fieldNumber",
+      "type": "string",
+      "nullable": "True",
+      "definition": "An identifier given to the dwc:Event in the field. Often serves as a link between field notes and the dwc:Event."
+    },
+    "footprintWKT": {
+      "url": "http://rs.tdwg.org/dwc/terms/footprintWKT",
+      "type": "string",
+      "nullable": "True",
+      "definition": "A Well-Known Text (WKT) representation of the shape (footprint, geometry) that defines the dcterms:Location. A dcterms:Location may have both a point-radius representation (see dwc:decimalLatitude) and a footprint representation, and they may differ from each other."
+    },
+    "identifiedBy": {
+      "url": "http://rs.tdwg.org/dwc/terms/identifiedBy",
+      "type": "string",
+      "nullable": "True",
+      "definition": "A list (concatenated and separated) of names of people, groups, or organizations who assigned the dwc:Taxon to the subject."
+    },
+    "occurrenceID": {
+      "url": "http://rs.tdwg.org/dwc/terms/occurrenceID",
+      "type": "string",
+      "nullable": "False",
+      "definition": "An identifier for the dwc:Occurrence (as opposed to a particular digital record of the dwc:Occurrence). In the absence of a persistent global unique identifier, construct one from a combination of identifiers in the record that will most closely make the dwc:occurrenceID globally unique."
+    },
+    "basisOfRecord": {
+      "url": "http://rs.tdwg.org/dwc/terms/basisOfRecord",
+      "type": "string",
+      "nullable": "False",
+      "definition": "The specific nature of the data record."
+    },
+    "catalogNumber": {
+      "url": "http://rs.tdwg.org/dwc/terms/catalogNumber",
+      "type": "string",
+      "nullable": "True",
+      "definition": "An identifier (preferably unique) for the record within the data set or collection."
+    },
+    "download_link": {
+      "type": "string",
+      "nullable": "False",
+      "definition": "The Darwin Core download link."
+    },
+    "resource_link": {
+      "type": "string",
+      "nullable": "False",
+      "definition": "The resource link for additional metadata context."
+    },
+    "stateProvince": {
+      "url": "http://rs.tdwg.org/dwc/terms/stateProvince",
+      "type": "string",
+      "nullable": "True",
+      "definition": "The name of the next smaller administrative region than country (state, province, canton, department, region, etc.) in which the dcterms:Location occurs."
+    },
+    "windDirection": {
+      "url": "https://vocabs.ardc.edu.au/repository/api/lda/aodn/aodn-discovery-parameter-vocabulary/version-1-7/resource?uri=http%3A%2F%2Fvocab.nerc.ac.uk%2Fcollection%2FP01%2Fcurrent%2FEWDAZZ01",
+      "type": "double",
+      "units": "deg",
+      "nullable": "True",
+      "long_name": "Wind from direction in the atmosphere",
+      "units_url": "https://vocabs.ardc.edu.au/repository/api/lda/aodn/aodn-units-of-measure-vocabulary/version-1-1/resource?uri=http%3A%2F%2Fvocab.nerc.ac.uk%2Fcollection%2FP06%2Fcurrent%2FUAAA",
+      "units_long_name": "Degrees"
+    },
+    "airTemperature": {
+      "url": "https://vocabs.ardc.edu.au/repository/api/lda/aodn/aodn-discovery-parameter-vocabulary/version-1-7/resource?uri=http%3A%2F%2Fvocab.nerc.ac.uk%2Fcollection%2FP01%2Fcurrent%2FCTMPZZ01",
+      "type": "double",
+      "units": "degC",
+      "nullable": "True",
+      "long_name": "Temperature of the atmosphere",
+      "units_url": "https://vocabs.ardc.edu.au/repository/api/lda/aodn/aodn-units-of-measure-vocabulary/version-1-1/resource?uri=http%3A%2F%2Fvocab.nerc.ac.uk%2Fcollection%2FP06%2Fcurrent%2FUPAA",
+      "units_long_name": "Degrees Celsius"
+    },
+    "collectionCode": {
+      "url": "http://rs.tdwg.org/dwc/terms/collectionCode",
+      "type": "string",
+      "nullable": "True",
+      "definition": "The name, acronym, coden, or initialism identifying the collection or data set from which the record was derived."
+    },
+    "datasetVersion": {
+      "type": "string",
+      "nullable": "False",
+      "definition": "The version of the dataset when it was downloaded to create this aggregated data product."
+    },
+    "scientificName": {
+      "url": "http://rs.tdwg.org/dwc/terms/scientificName",
+      "type": "string",
+      "nullable": "False",
+      "definition": "The full scientific name, with authorship and date information if known. When forming part of a dwc:Identification, this should be the name in lowest level taxonomic rank that can be determined. This term should not contain identification qualifications, which should instead be supplied in the dwc:identificationQualifier term."
+    },
+    "vernacularName": {
+      "url": "http://rs.tdwg.org/dwc/terms/vernacularName",
+      "type": "string",
+      "nullable": "True",
+      "definition": "A common or vernacular name."
+    },
+    "decimalLatitude": {
+      "CRS": "EPSG:4326",
+      "url": "http://rs.tdwg.org/dwc/terms/decimalLatitude",
+      "type": "double",
+      "nullable": "False",
+      "definition": "The geographic latitude (in decimal degrees, using the spatial reference system given in dwc:geodeticDatum) of the geographic center of a dcterms:Location. Positive values are north of the Equator, negative values are south of it. Legal values lie between -90 and 90, inclusive."
+    },
+    "institutionCode": {
+      "url": "http://rs.tdwg.org/dwc/terms/institutionCode",
+      "type": "string",
+      "nullable": "True",
+      "definition": "The name (or acronym) in use by the institution having custody of the object(s) or information referred to in the record."
+    },
+    "specificEpithet": {
+      "url": "http://rs.tdwg.org/dwc/terms/specificEpithet",
+      "type": "string",
+      "nullable": "True",
+      "definition": "The name of the first or species epithet of the dwc:scientificName."
+    },
+    "valid_authority": {
+      "type": "string",
+      "nullable": "True"
+    },
+    "decimalLongitude": {
+      "CRS": "EPSG:4326",
+      "url": "http://rs.tdwg.org/dwc/terms/decimalLongitude",
+      "type": "double",
+      "nullable": "False",
+      "definition": "The geographic longitude (in decimal degrees, using the spatial reference system given in dwc:geodeticDatum) of the geographic center of a dcterms:Location. Positive values are east of the Greenwich Meridian, negative values are west of it. Legal values lie between -180 and 180, inclusive."
+    },
+    "occurrenceStatus": {
+      "url": "http://rs.tdwg.org/dwc/terms/occurrenceStatus",
+      "type": "string",
+      "nullable": "True",
+      "definition": "A statement about the presence or absence of a dwc:Taxon at a dcterms:Location."
+    },
+    "organismQuantity": {
+      "url": "http://rs.tdwg.org/dwc/terms/organismQuantity",
+      "type": "string",
+      "nullable": "True",
+      "definition": "A number or enumeration value for the quantity of dwc:Organisms."
+    },
+    "scientificNameID": {
+      "url": "http://rs.tdwg.org/dwc/terms/scientificNameID",
+      "type": "string",
+      "nullable": "False",
+      "definition": "An identifier for the nomenclatural (not taxonomic) details of a scientific name."
+    },
+    "occurrenceRemarks": {
+      "url": "http://rs.tdwg.org/dwc/terms/occurrenceRemarks",
+      "type": "string",
+      "nullable": "True",
+      "definition": "Comments or notes about the dwc:Occurrence."
+    },
+    "maximumDepthInMeters": {
+      "url": "http://rs.tdwg.org/dwc/terms/maximumDepthInMeters",
+      "type": "int64",
+      "nullable": "True",
+      "definition": "The greater depth of a range of depth below the local surface, in meters."
+    },
+    "minimumDepthInMeters": {
+      "url": "http://rs.tdwg.org/dwc/terms/minimumDepthInMeters",
+      "type": "int64",
+      "nullable": "True",
+      "definition": "The lesser depth of a range of depth below the local surface, in meters."
+    },
+    "organismQuantityType": {
+      "url": "http://rs.tdwg.org/dwc/terms/organismQuantityType",
+      "type": "string",
+      "nullable": "True",
+      "definition": "The type of quantification system used for the quantity of dwc:Organisms."
+    },
+    "bibliographicCitation": {
+      "url": "http://purl.org/dc/terms/bibliographicCitation",
+      "type": "string",
+      "nullable": "True",
+      "definition": "A bibliographic reference for the resource."
+    },
+    "scientificNameAuthorship": {
+      "url": "http://rs.tdwg.org/dwc/terms/scientificNameAuthorship",
+      "type": "string",
+      "nullable": "True",
+      "definition": "The authorship information for the dwc:scientificName formatted according to the conventions of the applicable dwc:nomenclaturalCode."
+    },
+    "australianMarineRegionsTags": {
+      "type": "string",
+      "nullable": "True",
+      "definition": "A `|` separated tag column featuring common australian marine regions"
+    },
+    "coordinateUncertaintyInMeters": {
+      "url": "http://rs.tdwg.org/dwc/terms/coordinateUncertaintyInMeters",
+      "type": "int64",
+      "nullable": "True",
+      "definition": "The horizontal distance (in meters) from the given dwc:decimalLatitude and dwc:decimalLongitude describing the smallest circle containing the whole of the dcterms:Location. Leave the value empty if the uncertainty is unknown, cannot be estimated, or is not applicable (because there are no coordinates). Zero is not a valid value for this term."
+    },
+    "polygon": {
+      "type": "string",
+      "units": "1",
+      "long_name": "Spatial partition polygon"
+    },
+    "filename": {
+      "type": "string",
+      "units": "1",
+      "long_name": "Filename of the source file"
+    },
+    "timestamp": {
+      "type": "int64",
+      "units": "1",
+      "long_name": "Partition timestamp"
+    },
+    "global_attributes": {
+      "metadata_uuid": "ec2c0ef9-3645-4ded-b617-c8297f6eb250",
+      "dataset_name": "aggregated_seabird_nonqc"
+    }
   }
 }

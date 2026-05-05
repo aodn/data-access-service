@@ -5,7 +5,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from aodn_cloud_optimised import DataQuery
+from aodn_cloud_optimised.lib import DataQuery
 from data_access_service.config.config import Config
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ class TaskScheduler:
                 SECRET '{creds.secret_key}',
                 SESSION_TOKEN '{creds.token or ""}',
                 REGION '{region}'"""
-        
+
         self.memconn.execute(
             f"""
             CREATE OR REPLACE SECRET wave_buoy_s3 (
