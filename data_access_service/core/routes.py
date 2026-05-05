@@ -110,8 +110,8 @@ async def get_temporal_extent(uuid: str, key: str, request: Request):
             }
         ]
         return Response(content=json.dumps(result), media_type="application/json")
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Temporal extent not found")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=f"Temporal extent not found {e}")
 
 
 @router.get("/data/{uuid}/{key}/indexing_values", dependencies=[Depends(api_key_auth)])
