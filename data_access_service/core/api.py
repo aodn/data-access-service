@@ -15,7 +15,7 @@ import xarray
 from datetime import timedelta, timezone
 from io import BytesIO
 from typing import Optional, Dict, Any, List, Tuple, Hashable
-from aodn_cloud_optimised import DataQuery
+from aodn_cloud_optimised.lib import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, ZarrDataSource
 from aodn_cloud_optimised.lib.config import get_notebook_url
 from bokeh.server.tornado import psutil
