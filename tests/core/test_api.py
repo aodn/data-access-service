@@ -165,8 +165,8 @@ class TestApi(unittest.TestCase):
             [
                 {
                     "time": "2016-02-07",
-                    "longitude": 147.12346,
-                    "latitude": -42.98765,
+                    "longitude": 147.1,
+                    "latitude": -43.0,
                 }
             ],
         )
