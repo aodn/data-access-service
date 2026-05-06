@@ -145,6 +145,32 @@ class TestApi(unittest.TestCase):
         assert parsed_result[1]["longitude"] is None, "LONGITUDE NaN should be None"
         assert parsed_result[1]["depth"] is None, "DEPTH NaN should be None"
 
+    def test_generate_partial_json_array_maps_darwin_core_fields(self):
+        # test generate partial json array with normalised name field
+        df = ddf.from_pandas(
+            pd.DataFrame(
+                {
+                    "eventDate": ["2016-02-07"],
+                    "decimalLongitude": [147.123456],
+                    "decimalLatitude": [-42.987654],
+                }
+            ),
+            npartitions=1,
+        )
+
+        result = list(_generate_partial_json_array(df, None))
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    "time": "2016-02-07",
+                    "longitude": 147.12346,
+                    "latitude": -42.98765,
+                }
+            ],
+        )
+
     def test_normalize_lon(self):
         """Test None"""
         self.assertEqual(BaseAPI.normalize_lon(None), None)
