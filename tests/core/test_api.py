@@ -171,6 +171,42 @@ class TestApi(unittest.TestCase):
             ],
         )
 
+    def test_refresh_uuid_dataset_map_logs_dataset_failure_and_continues(self):
+        api = API()
+        api._metadata = MagicMock()
+        api._metadata.metadata_catalog_uncached.return_value = {
+            "bad_dataset.parquet": {},
+            "good_dataset.parquet": {
+                "dataset_metadata": {
+                    "uuid": "good-uuid",
+                }
+            },
+        }
+
+        def get_metadata_uuid(data):
+            if data == {}:
+                # mock raised error
+                raise ValueError("bad dataset metadata")
+            return "good-uuid"
+
+        with patch.object(API, "get_metadata_uuid", side_effect=get_metadata_uuid):
+            with patch.object(api, "_extract_coordinate", return_value=None):
+                with self.assertLogs(
+                    "data_access_service.core.api", level="ERROR"
+                ) as logs:
+                    api.refresh_uuid_dataset_map()
+
+        log_output = "\n".join(logs.output)
+
+        self.assertIn(
+            "Failed to refresh UUID dataset map for dataset=bad_dataset.parquet uuid=None",
+            log_output,
+        )
+        self.assertIn("good-uuid", api._raw)
+        self.assertIn("good_dataset.parquet", api._raw["good-uuid"])
+        self.assertIn("good-uuid", api._cached_metadata)
+        self.assertIn("good_dataset.parquet", api._cached_metadata["good-uuid"])
+
     def test_normalize_lon(self):
         """Test None"""
         self.assertEqual(BaseAPI.normalize_lon(None), None)
