@@ -563,14 +563,9 @@ class API(BaseAPI):
     def refresh_uuid_dataset_map(self):
         # A map contains dataset name and Metadata class, which is not
         # so useful in our case, we need UUID
-        try:
-            catalog = self._metadata.metadata_catalog_uncached()
-        except Exception:
-            log.error(
-                "Failed to load metadata catalog from cloud-optimised lib.",
-                exc_info=True,
-            )
-            return
+        catalog = self._metadata.metadata_catalog_uncached()
+        if catalog == {}:
+            log.error("Failed to load metadata catalog from cloud-optimised lib.")
 
         for key in catalog:
             uuid = None
