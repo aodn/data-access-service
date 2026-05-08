@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import dask.dataframe as dd
 import pandas as pd
 import xarray
 
@@ -9,6 +10,7 @@ from data_access_service.utils.routes_helper import (
     round_coordinate_list,
     generate_feature_collection,
     generate_rect_features,
+    generate_rect_features_from_dataframe,
 )
 
 
@@ -79,3 +81,42 @@ def test_generate_rect_feature_collection():
 
     actual_result = json.dumps(feature_collection)
     assert json.loads(actual_result) == json.loads(expected_result)
+
+
+def test_generate_rect_feature_collection_from_dataframe():
+    dataframe = pd.DataFrame(
+        {
+            "decimalLatitude": [-43.2, -42.8, -43.0],
+            "decimalLongitude": [147.1, 148.4, 147.9],
+            "eventDate": [
+                "2024-01-05T00:00:00Z",
+                "2024-01-12T00:00:00Z",
+                "2024-01-30T00:00:00Z",
+            ],
+        }
+    )
+    dask_dataframe = dd.from_pandas(dataframe, npartitions=1)
+
+    feature_collection = generate_rect_features_from_dataframe(
+        dask_dataframe, "decimalLatitude", "decimalLongitude", "eventDate"
+    )
+
+    actual_result = json.loads(json.dumps(feature_collection))
+    assert actual_result == [
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [147.1, -43.2],
+                        [147.1, -42.8],
+                        [148.4, -42.8],
+                        [148.4, -43.2],
+                        [147.1, -43.2],
+                    ]
+                ],
+            },
+            "properties": {"date": "2024-01", "count": 3},
+        }
+    ]

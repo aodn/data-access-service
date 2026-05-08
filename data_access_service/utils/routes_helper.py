@@ -576,3 +576,75 @@ def generate_rect_features(
         },
     )
     return [feature]
+
+
+def generate_rect_features_from_dataframe(
+    dataset: DataFrame,
+    lat_key: str,
+    lon_key: str,
+    time_key: str,
+):
+    """
+    Generate rectangle features from a parquet-backed Dask DataFrame.
+    This is the temp solution to handle large parquet datasets which do no render hexbin layers
+    """
+    missing_columns = [
+        column
+        for column in [lat_key, lon_key, time_key]
+        if column not in dataset.columns
+    ]
+    if missing_columns:
+        raise ValueError(
+            f"Dataset does not contain required columns: {missing_columns}"
+        )
+
+    data = dataset[[lat_key, lon_key, time_key]].dropna().compute()
+
+    if data.empty:
+        logger.info("No data available in the dataset.")
+        return None
+
+    times = data[time_key]
+    if time_key == "timestamp" and pandas.api.types.is_numeric_dtype(times):
+        pandas_times = pandas.to_datetime(times, unit="s")
+    else:
+        pandas_times = pandas.to_datetime(times)
+
+    valid_time_mask = pandas_times.notna()
+    if not valid_time_mask.any():
+        logger.info("No valid time values available in the dataset.")
+        return None
+
+    data = data.loc[valid_time_mask]
+    pandas_times = pandas_times.loc[valid_time_mask]
+    rounded_time = round_dates(pandas_times)[0]
+
+    lats = pandas.to_numeric(data[lat_key], errors="coerce").dropna()
+    lons = pandas.to_numeric(data[lon_key], errors="coerce").dropna()
+
+    if lats.empty or lons.empty:
+        logger.info("No valid coordinate values available in the dataset.")
+        return None
+
+    min_lat = float(lats.min())
+    max_lat = float(lats.max())
+    min_lon = float(lons.min())
+    max_lon = float(lons.max())
+
+    rect_polygon = [
+        [min_lon, min_lat],
+        [min_lon, max_lat],
+        [max_lon, max_lat],
+        [max_lon, min_lat],
+        [min_lon, min_lat],
+    ]
+
+    geometry = Geometry(type="Polygon", coordinates=[rect_polygon])
+    feature = Feature(
+        geometry=geometry,
+        properties={
+            "date": rounded_time.value,
+            "count": int(len(data)),
+        },
+    )
+    return [feature]

@@ -4,6 +4,7 @@ from http import HTTPStatus
 from typing import Optional, List
 import uuid as uuid_module
 
+from dask.dataframe import DataFrame
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import Response
 from xarray import Dataset
@@ -33,6 +34,7 @@ from data_access_service.utils.routes_helper import (
     async_response_json,
     generate_feature_collection,
     generate_rect_features,
+    generate_rect_features_from_dataframe,
 )
 from data_access_service.utils.sse_wrapper import sse_wrapper
 
@@ -202,7 +204,13 @@ async def get_zarr_rectangles(
             status_code=HTTPStatus.BAD_REQUEST,
             detail="Missing required parameters",
         )
-    if not key.endswith(".zarr"):
+
+    # hard coded this parquet dataset because it's too large
+    is_amsa_dataset = (
+        uuid == "2a5739e7-0cb8-444a-b83b-b2bc841b0ce8"
+        and key == "aggregated_amsa_nonqc.parquet"
+    )
+    if not key.endswith(".zarr") and not is_amsa_dataset:
         logger.error(f"Invalid file format. Key {key} must end with .zarr")
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
@@ -225,12 +233,6 @@ async def get_zarr_rectangles(
             status_code=HTTPStatus.NOT_FOUND,
             detail=f"No data found with provided params for dataset {uuid} with key {key}",
         )
-    if not isinstance(data_source, Dataset):
-        logger.error(f"Dataset {uuid} with key {key} is not a Zarr dataset")
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail=f"Dataset {uuid} with key {key} is not a Zarr dataset. Please doublecheck or contact AODN",
-        )
 
     lat_key = api.map_column_names(
         uuid=uuid, key=key, columns=[STR_LATITUDE_UPPER_CASE]
@@ -242,22 +244,46 @@ async def get_zarr_rectangles(
         0
     ]
 
-    if (
-        lat_key not in data_source.coords
-        or lon_key not in data_source.coords
-        or time_key not in data_source.coords
-    ):
-        logger.error(
-            f"Dataset {uuid} with key {key} does not contain required coordinates: {lat_key}, {lon_key}, {time_key}"
-        )
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail=f"Dataset {uuid} with key {key} does not contain required coordinates: {lat_key}, {lon_key}, {time_key}",
-        )
+    if is_amsa_dataset:
+        if not isinstance(data_source, DataFrame):
+            logger.error(f"Dataset {uuid} with key {key} is not a parquet dataset")
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail=f"Dataset {uuid} with key {key} is not a parquet dataset. Please doublecheck or contact AODN",
+            )
+        try:
+            features = generate_rect_features_from_dataframe(
+                dataset=data_source, lat_key=lat_key, lon_key=lon_key, time_key=time_key
+            )
+        except ValueError as e:
+            logger.error(
+                f"Dataset {uuid} with key {key} does not contain required columns: {lat_key}, {lon_key}, {time_key}"
+            )
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    else:
+        if not isinstance(data_source, Dataset):
+            logger.error(f"Dataset {uuid} with key {key} is not a Zarr dataset")
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail=f"Dataset {uuid} with key {key} is not a Zarr dataset. Please doublecheck or contact AODN",
+            )
 
-    features = generate_rect_features(
-        dataset=data_source, lat_key=lat_key, lon_key=lon_key, time_key=time_key
-    )
+        if (
+            lat_key not in data_source.coords
+            or lon_key not in data_source.coords
+            or time_key not in data_source.coords
+        ):
+            logger.error(
+                f"Dataset {uuid} with key {key} does not contain required coordinates: {lat_key}, {lon_key}, {time_key}"
+            )
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail=f"Dataset {uuid} with key {key} does not contain required coordinates: {lat_key}, {lon_key}, {time_key}",
+            )
+
+        features = generate_rect_features(
+            dataset=data_source, lat_key=lat_key, lon_key=lon_key, time_key=time_key
+        )
 
     if not features or len(features) == 0:
         logger.warning(f"No rectangle features found for dataset {uuid} with key {key}")
