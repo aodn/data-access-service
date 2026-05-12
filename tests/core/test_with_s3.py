@@ -18,6 +18,7 @@ from botocore import UNSIGNED
 from fsspec.core import get_fs_token_paths as original_get_fs_token_paths
 
 from data_access_service.core.AWSHelper import AWSHelper
+from data_access_service.models.CO_data_source.csiro_data_src import CsiroDataSrc
 
 log = logging.getLogger(__name__)
 
@@ -206,13 +207,13 @@ class TestWithS3:
         monkeypatch.setattr(DataQuery, "ENDPOINT_URL", localstack.get_url())
         monkeypatch.setattr(DataQuery, "REGION", REGION)
 
-        # Other test may have call this get_s3_filesystem() this function is cached and
-        # may use different ENDPOINT_URL other than the one above
-        # so we need to clear it now before the next call happens
-        # this function is not applicable anymore so temperately commented this line
-        # DataQuery.get_s3_filesystem.cache_clear()
-        # Force a load so its cache value use the test value
-        # DataQuery.get_s3_filesystem()
+        # CsiroDataSrc fetches real CSIRO S3 credentials and then accesses the external CSIRO S3
+        # bucket. When get_s3_filesystem is redirected to LocalStack (above), the CSIRO bucket
+        # does not exist there, causing FileNotFoundError. Stub it out so integration tests that
+        # only exercise AODN datasets are not affected by this external dependency.
+        monkeypatch.setattr(CsiroDataSrc, "__init__", lambda self: None)
+        monkeypatch.setattr(CsiroDataSrc, "get_metadata_catalog", lambda self: {})
+        monkeypatch.setattr(CsiroDataSrc, "get_name", lambda self: "csiro")
 
         yield wrapped_client
         monkeypatch.undo()
