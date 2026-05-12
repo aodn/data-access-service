@@ -111,8 +111,7 @@ async def get_temporal_extent(uuid: str, key: str, request: Request):
         ]
         return Response(content=json.dumps(result), media_type="application/json")
     except ValueError as e:
-        logger.error("ValueError: " + str(e))
-        raise HTTPException(status_code=404, detail="Temporal extent not found")
+        raise HTTPException(status_code=404, detail=f"Temporal extent not found {e}")
 
 
 @router.get("/data/{uuid}/{key}/indexing_values", dependencies=[Depends(api_key_auth)])
@@ -292,6 +291,17 @@ async def get_feature_collection_of_items_with_data_between_dates(
     api_instance = get_api_instance(request)
     return Response(
         content=json.dumps(api_instance.fetch_wave_buoy_sites(start_date, end_date)),
+        media_type="application/json",
+    )
+
+
+@router.get(
+    "/data/feature-collection/wave-buoy/all", dependencies=[Depends(api_key_auth)]
+)
+async def get_feature_collection_of_items_all(request: Request):
+    api_instance = get_api_instance(request)
+    return Response(
+        content=json.dumps(api_instance.fetch_all_unique_wave_buoy_sites()),
         media_type="application/json",
     )
 

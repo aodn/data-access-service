@@ -589,6 +589,7 @@ Jinja2 = ">=2.9"
 narwhals = ">=1.13"
 numpy = ">=1.16"
 packaging = ">=16.8"
+pandas = ">=1.2"
 pillow = ">=7.1.0"
 PyYAML = ">=3.10"
 tornado = {version = ">=6.2", markers = "sys_platform != \"emscripten\""}

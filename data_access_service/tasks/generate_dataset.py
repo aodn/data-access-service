@@ -13,6 +13,7 @@ from data_access_service import API, init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.constants import PARTITION_KEY, STR_TIME_UPPER_CASE
 from data_access_service.core.descriptor import Descriptor
+from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.tasks.data_file_upload import (
     upload_all_files_in_folder_to_temp_s3,
 )
@@ -33,12 +34,14 @@ def process_data_files(
     job_id_of_init: str,
     job_index: str,
     intermediate_output_folder: str,
-    uuid: str,
-    keys: List[str],
+    subset_request: SubsetRequest,
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
-    multi_polygon: str | None,
 ) -> str | None:
+    uuid = subset_request.uuid
+    keys = subset_request.keys
+    multi_polygon = subset_request.multi_polygon
+
     if multi_polygon is not None:
         if multi_polygon == "non-specified":
             #    multi polygon dict is whole earth

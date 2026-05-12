@@ -90,6 +90,18 @@ class TestApi(unittest.TestCase):
             )
             self.assertListEqual(col, ["JULD", "LATITUDE", "LONGITUDE"], "TIME mapped")
 
+            # This uuid uses eventDate as temporal field
+            col = api.map_column_names(
+                "ec2c0ef9-3645-4ded-b617-c8297f6eb250",
+                "aggregated_seabird_nonqc.parquet",
+                ["TIME", "LATITUDE", "LONGITUDE"],
+            )
+            self.assertListEqual(
+                col,
+                ["eventDate", "decimalLatitude", "decimalLongitude"],
+                "TIME mapped to eventDate, LATITUDE mapped to decimalLatitude, LONGITUDE mapped to decimalLongitude",
+            )
+
     def test_nan_to_none_conversion(self):
         # Create a sample pandas DataFrame with NaN values
         data = {
@@ -132,6 +144,32 @@ class TestApi(unittest.TestCase):
         assert parsed_result[0]["latitude"] is None, "LATITUDE NaN should be None"
         assert parsed_result[1]["longitude"] is None, "LONGITUDE NaN should be None"
         assert parsed_result[1]["depth"] is None, "DEPTH NaN should be None"
+
+    def test_generate_partial_json_array_maps_darwin_core_fields(self):
+        # test generate partial json array with normalised name field
+        df = ddf.from_pandas(
+            pd.DataFrame(
+                {
+                    "eventDate": ["2016-02-07"],
+                    "decimalLongitude": [147.123456],
+                    "decimalLatitude": [-42.987654],
+                }
+            ),
+            npartitions=1,
+        )
+
+        result = list(_generate_partial_json_array(df, None))
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    "time": "2016-02-07",
+                    "longitude": 147.1,
+                    "latitude": -43.0,
+                }
+            ],
+        )
 
     def test_normalize_lon(self):
         """Test None"""
@@ -258,6 +296,46 @@ class TestApi(unittest.TestCase):
         self.assertEqual(feature1["properties"]["buoy"], "Sydney")
         self.assertEqual(feature1["properties"]["date"], "2025-01-11T09:00:00Z")
         self.assertEqual(feature1["geometry"]["coordinates"], [151.21, -33.87])
+
+    def test_fetch_all_unique_wave_buoy_sites(self):
+        api = API()
+        mock_df = pd.DataFrame(
+            {
+                "site_name": ["Brisbane", "Sydney", "Perth"],
+                "TIME": [
+                    pd.Timestamp("2025-03-01 10:00:00"),
+                    pd.Timestamp("2025-02-15 06:00:00"),
+                    pd.Timestamp("2025-01-20 14:00:00"),
+                ],
+                "LATITUDE": [-27.47, -33.87, -31.95],
+                "LONGITUDE": [153.03, 151.21, 115.86],
+            }
+        )
+        api.memconn = MagicMock()
+        api.memconn.execute.return_value.df.return_value = mock_df
+
+        result = api.fetch_all_unique_wave_buoy_sites()
+
+        self.assertEqual(result["type"], "FeatureCollection")
+        self.assertEqual(len(result["features"]), 3)
+        api.memconn.execute.assert_called_once()
+
+        feature0 = result["features"][0]
+        self.assertEqual(feature0["type"], "Feature")
+        self.assertEqual(feature0["properties"]["buoy"], "Brisbane")
+        self.assertEqual(feature0["properties"]["date"], "2025-03-01T10:00:00Z")
+        self.assertEqual(feature0["geometry"]["type"], "Point")
+        self.assertEqual(feature0["geometry"]["coordinates"], [153.03, -27.47])
+
+        feature1 = result["features"][1]
+        self.assertEqual(feature1["properties"]["buoy"], "Sydney")
+        self.assertEqual(feature1["properties"]["date"], "2025-02-15T06:00:00Z")
+        self.assertEqual(feature1["geometry"]["coordinates"], [151.21, -33.87])
+
+        feature2 = result["features"][2]
+        self.assertEqual(feature2["properties"]["buoy"], "Perth")
+        self.assertEqual(feature2["properties"]["date"], "2025-01-20T14:00:00Z")
+        self.assertEqual(feature2["geometry"]["coordinates"], [115.86, -31.95])
 
     def test_fetch_wave_buoy_data(self):
         api = API()

@@ -96,8 +96,10 @@ class BaseAPI:
             if mapped_col is None or len(mapped_col) == 0:
                 return None
             # Translate to the correct column name for dataset
-            mapped_col = self.map_column_names(uuid, key, [column])[0]
-            val = data.get(mapped_col)
+            mapped_col = self.map_column_names(uuid, key, [column])
+            if not mapped_col:
+                return None
+            val = data.get(mapped_col[0])
 
             if val is not None:
                 return Coordinate(min=val.get("valid_min"), max=val.get("valid_max"))
@@ -496,6 +498,39 @@ class API(BaseAPI):
         # DuckDB return pandas Timestamp which is timezone-naive like 2026-04-21 23:25:00, we need to convert it to ISO format with Z. The time is in UTC because the data source is in UTC, so we can just add Z at the end to indicate it is UTC time.
         return result["TIME"].item().isoformat() + "Z"
 
+    def fetch_all_unique_wave_buoy_sites(self):
+        result = self.memconn.execute(
+            """SELECT
+            site_name,
+            MAX(TIME) AS TIME,
+            first(LATITUDE) AS LATITUDE,
+            first(LONGITUDE) AS LONGITUDE
+            FROM wave_buoy_realtime_nonqc
+            GROUP BY site_name"""
+        ).df()
+        feature_collection = {
+            "type": "FeatureCollection",
+            "features": [],
+        }
+        for _, row in result.iterrows():
+            feature = {
+                "type": "Feature",
+                "properties": {
+                    "buoy": row["site_name"],
+                    "date": row["TIME"].isoformat() + "Z",
+                },
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [
+                        row[STR_LONGITUDE_UPPER_CASE],
+                        row[STR_LATITUDE_UPPER_CASE],
+                    ],
+                },
+            }
+            feature_collection["features"].append(feature)
+
+        return feature_collection
+
     def fetch_wave_buoy_sites(self, start_date: str, end_date: str):
         result = self.memconn.execute(
             f"""SELECT
@@ -651,6 +686,8 @@ class API(BaseAPI):
                         output.append("TIME")
                     case meta if "time" in meta:
                         output.append("time")
+                    case meta if "eventDate" in meta:
+                        output.append("eventDate")
                     case meta if "timestamp" in meta:
                         log.error(
                             f"For most datasets, timestamp should not be the field to express the accurate time. "
@@ -675,6 +712,9 @@ class API(BaseAPI):
                         output.append(STR_LATITUDE_UPPER_CASE)
                     case meta if "lat" in meta:
                         output.append("lat")
+                    # some data-uplift datasets use this, e.g., "aggregated_seabird_nonqc.parquet"
+                    case meta if "decimalLatitude" in meta:
+                        output.append("decimalLatitude")
             elif column.casefold() == STR_LONGITUDE_UPPER_CASE.casefold() and (
                 STR_LONGITUDE_UPPER_CASE not in meta
                 or STR_LONGITUDE_LOWER_CASE not in meta
@@ -686,6 +726,9 @@ class API(BaseAPI):
                         output.append(STR_LONGITUDE_UPPER_CASE)
                     case meta if "lon" in meta:
                         output.append("lon")
+                    # some data-uplift datasets use this, e.g., "aggregated_seabird_nonqc.parquet"
+                    case meta if "decimalLongitude" in meta:
+                        output.append("decimalLongitude")
             else:
                 output.append(column)
 

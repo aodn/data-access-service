@@ -103,6 +103,11 @@ def _generate_partial_json_array(
                 )
             elif "JULD" in record:
                 filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(record["JULD"])
+            # add this for data-uplift aggregated datasets for co-index
+            elif "eventDate" in record:
+                filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
+                    record["eventDate"]
+                )
             elif "timestamp" in record:
                 filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
                     datetime.fromtimestamp(
@@ -142,6 +147,12 @@ def _generate_partial_json_array(
                     if record["lon"] is not None
                     else None
                 )
+            elif "decimalLongitude" in record:
+                filtered_record[STR_LONGITUDE_LOWER_CASE] = (
+                    round(record["decimalLongitude"], COORDINATE_INDEX_PRECISION)
+                    if record["decimalLongitude"] is not None
+                    else None
+                )
 
             if "LATITUDE" in record:
                 filtered_record[STR_LATITUDE_LOWER_CASE] = (
@@ -159,6 +170,13 @@ def _generate_partial_json_array(
                 filtered_record[STR_LATITUDE_LOWER_CASE] = (
                     round(record["lat"], COORDINATE_INDEX_PRECISION)
                     if record["lat"] is not None
+                    else None
+                )
+            # add this for data-uplift aggregated datasets for co-index
+            elif "decimalLatitude" in record:
+                filtered_record[STR_LATITUDE_LOWER_CASE] = (
+                    round(record["decimalLatitude"], COORDINATE_INDEX_PRECISION)
+                    if record["decimalLatitude"] is not None
                     else None
                 )
 

@@ -11,9 +11,7 @@ from data_access_service.utils.email_templates.download_email import (
 )
 
 
-def collect_data_files(
-    master_job_id: str, dataset_uuid: str, recipient: str, subset_request: SubsetRequest
-):
+def collect_data_files(master_job_id: str, subset_request: SubsetRequest):
 
     aws = AWSHelper()
     config = Config.get_config()
@@ -46,16 +44,15 @@ def collect_data_files(
                 )
             )
 
-    subject = f"Finish processing data file whose uuid is:  {dataset_uuid}"
-    body_text = (
-        f"You can download the data file from the following link(s): {download_urls}"
-    )
+    subject = f"Finish processing data file whose uuid is:  {subset_request.uuid}"
 
     html_content = get_download_email_html_body(
         subset_request=subset_request, object_urls=download_urls
     )
 
-    aws.send_email(recipient=recipient, subject=subject, html_body=html_content)
+    aws.send_email(
+        recipient=subset_request.recipient, subject=subject, html_body=html_content
+    )
     log.info("Finish aggregation and send email")
 
 
