@@ -110,7 +110,8 @@ async def get_temporal_extent(uuid: str, key: str, request: Request):
             }
         ]
         return Response(content=json.dumps(result), media_type="application/json")
-    except ValueError:
+    except ValueError as e:
+        logger.error("ValueError: " + str(e))
         raise HTTPException(status_code=404, detail="Temporal extent not found")
 
 

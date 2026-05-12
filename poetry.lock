@@ -260,7 +260,7 @@ trio = ["trio (>=0.26.1)"]
 
 [[package]]
 name = "aodn-cloud-optimised"
-version = "1.1.0"
+version = "1.2.2"
 description = "Cloud optimised data formats for IMOS NetCDF files and CSVs."
 optional = false
 python-versions = ">=3.11,<3.13"
@@ -308,8 +308,8 @@ tests = ["coverage (>=7.5.3)", "moto[all,ec2,s3,server] (==5.1.1)", "pytest (>=8
 [package.source]
 type = "git"
 url = "https://github.com/aodn/aodn_cloud_optimised.git"
-reference = "v1.1.0"
-resolved_reference = "d9f2b59d95a4a230614e4572b846f5f189520d4b"
+reference = "v1.2.2"
+resolved_reference = "f55b9f39dab9036666ab6df0c6c8770328d1c2d7"
 
 [[package]]
 name = "apscheduler"
@@ -6507,4 +6507,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11.0, < 3.13"
-content-hash = "89d890ecbd8adb9e59a088d0902bb8904a2a4dfd82deaba2ab3ba41155f150b9"
+content-hash = "93283d189d8a037037202c839396ed23c144c3154721e68e45d8d8b599eecd60"
