@@ -18,7 +18,7 @@ from botocore import UNSIGNED
 from fsspec.core import get_fs_token_paths as original_get_fs_token_paths
 
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.models.CO_data_source.csiro_data_src import CsiroDataSrc
+from data_access_service.models.co_data_source.csiro_data_src import CsiroDataSrc
 
 log = logging.getLogger(__name__)
 

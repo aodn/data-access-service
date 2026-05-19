@@ -3,7 +3,7 @@ from pprint import pprint
 from aodn_cloud_optimised.lib.DataQuery import Metadata, DataSource, GetAodn
 
 from data_access_service.exceptions.dataset_not_found_error import DatasetNotFoundError
-from data_access_service.models.CO_data_source.abstract_data_src import (
+from data_access_service.models.co_data_source.abstract_data_src import (
     AbstractDataSrc,
     AODN,
 )

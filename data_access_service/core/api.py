@@ -35,8 +35,8 @@ from data_access_service.core.constants import (
 from data_access_service.core.descriptor import Depth, Descriptor, Coordinate
 from urllib.parse import unquote_plus
 
-from data_access_service.models.CO_data_source.co_data_registory import CODataRegistry
-from data_access_service.models.CO_data_source.csiro_data_src import CsiroDataSrc
+from data_access_service.models.co_data_source.co_data_registory import CODataRegistry
+from data_access_service.models.co_data_source.csiro_data_src import CsiroDataSrc
 
 log = logging.getLogger(__name__)
 

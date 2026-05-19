@@ -37,7 +37,7 @@ class TestApiWithS3(TestWithS3):
         mock_csiro.get_name.return_value = "csiro"
         mock_csiro.get_metadata_catalog.return_value = {}
         with patch(
-            "data_access_service.models.CO_data_source.co_data_registory.CsiroDataSrc",
+            "data_access_service.models.co_data_source.co_data_registory.CsiroDataSrc",
             return_value=mock_csiro,
         ):
             api_setup(app)
