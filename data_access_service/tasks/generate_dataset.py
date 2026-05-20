@@ -169,6 +169,12 @@ def _generate_partition_output(
                     time_key = api.map_column_names(
                         uuid=uuid, key=key, columns=[STR_TIME_UPPER_CASE]
                     )[0]
+
+                    # 'M' stands for Datetime in NumPy/Pandas dtypes, some dataset return
+                    # time field of different type
+                    if result[time_key].dtype.kind != "M":
+                        result[time_key] = ddf.to_datetime(result[time_key])
+
                     result[PARTITION_KEY] = result[time_key].dt.strftime("%Y-%m")
 
                     result.to_parquet(

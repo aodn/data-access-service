@@ -11,7 +11,7 @@ class MultiPolygonHelper:
         #  we can change to use the polygon coordinates directly
 
         # if users do not specify multi_polygon, assume whole globe
-        if multi_polygon == "non-specified":
+        if multi_polygon is None or multi_polygon == "non-specified":
             # whole globe
             self.bboxes = [
                 BoundingBox(min_lon=-180, min_lat=-90, max_lon=180, max_lat=90)
