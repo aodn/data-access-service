@@ -1,6 +1,5 @@
 import logging
 import boto3
-import botocore.session
 import duckdb
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
