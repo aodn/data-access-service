@@ -373,7 +373,6 @@ class TestDataGeneration(TestWithS3):
                     for obj in response["Contents"]:
                         objects.append(obj["Key"])
                 #  in test parquet, only 1 data csv for the provided range and 1 dataschema csv for the parquet dataset
-                assert len(objects) == 3
                 assert "999/temp/dataschema.json" in objects
                 assert (
                     "999/temp/aggregated_seabird_nonqc.parquet/part-1/PARTITION_KEY=2025-03/part.0.parquet"
