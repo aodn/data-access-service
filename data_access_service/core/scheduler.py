@@ -39,9 +39,7 @@ class TaskScheduler:
         #
         # ECS task role credentials expire after ~6 hours. This method is called at
         # startup and before every hourly_task run to keep the secret current.
-        bc = botocore.session.get_session()
-        bc.user_agent_extra += " data-access-service"
-        session = boto3.Session(botocore_session=bc)
+        session = boto3.Session()
         creds = session.get_credentials().get_frozen_credentials()
         region = session.region_name or "ap-southeast-2"
         secret_params = f"""
