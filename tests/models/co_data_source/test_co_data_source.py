@@ -1,5 +1,5 @@
 """
-Unit tests for the CO_data_source package:
+Unit tests for the co_data_source package:
   - abstract_data_src.py  (via a concrete stub)
   - aodn_data_src.py
   - csiro_data_src.py
@@ -101,7 +101,7 @@ class TestAodnDataSrc:
     def _make_src(self) -> tuple[AodnDataSrc, MagicMock]:
         mock_aodn = _make_mock_get_aodn(catalog={KNOWN_DATASET: {"info": 1}})
         with patch(
-            "data_access_service.models.CO_data_source.aodn_data_src.GetAodn",
+            "data_access_service.models.co_data_source.aodn_data_src.GetAodn",
             return_value=mock_aodn,
         ):
             src = AodnDataSrc()
@@ -169,11 +169,11 @@ def _patch_csiro(api_response=None, metadata=None):
     mock_aodn.get_dataset.return_value = mock_dataset
 
     requests_patch = patch(
-        "data_access_service.models.CO_data_source.csiro_data_src.requests.get",
+        "data_access_service.models.co_data_source.csiro_data_src.requests.get",
         return_value=mock_response,
     )
     get_aodn_patch = patch(
-        "data_access_service.models.CO_data_source.csiro_data_src.GetAodn",
+        "data_access_service.models.co_data_source.csiro_data_src.GetAodn",
         return_value=mock_aodn,
     )
     return requests_patch, get_aodn_patch, mock_aodn
@@ -210,7 +210,7 @@ class TestCsiroDataSrc:
         mock_response.status_code = 403
 
         with patch(
-            "data_access_service.models.CO_data_source.csiro_data_src.requests.get",
+            "data_access_service.models.co_data_source.csiro_data_src.requests.get",
             return_value=mock_response,
         ):
             with pytest.raises(Exception, match="Failed to get keys from CSIRO"):
@@ -266,10 +266,10 @@ class TestCsiroDataSrc:
         mock_aodn.get_dataset.return_value = mock_dataset
 
         with patch(
-            "data_access_service.models.CO_data_source.csiro_data_src.requests.get",
+            "data_access_service.models.co_data_source.csiro_data_src.requests.get",
             return_value=mock_response,
         ), patch(
-            "data_access_service.models.CO_data_source.csiro_data_src.GetAodn",
+            "data_access_service.models.co_data_source.csiro_data_src.GetAodn",
             return_value=mock_aodn,
         ):
             with pytest.raises(

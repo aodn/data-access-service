@@ -26,7 +26,7 @@ class TestInit(TestWithS3):
         yield
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    @patch("data_access_service.models.CO_data_source.co_data_registory.CsiroDataSrc")
+    @patch("data_access_service.models.co_data_source.co_data_registory.CsiroDataSrc")
     def test_init(self, mock_csiro_cls, upload_test_case_to_s3):
         mock_csiro = MagicMock()
         mock_csiro.get_name.return_value = "csiro"
@@ -70,7 +70,7 @@ class TestInit(TestWithS3):
                 ), "call arg list 2"
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    @patch("data_access_service.models.CO_data_source.co_data_registory.CsiroDataSrc")
+    @patch("data_access_service.models.co_data_source.co_data_registory.CsiroDataSrc")
     def test_init_with_very_narrow_date_range(
         self, mock_csiro_cls, upload_test_case_to_s3
     ):
@@ -128,7 +128,7 @@ class TestInit(TestWithS3):
                     assert expected_call_2 in submit_a_job.call_args_list
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    @patch("data_access_service.models.CO_data_source.co_data_registory.CsiroDataSrc")
+    @patch("data_access_service.models.co_data_source.co_data_registory.CsiroDataSrc")
     def test_init_with_non_specified_dates(
         self, mock_csiro_cls, upload_test_case_to_s3
     ):
