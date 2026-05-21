@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from data_access_service.core.AWSHelper import AWSHelper
 from aodn_cloud_optimised.lib import DataQuery
 from data_access_service import Config, API
@@ -35,13 +35,19 @@ class TestKeyMapping(TestWithS3):
         )
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    @patch("data_access_service.models.co_data_source.co_data_registory.CsiroDataSrc")
     def test_special_time_column(
         self,
+        mock_csiro_cls,
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
         subset_request_factory,
     ):
+        mock_csiro = MagicMock()
+        mock_csiro.get_name.return_value = "csiro"
+        mock_csiro.get_metadata_catalog.return_value = {}
+        mock_csiro_cls.return_value = mock_csiro
         s3_client, _, _ = aws_clients
         config = Config.get_config()
         helper = AWSHelper()
@@ -83,8 +89,10 @@ class TestKeyMapping(TestWithS3):
                     shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    @patch("data_access_service.models.co_data_source.co_data_registory.CsiroDataSrc")
     def test_special_time_dimension(
         self,
+        mock_csiro_cls,
         aws_clients,
         upload_test_case_to_s3,
         mock_get_fs_token_paths,
@@ -93,6 +101,10 @@ class TestKeyMapping(TestWithS3):
         """
         this dataset has a special TIME dimension
         """
+        mock_csiro = MagicMock()
+        mock_csiro.get_name.return_value = "csiro"
+        mock_csiro.get_metadata_catalog.return_value = {}
+        mock_csiro_cls.return_value = mock_csiro
         s3_client, _, _ = aws_clients
         config = Config.get_config()
         helper = AWSHelper()

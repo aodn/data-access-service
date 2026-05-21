@@ -11,7 +11,7 @@ from data_access_service.server import app, api_setup
 from tests.core.test_with_s3 import TestWithS3, REGION
 from data_access_service.core.AWSHelper import AWSHelper
 from starlette.status import HTTP_200_OK, HTTP_403_FORBIDDEN, HTTP_401_UNAUTHORIZED
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 
 class TestApiWithS3(TestWithS3):
@@ -32,7 +32,14 @@ class TestApiWithS3(TestWithS3):
     def client(self, upload_test_case_to_s3, mock_boto3_client):
         # Use LifespanManager to ensure lifespan events are triggered
         # Make sure file uploaded before init the app
-        api_setup(app)
+        mock_csiro = MagicMock()
+        mock_csiro.get_name.return_value = "csiro"
+        mock_csiro.get_metadata_catalog.return_value = {}
+        with patch(
+            "data_access_service.models.co_data_source.co_data_registory.CsiroDataSrc",
+            return_value=mock_csiro,
+        ):
+            api_setup(app)
         return TestClient(app)
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)

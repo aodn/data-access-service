@@ -16,7 +16,11 @@ from datetime import timedelta, timezone
 from io import BytesIO
 from typing import Optional, Dict, Any, List, Tuple, Hashable
 from aodn_cloud_optimised.lib import DataQuery
-from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, ZarrDataSource
+from aodn_cloud_optimised.lib.DataQuery import (
+    ParquetDataSource,
+    ZarrDataSource,
+    Metadata,
+)
 from aodn_cloud_optimised.lib.config import get_notebook_url
 from bokeh.server.tornado import psutil
 from xarray.core.utils import Frozen
@@ -31,6 +35,8 @@ from data_access_service.core.constants import (
 from data_access_service.core.descriptor import Depth, Descriptor, Coordinate
 from urllib.parse import unquote_plus
 
+from data_access_service.models.co_data_source.co_data_registory import CODataRegistry
+from data_access_service.models.co_data_source.csiro_data_src import CsiroDataSrc
 
 log = logging.getLogger(__name__)
 
@@ -368,8 +374,9 @@ class API(BaseAPI):
         self._cached_metadata: Dict[str, Dict[str, Descriptor]] = dict()
 
         # UUID to metadata mapper
-        self._instance = DataQuery.GetAodn()
-        self._metadata = None
+        # self._instance = DataQuery.GetAodn()
+        self._instance = CODataRegistry()
+        self._metadata: Metadata | None = None
         self._is_ready = False
         self.memconn = duckdb.connect(":memory:cloud_optimized")
 
@@ -561,11 +568,18 @@ class API(BaseAPI):
 
     # Do not use cache, so that we can refresh it again
     def refresh_uuid_dataset_map(self):
+
+        cached_catalog = self._metadata.catalog
         # A map contains dataset name and Metadata class, which is not
         # so useful in our case, we need UUID
         catalog = self._metadata.metadata_catalog_uncached()
 
+        # Metadata_catalog_uncached() is not working for external data resources right now.
+        # So we use the cached catalog which is working for all data sources, and merge with the uncached one
+        catalog = cached_catalog | catalog
         for key in catalog:
+            if key == "uwy_csiro.parquet":
+                print()
             data = catalog.get(key)
             uuid = API.get_metadata_uuid(data)
 
@@ -867,6 +881,15 @@ class API(BaseAPI):
             return data.get("dataset_metadata").get("metadata_uuid")
         elif data.get("global_attributes") is not None:
             # For zarr data, uuid is found in here
+            ga = data.get("global_attributes")
             return data.get("global_attributes").get("metadata_uuid")
         else:
             return None
+
+
+if __name__ == "__main__":
+    csiro = CsiroDataSrc()
+    catalog = csiro.get_metadata_catalog()
+    data = catalog.get("uwy_csiro.parquet")
+    print(data)
+    uuid = API.get_metadata_uuid(data)

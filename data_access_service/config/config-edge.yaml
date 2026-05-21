@@ -1,3 +1,7 @@
+csiro:
+  datasets:
+    - dataset_name: uwy_csiro.parquet
+      key_request_url: https://data.csiro.au/dap/api/v2/collections/72626/files/s3
 aws:
   s3:
     bucket_name:
