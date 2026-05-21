@@ -80,8 +80,7 @@ jobs:
                 environment: '${{ inputs.environment }}'
               }
             })
-            if ('${{ inputs.environment }}' !== 'edge'){
-                github.rest.actions.createWorkflowDispatch({
+            github.rest.actions.createWorkflowDispatch({
               owner: 'aodn',
               repo: 'appdeploy',
               workflow_id: 'deploy.yml',
@@ -91,4 +90,3 @@ jobs:
                 environment: '${{ inputs.environment }}'
               }
             })
-            }
