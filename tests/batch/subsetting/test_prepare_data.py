@@ -70,8 +70,8 @@ class TestDataGeneration(TestWithS3):
                     if prefix["Prefix"].endswith(".parquet/")
                 ]
 
-                assert len(folders) == 2
-                assert folders[0] == "animal_acoustic_tracking_delayed_qc.parquet/"
+                assert len(folders) == 3
+                assert folders[1] == "animal_acoustic_tracking_delayed_qc.parquet/"
 
                 # Verify DataQuery functionality
                 aodn = DataQuery.GetAodn()
@@ -310,6 +310,133 @@ class TestDataGeneration(TestWithS3):
                     )
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_parquet_with_date32_type(
+        self,
+        aws_clients,
+        setup_resources,
+        upload_test_case_to_s3,
+        subset_request_factory,
+    ):
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+        helper = AWSHelper()
+
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
+            try:
+                # List objects in S3
+                response = s3_client.list_objects_v2(
+                    Bucket=DataQuery.BUCKET_OPTIMISED_DEFAULT,
+                    Prefix=DataQuery.ROOT_PREFIX_CLOUD_OPTIMISED_PATH,
+                    Delimiter="/",
+                )
+
+                folders = [
+                    prefix["Prefix"][len(prefix) - 1 :]
+                    for prefix in response.get("CommonPrefixes", [])
+                    if prefix["Prefix"].endswith(".parquet/")
+                ]
+
+                assert len(folders) == 3
+                assert folders[0] == "aggregated_seabird_nonqc.parquet/"
+
+                # Verify DataQuery functionality
+                aodn = DataQuery.GetAodn()
+                metadata: Metadata = aodn.get_metadata()
+                assert (
+                    metadata.metadata_catalog().get("aggregated_seabird_nonqc.parquet")
+                    is not None
+                )
+
+                # prepare data according to the test parameters
+                api = API()
+                api.initialize_metadata()
+                for i in range(5):
+                    prepare_data(
+                        api,
+                        job_index=str(i),
+                        parameters={
+                            **PREPARATION_PARAMETERS,
+                            Parameters.UUID.value: "ec2c0ef9-3645-4ded-b617-c8297f6eb250",
+                            Parameters.MULTI_POLYGON.value: None,
+                            Parameters.START_DATE.value: "03-2025",
+                            Parameters.END_DATE.value: "04-2025",
+                            Parameters.DATE_RANGES.value: '{"0": ["2025-03-01 00:00:00.000000000", "2025-03-05 23:59:59.999999999"], "1": ["2025-03-06 00:00:00.000000000", "2025-03-10 23:59:59.999999999"], "2": ["2025-03-11 00:00:00.000000000", "2025-03-20 23:59:59.999999999"], "3": ["2025-03-20 00:00:00.000000000", "2025-03-25 23:59:59.999999999"], "4": ["2025-03-26 00:00:00.000000000", "2025-03-30 23:59:59.999999999"]}',
+                        },
+                    )
+
+                bucket_name = config.get_csv_bucket_name()
+                response = s3_client.list_objects_v2(Bucket=bucket_name)
+
+                objects = []
+                if "Contents" in response:
+                    for obj in response["Contents"]:
+                        objects.append(obj["Key"])
+                #  in test parquet, only 1 data csv for the provided range and 1 dataschema csv for the parquet dataset
+                assert "999/temp/dataschema.json" in objects
+                assert (
+                    "999/temp/aggregated_seabird_nonqc.parquet/part-1/PARTITION_KEY=2025-03/part.0.parquet"
+                    in objects
+                )
+
+                # Check if the files are compressed and uploaded correctly
+                compressed_s3_key = "999/aggregated_seabird_nonqc.zip"
+
+                # Create dummy subset_request
+                subset_request = subset_request_factory(
+                    uuid="test-dataset-uuid",
+                    recipient="test@example.com",
+                )
+
+                collect_data_files(
+                    master_job_id="999",
+                    subset_request=subset_request,
+                )
+
+                response2 = s3_client.list_objects_v2(
+                    Bucket=bucket_name, Prefix=compressed_s3_key
+                )
+                assert "Contents" in response2
+                assert len(response2["Contents"]) == 1
+                assert response2["Contents"][0]["Key"] == compressed_s3_key
+
+                # Check if the email was sent correctly
+                mock_send_email.assert_called_once()
+                call_kwargs = mock_send_email.call_args.kwargs
+                assert call_kwargs["recipient"] == "test@example.com"
+                assert "test-dataset-uuid" in call_kwargs["subject"]
+                assert "html_body" in call_kwargs
+                assert "aggregated_seabird_nonqc.zip" in call_kwargs["html_body"]
+
+                # Download the zip file and check the content
+                names: list[str] = helper.extract_zip_from_s3(
+                    bucket_name, compressed_s3_key, "/tmp"
+                )
+
+                assert (
+                    len(names) == 2
+                ), "contain single data file plus one table schema file"
+
+                schema_files = [f for f in names if "dataschema.csv" in f]
+                data_files = [
+                    f for f in names if f.endswith(".csv") and "dataschema" not in f
+                ]
+
+                # Check values
+                schema_df = pd.read_csv(f"/tmp/{schema_files[0]}", index_col=0)
+                assert len(schema_df) > 0, "Schema should not be empty"
+
+                # Expect a csv in this case so we can load it back with panda
+                csv = pd.read_csv(f"/tmp/{data_files[0]}")
+                assert len(csv) == 93, f"Expected 93 rows, got {len(csv)}"
+
+            except Exception as ex:
+                raise ex
+            finally:
+                # Delete temp output folder as the name always same for testing
+                shutil.rmtree(config.get_temp_folder(INIT_JOB_ID), ignore_errors=True)
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_non_specified_multi_polygon(
         self, aws_clients, setup_resources, upload_test_case_to_s3
     ):
@@ -338,8 +465,8 @@ class TestDataGeneration(TestWithS3):
                     if prefix["Prefix"].endswith(".parquet/")
                 ]
 
-                assert len(folders) == 2
-                assert folders[0] == "animal_acoustic_tracking_delayed_qc.parquet/"
+                assert len(folders) == 3
+                assert folders[1] == "animal_acoustic_tracking_delayed_qc.parquet/"
 
                 # Verify DataQuery functionality
                 aodn = DataQuery.GetAodn()

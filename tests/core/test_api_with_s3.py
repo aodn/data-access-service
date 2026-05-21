@@ -1,8 +1,7 @@
-from typing import Dict, Any
-
 import pytest
 import json
 
+from typing import Dict, Any
 from pathlib import Path
 from fastapi.testclient import TestClient
 from aodn_cloud_optimised.lib import DataQuery
@@ -353,5 +352,53 @@ class TestApiWithS3(TestWithS3):
                 parsed = json.loads(response.content.decode("utf-8"))
                 # make sure if the returning is empty, it should not be any errors
                 assert len(parsed) == 0, "Number of record is incorrect"
+            except json.JSONDecodeError as e:
+                assert False, "Fail to parse to JSON"
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_fetch_data_correct_with_date32_type(
+        self, setup, localstack, aws_clients, setup_resources, client
+    ):
+        """
+        The date column in this dataset is name eventDate stored as date32, which is not datetime
+        might cause issues when comparing the values.
+        """
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
+            # Test with range, this dataset field is different, dataset without DEPTH
+            param = {
+                "start_date": "2025-03-01 00:00:00.000000000",
+                "end_date": "2025-03-31 23:59:59.999999999",
+                "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
+            }
+
+            response = client.get(
+                config.BASE_URL
+                + "/data/ec2c0ef9-3645-4ded-b617-c8297f6eb250/aggregated_seabird_nonqc.parquet",
+                params=param,
+                headers={"X-API-Key": config.get_api_key()},
+            )
+
+            # The X-API-KEY has typo, it should be X-API-Key
+            assert response.status_code == HTTP_200_OK
+            assert isinstance(response.content, bytes)
+
+            # Read and process response body
+            try:
+                parsed = json.loads(response.content.decode("utf-8"))
+                assert len(parsed) == 93, "Number of record is incorrect"
+                assert parsed[0] == {
+                    "latitude": -39.9,
+                    "longitude": 146.2,
+                    "time": "2025-03-11",
+                }, f"Unexpected JSON content: {parsed[0]}"
+                assert parsed[92] == {
+                    "latitude": -40.8,
+                    "longitude": 144.4,
+                    "time": "2025-03-13",
+                }, f"Unexpected JSON content: {parsed[92]}"
             except json.JSONDecodeError as e:
                 assert False, "Fail to parse to JSON"
