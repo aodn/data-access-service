@@ -2,6 +2,7 @@ import logging
 import requests
 from aodn_cloud_optimised.lib.DataQuery import Metadata, DataSource, GetAodn
 
+from data_access_service.config.config import Config
 from data_access_service.models.co_data_source.abstract_data_src import (
     AbstractDataSrc,
     CSIRO,
@@ -12,23 +13,22 @@ log = logging.getLogger(__name__)
 
 class CsiroDataSrc(AbstractDataSrc):
     """
-    Currently, this "Marine National Facility (MNF) Processed Underway Parquet Data" is the only external
-    cloud optimized dataset we are integrating with, so there are a lot of hard coded values and assumptions in the code.
-    It needs refactoring when there are more external cloud optimized datasets.
+    Integrates with CSIRO cloud optimised datasets.
+    Supports multiple datasets, each with its own key_request_url, as configured in the config YAML.
     """
-
-    # TODO: this is a temp name to remind us to that currently we only integrate one dataset from csiro.
-    #  please refactor when there are more datasets.
-    THE_ONLY_DATASET_NAME = "uwy_csiro.parquet"
-    # this one is only for dataset "Marine National Facility (MNF) Processed Underway Parquet Data"
-    CSIRO_KEY_REQUEST_URL = (
-        "https://data.csiro.au/dap/api/v2/collections/72626/files/s3"
-    )
 
     def __init__(self):
         self.name = CSIRO
-        self.__data_src = self.__get_csiro_co_data_src()
-        self.__metadata_catalog = self.__get_csiro_co_dataset_catalog()
+        config = Config.get_config()
+        self.__datasets = config.get_csiro_datasets()
+        # dict of dataset_name -> GetAodn instance
+        self.__data_srcs: dict[str, GetAodn] = {
+            ds["dataset_name"]: self.__init_data_src(
+                ds["dataset_name"], ds["key_request_url"]
+            )
+            for ds in self.__datasets
+        }
+        self.__metadata_catalog = self.__build_metadata_catalog()
 
     def get_metadata(self) -> Metadata:
         raise NotImplementedError(
@@ -44,34 +44,35 @@ class CsiroDataSrc(AbstractDataSrc):
     def get_name(self) -> str:
         return self.name
 
-    def get_data_src(self) -> GetAodn:
-        return self.__data_src
+    def get_data_src(self) -> dict[str, GetAodn]:
+        """Returns a dict of dataset_name -> GetAodn instance for all configured CSIRO datasets."""
+        return self.__data_srcs
 
-    def __get_csiro_co_dataset_catalog(self) -> dict:
-        single_metadata = self.__data_src.get_dataset(
-            self.THE_ONLY_DATASET_NAME
-        ).get_metadata()
-        if not isinstance(single_metadata, dict):
-            raise Exception(
-                f"Unexpected metadata format for CSIRO dataset {self.THE_ONLY_DATASET_NAME}: {single_metadata}"
-            )
+    def __build_metadata_catalog(self) -> dict:
+        catalog = {}
+        for dataset_name, data_src in self.__data_srcs.items():
+            metadata = data_src.get_dataset(dataset_name).get_metadata()
+            if not isinstance(metadata, dict):
+                raise Exception(
+                    f"Unexpected metadata format for CSIRO dataset {dataset_name}: {metadata}"
+                )
+            #  hardcode uuid until csiro add uuid into their global attributes in parquet
+            if metadata.get("global_attributes") is not None:
+                if metadata["global_attributes"].get("metadata_uuid") is None:
+                    metadata["global_attributes"][
+                        "metadata_uuid"
+                    ] = "154a59da-b88a-4231-97df-c0407a6f0ec4"
+            catalog[dataset_name] = metadata
+        return catalog
 
-        #  hardcode uuid until csiro add uuid into their global attributes in parquet
-        if single_metadata.get("global_attributes") is not None:
-            if single_metadata["global_attributes"].get("metadata_uuid") is None:
-                single_metadata["global_attributes"][
-                    "metadata_uuid"
-                ] = "154a59da-b88a-4231-97df-c0407a6f0ec4"
-        return {self.THE_ONLY_DATASET_NAME: single_metadata}
-
-    def __get_csiro_co_data_src(self) -> GetAodn:
-
+    def __init_data_src(self, dataset_name: str, key_request_url: str) -> GetAodn:
         log.info(
-            "Requesting temporary access keys for CSIRO cloud optimized dataset..."
+            "Requesting temporary access keys for CSIRO dataset '%s'...", dataset_name
         )
-        response = requests.get(self.CSIRO_KEY_REQUEST_URL, timeout=30)
+        response = requests.get(key_request_url, timeout=30)
         log.info(
-            "Received response from CSIRO for temporary access keys, status code: %s",
+            "Received response for CSIRO dataset '%s', status code: %s",
+            dataset_name,
             response.status_code,
         )
         if response.status_code == 200:
@@ -88,28 +89,21 @@ class CsiroDataSrc(AbstractDataSrc):
                     f"Unexpected remote directory format: {remote_directory}"
                 )
 
-            params = {
-                "bucket_name": bucket_name,
-                "prefix": prefix,
-                "key": access_key,
-                "secret": secret_access_key,
-                "endpoint_url": endpoint_url,
-            }
             csiro = GetAodn(
-                bucket_name=params["bucket_name"],
-                prefix=params["prefix"],
+                bucket_name=bucket_name,
+                prefix=prefix,
                 s3_fs_opts={
-                    "key": params["key"],
-                    "secret": params["secret"],
-                    "client_kwargs": {"endpoint_url": params["endpoint_url"]},
+                    "key": access_key,
+                    "secret": secret_access_key,
+                    "client_kwargs": {"endpoint_url": endpoint_url},
                 },
             )
             log.info(
-                "Successfully initialized CSIRO cloud optimized data source with temporary access keys"
+                "Successfully initialized CSIRO data source for dataset '%s'",
+                dataset_name,
             )
             return csiro
-
         else:
             raise Exception(
-                f"Failed to get keys from CSIRO, status code: {response.status_code}"
+                f"Failed to get keys from CSIRO for dataset '{dataset_name}', status code: {response.status_code}"
             )
