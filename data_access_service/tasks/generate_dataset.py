@@ -1,13 +1,16 @@
+from data_access_service.utils.multi_polygon_helper import get_bbox_from
 import json
 import os
-from typing import List, Dict, Optional
-
+import geojson
 import dask.dataframe as ddf
 import pandas as pd
 import xarray
+
 from numcodecs import Zlib
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
 from pathlib import Path
+from geojson import MultiPolygon
+from typing import List, Dict, Optional
 
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
@@ -46,7 +49,7 @@ def process_data_files(
         if multi_polygon == "non-specified":
             #    multi polygon dict is whole earth
             multi_polygon = '{"type":"MultiPolygon","coordinates":[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}'
-        multi_polygon_dict = json.loads(multi_polygon)
+        multi_polygon_dict = geojson.loads(multi_polygon)
     else:
         multi_polygon_dict = None
 
@@ -227,19 +230,19 @@ def _generate_partition_output_with_polygon(
     key: str,
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
-    multi_polygon: dict | None,
+    multi_polygon: MultiPolygon | None,
 ) -> bool:
 
     had_data = False
     if multi_polygon is not None:
         # TODO: currently, assume polygons are all rectangles. when cloud-optimized library is upgraded,
         #  we can change to use the polygon coordinates directly
-        for polygon in multi_polygon["coordinates"]:
-            lats_lons = get_lat_lon_from_(polygon)
-            min_lat = lats_lons["min_lat"]
-            max_lat = lats_lons["max_lat"]
-            min_lon = lats_lons["min_lon"]
-            max_lon = lats_lons["max_lon"]
+        for polygon in multi_polygon.coordinates:
+            bbox = get_bbox_from(polygon)
+            min_lat = bbox.min_lat
+            max_lat = bbox.max_lat
+            min_lon = bbox.min_lon
+            max_lon = bbox.max_lon
 
             had_data = had_data or _generate_partition_output(
                 api,

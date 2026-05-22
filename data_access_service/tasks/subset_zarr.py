@@ -24,7 +24,7 @@ from data_access_service.core.constants import (
     STR_LONGITUDE_UPPER_CASE,
 )
 from data_access_service.models.bounding_box import BoundingBox
-from data_access_service.models.multi_polygon_helper import MultiPolygonHelper
+from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
 from data_access_service.utils.date_time_utils import supply_day_with_nano_precision
 from data_access_service.utils.email_templates.download_email import (
     get_download_email_html_body,
