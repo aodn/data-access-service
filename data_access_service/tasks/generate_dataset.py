@@ -1,3 +1,5 @@
+from data_access_service.core.constants import STR_LONGITUDE_UPPER_CASE
+from data_access_service.core.constants import STR_LATITUDE_UPPER_CASE
 from data_access_service.utils.multi_polygon_helper import get_bbox_from
 import json
 import os
@@ -5,11 +7,13 @@ import geojson
 import dask.dataframe as ddf
 import pandas as pd
 import xarray
+import geopandas as gpd
 
+from shapely.geometry import Point
 from numcodecs import Zlib
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
 from pathlib import Path
-from geojson import MultiPolygon
+from geojson import MultiPolygon, Polygon
 from typing import List, Dict, Optional
 
 from data_access_service import API, init_log, Config
@@ -112,10 +116,7 @@ def _generate_partition_output(
     key: str,
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
-    min_lat,
-    max_lat,
-    min_lon,
-    max_lon,
+    polygon: Optional[Polygon] = None,
 ):
     has_data = False
     # We need to split it smaller due to fact that the lib return data with to_parquet internally
@@ -149,6 +150,18 @@ def _generate_partition_output(
             api, uuid, key, datasource, date_ranges
         )
 
+        if polygon is not None:
+            bbox = get_bbox_from(polygon)
+            min_lat = bbox.min_lat
+            max_lat = bbox.max_lat
+            min_lon = bbox.min_lon
+            max_lon = bbox.max_lon
+        else:
+            min_lat = None
+            max_lat = None
+            min_lon = None
+            max_lon = None
+
         need_append = False
         for date_range in checked_date_ranges:
             result: Optional[ddf.DataFrame | xarray.Dataset] = query_data(
@@ -163,7 +176,26 @@ def _generate_partition_output(
                 max_lon,
             )
             if result is not None:
+                lat_key, lon_key = api.map_column_names(
+                    uuid=uuid,
+                    key=key,
+                    columns=[STR_LATITUDE_UPPER_CASE, STR_LONGITUDE_UPPER_CASE],
+                )
+
                 if key.endswith("parquet"):
+                    # If we have polygon to filter, convert to GeoDataFrame
+                    if polygon is not None:
+                        gdf = gpd.GeoDataFrame(
+                            result,
+                            geometry=gpd.points_from_xy(
+                                result[lon_key], result[lat_key]
+                            ),
+                        )
+                        gdf_filtered = gdf[gdf.within(polygon.geometry[0])]
+
+                        # Save result back
+                        result = gdf_filtered.drop(columns=["geometry"])
+
                     # With parquet we can write on each result because of the partition by TIME
                     # create different directory
                     output_path = f"{root_folder_path}/{key}/part-{job_index}/"
@@ -238,24 +270,8 @@ def _generate_partition_output_with_polygon(
         # TODO: currently, assume polygons are all rectangles. when cloud-optimized library is upgraded,
         #  we can change to use the polygon coordinates directly
         for polygon in multi_polygon.coordinates:
-            bbox = get_bbox_from(polygon)
-            min_lat = bbox.min_lat
-            max_lat = bbox.max_lat
-            min_lon = bbox.min_lon
-            max_lon = bbox.max_lon
-
             had_data = had_data or _generate_partition_output(
-                api,
-                folder_path,
-                array_index,
-                uuid,
-                key,
-                start_date,
-                end_date,
-                min_lat,
-                max_lat,
-                min_lon,
-                max_lon,
+                api, folder_path, array_index, uuid, key, start_date, end_date, polygon
             )
     else:
         had_data = _generate_partition_output(
@@ -266,9 +282,6 @@ def _generate_partition_output_with_polygon(
             key,
             start_date,
             end_date,
-            None,
-            None,
-            None,
             None,
         )
 
