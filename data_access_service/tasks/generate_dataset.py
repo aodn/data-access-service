@@ -1,17 +1,23 @@
-from data_access_service.utils.multi_polygon_helper import get_bbox_from
 import json
 import os
 import geojson
 import dask.dataframe as ddf
 import pandas as pd
 import xarray
+import geopandas as gpd
+
+from shapely.geometry import Polygon as ShapelyPolygon
+from shapely.ops import unary_union
+from shapely.geometry import MultiPolygon as ShapelyMultiPolygon
 
 from numcodecs import Zlib
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
 from pathlib import Path
 from geojson import MultiPolygon
-from typing import List, Dict, Optional
+from typing import Dict, Optional
 
+from data_access_service.core.constants import STR_LONGITUDE_UPPER_CASE
+from data_access_service.core.constants import STR_LATITUDE_UPPER_CASE
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.constants import PARTITION_KEY, STR_TIME_UPPER_CASE
@@ -104,6 +110,17 @@ def process_data_files(
     return None
 
 
+def _filter_partition_by_polygon(df, shapely_poly, lat_key, lon_key):
+    import geopandas as gpd
+
+    gdf = gpd.GeoDataFrame(
+        df,
+        geometry=gpd.points_from_xy(df[lon_key], df[lat_key]),
+    )
+    gdf_filtered = gdf[gdf.within(shapely_poly)]
+    return gdf_filtered.drop(columns=["geometry"])
+
+
 def _generate_partition_output(
     api: API,
     root_folder_path: str,
@@ -112,10 +129,7 @@ def _generate_partition_output(
     key: str,
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
-    min_lat,
-    max_lat,
-    min_lon,
-    max_lon,
+    polygon: Optional[ShapelyPolygon] = None,
 ):
     has_data = False
     # We need to split it smaller due to fact that the lib return data with to_parquet internally
@@ -149,6 +163,14 @@ def _generate_partition_output(
             api, uuid, key, datasource, date_ranges
         )
 
+        if polygon is not None:
+            min_lon, min_lat, max_lon, max_lat = polygon.bounds
+        else:
+            min_lat = None
+            max_lat = None
+            min_lon = None
+            max_lon = None
+
         need_append = False
         for date_range in checked_date_ranges:
             result: Optional[ddf.DataFrame | xarray.Dataset] = query_data(
@@ -163,7 +185,23 @@ def _generate_partition_output(
                 max_lon,
             )
             if result is not None:
+                lat_key, lon_key = api.map_column_names(
+                    uuid=uuid,
+                    key=key,
+                    columns=[STR_LATITUDE_UPPER_CASE, STR_LONGITUDE_UPPER_CASE],
+                )
+
                 if key.endswith("parquet"):
+                    # If we have polygon to filter, apply map_partitions lazily
+                    if polygon is not None:
+                        result = result.map_partitions(
+                            _filter_partition_by_polygon,
+                            shapely_poly=polygon,
+                            lat_key=lat_key,
+                            lon_key=lon_key,
+                            meta=result._meta,
+                        )
+
                     # With parquet we can write on each result because of the partition by TIME
                     # create different directory
                     output_path = f"{root_folder_path}/{key}/part-{job_index}/"
@@ -235,15 +273,29 @@ def _generate_partition_output_with_polygon(
 
     had_data = False
     if multi_polygon is not None:
-        # TODO: currently, assume polygons are all rectangles. when cloud-optimized library is upgraded,
-        #  we can change to use the polygon coordinates directly
-        for polygon in multi_polygon.coordinates:
-            bbox = get_bbox_from(polygon)
-            min_lat = bbox.min_lat
-            max_lat = bbox.max_lat
-            min_lon = bbox.min_lon
-            max_lon = bbox.max_lon
+        # The mutliple polygon may have overlap, merge those overlap into non-overlapping polygons
+        shapely_polys = []
+        for poly in multi_polygon.coordinates:
+            shapely_polys.append(ShapelyPolygon(poly[0], poly[1:]))
 
+        merged_geom = unary_union(shapely_polys)
+
+        if isinstance(merged_geom, ShapelyPolygon):
+            merged_polygons = [merged_geom]
+        elif isinstance(merged_geom, ShapelyMultiPolygon):
+            merged_polygons = list(merged_geom.geoms)
+        else:
+            # Fallback for GeometryCollection or empty/other geometries
+            if hasattr(merged_geom, "geoms"):
+                merged_polygons = [
+                    g for g in merged_geom.geoms if isinstance(g, ShapelyPolygon)
+                ]
+            elif isinstance(merged_geom, ShapelyPolygon):
+                merged_polygons = [merged_geom]
+            else:
+                merged_polygons = []
+
+        for shapely_poly in merged_polygons:
             had_data = had_data or _generate_partition_output(
                 api,
                 folder_path,
@@ -252,10 +304,7 @@ def _generate_partition_output_with_polygon(
                 key,
                 start_date,
                 end_date,
-                min_lat,
-                max_lat,
-                min_lon,
-                max_lon,
+                shapely_poly,
             )
     else:
         had_data = _generate_partition_output(
@@ -266,9 +315,6 @@ def _generate_partition_output_with_polygon(
             key,
             start_date,
             end_date,
-            None,
-            None,
-            None,
             None,
         )
 
@@ -341,19 +387,6 @@ def query_data(
     except Exception as e:
         log.error(f"{type(e)}: {e}")
         raise e
-
-
-def get_lat_lon_from_(polygon: List[List[List[float]]]) -> Dict[str, float]:
-    coordinates = [coord for ring in polygon for coord in ring]
-    lats = [coord[1] for coord in coordinates]
-    lons = [coord[0] for coord in coordinates]
-
-    return {
-        "min_lat": min(lats),
-        "max_lat": max(lats),
-        "min_lon": min(lons),
-        "max_lon": max(lons),
-    }
 
 
 def generate_zip_name(uuid, start_date, end_date):
