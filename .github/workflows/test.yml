@@ -21,13 +21,13 @@ jobs:
         with:
           python-version: "3.11.14"
       - name: Set up Poetry
-        run: pipx install poetry==2.2.1
+        run: pipx install --python python poetry==2.2.1
       - name: Install dependencies
         run: |
           poetry install
       - name: Run pre-commit checks
         run: |
-          SKIP=poetry-lock poetry run pre-commit run --all-files
+          run pre-commit run --all-files
       - name: Run tests
         run: |
           if [ -z "$(find . -name 'test_*.py')" ]; then echo "No tests found"; else export PROFILE=testing && poetry run pytest; fi
