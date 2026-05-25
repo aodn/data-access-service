@@ -244,21 +244,37 @@ def _generate_partition_output(
                         if lats.ndim == 1 and lons.ndim == 1:
                             lat_dim = lats.dims[0]
                             lon_dim = lons.dims[0]
-                            lon_2d, lat_2d = np.meshgrid(lons.values, lats.values)
-                            if is_0_360:
-                                # Transform longitudes from 0 to 360 to -180 to 180 space for shapely
-                                lon_2d = lon_2d - 180.0
+                            if lat_dim == lon_dim:
+                                # This branch handles 1D parallel coordinate arrays (e.g., trajectories, tracks)
+                                # where LATITUDE and LONGITUDE are not independent dimensions but share a common dimension.
+                                lons_val = lons.values
+                                if is_0_360:
+                                    lons_val = lons_val - 180.0
+                                mask_data = shapely.contains_xy(
+                                    polygon, lons_val, lats.values
+                                )
+                                mask = xarray.DataArray(
+                                    mask_data,
+                                    coords={lat_dim: lats[lat_dim]},
+                                    dims=[lat_dim],
+                                )
+                            else:
+                                # Standard rectilinear/orthogonal 2D grid
+                                lon_2d, lat_2d = np.meshgrid(lons.values, lats.values)
+                                if is_0_360:
+                                    # Transform longitudes from 0 to 360 to -180 to 180 space for shapely
+                                    lon_2d = lon_2d - 180.0
 
-                            # lon_2d is shifted here ONLY for shapely's spatial check, no impact to output
-                            mask_data = shapely.contains_xy(polygon, lon_2d, lat_2d)
-                            mask = xarray.DataArray(
-                                mask_data,
-                                coords={
-                                    lat_dim: lats,
-                                    lon_dim: lons,
-                                },  # <--- Uses the original [0, 360] lons!
-                                dims=[lat_dim, lon_dim],
-                            )
+                                # lon_2d is shifted here ONLY for shapely's spatial check, no impact to output
+                                mask_data = shapely.contains_xy(polygon, lon_2d, lat_2d)
+                                mask = xarray.DataArray(
+                                    mask_data,
+                                    coords={
+                                        lat_dim: lats,
+                                        lon_dim: lons,
+                                    },  # <--- Uses the original [0, 360] lons!
+                                    dims=[lat_dim, lon_dim],
+                                )
                         else:
                             # This branch runs when the latitude and longitude coordinates are already 2D (or higher-dimensional),
                             # which is typical in curvilinear grids (e.g., swath data or rotated grids).
