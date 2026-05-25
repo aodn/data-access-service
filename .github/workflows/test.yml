@@ -24,12 +24,12 @@ jobs:
         uses: snok/install-poetry@v1
         with:
           version: "2.2.1"
-      - name: Install dependencies
-        run: |
-          poetry install
       - name: Run pre-commit checks
         run: |
           poetry run pre-commit run --all-files
+      - name: Install dependencies
+        run: |
+          poetry install
       - name: Run tests
         run: |
           if [ -z "$(find . -name 'test_*.py')" ]; then echo "No tests found"; else export PROFILE=testing && poetry run pytest; fi
