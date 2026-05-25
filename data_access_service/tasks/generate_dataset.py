@@ -5,6 +5,8 @@ import dask.dataframe as ddf
 import pandas as pd
 import xarray
 import geopandas as gpd
+import shapely
+import numpy as np
 
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.ops import unary_union
@@ -227,6 +229,56 @@ def _generate_partition_output(
                     )
                     log.info(f"Saved partition to {output_path}")
                 else:
+                    # Apply polygon filtering to the xarray dataset if polygon is specified
+                    if polygon is not None:
+                        lats = result[lat_key]
+                        lons = result[lon_key]
+
+                        # Check if the dataset uses 0 to 360 longitude coordinate space
+                        desc = api.get_mapped_meta_data(uuid).get(key)
+                        is_0_360 = False
+                        if desc is not None and desc.lng is not None:
+                            if desc.lng.min == 0 and desc.lng.max == 360:
+                                is_0_360 = True
+
+                        if lats.ndim == 1 and lons.ndim == 1:
+                            lat_dim = lats.dims[0]
+                            lon_dim = lons.dims[0]
+                            lon_2d, lat_2d = np.meshgrid(lons.values, lats.values)
+                            if is_0_360:
+                                # Transform longitudes from 0 to 360 to -180 to 180 space for shapely
+                                lon_2d = lon_2d - 180.0
+
+                            # lon_2d is shifted here ONLY for shapely's spatial check, no impact to output
+                            mask_data = shapely.contains_xy(polygon, lon_2d, lat_2d)
+                            mask = xarray.DataArray(
+                                mask_data,
+                                coords={
+                                    lat_dim: lats,
+                                    lon_dim: lons,
+                                },  # <--- Uses the original [0, 360] lons!
+                                dims=[lat_dim, lon_dim],
+                            )
+                        else:
+                            # This branch runs when the latitude and longitude coordinates are already 2D (or higher-dimensional),
+                            # which is typical in curvilinear grids (e.g., swath data or rotated grids).
+                            # NOT EXPECT TO HIT THIS BRANCH
+                            lons_broadcasted, lats_broadcasted = xarray.broadcast(
+                                lons, lats
+                            )
+                            lons_val = lons_broadcasted.values
+                            if is_0_360:
+                                lons_val = lons_val - 180.0
+                            mask_data = shapely.contains_xy(
+                                polygon, lons_val, lats_broadcasted.values
+                            )
+                            mask = xarray.DataArray(
+                                mask_data,
+                                coords=lons_broadcasted.coords,
+                                dims=lons_broadcasted.dims,
+                            )
+                        result = result.where(mask, drop=False)
+
                     # Zarr do not support directory partition hence we need to consolidate
                     # it before write to disk.
                     output_path = f"{root_folder_path}/{key}/part-{job_index}.zarr"

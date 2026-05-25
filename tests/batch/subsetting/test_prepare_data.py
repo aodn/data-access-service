@@ -743,3 +743,143 @@ class TestDataGeneration(TestWithS3):
             finally:
                 # Delete temp output folder as the name always same for testing
                 shutil.rmtree(config.get_temp_folder("996"), ignore_errors=True)
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_zarr_with_multipolygon(
+        self, aws_clients, setup_resources, upload_test_case_to_s3
+    ):
+        """
+        satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr dataset,
+        testing spatial filtering on Zarr with an overlapping MultiPolygon.
+        """
+        parameters = PREPARATION_PARAMETERS.copy()
+        parameters[Parameters.UUID.value] = "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
+        parameters[Parameters.KEY.value] = (
+            "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
+        )
+        parameters[Parameters.MASTER_JOB_ID.value] = "master_zarr_poly"
+
+        parameters[Parameters.DATE_RANGES.value] = json.dumps(
+            split_date_range(pd.Timestamp("2012-10-16"), pd.Timestamp("2012-11-16"), 1)
+        )
+
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+
+        api = API()
+        api.initialize_metadata()
+
+        # Let's define a MultiPolygon with two overlapping boxes.
+        # Box 1: lat=[-30, -10], lon=[2.0, 5.0] (maps to 182.0, 185.0 in dataset)
+        # Box 2: lat=[-25, -5], lon=[4.0, 7.0] (maps to 184.0, 187.0 in dataset)
+        # Their union will cover lat=[-30, -5], lon=[2.0, 7.0] (maps to 182.0, 187.0 in dataset).
+        overlapping_geojson_str = json.dumps(
+            obj={
+                "type": "MultiPolygon",
+                "coordinates": [
+                    # POLYGON 1
+                    [
+                        [
+                            [2.0, -10.0],
+                            [5.0, -10.0],
+                            [5.0, -30.0],
+                            [2.0, -30.0],
+                            [2.0, -10.0],
+                        ]
+                    ],
+                    # POLYGON 2
+                    [
+                        [
+                            [4.0, -5.0],
+                            [7.0, -5.0],
+                            [7.0, -25.0],
+                            [4.0, -25.0],
+                            [4.0, -5.0],
+                        ]
+                    ],
+                ],
+            }
+        )
+        parameters[Parameters.MULTI_POLYGON.value] = overlapping_geojson_str
+
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
+            with tempfile.TemporaryDirectory() as temp_folder:
+                parameters[Parameters.INTERMEDIATE_OUTPUT_FOLDER.value] = temp_folder
+
+                try:
+                    prepare_data(api, job_index="0", parameters=parameters)
+
+                    # Now open the file and inspect values
+                    store = xarray.open_mfdataset(
+                        paths=f"{temp_folder}/{parameters[Parameters.KEY.value]}/part-*.zarr",
+                        engine="zarr",
+                        combine="nested",
+                        consolidated=False,
+                        parallel=False,
+                    )
+
+                    # Verify that points inside the MultiPolygon union have valid data (are not all NaN),
+                    # and points outside have NaN.
+                    # Let's build the unified polygon using Shapely
+                    from shapely.geometry import Polygon as ShapelyPolygon
+                    from shapely.ops import unary_union
+
+                    poly1 = ShapelyPolygon(
+                        [
+                            [2.0, -10.0],
+                            [5.0, -10.0],
+                            [5.0, -30.0],
+                            [2.0, -30.0],
+                            [2.0, -10.0],
+                        ]
+                    )
+                    poly2 = ShapelyPolygon(
+                        [
+                            [4.0, -5.0],
+                            [7.0, -5.0],
+                            [7.0, -25.0],
+                            [4.0, -25.0],
+                            [4.0, -5.0],
+                        ]
+                    )
+                    union_poly = unary_union([poly1, poly2])
+
+                    # Take a sample variable, e.g., analysed_sst
+                    sst = store.analysed_sst.isel(time=0).values  # Shape: (lat, lon)
+                    lats = store.lat.values
+                    lons = store.lon.values
+
+                    has_inside_valid = False
+
+                    # Iterate over coordinates to assert point-in-polygon filtering
+                    for i, lat in enumerate(lats):
+                        for j, lon in enumerate(lons):
+                            from shapely.geometry import Point as ShapelyPoint
+
+                            # Since the dataset longitudes are in 0 to 360 range (182 to 187),
+                            # map them back to standard space to check containment.
+                            point = ShapelyPoint(lon - 180.0, lat)
+                            val = sst[i, j]
+
+                            # Check if the point is inside the union
+                            is_inside = union_poly.contains(
+                                point
+                            ) or union_poly.touches(point)
+
+                            if is_inside:
+                                # Within the union, we expect at least some data points to be valid (not NaN)
+                                if not np.isnan(val):
+                                    has_inside_valid = True
+                            else:
+                                # Outside the union, ALL points must be NaN
+                                assert np.isnan(
+                                    val
+                                ), f"Expected NaN at lat={lat}, lon={lon} (outside polygon), got {val}"
+
+                    assert (
+                        has_inside_valid
+                    ), "Expected at least some valid data inside the polygon area"
+
+                except Exception as e:
+                    assert False, f"prepare_data raised an exception: {e}"
