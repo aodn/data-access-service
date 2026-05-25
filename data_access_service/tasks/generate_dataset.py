@@ -9,7 +9,7 @@ import pandas as pd
 import xarray
 import geopandas as gpd
 
-from shapely.geometry import Point
+from shapely.geometry import Polygon as ShapelyPolygon
 from numcodecs import Zlib
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
 from pathlib import Path
@@ -108,6 +108,17 @@ def process_data_files(
     return None
 
 
+def _filter_partition_by_polygon(df, shapely_poly, lat_key, lon_key):
+    import geopandas as gpd
+
+    gdf = gpd.GeoDataFrame(
+        df,
+        geometry=gpd.points_from_xy(df[lon_key], df[lat_key]),
+    )
+    gdf_filtered = gdf[gdf.within(shapely_poly)]
+    return gdf_filtered.drop(columns=["geometry"])
+
+
 def _generate_partition_output(
     api: API,
     root_folder_path: str,
@@ -116,7 +127,7 @@ def _generate_partition_output(
     key: str,
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
-    polygon: Optional[Polygon] = None,
+    polygon: Optional[List[List[List[float]]]] = None,
 ):
     has_data = False
     # We need to split it smaller due to fact that the lib return data with to_parquet internally
@@ -183,18 +194,16 @@ def _generate_partition_output(
                 )
 
                 if key.endswith("parquet"):
-                    # If we have polygon to filter, convert to GeoDataFrame
+                    # If we have polygon to filter, apply map_partitions lazily
                     if polygon is not None:
-                        gdf = gpd.GeoDataFrame(
-                            result,
-                            geometry=gpd.points_from_xy(
-                                result[lon_key], result[lat_key]
-                            ),
+                        shapely_poly = ShapelyPolygon(polygon[0], polygon[1:])
+                        result = result.map_partitions(
+                            _filter_partition_by_polygon,
+                            shapely_poly=shapely_poly,
+                            lat_key=lat_key,
+                            lon_key=lon_key,
+                            meta=result._meta,
                         )
-                        gdf_filtered = gdf[gdf.within(polygon.geometry[0])]
-
-                        # Save result back
-                        result = gdf_filtered.drop(columns=["geometry"])
 
                     # With parquet we can write on each result because of the partition by TIME
                     # create different directory
@@ -267,8 +276,8 @@ def _generate_partition_output_with_polygon(
 
     had_data = False
     if multi_polygon is not None:
-        # TODO: currently, assume polygons are all rectangles. when cloud-optimized library is upgraded,
-        #  we can change to use the polygon coordinates directly
+        # It is a multiple polygon, we need to iterate each of them
+        # TODO: The mutliple polygon may have overlap
         for polygon in multi_polygon.coordinates:
             had_data = had_data or _generate_partition_output(
                 api, folder_path, array_index, uuid, key, start_date, end_date, polygon
@@ -354,19 +363,6 @@ def query_data(
     except Exception as e:
         log.error(f"{type(e)}: {e}")
         raise e
-
-
-def get_lat_lon_from_(polygon: List[List[List[float]]]) -> Dict[str, float]:
-    coordinates = [coord for ring in polygon for coord in ring]
-    lats = [coord[1] for coord in coordinates]
-    lons = [coord[0] for coord in coordinates]
-
-    return {
-        "min_lat": min(lats),
-        "max_lat": max(lats),
-        "min_lon": min(lons),
-        "max_lon": max(lons),
-    }
 
 
 def generate_zip_name(uuid, start_date, end_date):
