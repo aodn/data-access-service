@@ -19,7 +19,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11.14"
+          python-version: "3.12.9"
       - name: Set up Poetry
         run: pipx install poetry==2.2.1
       - name: Install dependencies
