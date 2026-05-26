@@ -57,14 +57,6 @@ class TaskScheduler:
         """
         )
 
-        self.memconn.execute(
-            f"""
-            CREATE OR REPLACE SECRET wave_buoy_s3_instance (
-                {secret_params},
-                SCOPE 's3://{self._instance.bucket_name}'
-            )
-        """
-        )
 
     def _refresh_task(self):
         """
