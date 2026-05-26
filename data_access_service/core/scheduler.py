@@ -57,7 +57,6 @@ class TaskScheduler:
         """
         )
 
-
     def _refresh_task(self):
         """
         Refreshes the wave buoy data table without blocking reads.
