@@ -370,7 +370,6 @@ class API(BaseAPI):
         # UUID to metadata mapper
         self._instance = DataQuery.GetAodn()
         self._metadata = None
-        self._is_ready = False
         self.memconn = duckdb.connect(":memory:cloud_optimized")
 
     def destroy(self):
@@ -407,7 +406,12 @@ class API(BaseAPI):
         self._metadata = self._instance.get_metadata()
         self.refresh_uuid_dataset_map()
 
-        log.info("Done init")
+        process = psutil.Process()
+        rss_mb = process.memory_info().rss / (1024 * 1024)
+        vms_mb = process.memory_info().vms / (1024 * 1024)
+        log.info(
+            f"Done init. Memory usage: RSS = {rss_mb:.2f} MB, VMS = {vms_mb:.2f} MB"
+        )
         # init finalised, set as ready
         self._is_ready = True
 
