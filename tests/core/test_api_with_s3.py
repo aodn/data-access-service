@@ -293,10 +293,13 @@ class TestApiWithS3(TestWithS3):
         config.set_s3_client(s3_client)
 
         with patch.object(AWSHelper, "send_email") as mock_send_email:
-            # Test with range, this dataset field is different, dataset without DEPTH
+            # Test with range, this dataset field is different, dataset without DEPTH.
+            # Use a small time range (this is a negative test case with all-NaN TIME).
+            # A wide range (e.g. 2009-2025) makes the upstream library do unnecessary work
+            # before hitting the degenerate coordinate, slowing the test down significantly.
             param = {
-                "start_date": "2009-11-07 00:00:00.000000000",
-                "end_date": "2025-11-08 23:59:59.999999999",
+                "start_date": "2024-02-01 00:00:00.000000000",
+                "end_date": "2024-02-06 23:59:59.999999999",
                 "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
             }
 
