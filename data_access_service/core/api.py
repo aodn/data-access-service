@@ -375,7 +375,7 @@ class API(BaseAPI):
         # UUID to metadata mapper
         self._instance = DataQuery.GetAodn()
         self._metadata = None
-        self.memconn = duckdb.connect(":memory:cloud_optimized")
+        self._memconn = duckdb.connect(":memory:cloud_optimized")
         try:
             config = Config.get_config()
             temp_dir = os.path.join(os.getcwd(), ".duckdb_temp")
@@ -440,7 +440,7 @@ class API(BaseAPI):
         return self._is_ready
 
     def get_memconn(self):
-        return self.memconn
+        return self._memconn
 
     def get_aodn_instance(self):
         return self._instance
