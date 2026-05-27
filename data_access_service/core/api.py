@@ -382,7 +382,9 @@ class API(BaseAPI):
             os.makedirs(temp_dir, exist_ok=True)
 
             self._memconn = duckdb.connect(
-                ":memory:cloud_optimized",
+                # use disk instead of memory as system low of memory and OOM
+                # ":memory:cloud_optimized",
+                "/tmp/wave_buoy.duckdb",
                 config={
                     "threads": 1,
                     "temp_directory": temp_dir,
