@@ -1,9 +1,14 @@
+from data_access_service import Config
 import asyncio
 import gzip
 import math
 import os
+import gc
 
 import duckdb
+import json
+import zlib
+
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -371,6 +376,14 @@ class API(BaseAPI):
         self._instance = DataQuery.GetAodn()
         self._metadata = None
         self.memconn = duckdb.connect(":memory:cloud_optimized")
+        try:
+            config = Config.get_config()
+            temp_dir = os.path.join(os.getcwd(), ".duckdb_temp")
+            os.makedirs(temp_dir, exist_ok=True)
+            self.memconn.execute(f"SET temp_directory = '{temp_dir}';")
+            self.memconn.execute(f"SET max_memory = '{config.get_duckdb_maxmem()}';")
+        except Exception as e:
+            log.warning(f"Failed to set DuckDB memory/temp limits: {e}")
 
     def destroy(self):
         log.info("Destroying API instance")
@@ -405,6 +418,10 @@ class API(BaseAPI):
         """Helper method to run blocking initialization tasks."""
         self._metadata = self._instance.get_metadata()
         self.refresh_uuid_dataset_map()
+
+        # Free up catalog metadata memory and trigger garbage collection
+        self._metadata = None
+        gc.collect()
 
         process = psutil.Process()
         rss_mb = process.memory_info().rss / (1024 * 1024)
@@ -577,8 +594,8 @@ class API(BaseAPI):
                 log.info("Adding uuid " + uuid + " name " + key)
                 if uuid not in self._raw:
                     self._raw[uuid] = dict()
-                # We can add directly because the dict() created
-                self._raw[uuid][key] = data
+                # Save memory compress the content
+                self._raw[uuid][key] = zlib.compress(json.dumps(data).encode("utf-8"))
 
                 if uuid not in self._cached_metadata:
                     self._cached_metadata[uuid] = dict()
@@ -613,7 +630,11 @@ class API(BaseAPI):
         value = self._raw.get(uuid)
 
         if value is not None:
-            return BaseAPI.fix_encode_error_nested_dict(value)
+            decompressed = {
+                key: json.loads(zlib.decompress(val).decode("utf-8"))
+                for key, val in value.items()
+            }
+            return BaseAPI.fix_encode_error_nested_dict(decompressed)
         else:
             return dict()
 

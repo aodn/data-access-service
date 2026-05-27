@@ -9,6 +9,7 @@ from aodn_cloud_optimised.lib import DataQuery
 from data_access_service.config.config import Config
 
 logger = logging.getLogger(__name__)
+config = Config.get_config()
 
 
 class TaskScheduler:
@@ -18,6 +19,15 @@ class TaskScheduler:
 
     def __init__(self):
         self.memconn = duckdb.connect(":memory:cloud_optimized")
+        try:
+            import os
+
+            temp_dir = os.path.join(os.getcwd(), ".duckdb_temp")
+            os.makedirs(temp_dir, exist_ok=True)
+            self.memconn.execute(f"SET temp_directory = '{temp_dir}';")
+            self.memconn.execute(f"SET max_memory = '{config.get_duckdb_maxmem()}';")
+        except Exception as e:
+            logger.warning(f"Failed to set DuckDB memory/temp limits: {e}")
         self.scheduler = AsyncIOScheduler()
         self._instance = DataQuery.GetAodn()
         self.wave_buoy_backup_bucket = (
@@ -38,24 +48,37 @@ class TaskScheduler:
         #
         # ECS task role credentials expire after ~6 hours. This method is called at
         # startup and before every hourly_task run to keep the secret current.
-        session = boto3.Session()
-        creds = session.get_credentials().get_frozen_credentials()
-        region = session.region_name or "ap-southeast-2"
-        secret_params = f"""
-                TYPE S3,
-                KEY_ID '{creds.access_key}',
-                SECRET '{creds.secret_key}',
-                SESSION_TOKEN '{creds.token or ""}',
-                REGION '{region}'"""
+        try:
+            session = boto3.Session()
+            credentials = session.get_credentials()
+            if credentials is not None:
+                creds = credentials.get_frozen_credentials()
+                region = session.region_name or "ap-southeast-2"
+                secret_params = f"""
+                        TYPE S3,
+                        KEY_ID '{creds.access_key}',
+                        SECRET '{creds.secret_key}',
+                        SESSION_TOKEN '{creds.token or ""}',
+                        REGION '{region}'"""
 
-        self.memconn.execute(
-            f"""
-            CREATE OR REPLACE SECRET wave_buoy_s3 (
-                {secret_params},
-                SCOPE 's3://{self.wave_buoy_backup_bucket}'
+                self.memconn.execute(
+                    f"""
+                    CREATE OR REPLACE SECRET wave_buoy_s3 (
+                        {secret_params},
+                        SCOPE 's3://{self.wave_buoy_backup_bucket}'
+                    )
+                """
+                )
+                logger.info("DuckDB S3 credentials configured successfully")
+            else:
+                logger.warning(
+                    "No AWS credentials found. Skipping DuckDB S3 secret creation."
+                )
+        except Exception as e:
+            logger.warning(
+                f"Failed to fetch AWS credentials (possibly expired SSO token). "
+                f"Skipping DuckDB S3 secret creation. Local dev will continue. Error: {e}"
             )
-        """
-        )
 
     def _refresh_task(self):
         """

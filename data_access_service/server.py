@@ -1,11 +1,11 @@
 import asyncio
+import os
+import uvicorn
+
+from fastapi import FastAPI
 from asyncio import AbstractEventLoop
 from contextlib import asynccontextmanager
 from pathlib import Path
-
-import uvicorn
-from fastapi import FastAPI
-
 from data_access_service import Config
 from data_access_service.config.config import IntTestConfig
 from data_access_service.core.api import API
@@ -65,12 +65,14 @@ app = FastAPI(lifespan=lifespan, title="Data Access Service")
 
 
 if __name__ == "__main__":
+    # Turn off reload by default, else production will pick set reload true
+    reload_mode = os.getenv("FASTAPI_RELOAD", "false").lower() == "true"
     log_config_path = str(Path(__file__).parent.parent / "log_config.yaml")
     uvicorn.run(
         "data_access_service.server:app",
         host="0.0.0.0",
         port=5000,
-        reload=True,
+        reload=reload_mode,
         workers=1,
         log_config=log_config_path,
         timeout_keep_alive=900,  # 15 mins
