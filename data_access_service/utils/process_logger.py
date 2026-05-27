@@ -4,7 +4,7 @@ import os
 import resource
 
 
-class ProcessLogger(Callback):
+class DaskProcessLogger(Callback):
     def __init__(self, logger, task_name: str = "Dask Task"):
         self.logger = logger
         self.total_tasks = 0

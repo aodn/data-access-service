@@ -30,7 +30,7 @@ from data_access_service.utils.email_templates.download_email import (
     get_download_email_html_body,
 )
 from data_access_service.models.subset_request import SubsetRequest
-from data_access_service.utils.process_logger import ProcessLogger
+from data_access_service.utils.process_logger import DaskProcessLogger
 
 
 class ZarrProcessor:
@@ -264,7 +264,7 @@ class ZarrProcessor:
                 f"Writing {len(data_var_names)} variables incrementally: {data_var_names}"
             )
 
-            with ProcessLogger(
+            with DaskProcessLogger(
                 logger=self.log, task_name="Step 1: Writing coordinates to NetCDF file"
             ):
                 # First write: Create file with coordinates only (no data variables)
@@ -291,7 +291,7 @@ class ZarrProcessor:
             # and "a" mode appends to existing file will overwrite existing variables.
             # doc: https://docs.xarray.dev/en/stable/generated/xarray.Dataset.to_netcdf.html
             for idx, var_name in enumerate(data_var_names, start=1):
-                with ProcessLogger(
+                with DaskProcessLogger(
                     logger=self.log,
                     task_name=f"Step {idx + 1}/{len(data_var_names) + 1}: Appending variable '{var_name}'",
                 ):

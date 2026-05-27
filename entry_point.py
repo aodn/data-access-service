@@ -45,5 +45,7 @@ match call_type:
         subsetting.prepare_data(api, job_index=job_index, parameters=parameters)
     case "sub-setting-data-collection":
         subsetting.collect_data(parameters=parameters)
+    case "generate-pmtiles-for-parquet":
+        pass
     case _:
         logger.error("Unknow call type", call_type)

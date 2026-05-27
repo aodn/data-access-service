@@ -108,6 +108,11 @@ class Config:
             else None
         )
 
+    def is_batch(self) -> bool:
+        """Return True when running in a real (non-dev/test) batch environment."""
+        profile = EnvType(os.getenv("PROFILE", EnvType.DEV.value))
+        return profile in {EnvType.EDGE, EnvType.STAGING, EnvType.PRODUCTION}
+
     @staticmethod
     def get_s3_temp_folder_name(master_job_id: str):
         """
