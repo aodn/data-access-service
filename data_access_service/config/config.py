@@ -90,8 +90,8 @@ class Config:
 
     def get_duckdb_maxmem(self):
         if self.config is None:
-            return "1G"
-        return self.config.get("duckdb", {}).get("maxmem", "1G")
+            return "800M"
+        return self.config.get("duckdb", {}).get("maxmem", "800M")
 
     def get_wave_buoy_backup_bucket_name(self):
         return (

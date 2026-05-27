@@ -18,6 +18,7 @@ class TaskScheduler:
     WAVE_BUOY_TABLE_NAME = "wave_buoy_realtime_nonqc"
 
     def __init__(self, api: API):
+        self.api = api
         self.memconn = api.get_memconn()
         self.scheduler = AsyncIOScheduler()
         self._instance = api.get_aodn_instance()
@@ -26,6 +27,19 @@ class TaskScheduler:
         )
         self.wave_buoy_backup_s3_path = f"s3://{self.wave_buoy_backup_bucket}/imoslive/BUOY/{self.WAVE_BUOY_TABLE_NAME}.parquet"
         self._configure_duckdb_s3()
+
+    async def _wait_until_api_ready(self, timeout: float = 300):
+        """Wait until main API metadata initialization has finished."""
+        waited = 0
+        while not self.api.get_api_status():
+            if waited >= timeout:
+                logger.warning("Timed out waiting for API to become ready")
+                break
+            await asyncio.sleep(0.5)
+            waited += 0.5
+        logger.info(
+            f"API ready status = {self.api.get_api_status()} (waited {waited}s)"
+        )
 
     def _configure_duckdb_s3(self):
         # The source bucket (aodn-cloud-optimised) is public, so DuckDB can read it
@@ -144,6 +158,9 @@ class TaskScheduler:
             logger.warning(f"No S3 backup found, will rely on initial S3 fetch: {e}")
 
     async def start_with_initial_run(self):
+        # API init is memory intensive, so do not refresh until the init done
+        await self._wait_until_api_ready()
+
         """Start the scheduler and run the refresh task immediately."""
         loop = asyncio.get_running_loop()
         with ThreadPoolExecutor() as executor:

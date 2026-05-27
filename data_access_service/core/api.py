@@ -375,13 +375,20 @@ class API(BaseAPI):
         # UUID to metadata mapper
         self._instance = DataQuery.GetAodn()
         self._metadata = None
-        self._memconn = duckdb.connect(":memory:cloud_optimized")
         try:
             config = Config.get_config()
+
             temp_dir = os.path.join(os.getcwd(), ".duckdb_temp")
             os.makedirs(temp_dir, exist_ok=True)
-            self._memconn.execute(f"SET temp_directory = '{temp_dir}';")
-            self._memconn.execute(f"SET max_memory = '{config.get_duckdb_maxmem()}';")
+
+            self._memconn = duckdb.connect(
+                ":memory:cloud_optimized",
+                config={
+                    "threads": 1,
+                    "temp_directory": temp_dir,
+                    "max_memory": config.get_duckdb_maxmem(),
+                },
+            )
         except Exception as e:
             log.warning(f"Failed to set DuckDB memory/temp limits: {e}")
 
