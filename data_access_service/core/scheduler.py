@@ -11,6 +11,21 @@ from data_access_service.config.config import Config
 logger = logging.getLogger(__name__)
 
 
+def _format_exception(exc: BaseException) -> str:
+    """Render an exception message, recovering DuckDB errors whose bytes are not valid UTF-8.
+
+    DuckDB's Python binding decodes its C++ error messages as UTF-8. When a message
+    contains a non-UTF-8 byte (e.g. raw bytes from a corrupt or non-Parquet S3 object),
+    the decode itself raises UnicodeDecodeError, masking the real error. The raw message
+    bytes are preserved on the exception's ``object`` attribute, so we recover them here
+    with ``errors="replace"`` rather than letting the cryptic decode error surface.
+    """
+    if isinstance(exc, UnicodeDecodeError):
+        recovered = exc.object.decode(exc.encoding, errors="replace")
+        return f"{recovered} [recovered from non-UTF-8 DuckDB message; decode error: {exc}]"
+    return str(exc)
+
+
 class TaskScheduler:
     """Manages scheduled tasks for the application."""
 
@@ -78,6 +93,7 @@ class TaskScheduler:
         self._configure_duckdb_s3()
         temp_table_name = f"{self.WAVE_BUOY_TABLE_NAME}_temp"
         target_table_name = self.WAVE_BUOY_TABLE_NAME
+        step = "initialising"
 
         try:
             dataset = (
@@ -85,6 +101,7 @@ class TaskScheduler:
             )
 
             # Step 1: Create temp table with new data (non-blocking for readers)
+            step = f"reading source dataset into temporary table '{temp_table_name}'"
             logger.info(f"Creating temporary table '{temp_table_name}'...")
             self.memconn.execute(
                 f"""
@@ -95,6 +112,7 @@ class TaskScheduler:
             logger.info(f"Temporary table '{temp_table_name}' created successfully")
 
             # Step 2: Drop old table if it exists and rename temp table to target name (atomic operation)
+            step = f"renaming '{temp_table_name}' to '{target_table_name}'"
             logger.info(
                 f"Drop old table '{target_table_name}' if it exists and rename '{temp_table_name}' to '{target_table_name}'..."
             )
@@ -108,13 +126,17 @@ class TaskScheduler:
             )
 
             # Keep backup fresh
+            step = f"writing backup to '{self.wave_buoy_backup_s3_path}'"
             self.memconn.execute(
                 f"COPY {target_table_name} TO '{self.wave_buoy_backup_s3_path}' (FORMAT PARQUET)"
             )
             logger.info("Backup written to S3 successfully")
             logger.info("Refresh task completed successfully")
         except Exception as e:
-            logger.error(f"Error in refresh task: {e}", exc_info=True)
+            logger.error(
+                f"Error in refresh task while {step}: {_format_exception(e)}",
+                exc_info=True,
+            )
             # Clean up temp table if it exists
             try:
                 self.memconn.execute(f"DROP TABLE IF EXISTS {temp_table_name}")
