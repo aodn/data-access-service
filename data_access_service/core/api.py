@@ -380,8 +380,8 @@ class API(BaseAPI):
             config = Config.get_config()
             temp_dir = os.path.join(os.getcwd(), ".duckdb_temp")
             os.makedirs(temp_dir, exist_ok=True)
-            self.memconn.execute(f"SET temp_directory = '{temp_dir}';")
-            self.memconn.execute(f"SET max_memory = '{config.get_duckdb_maxmem()}';")
+            self._memconn.execute(f"SET temp_directory = '{temp_dir}';")
+            self._memconn.execute(f"SET max_memory = '{config.get_duckdb_maxmem()}';")
         except Exception as e:
             log.warning(f"Failed to set DuckDB memory/temp limits: {e}")
 
@@ -398,7 +398,7 @@ class API(BaseAPI):
                 # Do nothing as we end process
                 pass
 
-        self.memconn.close()
+        self._memconn.close()
 
     async def async_initialize_metadata(self):
         # Use ThreadPoolExecutor to run blocking calls in a separate thread
@@ -448,7 +448,7 @@ class API(BaseAPI):
     def fetch_wave_buoy_data(self, buoy_name: str, start_date: str, end_date: str):
         buoy_name = unquote_plus(buoy_name)
         print("Fetching data for buoy:", buoy_name)
-        waveBuoyPositionQueryResult = self.memconn.execute(
+        waveBuoyPositionQueryResult = self._memconn.execute(
             f"""SELECT
             LATITUDE,
             LONGITUDE
@@ -472,7 +472,7 @@ class API(BaseAPI):
         if lat is None or lon is None:
             return {}
 
-        waveBuoyDataQueryResult = self.memconn.execute(
+        waveBuoyDataQueryResult = self._memconn.execute(
             f"""SELECT SSWMD, WPFM, WPMH, WHTH, WSSH, TIME
             FROM wave_buoy_realtime_nonqc
             WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (WPFM IS NOT NULL OR WPMH IS NOT NULL) AND (WHTH IS NOT NULL OR WSSH IS NOT NULL)
@@ -510,7 +510,7 @@ class API(BaseAPI):
         return feature
 
     def fetch_wave_buoy_latest_date(self):
-        result = self.memconn.execute(
+        result = self._memconn.execute(
             f"""SELECT
             MAX(TIME) AS TIME
             FROM wave_buoy_realtime_nonqc"""
@@ -519,7 +519,7 @@ class API(BaseAPI):
         return result["TIME"].item().isoformat() + "Z"
 
     def fetch_all_unique_wave_buoy_sites(self):
-        result = self.memconn.execute(
+        result = self._memconn.execute(
             """SELECT
             site_name,
             MAX(TIME) AS TIME,
@@ -552,7 +552,7 @@ class API(BaseAPI):
         return feature_collection
 
     def fetch_wave_buoy_sites(self, start_date: str, end_date: str):
-        result = self.memconn.execute(
+        result = self._memconn.execute(
             f"""SELECT
             site_name,
             first(TIME) AS TIME,
