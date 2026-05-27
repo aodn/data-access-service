@@ -1,6 +1,6 @@
+from data_access_service import API
 import logging
 import boto3
-import duckdb
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -17,19 +17,10 @@ class TaskScheduler:
 
     WAVE_BUOY_TABLE_NAME = "wave_buoy_realtime_nonqc"
 
-    def __init__(self):
-        self.memconn = duckdb.connect(":memory:cloud_optimized")
-        try:
-            import os
-
-            temp_dir = os.path.join(os.getcwd(), ".duckdb_temp")
-            os.makedirs(temp_dir, exist_ok=True)
-            self.memconn.execute(f"SET temp_directory = '{temp_dir}';")
-            self.memconn.execute(f"SET max_memory = '{config.get_duckdb_maxmem()}';")
-        except Exception as e:
-            logger.warning(f"Failed to set DuckDB memory/temp limits: {e}")
+    def __init__(self, api: API):
+        self.memconn = api.get_memconn()
         self.scheduler = AsyncIOScheduler()
-        self._instance = DataQuery.GetAodn()
+        self._instance = api.get_aodn_instance()
         self.wave_buoy_backup_bucket = (
             Config.get_config().get_wave_buoy_backup_bucket_name()
         )

@@ -439,6 +439,12 @@ class API(BaseAPI):
         # used for checking if the API instance is ready
         return self._is_ready
 
+    def get_memconn(self):
+        return self.memconn
+
+    def get_aodn_instance(self):
+        return self._instance
+
     def fetch_wave_buoy_data(self, buoy_name: str, start_date: str, end_date: str):
         buoy_name = unquote_plus(buoy_name)
         print("Fetching data for buoy:", buoy_name)

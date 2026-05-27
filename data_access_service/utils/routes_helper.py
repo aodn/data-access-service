@@ -48,6 +48,7 @@ from data_access_service.utils.date_time_utils import (
 )
 
 logger = init_log(Config.get_config())
+memory_lock = threading.Lock()
 
 
 # Make all non-numeric and str field to str so that json do not throw serializable error
@@ -357,6 +358,9 @@ async def fetch_data(
     end_depth: float | None,
     columns: List[str],
 ) -> AsyncGenerator[dict | None, None]:
+    logger.debug("Background thread waiting for memory_lock")
+    memory_lock.acquire()
+    logger.debug("Background thread acquired memory_lock")
     try:
         result: Optional[dd.DataFrame | xr.Dataset] = api_instance.get_dataset(
             uuid=uuid,
@@ -369,11 +373,8 @@ async def fetch_data(
         if result is None:
             # Indicate end of generator record
             yield None
+            return
 
-    except Exception as e:
-        # Indicate end of generator record
-        yield None
-    else:
         # Now we need to change the xarray if type match to 2D dataframe for processing
         if isinstance(result, xr.Dataset):
             # A way to get row count without compute and load all for xarray,
@@ -415,6 +416,14 @@ async def fetch_data(
             filtered, None if count is None else count // RECORD_PER_PARTITION + 1
         ):
             yield record
+
+    except Exception as e:
+        logger.error("Error in fetch_data: %s", str(e))
+        # Indicate end of generator record
+        yield None
+    finally:
+        memory_lock.release()
+        logger.debug("Background thread released memory_lock")
 
 
 class HealthCheckResponse(BaseModel):
