@@ -659,7 +659,7 @@ class API(BaseAPI):
         if value is not None:
             return value
         else:
-            return {"not_exist": Descriptor(uuid=uuid)}
+            return {"not_exist": Descriptor(uuid=uuid if uuid is not None else "*")}
 
     def get_raw_meta_data(self, uuid: str) -> Dict[str, Any]:
         value = self._raw.get(uuid)
@@ -680,7 +680,7 @@ class API(BaseAPI):
     def has_data(
         self, uuid: str, key: str, start_date: pd.Timestamp, end_date: pd.Timestamp
     ):
-        md: Dict[str, Descriptor] = self._cached_metadata.get(uuid)
+        md: Dict[str, Descriptor] | None = self._cached_metadata.get(uuid)
         if md is not None and md[key] is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
             tes, tee = ds.get_temporal_extent()
@@ -690,7 +690,7 @@ class API(BaseAPI):
     def get_temporal_extent(
         self, uuid: str, key: str
     ) -> Tuple[pd.Timestamp | None, pd.Timestamp | None]:
-        md: Dict[str, Descriptor] = self._cached_metadata.get(uuid)
+        md: Dict[str, Descriptor] | None = self._cached_metadata.get(uuid)
         if md is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
             start_date, end_date = ds.get_temporal_extent()
@@ -738,7 +738,7 @@ class API(BaseAPI):
         return output
 
     def get_datasource(self, uuid: str, key: str) -> Optional[DataQuery.DataSource]:
-        mds: Dict[str, Descriptor] = self._cached_metadata.get(uuid)
+        mds: Dict[str, Descriptor] | None = self._cached_metadata.get(uuid)
         if mds is not None and key in mds:
             md = mds[key]
             if md is not None:
