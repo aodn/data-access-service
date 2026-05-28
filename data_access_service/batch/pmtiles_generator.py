@@ -12,6 +12,7 @@ from shapely.geometry import Polygon, MultiPolygon, mapping
 from shapely.ops import unary_union
 
 from data_access_service import Config, init_log
+from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.api import BaseAPI
 from data_access_service.core.constants import (
     STR_LONGITUDE_UPPER_CASE,
@@ -28,13 +29,17 @@ class HexLayerSpec:
     """
     One output layer/resolution definition.
 
+    Six layers are used by default, one per zoom-band:
+        hex_z0  (res=1, z0-1),  hex_z2 (res=2, z2-3),  hex_z4 (res=3, z4-5),
+        hex_z6  (res=5, z6-7),  hex_z8 (res=6, z8-9),  hex_z10(res=7, z10-15)
+
     Example:
         HexLayerSpec(
-            name="hex_low",
-            h3_resolution=4,
+            name="hex_z0",
+            h3_resolution=1,
             minzoom=0,
-            maxzoom=5,
-            output_path="hex_low.geojsonseq",
+            maxzoom=1,
+            output_path="hex_z0.geojsonseq",
         )
     """
 
@@ -789,6 +794,42 @@ def generate_pmtiles(
     return abs_path
 
 
+def generate_pmtiles_for_all_parquets(api: BaseAPI):
+    aws = AWSHelper()
+    metadata_list = api.get_mapped_meta_data(uuid=None)
+
+    uuid_dname_pair = []
+    for k, v in metadata_list.items():
+        dataset_names = v.keys()
+        for dataset_name in dataset_names:
+            uuid_dname_pair.append((k, dataset_name))
+
+    for uuid, dname in uuid_dname_pair:
+        try:
+            # generate a test file
+            test_file_path = "./test_file.txt"
+            with open(test_file_path, "w") as test_file:
+                test_file.write(
+                    f"This is a test file for pmtiles generation. Dataset UUID: {uuid}, Parquet Name: {dname}\n"
+                )
+
+            aws.upload_file_to_s3(
+                test_file_path,
+                "havier-example-bucket",
+                f"visualization/{uuid}/{dname}.txt",
+            )
+            aws.upload_file_to_s3(
+                test_file_path,
+                "aodn-cloud-optimized-subset-edge ",
+                f"visualization/{uuid}/{dname}.txt",
+            )
+            # generate_pmtiles_for(dataset_uuid=uuid, parquet_name=dname, api=api)
+
+        except Exception as e:
+            # TODO: may add retry later, with a max retry count.
+            logger.error(f"Error processing dataset {uuid!r}, parquet {dname!r}: {e}")
+
+
 def generate_pmtiles_for(dataset_uuid: str, parquet_name: str, api: BaseAPI):
     """Entry point: resolve column names from the API and run the full pmtiles pipeline."""
     logger.info(
@@ -806,25 +847,46 @@ def generate_pmtiles_for(dataset_uuid: str, parquet_name: str, api: BaseAPI):
 
     layers = [
         HexLayerSpec(
-            name="hex_low",
-            h3_resolution=3,
+            name="hex_z0",
+            h3_resolution=2,
             minzoom=0,
-            maxzoom=4,
-            output_path=f"data/intermediate/{parquet_stem}_hex_low.geojsonseq",
+            maxzoom=1,
+            output_path=f"data/intermediate/{parquet_stem}_hex_z0.geojsonseq",
         ),
         HexLayerSpec(
-            name="hex_mid",
-            h3_resolution=5,
-            minzoom=5,
-            maxzoom=8,
-            output_path=f"data/intermediate/{parquet_stem}_hex_mid.geojsonseq",
+            name="hex_z2",
+            h3_resolution=3,
+            minzoom=2,
+            maxzoom=3,
+            output_path=f"data/intermediate/{parquet_stem}_hex_z2.geojsonseq",
         ),
         HexLayerSpec(
-            name="hex_high",
+            name="hex_z4",
+            h3_resolution=4,
+            minzoom=4,
+            maxzoom=5,
+            output_path=f"data/intermediate/{parquet_stem}_hex_z4.geojsonseq",
+        ),
+        HexLayerSpec(
+            name="hex_z6",
+            h3_resolution=6,
+            minzoom=6,
+            maxzoom=7,
+            output_path=f"data/intermediate/{parquet_stem}_hex_z6.geojsonseq",
+        ),
+        HexLayerSpec(
+            name="hex_z8",
             h3_resolution=7,
-            minzoom=9,
+            minzoom=8,
+            maxzoom=9,
+            output_path=f"data/intermediate/{parquet_stem}_hex_z8.geojsonseq",
+        ),
+        HexLayerSpec(
+            name="hex_z10",
+            h3_resolution=8,  # ~10 km cells — detailed view
+            minzoom=10,
             maxzoom=12,
-            output_path=f"data/intermediate/{parquet_stem}_hex_high.geojsonseq",
+            output_path=f"data/intermediate/{parquet_stem}_hex_z10.geojsonseq",
         ),
     ]
 
