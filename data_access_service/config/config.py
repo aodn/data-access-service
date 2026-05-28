@@ -7,6 +7,7 @@ import logging.config
 from threading import Lock
 from pathlib import Path
 from enum import Enum
+from typing import Dict
 from botocore.client import BaseClient
 from dotenv import load_dotenv
 
@@ -129,6 +130,22 @@ class Config:
         This is used to split the date range into smaller chunks for processing.
         """
         return 12
+
+    def get_column_name_mapping(self) -> Dict[str, list[str]]:
+        """
+        Returns the ordered list of candidate column names for standard coordinate/time fields.
+        The first candidate that exists in a dataset's metadata is used.
+
+        Structure: { "TIME": ["TIME", "time", "JULD", ...], ... }
+        """
+        yaml_mapping = self.config.get("column_name_mapping")
+        result = {}
+        if yaml_mapping:
+            # Merge: yaml values override/extend defaults per key, otherwise use default
+            for key, candidates in yaml_mapping.items():
+                if isinstance(candidates, list) or candidates is None:
+                    result[key.casefold()] = candidates
+        return result
 
     def get_sender_email(self):
         return (
