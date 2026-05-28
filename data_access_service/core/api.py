@@ -1,9 +1,14 @@
+from data_access_service import Config
 import asyncio
 import gzip
 import math
 import os
+import gc
 
 import duckdb
+import json
+import zlib
+
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -370,8 +375,24 @@ class API(BaseAPI):
         # UUID to metadata mapper
         self._instance = DataQuery.GetAodn()
         self._metadata = None
-        self._is_ready = False
-        self.memconn = duckdb.connect(":memory:cloud_optimized")
+        try:
+            config = Config.get_config()
+
+            temp_dir = os.path.join(os.getcwd(), ".duckdb_temp")
+            os.makedirs(temp_dir, exist_ok=True)
+
+            self._memconn = duckdb.connect(
+                # use disk instead of memory as system low of memory and OOM
+                # ":memory:cloud_optimized",
+                "/tmp/wave_buoy.duckdb",
+                config={
+                    "threads": 1,
+                    "temp_directory": temp_dir,
+                    "max_memory": config.get_duckdb_maxmem(),
+                },
+            )
+        except Exception as e:
+            log.warning(f"Failed to set DuckDB memory/temp limits: {e}")
 
     def destroy(self):
         log.info("Destroying API instance")
@@ -386,7 +407,7 @@ class API(BaseAPI):
                 # Do nothing as we end process
                 pass
 
-        self.memconn.close()
+        self._memconn.close()
 
     async def async_initialize_metadata(self):
         # Use ThreadPoolExecutor to run blocking calls in a separate thread
@@ -407,7 +428,16 @@ class API(BaseAPI):
         self._metadata = self._instance.get_metadata()
         self.refresh_uuid_dataset_map()
 
-        log.info("Done init")
+        # Free up catalog metadata memory and trigger garbage collection
+        self._metadata = None
+        gc.collect()
+
+        process = psutil.Process()
+        rss_mb = process.memory_info().rss / (1024 * 1024)
+        vms_mb = process.memory_info().vms / (1024 * 1024)
+        log.info(
+            f"Done init. Memory usage: RSS = {rss_mb:.2f} MB, VMS = {vms_mb:.2f} MB"
+        )
         # init finalised, set as ready
         self._is_ready = True
 
@@ -418,17 +448,27 @@ class API(BaseAPI):
         # used for checking if the API instance is ready
         return self._is_ready
 
+    def get_memconn(self):
+        return self._memconn
+
+    def get_aodn_instance(self):
+        return self._instance
+
     def fetch_wave_buoy_data(self, buoy_name: str, start_date: str, end_date: str):
         buoy_name = unquote_plus(buoy_name)
         print("Fetching data for buoy:", buoy_name)
-        waveBuoyPositionQueryResult = self.memconn.execute(
-            f"""SELECT
+        waveBuoyPositionQueryResult = (
+            self.get_memconn()
+            .execute(
+                f"""SELECT
             LATITUDE,
             LONGITUDE
             FROM wave_buoy_realtime_nonqc
             WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (WPFM IS NOT NULL OR WPMH IS NOT NULL) AND (WHTH IS NOT NULL OR WSSH IS NOT NULL)
             LIMIT 1"""
-        ).df()
+            )
+            .df()
+        )
 
         ds = ddf.from_pandas(waveBuoyPositionQueryResult)
         lat = (
@@ -445,12 +485,16 @@ class API(BaseAPI):
         if lat is None or lon is None:
             return {}
 
-        waveBuoyDataQueryResult = self.memconn.execute(
-            f"""SELECT SSWMD, WPFM, WPMH, WHTH, WSSH, TIME
+        waveBuoyDataQueryResult = (
+            self.get_memconn()
+            .execute(
+                f"""SELECT SSWMD, WPFM, WPMH, WHTH, WSSH, TIME
             FROM wave_buoy_realtime_nonqc
             WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (WPFM IS NOT NULL OR WPMH IS NOT NULL) AND (WHTH IS NOT NULL OR WSSH IS NOT NULL)
             ORDER BY TIME"""
-        ).df()
+            )
+            .df()
+        )
         feature = {
             "type": "Feature",
             "properties": {
@@ -483,24 +527,32 @@ class API(BaseAPI):
         return feature
 
     def fetch_wave_buoy_latest_date(self):
-        result = self.memconn.execute(
-            f"""SELECT
+        result = (
+            self.get_memconn()
+            .execute(
+                f"""SELECT
             MAX(TIME) AS TIME
             FROM wave_buoy_realtime_nonqc"""
-        ).df()
+            )
+            .df()
+        )
         # DuckDB return pandas Timestamp which is timezone-naive like 2026-04-21 23:25:00, we need to convert it to ISO format with Z. The time is in UTC because the data source is in UTC, so we can just add Z at the end to indicate it is UTC time.
         return result["TIME"].item().isoformat() + "Z"
 
     def fetch_all_unique_wave_buoy_sites(self):
-        result = self.memconn.execute(
-            """SELECT
+        result = (
+            self.get_memconn()
+            .execute(
+                """SELECT
             site_name,
             MAX(TIME) AS TIME,
             first(LATITUDE) AS LATITUDE,
             first(LONGITUDE) AS LONGITUDE
             FROM wave_buoy_realtime_nonqc
             GROUP BY site_name"""
-        ).df()
+            )
+            .df()
+        )
         feature_collection = {
             "type": "FeatureCollection",
             "features": [],
@@ -525,8 +577,10 @@ class API(BaseAPI):
         return feature_collection
 
     def fetch_wave_buoy_sites(self, start_date: str, end_date: str):
-        result = self.memconn.execute(
-            f"""SELECT
+        result = (
+            self.get_memconn()
+            .execute(
+                f"""SELECT
             site_name,
             first(TIME) AS TIME,
             first(LATITUDE) AS LATITUDE,
@@ -534,7 +588,9 @@ class API(BaseAPI):
             FROM wave_buoy_realtime_nonqc
             WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND (WPFM IS NOT NULL OR WPMH IS NOT NULL) AND (WHTH IS NOT NULL OR WSSH IS NOT NULL)
             GROUP BY site_name"""
-        ).df()
+            )
+            .df()
+        )
         feature_collection = {
             "type": "FeatureCollection",
             "features": [],
@@ -573,8 +629,8 @@ class API(BaseAPI):
                 log.info("Adding uuid " + uuid + " name " + key)
                 if uuid not in self._raw:
                     self._raw[uuid] = dict()
-                # We can add directly because the dict() created
-                self._raw[uuid][key] = data
+                # Save memory compress the content
+                self._raw[uuid][key] = zlib.compress(json.dumps(data).encode("utf-8"))
 
                 if uuid not in self._cached_metadata:
                     self._cached_metadata[uuid] = dict()
@@ -609,7 +665,11 @@ class API(BaseAPI):
         value = self._raw.get(uuid)
 
         if value is not None:
-            return BaseAPI.fix_encode_error_nested_dict(value)
+            decompressed = {
+                key: json.loads(zlib.decompress(val).decode("utf-8"))
+                for key, val in value.items()
+            }
+            return BaseAPI.fix_encode_error_nested_dict(decompressed)
         else:
             return dict()
 
@@ -846,7 +906,24 @@ class API(BaseAPI):
                         lon_max,
                         scalar_filter,
                     )
-            except ValueError as e:
+            except (ValueError, TypeError, IndexError, KeyError) as e:
+                err_msg = str(e)
+                # Some datasets (particularly secondary ones under a shared UUID)
+                # have degenerate TIME coordinates (all-NaN or non-monotonic).
+                # The upstream library raises this pandas slicing error in those cases.
+                # Handle gracefully by returning no data instead of failing the request.
+                if (
+                    "non-monotonic" in err_msg
+                    or "DatetimeIndex" in err_msg
+                    or "partial slicing" in err_msg
+                ):
+                    log.warning(
+                        "Dataset has unusable TIME coordinate, returning empty result for %s/%s: %s",
+                        uuid,
+                        key,
+                        err_msg,
+                    )
+                    return None
                 log.error(f"Error when query ds.get_data: {e}")
                 raise e
             except Exception as v:

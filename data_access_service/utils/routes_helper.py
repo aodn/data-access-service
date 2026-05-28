@@ -48,6 +48,7 @@ from data_access_service.utils.date_time_utils import (
 )
 
 logger = init_log(Config.get_config())
+memory_lock = threading.Lock()
 
 
 # Make all non-numeric and str field to str so that json do not throw serializable error
@@ -273,12 +274,21 @@ def async_response_json(result: AsyncGenerator[dict, None], compress: bool):
         try:
 
             async def collect():
-                async for i in result:
-                    if i is not None:
-                        result_queue.put(i)  # Thread-safe append
-                    else:
-                        break
-                result_queue.put(None)  # Sentinel to indicate completion
+                try:
+                    async for i in result:
+                        if i is not None:
+                            result_queue.put(i)  # Thread-safe append
+                        else:
+                            break
+                    result_queue.put(None)  # Sentinel to indicate completion
+                finally:
+                    # Always close the async generator so that the finally block
+                    # inside fetch_data() runs and releases memory_lock.
+                    # This is critical when the consumer breaks early or on errors.
+                    try:
+                        await result.aclose()
+                    except Exception:
+                        pass
 
             loop.run_until_complete(collect())
         finally:
@@ -357,6 +367,9 @@ async def fetch_data(
     end_depth: float | None,
     columns: List[str],
 ) -> AsyncGenerator[dict | None, None]:
+    logger.debug("Background thread waiting for memory_lock")
+    memory_lock.acquire()
+    logger.debug("Background thread acquired memory_lock")
     try:
         result: Optional[dd.DataFrame | xr.Dataset] = api_instance.get_dataset(
             uuid=uuid,
@@ -369,11 +382,8 @@ async def fetch_data(
         if result is None:
             # Indicate end of generator record
             yield None
+            return
 
-    except Exception as e:
-        # Indicate end of generator record
-        yield None
-    else:
         # Now we need to change the xarray if type match to 2D dataframe for processing
         if isinstance(result, xr.Dataset):
             # A way to get row count without compute and load all for xarray,
@@ -415,6 +425,22 @@ async def fetch_data(
             filtered, None if count is None else count // RECORD_PER_PARTITION + 1
         ):
             yield record
+
+    except Exception as e:
+        # Log with uuid/key context so we can identify which specific dataset
+        # under a UUID caused the problem (common with multi-dataset UUIDs).
+        logger.error(
+            "Error in fetch_data (uuid=%s, key=%s): %s",
+            uuid,
+            key,
+            str(e),
+            exc_info=True,
+        )
+        # Indicate end of generator record (caller will see empty result)
+        yield None
+    finally:
+        memory_lock.release()
+        logger.debug("Background thread released memory_lock")
 
 
 class HealthCheckResponse(BaseModel):

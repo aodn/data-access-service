@@ -34,6 +34,7 @@ class Config:
         self.s3 = None
         self.ses = None
         self.batch = None
+        self.duckdb_maxmem = None
 
     @staticmethod
     def load_config(file_path: str):
@@ -86,6 +87,11 @@ class Config:
             if self.config is not None
             else None
         )
+
+    def get_duckdb_maxmem(self):
+        if self.config is None:
+            return "800M"
+        return self.config.get("duckdb", {}).get("maxmem", "800M")
 
     def get_wave_buoy_backup_bucket_name(self):
         return (
