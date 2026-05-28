@@ -886,7 +886,24 @@ class API(BaseAPI):
                         lon_max,
                         scalar_filter,
                     )
-            except ValueError as e:
+            except (ValueError, TypeError, IndexError, KeyError) as e:
+                err_msg = str(e)
+                # Some datasets (particularly secondary ones under a shared UUID)
+                # have degenerate TIME coordinates (all-NaN or non-monotonic).
+                # The upstream library raises this pandas slicing error in those cases.
+                # Handle gracefully by returning no data instead of failing the request.
+                if (
+                    "non-monotonic" in err_msg
+                    or "DatetimeIndex" in err_msg
+                    or "partial slicing" in err_msg
+                ):
+                    log.warning(
+                        "Dataset has unusable TIME coordinate, returning empty result for %s/%s: %s",
+                        uuid,
+                        key,
+                        err_msg,
+                    )
+                    return None
                 log.error(f"Error when query ds.get_data: {e}")
                 raise e
             except Exception as v:
