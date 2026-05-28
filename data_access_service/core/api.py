@@ -457,14 +457,18 @@ class API(BaseAPI):
     def fetch_wave_buoy_data(self, buoy_name: str, start_date: str, end_date: str):
         buoy_name = unquote_plus(buoy_name)
         print("Fetching data for buoy:", buoy_name)
-        waveBuoyPositionQueryResult = self._memconn.execute(
-            f"""SELECT
+        waveBuoyPositionQueryResult = (
+            self.get_memconn()
+            .execute(
+                f"""SELECT
             LATITUDE,
             LONGITUDE
             FROM wave_buoy_realtime_nonqc
             WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (WPFM IS NOT NULL OR WPMH IS NOT NULL) AND (WHTH IS NOT NULL OR WSSH IS NOT NULL)
             LIMIT 1"""
-        ).df()
+            )
+            .df()
+        )
 
         ds = ddf.from_pandas(waveBuoyPositionQueryResult)
         lat = (
@@ -481,12 +485,16 @@ class API(BaseAPI):
         if lat is None or lon is None:
             return {}
 
-        waveBuoyDataQueryResult = self._memconn.execute(
-            f"""SELECT SSWMD, WPFM, WPMH, WHTH, WSSH, TIME
+        waveBuoyDataQueryResult = (
+            self.get_memconn()
+            .execute(
+                f"""SELECT SSWMD, WPFM, WPMH, WHTH, WSSH, TIME
             FROM wave_buoy_realtime_nonqc
             WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (WPFM IS NOT NULL OR WPMH IS NOT NULL) AND (WHTH IS NOT NULL OR WSSH IS NOT NULL)
             ORDER BY TIME"""
-        ).df()
+            )
+            .df()
+        )
         feature = {
             "type": "Feature",
             "properties": {
@@ -519,24 +527,32 @@ class API(BaseAPI):
         return feature
 
     def fetch_wave_buoy_latest_date(self):
-        result = self._memconn.execute(
-            f"""SELECT
+        result = (
+            self.get_memconn()
+            .execute(
+                f"""SELECT
             MAX(TIME) AS TIME
             FROM wave_buoy_realtime_nonqc"""
-        ).df()
+            )
+            .df()
+        )
         # DuckDB return pandas Timestamp which is timezone-naive like 2026-04-21 23:25:00, we need to convert it to ISO format with Z. The time is in UTC because the data source is in UTC, so we can just add Z at the end to indicate it is UTC time.
         return result["TIME"].item().isoformat() + "Z"
 
     def fetch_all_unique_wave_buoy_sites(self):
-        result = self._memconn.execute(
-            """SELECT
+        result = (
+            self.get_memconn()
+            .execute(
+                """SELECT
             site_name,
             MAX(TIME) AS TIME,
             first(LATITUDE) AS LATITUDE,
             first(LONGITUDE) AS LONGITUDE
             FROM wave_buoy_realtime_nonqc
             GROUP BY site_name"""
-        ).df()
+            )
+            .df()
+        )
         feature_collection = {
             "type": "FeatureCollection",
             "features": [],
@@ -561,8 +577,10 @@ class API(BaseAPI):
         return feature_collection
 
     def fetch_wave_buoy_sites(self, start_date: str, end_date: str):
-        result = self._memconn.execute(
-            f"""SELECT
+        result = (
+            self.get_memconn()
+            .execute(
+                f"""SELECT
             site_name,
             first(TIME) AS TIME,
             first(LATITUDE) AS LATITUDE,
@@ -570,7 +588,9 @@ class API(BaseAPI):
             FROM wave_buoy_realtime_nonqc
             WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND (WPFM IS NOT NULL OR WPMH IS NOT NULL) AND (WHTH IS NOT NULL OR WSSH IS NOT NULL)
             GROUP BY site_name"""
-        ).df()
+            )
+            .df()
+        )
         feature_collection = {
             "type": "FeatureCollection",
             "features": [],
