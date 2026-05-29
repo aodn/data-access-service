@@ -129,57 +129,28 @@ def _generate_partial_json_array(
                         ).strftime(DATE_FORMAT)
                     )
 
-            #  may need to add more field here
-            if "LONGITUDE" in record:
-                filtered_record[STR_LONGITUDE_LOWER_CASE] = (
-                    round(record["LONGITUDE"], COORDINATE_INDEX_PRECISION)
-                    if record["LONGITUDE"] is not None
-                    else None
-                )
-            elif "longitude" in record:
-                filtered_record[STR_LONGITUDE_LOWER_CASE] = (
-                    round(record["longitude"], COORDINATE_INDEX_PRECISION)
-                    if record["longitude"] is not None
-                    else None
-                )
-            elif "lon" in record:
-                filtered_record[STR_LONGITUDE_LOWER_CASE] = (
-                    round(record["lon"], COORDINATE_INDEX_PRECISION)
-                    if record["lon"] is not None
-                    else None
-                )
-            elif "decimalLongitude" in record:
-                filtered_record[STR_LONGITUDE_LOWER_CASE] = (
-                    round(record["decimalLongitude"], COORDINATE_INDEX_PRECISION)
-                    if record["decimalLongitude"] is not None
-                    else None
-                )
+            # Longitude/latitude use the ordered candidates from config.yaml
+            # so the first matching key wins according to the defined priority.
+            coord_mapping = Config.get_config().get_column_name_mapping()
+            for candidate in coord_mapping.get("longitude") or []:
+                if candidate in record:
+                    val = record[candidate]
+                    filtered_record[STR_LONGITUDE_LOWER_CASE] = (
+                        round(val, COORDINATE_INDEX_PRECISION)
+                        if val is not None
+                        else None
+                    )
+                    break
 
-            if "LATITUDE" in record:
-                filtered_record[STR_LATITUDE_LOWER_CASE] = (
-                    round(record["LATITUDE"], COORDINATE_INDEX_PRECISION)
-                    if record["LATITUDE"] is not None
-                    else None
-                )
-            elif "latitude" in record:
-                filtered_record[STR_LATITUDE_LOWER_CASE] = (
-                    round(record["latitude"], COORDINATE_INDEX_PRECISION)
-                    if record["latitude"] is not None
-                    else None
-                )
-            elif "lat" in record:
-                filtered_record[STR_LATITUDE_LOWER_CASE] = (
-                    round(record["lat"], COORDINATE_INDEX_PRECISION)
-                    if record["lat"] is not None
-                    else None
-                )
-            # add this for data-uplift aggregated datasets for co-index
-            elif "decimalLatitude" in record:
-                filtered_record[STR_LATITUDE_LOWER_CASE] = (
-                    round(record["decimalLatitude"], COORDINATE_INDEX_PRECISION)
-                    if record["decimalLatitude"] is not None
-                    else None
-                )
+            for candidate in coord_mapping.get("latitude") or []:
+                if candidate in record:
+                    val = record[candidate]
+                    filtered_record[STR_LATITUDE_LOWER_CASE] = (
+                        round(val, COORDINATE_INDEX_PRECISION)
+                        if val is not None
+                        else None
+                    )
+                    break
 
             if "DEPTH" in record:
                 filtered_record[STR_DEPTH_LOWER_CASE] = (

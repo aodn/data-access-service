@@ -1,19 +1,24 @@
+# Order of values under each key matters
 column_name_mapping:
   time:
-    - JULD
-    - detection_timestamp
     - TIME
     - time
+    - JULD
     - eventDate
     - timestamp
+    - detection_timestamp
   depth:
   latitude:
-    - latitude
     - LATITUDE
+    - latitude
     - lat
+    -
+    # add this for data-uplift aggregated datasets for co-index
     - decimalLatitude
   longitude:
-    - longitude
     - LONGITUDE
+    - longitude
     - lon
+    -
+    # add this for data-uplift aggregated datasets for co-index
     - decimalLongitude
