@@ -1,4 +1,4 @@
-# Order of values under each key matters, do not change it, look at the _generate_partial_json_array()
+# Order of values under each key matters, do not change it. Else you will get test errors.
 column_name_mapping:
   time:
     - TIME
