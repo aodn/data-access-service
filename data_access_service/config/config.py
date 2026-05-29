@@ -46,6 +46,32 @@ class Config:
         return config
 
     @staticmethod
+    def _deep_merge(base: Dict, override: Dict) -> Dict:
+        """Deep merge override dict into a copy of base. Nested dicts are merged recursively; lists/scalars are replaced by override values."""
+        if not isinstance(base, dict):
+            base = {}
+        if not isinstance(override, dict):
+            override = {}
+        result = dict(base)
+        for key, value in override.items():
+            if (
+                key in result
+                and isinstance(result[key], dict)
+                and isinstance(value, dict)
+            ):
+                result[key] = Config._deep_merge(result[key], value)
+            else:
+                result[key] = value
+        return result
+
+    @staticmethod
+    def load_merged_config(base_path: str, override_path: str):
+        """Load base config then deep-merge the env/override config on top."""
+        base = Config.load_config(base_path) or {}
+        override = Config.load_config(override_path) or {}
+        return Config._deep_merge(base, override)
+
+    @staticmethod
     def get_config(profile: EnvType = None):
         if profile is None:
             profile = EnvType(os.getenv("PROFILE", EnvType.DEV))
@@ -161,7 +187,10 @@ class Config:
 class IntTestConfig(Config):
     def __init__(self):
         super().__init__()
-        self.config = Config.load_config("tests/config/config-test.yaml")
+        self.config = Config.load_merged_config(
+            "data_access_service/config/config.yaml",
+            "tests/config/config-test.yaml",
+        )
 
     def set_s3_client(self, s3_client):
         self.s3 = s3_client
@@ -188,7 +217,10 @@ class IntTestConfig(Config):
 class DevConfig(Config):
     def __init__(self):
         super().__init__()
-        self.config = Config.load_config("data_access_service/config/config-dev.yaml")
+        self.config = Config.load_merged_config(
+            "data_access_service/config/config.yaml",
+            "data_access_service/config/config-dev.yaml",
+        )
         self.batch = boto3.client("batch", region_name="ap-southeast-2")
         self.s3 = boto3.client("s3")
         self.ses = boto3.client("ses", region_name="ap-southeast-2")
@@ -197,7 +229,10 @@ class DevConfig(Config):
 class EdgeConfig(Config):
     def __init__(self):
         super().__init__()
-        self.config = Config.load_config("data_access_service/config/config-edge.yaml")
+        self.config = Config.load_merged_config(
+            "data_access_service/config/config.yaml",
+            "data_access_service/config/config-edge.yaml",
+        )
         self.batch = boto3.client("batch")
         self.s3 = boto3.client("s3")
         self.ses = boto3.client("ses")
@@ -209,8 +244,9 @@ class StagingConfig(Config):
 
     def __init__(self):
         super().__init__()
-        self.config = Config.load_config(
-            "data_access_service/config/config-staging.yaml"
+        self.config = Config.load_merged_config(
+            "data_access_service/config/config.yaml",
+            "data_access_service/config/config-staging.yaml",
         )
         self.batch = boto3.client("batch")
         self.s3 = boto3.client("s3")
@@ -223,7 +259,10 @@ class ProdConfig(Config):
 
     def __init__(self):
         super().__init__()
-        self.config = Config.load_config("data_access_service/config/config-prod.yaml")
+        self.config = Config.load_merged_config(
+            "data_access_service/config/config.yaml",
+            "data_access_service/config/config-prod.yaml",
+        )
         self.batch = boto3.client("batch")
         self.s3 = boto3.client("s3")
         self.ses = boto3.client("ses")

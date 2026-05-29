@@ -1,0 +1,19 @@
+column_name_mapping:
+  time:
+    - JULD
+    - detection_timestamp
+    - TIME
+    - time
+    - eventDate
+    - timestamp
+  depth:
+  latitude:
+    - latitude
+    - LATITUDE
+    - lat
+    - decimalLatitude
+  longitude:
+    - longitude
+    - LONGITUDE
+    - lon
+    - decimalLongitude
