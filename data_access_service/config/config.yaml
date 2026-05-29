@@ -12,13 +12,11 @@ column_name_mapping:
     - LATITUDE
     - latitude
     - lat
-    -
     # add this for data-uplift aggregated datasets for co-index
     - decimalLatitude
   longitude:
     - LONGITUDE
     - longitude
     - lon
-    -
     # add this for data-uplift aggregated datasets for co-index
     - decimalLongitude
