@@ -7,6 +7,7 @@ import logging.config
 from threading import Lock
 from pathlib import Path
 from enum import Enum
+from typing import Dict
 from botocore.client import BaseClient
 from dotenv import load_dotenv
 
@@ -43,6 +44,32 @@ class Config:
         with open(resolved_file_path, "r") as file:
             config = yaml.safe_load(file)
         return config
+
+    @staticmethod
+    def _deep_merge(base: Dict, override: Dict) -> Dict:
+        """Deep merge override dict into a copy of base. Nested dicts are merged recursively; lists/scalars are replaced by override values."""
+        if not isinstance(base, dict):
+            base = {}
+        if not isinstance(override, dict):
+            override = {}
+        result = dict(base)
+        for key, value in override.items():
+            if (
+                key in result
+                and isinstance(result[key], dict)
+                and isinstance(value, dict)
+            ):
+                result[key] = Config._deep_merge(result[key], value)
+            else:
+                result[key] = value
+        return result
+
+    @staticmethod
+    def load_merged_config(base_path: str, override_path: str):
+        """Load base config then deep-merge the env/override config on top."""
+        base = Config.load_config(base_path) or {}
+        override = Config.load_config(override_path) or {}
+        return Config._deep_merge(base, override)
 
     @staticmethod
     def get_config(profile: EnvType = None):
@@ -130,6 +157,22 @@ class Config:
         """
         return 12
 
+    def get_column_name_mapping(self) -> Dict[str, list[str]]:
+        """
+        Returns the ordered list of candidate column names for standard coordinate/time fields.
+        The first candidate that exists in a dataset's metadata is used.
+
+        Structure: { "TIME": ["TIME", "time", "JULD", ...], ... }
+        """
+        yaml_mapping = self.config.get("column_name_mapping")
+        result = {}
+        if yaml_mapping:
+            # Merge: yaml values override/extend defaults per key, otherwise use default
+            for key, candidates in yaml_mapping.items():
+                if isinstance(candidates, list) or candidates is None:
+                    result[key.casefold()] = candidates
+        return result
+
     def get_sender_email(self):
         return (
             self.config["aws"]["ses"]["sender_email"]
@@ -144,7 +187,10 @@ class Config:
 class IntTestConfig(Config):
     def __init__(self):
         super().__init__()
-        self.config = Config.load_config("tests/config/config-test.yaml")
+        self.config = Config.load_merged_config(
+            "data_access_service/config/config.yaml",
+            "tests/config/config-test.yaml",
+        )
 
     def set_s3_client(self, s3_client):
         self.s3 = s3_client
@@ -171,7 +217,10 @@ class IntTestConfig(Config):
 class DevConfig(Config):
     def __init__(self):
         super().__init__()
-        self.config = Config.load_config("data_access_service/config/config-dev.yaml")
+        self.config = Config.load_merged_config(
+            "data_access_service/config/config.yaml",
+            "data_access_service/config/config-dev.yaml",
+        )
         self.batch = boto3.client("batch", region_name="ap-southeast-2")
         self.s3 = boto3.client("s3")
         self.ses = boto3.client("ses", region_name="ap-southeast-2")
@@ -180,7 +229,10 @@ class DevConfig(Config):
 class EdgeConfig(Config):
     def __init__(self):
         super().__init__()
-        self.config = Config.load_config("data_access_service/config/config-edge.yaml")
+        self.config = Config.load_merged_config(
+            "data_access_service/config/config.yaml",
+            "data_access_service/config/config-edge.yaml",
+        )
         self.batch = boto3.client("batch")
         self.s3 = boto3.client("s3")
         self.ses = boto3.client("ses")
@@ -192,8 +244,9 @@ class StagingConfig(Config):
 
     def __init__(self):
         super().__init__()
-        self.config = Config.load_config(
-            "data_access_service/config/config-staging.yaml"
+        self.config = Config.load_merged_config(
+            "data_access_service/config/config.yaml",
+            "data_access_service/config/config-staging.yaml",
         )
         self.batch = boto3.client("batch")
         self.s3 = boto3.client("s3")
@@ -206,7 +259,10 @@ class ProdConfig(Config):
 
     def __init__(self):
         super().__init__()
-        self.config = Config.load_config("data_access_service/config/config-prod.yaml")
+        self.config = Config.load_merged_config(
+            "data_access_service/config/config.yaml",
+            "data_access_service/config/config-prod.yaml",
+        )
         self.batch = boto3.client("batch")
         self.s3 = boto3.client("s3")
         self.ses = boto3.client("ses")

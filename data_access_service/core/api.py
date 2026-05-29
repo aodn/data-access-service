@@ -659,7 +659,7 @@ class API(BaseAPI):
         if value is not None:
             return value
         else:
-            return {"not_exist": Descriptor(uuid=uuid)}
+            return {"not_exist": Descriptor(uuid=uuid if uuid is not None else "*")}
 
     def get_raw_meta_data(self, uuid: str) -> Dict[str, Any]:
         value = self._raw.get(uuid)
@@ -680,7 +680,7 @@ class API(BaseAPI):
     def has_data(
         self, uuid: str, key: str, start_date: pd.Timestamp, end_date: pd.Timestamp
     ):
-        md: Dict[str, Descriptor] = self._cached_metadata.get(uuid)
+        md: Dict[str, Descriptor] | None = self._cached_metadata.get(uuid)
         if md is not None and md[key] is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
             tes, tee = ds.get_temporal_extent()
@@ -690,7 +690,7 @@ class API(BaseAPI):
     def get_temporal_extent(
         self, uuid: str, key: str
     ) -> Tuple[pd.Timestamp | None, pd.Timestamp | None]:
-        md: Dict[str, Descriptor] = self._cached_metadata.get(uuid)
+        md: Dict[str, Descriptor] | None = self._cached_metadata.get(uuid)
         if md is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
             start_date, end_date = ds.get_temporal_extent()
@@ -716,72 +716,29 @@ class API(BaseAPI):
             return columns
 
         meta: Dict[str, Any] = self.get_raw_meta_data(uuid)[key]
+        columns_map = Config.get_config().get_column_name_mapping()
         output = list()
         for column in columns:
-
-            # You want TIME field but not in there, try map to something else
-            if column.casefold() == "TIME".casefold() and (
-                "TIME" not in meta or "time" not in meta
-            ):
-                match meta:
-                    case meta if "JULD" in meta:
-                        output.append("JULD")
-                    case meta if "detection_timestamp" in meta:
-                        output.append("detection_timestamp")
-                    case meta if "TIME" in meta:
-                        output.append("TIME")
-                    case meta if "time" in meta:
-                        output.append("time")
-                    case meta if "eventDate" in meta:
-                        output.append("eventDate")
-                    case meta if "timestamp" in meta:
+            # If the column name can map to target data source column name
+            if column.casefold() in columns_map:
+                candidates = columns_map.get(column.casefold())
+                if candidates is not None:
+                    for candidate in candidates:
+                        if candidate in meta:
+                            output.append(candidate)
+                            break
+                    else:
                         log.error(
-                            f"For most datasets, timestamp should not be the field to express the accurate time. "
+                            f"Column {column} is mapped to {candidates} but not in the metadata. "
                             f"Please check this dataset(uuid: {uuid}) if it is correct."
                         )
-                        output.append("timestamp")
-
-            # You want depth field, but it is not in data
-            elif column.casefold() == "DEPTH".casefold() and (
-                "DEPTH" not in meta or "depth" not in meta
-            ):
-                # Just ignore the field in the query, assume zero
-                pass
-            elif column.casefold() == STR_LATITUDE_UPPER_CASE.casefold() and (
-                STR_LATITUDE_UPPER_CASE not in meta
-                or STR_LATITUDE_LOWER_CASE not in meta
-            ):
-                match meta:
-                    case meta if STR_LATITUDE_LOWER_CASE in meta:
-                        output.append(STR_LATITUDE_LOWER_CASE)
-                    case meta if STR_LATITUDE_UPPER_CASE in meta:
-                        output.append(STR_LATITUDE_UPPER_CASE)
-                    case meta if "lat" in meta:
-                        output.append("lat")
-                    # some data-uplift datasets use this, e.g., "aggregated_seabird_nonqc.parquet"
-                    case meta if "decimalLatitude" in meta:
-                        output.append("decimalLatitude")
-            elif column.casefold() == STR_LONGITUDE_UPPER_CASE.casefold() and (
-                STR_LONGITUDE_UPPER_CASE not in meta
-                or STR_LONGITUDE_LOWER_CASE not in meta
-            ):
-                match meta:
-                    case meta if STR_LONGITUDE_LOWER_CASE in meta:
-                        output.append(STR_LONGITUDE_LOWER_CASE)
-                    case meta if STR_LONGITUDE_UPPER_CASE in meta:
-                        output.append(STR_LONGITUDE_UPPER_CASE)
-                    case meta if "lon" in meta:
-                        output.append("lon")
-                    # some data-uplift datasets use this, e.g., "aggregated_seabird_nonqc.parquet"
-                    case meta if "decimalLongitude" in meta:
-                        output.append("decimalLongitude")
             else:
                 output.append(column)
 
         return output
 
     def get_datasource(self, uuid: str, key: str) -> Optional[DataQuery.DataSource]:
-        mds: Dict[str, Descriptor] = self._cached_metadata.get(uuid)
+        mds: Dict[str, Descriptor] | None = self._cached_metadata.get(uuid)
         if mds is not None and key in mds:
             md = mds[key]
             if md is not None:
