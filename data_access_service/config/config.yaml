@@ -5,8 +5,8 @@ column_name_mapping:
     - time
     - JULD
     - eventDate
-    - timestamp
     - detection_timestamp
+    - timestamp
   depth:
   latitude:
     - LATITUDE
