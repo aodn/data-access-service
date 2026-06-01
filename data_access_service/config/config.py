@@ -109,11 +109,11 @@ class Config:
         return self.batch
 
     def get_csv_bucket_name(self):
-        return (
-            self.config["aws"]["s3"]["bucket_name"]["csv"]
-            if self.config is not None
-            else None
-        )
+        if self.config is None:
+            return None
+        # Make sure no accidental leading/trailing spaces
+        val = self.config["aws"]["s3"]["bucket_name"]["csv"]
+        return val.strip() if isinstance(val, str) else val
 
     def get_duckdb_maxmem(self):
         if self.config is None:
@@ -121,11 +121,11 @@ class Config:
         return self.config.get("duckdb", {}).get("maxmem", "800M")
 
     def get_wave_buoy_backup_bucket_name(self):
-        return (
-            self.config["aws"]["s3"]["bucket_name"]["wave_buoy_backup"]
-            if self.config is not None
-            else None
-        )
+        if self.config is None:
+            return None
+        # Make sure no accidental leading/trailing spaces
+        val = self.config["aws"]["s3"]["bucket_name"]["wave_buoy_backup"]
+        return val.strip() if isinstance(val, str) else val
 
     def get_job_queue_name(self):
         return (
