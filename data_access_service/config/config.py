@@ -111,8 +111,7 @@ class Config:
     def get_csv_bucket_name(self):
         if self.config is None:
             return None
-        # Make sure no accidental leading/trailing spaces
-        val = self.config["aws"]["s3"]["bucket_name"]["csv"]
+        val = self.config.get("aws", {}).get("s3", {}).get("bucket_name", {}).get("csv")
         return val.strip() if isinstance(val, str) else val
 
     def get_duckdb_maxmem(self):
@@ -123,23 +122,25 @@ class Config:
     def get_wave_buoy_backup_bucket_name(self):
         if self.config is None:
             return None
-        # Make sure no accidental leading/trailing spaces
-        val = self.config["aws"]["s3"]["bucket_name"]["wave_buoy_backup"]
+        val = (
+            self.config.get("aws", {})
+            .get("s3", {})
+            .get("bucket_name", {})
+            .get("wave_buoy_backup")
+        )
         return val.strip() if isinstance(val, str) else val
 
     def get_job_queue_name(self):
-        return (
-            self.config["aws"]["batch"]["job_queue"]
-            if self.config is not None
-            else None
-        )
+        if self.config is None:
+            return None
+        val = self.config.get("aws", {}).get("batch", {}).get("job_queue")
+        return val.strip() if isinstance(val, str) else val
 
     def get_job_definition_name(self):
-        return (
-            self.config["aws"]["batch"]["job_definition"]
-            if self.config is not None
-            else None
-        )
+        if self.config is None:
+            return None
+        val = self.config.get("aws", {}).get("batch", {}).get("job_definition")
+        return val.strip() if isinstance(val, str) else val
 
     @staticmethod
     def get_s3_temp_folder_name(master_job_id: str):
@@ -174,11 +175,10 @@ class Config:
         return result
 
     def get_sender_email(self):
-        return (
-            self.config["aws"]["ses"]["sender_email"]
-            if self.config is not None
-            else None
-        )
+        if self.config is None:
+            return None
+        val = self.config.get("aws", {}).get("ses", {}).get("sender_email")
+        return val.strip() if isinstance(val, str) else val
 
     def get_api_key(self):
         return os.getenv("API_KEY")
