@@ -74,7 +74,11 @@ class Config:
     @staticmethod
     def get_config(profile: EnvType = None):
         if profile is None:
-            profile = EnvType(os.getenv("PROFILE", EnvType.DEV))
+            if os.getenv("PYTEST_CURRENT_TEST") is not None:
+                # User do not specify profile but running pytest so it must be testing
+                profile = EnvType.TESTING
+            else:
+                profile = EnvType(os.getenv("PROFILE", EnvType.DEV))
 
         print(f"Env profile is : {profile}")
 
@@ -109,10 +113,11 @@ class Config:
         return self.batch
 
     def get_csv_bucket_name(self):
-        if self.config is None:
-            return None
-        val = self.config.get("aws", {}).get("s3", {}).get("bucket_name", {}).get("csv")
-        return val.strip() if isinstance(val, str) else val
+        return (
+            self.config["aws"]["s3"]["bucket_name"]["csv"]
+            if self.config is not None
+            else None
+        )
 
     def get_duckdb_maxmem(self):
         if self.config is None:
@@ -120,27 +125,25 @@ class Config:
         return self.config.get("duckdb", {}).get("maxmem", "800M")
 
     def get_wave_buoy_backup_bucket_name(self):
-        if self.config is None:
-            return None
-        val = (
-            self.config.get("aws", {})
-            .get("s3", {})
-            .get("bucket_name", {})
-            .get("wave_buoy_backup")
+        return (
+            self.config["aws"]["s3"]["bucket_name"]["wave_buoy_backup"]
+            if self.config is not None
+            else None
         )
-        return val.strip() if isinstance(val, str) else val
 
     def get_job_queue_name(self):
-        if self.config is None:
-            return None
-        val = self.config.get("aws", {}).get("batch", {}).get("job_queue")
-        return val.strip() if isinstance(val, str) else val
+        return (
+            self.config["aws"]["batch"]["job_queue"]
+            if self.config is not None
+            else None
+        )
 
     def get_job_definition_name(self):
-        if self.config is None:
-            return None
-        val = self.config.get("aws", {}).get("batch", {}).get("job_definition")
-        return val.strip() if isinstance(val, str) else val
+        return (
+            self.config["aws"]["batch"]["job_definition"]
+            if self.config is not None
+            else None
+        )
 
     @staticmethod
     def get_s3_temp_folder_name(master_job_id: str):
@@ -175,10 +178,11 @@ class Config:
         return result
 
     def get_sender_email(self):
-        if self.config is None:
-            return None
-        val = self.config.get("aws", {}).get("ses", {}).get("sender_email")
-        return val.strip() if isinstance(val, str) else val
+        return (
+            self.config["aws"]["ses"]["sender_email"]
+            if self.config is not None
+            else None
+        )
 
     def get_api_key(self):
         return os.getenv("API_KEY")
