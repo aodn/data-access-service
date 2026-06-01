@@ -89,10 +89,7 @@ class BaseAPI:
         key: str,
         date_start: pd.Timestamp = None,
         date_end: pd.Timestamp = None,
-        lat_min=None,
-        lat_max=None,
-        lon_min=None,
-        lon_max=None,
+        multi_polygon=None,
         columns: list[str] = None,
         output_format: str = "netcdf",
     ) -> Optional[dict]:
@@ -924,23 +921,18 @@ class API(BaseAPI):
         key: str,
         date_start: pd.Timestamp = None,
         date_end: pd.Timestamp = None,
-        lat_min=None,
-        lat_max=None,
-        lon_min=None,
-        lon_max=None,
+        multi_polygon=None,
         columns: list[str] = None,
         output_format: str = "netcdf",
     ) -> Optional[dict]:
         """Estimate the download size of a dataset selection without downloading the data.
 
-        For zarr we read ``xarray.Dataset.nbytes`` on the lazily-sliced dataset (no chunks are computed), then scale by the per-format compression ratio to estimate the final download size.
-
         :param uuid: Dataset UUID
         :param key: Dataset key (a UUID may map to several datasets)
         :param date_start: Filter start (UTC); None means open-ended
         :param date_end: Filter end (UTC); None means open-ended
-        :param lat_min/lat_max: Latitude bbox, assume [-90, 90]
-        :param lon_min/lon_max: Longitude bbox, assume [-180, 180]
+        :param multi_polygon: GeoJSON MultiPolygon (str or object); None means
+            no spatial filter (whole dataset)
         :param columns: If given, only these data variables count toward the size
         :param output_format: One of SUPPORTED_OUTPUT_FORMATS (netcdf/geotiff/csv)
         :return: A dict with the estimate, or None if the dataset is not found
@@ -956,14 +948,30 @@ class API(BaseAPI):
         if ds is None:
             return None
 
-        # Longitude: first clamp to [-180, 180], then map to the dataset's own
-        # convention (some satellite data uses [0, 360]). Same as get_dataset.
-        lon_min = self.normalize_to_0_360_if_needed(
-            uuid, key, BaseAPI.normalize_lon(lon_min)
-        )
-        lon_max = self.normalize_to_0_360_if_needed(
-            uuid, key, BaseAPI.normalize_lon(lon_max)
-        )
+        # Resolve the spatial filter into one or more bboxes. A multi_polygon is
+        # reused via the same MultiPolygonHelper the batch download uses
+        if multi_polygon is not None:
+            from data_access_service.utils.multi_polygon_helper import (
+                MultiPolygonHelper,
+            )
+
+            bboxes = MultiPolygonHelper(multi_polygon=multi_polygon).bboxes
+            spatial_slices = [
+                (
+                    b.min_lat,
+                    b.max_lat,
+                    self.normalize_to_0_360_if_needed(
+                        uuid, key, BaseAPI.normalize_lon(b.min_lon)
+                    ),
+                    self.normalize_to_0_360_if_needed(
+                        uuid, key, BaseAPI.normalize_lon(b.max_lon)
+                    ),
+                )
+                for b in bboxes
+            ]
+        else:
+            # No spatial filter: a single open slice (whole dataset).
+            spatial_slices = [(None, None, None, None)]
 
         if isinstance(ds, ZarrDataSource):
             return self._estimate_zarr_size(
@@ -972,10 +980,7 @@ class API(BaseAPI):
                 key,
                 date_start,
                 date_end,
-                lat_min,
-                lat_max,
-                lon_min,
-                lon_max,
+                spatial_slices,
                 columns,
                 output_format,
             )
@@ -992,14 +997,10 @@ class API(BaseAPI):
         key: str,
         date_start: pd.Timestamp | None,
         date_end: pd.Timestamp | None,
-        lat_min,
-        lat_max,
-        lon_min,
-        lon_max,
+        spatial_slices: list[tuple],
         columns: list[str] | None,
         output_format: str,
     ) -> dict:
-        """Zarr branch of estimate_dataset_size."""
         if date_start is not None and date_end is not None:
             # Lazy import to avoid circular dependency
             from data_access_service.batch.subsetting_helper import (
@@ -1014,65 +1015,87 @@ class API(BaseAPI):
                 # batch download emails "no data", the estimate reports zero size.
                 return self._empty_estimate(uuid, key, output_format)
 
-        # get_data returns a lazily-sliced xarray.Dataset; chunks are NOT loaded.
-        dataset: xarray.Dataset = ds.get_data(
-            self._timestamp_to_zarr_slice_str(date_start),
-            self._timestamp_to_zarr_slice_str(date_end),
-            lat_min,
-            lat_max,
-            lon_min,
-            lon_max,
-        )
+        date_start_str = self._timestamp_to_zarr_slice_str(date_start)
+        date_end_str = self._timestamp_to_zarr_slice_str(date_end)
 
         notes: list[str] = []
-
-        # Restrict to requested data variables, if any (reduces output size).
-        if columns:
-            mapped = self.map_column_names(uuid, key, columns) or []
-            present = [c for c in mapped if c in dataset.data_vars]
-            missing = [c for c in columns if c not in (present or [])]
-            if present:
-                dataset = dataset[present]
-            if missing:
-                notes.append(f"columns not found and ignored: {missing}")
-
-        # use .nbytes on the lazily-sliced dataset to get the total size in
-        # bytes of the selected data
-        uncompressed_bytes = int(dataset.nbytes)
-
-        # Row count: use the size of the time dimension when present, else the
-        # product of all dimensions as a fallback
-        time_name = next(
-            (d for d in dataset.sizes if str(d).upper() == STR_TIME_UPPER_CASE),
-            None,
-        )
-        if time_name is not None:
-            row_count = int(dataset.sizes[time_name])
-        else:
-            row_count = 1
-            for size in dataset.sizes.values():
-                row_count *= int(size)
-
-        # Output size depends on format - geotiff is NOT a flat multiplier on
-        # nbytes so it has its own dimension-based estimate
-        if output_format == "geotiff":
-            output_bytes = self._estimate_geotiff_output_bytes(
-                dataset, uuid, key, notes
+        if len(spatial_slices) > 1:
+            notes.append(
+                f"summed {len(spatial_slices)} polygon bboxes "
+                "(overlapping regions counted once per box -> upper bound)"
             )
-        else:
+
+        total_uncompressed = 0
+        total_output = 0
+        cell_row_count = 0  # accumulated only for the no-TIME (gridded cells) case
+        time_row_count: int | None = None
+        columns_note_done = False
+
+        for la_min, la_max, lo_min, lo_max in spatial_slices:
+            # get_data returns a lazily-sliced xarray.Dataset; chunks are NOT
+            # loaded. We measure this one bbox and discard it before the next,
+            # so no union grid is ever materialised.
+            dataset: xarray.Dataset = ds.get_data(
+                date_start_str, date_end_str, la_min, la_max, lo_min, lo_max
+            )
+
+            # Restrict to requested data variables, if any (reduces output size).
+            if columns:
+                mapped = self.map_column_names(uuid, key, columns) or []
+                present = [c for c in mapped if c in dataset.data_vars]
+                missing = [c for c in columns if c not in present]
+                if present:
+                    dataset = dataset[present]
+                if missing and not columns_note_done:
+                    notes.append(f"columns not found and ignored: {missing}")
+            columns_note_done = True
+
+            # .nbytes / .sizes are metadata only (no compute); sum across bboxes.
+            total_uncompressed += int(dataset.nbytes)
+
+            # Row count: the TIME dim when present, else the product of all dims.
+            time_name = next(
+                (d for d in dataset.sizes if str(d).upper() == STR_TIME_UPPER_CASE),
+                None,
+            )
+            if time_name is not None:
+                # TIME is not spatially filtered, so it is identical for every
+                # bbox -> record it once instead of summing.
+                time_row_count = int(dataset.sizes[time_name])
+            else:
+                prod = 1
+                for size in dataset.sizes.values():
+                    prod *= int(size)
+                cell_row_count += prod
+
+            # Output size depends on format - geotiff is NOT a flat multiplier on
+            # nbytes so it has its own dimension-based estimate.
+            if output_format == "geotiff":
+                total_output += self._estimate_geotiff_output_bytes(
+                    dataset, uuid, key, notes
+                )
+            else:
+                ratio = OUTPUT_FORMAT_COMPRESSION_RATIO[output_format]
+                total_output += int(int(dataset.nbytes) * ratio)
+
+        row_count = time_row_count if time_row_count is not None else cell_row_count
+
+        if output_format != "geotiff":
             ratio = OUTPUT_FORMAT_COMPRESSION_RATIO[output_format]
-            output_bytes = int(uncompressed_bytes * ratio)
             notes.append(f"compression ratio assumed: {ratio} for {output_format}")
+
+        # Per-bbox calls may append duplicate notes (e.g. geotiff); dedupe in order.
+        deduped_notes = list(dict.fromkeys(notes))
 
         return {
             "uuid": uuid,
             "key": key,
             "format": output_format,
             "estimated_row_count": row_count,
-            "estimated_uncompressed_bytes": uncompressed_bytes,
-            "estimated_output_bytes": output_bytes,
+            "estimated_uncompressed_bytes": total_uncompressed,
+            "estimated_output_bytes": total_output,
             "is_estimate": True,
-            "notes": "; ".join(notes),
+            "notes": "; ".join(deduped_notes),
         }
 
     @staticmethod

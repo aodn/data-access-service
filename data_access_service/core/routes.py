@@ -129,15 +129,10 @@ async def estimate_size(
     start_date: Optional[str] = Query(default=NON_SPECIFIED_DATE),
     end_date: Optional[str] = Query(default=NON_SPECIFIED_DATE),
     columns: Optional[List[str]] = Query(default=None),
-    lat_min: Optional[float] = Query(default=None),
-    lat_max: Optional[float] = Query(default=None),
-    lon_min: Optional[float] = Query(default=None),
-    lon_max: Optional[float] = Query(default=None),
+    multi_polygon: Optional[str] = Query(default=None),
     f: Optional[str] = Query(default="netcdf"),
 ):
     """Estimate the download size of a dataset selection
-
-    Dates use the same lenient contract as the async batch download (no nanosecond-precision requirement) so the estimate matches the real download request.
 
     Currently only zarr datasets are supported; parquet returns 501.
     """
@@ -170,15 +165,13 @@ async def estimate_size(
             key,
             date_start=start_date,
             date_end=end_date,
-            lat_min=lat_min,
-            lat_max=lat_max,
-            lon_min=lon_min,
-            lon_max=lon_max,
+            multi_polygon=multi_polygon,
             columns=columns,
             output_format=f,
         )
-    except ValueError as e:
-        # Unsupported output format -> 400
+    except (ValueError, TypeError) as e:
+        # Unsupported output format, invalid multi_polygon GeoJSON, or
+        # out-of-range lon -> 400 (client input error)
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except NotImplementedError as e:
         # Parquet path not built yet -> 501

@@ -184,6 +184,92 @@ def test_columns_subset_reduces_size():
     assert result["estimated_uncompressed_bytes"] == dataset[["TEMP"]].nbytes
 
 
+def _single_polygon_geojson(lon_min, lat_min, lon_max, lat_max) -> str:
+    """A GeoJSON MultiPolygon string holding one rectangular polygon."""
+    ring = [
+        [lon_min, lat_min],
+        [lon_max, lat_min],
+        [lon_max, lat_max],
+        [lon_min, lat_max],
+        [lon_min, lat_min],
+    ]
+    return (
+        '{"type": "MultiPolygon", "coordinates": [['
+        + str(ring).replace("'", "")
+        + "]]}"
+    )
+
+
+def test_multi_polygon_single_resolves_to_bbox():
+    # A multi_polygon with one rectangle is resolved to its bbox via the same
+    # MultiPolygonHelper the batch path uses, then sliced.
+    dataset = _make_dataset()
+    api, mock_ds = _api_with_zarr(dataset)
+    # normalize_to_0_360_if_needed needs metadata; bypass it (identity).
+    api.normalize_to_0_360_if_needed = MagicMock(side_effect=lambda u, k, lon: lon)
+
+    polygon = _single_polygon_geojson(lon_min=10, lat_min=20, lon_max=30, lat_max=40)
+    result = api.estimate_dataset_size(UUID, KEY, multi_polygon=polygon)
+
+    assert result["estimated_uncompressed_bytes"] == dataset.nbytes
+    mock_ds.get_data.assert_called_once()
+    # get_data(date_start, date_end, lat_min, lat_max, lon_min, lon_max)
+    _, _, la_min, la_max, lo_min, lo_max = mock_ds.get_data.call_args.args
+    assert (la_min, la_max, lo_min, lo_max) == (20, 40, 10, 30)
+
+
+def test_no_spatial_filter_uses_open_slice():
+    # When no multi_polygon is given, get_data is called once with an open
+    # (None) lat/lon slice - the whole dataset.
+    dataset = _make_dataset()
+    api, mock_ds = _api_with_zarr(dataset)
+
+    result = api.estimate_dataset_size(UUID, KEY)
+
+    assert result["estimated_uncompressed_bytes"] == dataset.nbytes
+    mock_ds.get_data.assert_called_once()
+    _, _, la_min, la_max, lo_min, lo_max = mock_ds.get_data.call_args.args
+    assert (la_min, la_max, lo_min, lo_max) == (None, None, None, None)
+
+
+def test_multi_polygon_multiple_bboxes_summed():
+    # Two polygons -> get_data is called per bbox and the per-bbox .nbytes are
+    # SUMMED (no xarray.merge, so no union grid is allocated -> flat memory).
+    dataset = _make_dataset()
+    api, mock_ds = _api_with_zarr(dataset)
+    api.normalize_to_0_360_if_needed = MagicMock(side_effect=lambda u, k, lon: lon)
+
+    ring_a = [[10, 20], [30, 20], [30, 40], [10, 40], [10, 20]]
+    ring_b = [[50, 60], [70, 60], [70, 80], [50, 80], [50, 60]]
+    polygon = (
+        '{"type": "MultiPolygon", "coordinates": ['
+        + "["
+        + str(ring_a).replace("'", "")
+        + "],"
+        + "["
+        + str(ring_b).replace("'", "")
+        + "]]}"
+    )
+
+    result = api.estimate_dataset_size(UUID, KEY, multi_polygon=polygon)
+
+    assert mock_ds.get_data.call_count == 2
+    assert "summed 2 polygon bboxes" in result["notes"]
+    # each bbox returns the same mock dataset -> bytes are summed (2x)
+    assert result["estimated_uncompressed_bytes"] == 2 * dataset.nbytes
+    # TIME is not spatially filtered, so the row count is NOT doubled
+    assert result["estimated_row_count"] == dataset.sizes["TIME"]
+
+
+def test_invalid_multi_polygon_raises():
+    # A valid-JSON but non-MultiPolygon geometry -> TypeError from the helper,
+    # which the route maps to a 400.
+    api, _ = _api_with_zarr(_make_dataset())
+    bad = '{"type": "Point", "coordinates": [10, 20]}'
+    with pytest.raises(TypeError):
+        api.estimate_dataset_size(UUID, KEY, multi_polygon=bad)
+
+
 def test_parquet_path_not_implemented_yet():
     from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
 
