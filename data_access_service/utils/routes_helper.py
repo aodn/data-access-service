@@ -45,9 +45,7 @@ from data_access_service.core.error import ErrorResponse
 from data_access_service.models.value_count import ValueCount
 from data_access_service.utils.date_time_utils import (
     DATE_FORMAT,
-    parse_date,
 )
-from data_access_service.models.subset_request import NON_SPECIFIED_DATE
 
 logger = init_log(Config.get_config())
 memory_lock = threading.Lock()
@@ -206,45 +204,6 @@ def verify_datatime_param(name: str, req_date: str) -> pd.Timestamp:
         )
 
     return _date
-
-
-def parse_subset_date_param(name: str, req_date: str | None) -> pd.Timestamp | None:
-    """Parse a date the same lenient way the async batch download does
-
-    The batch path uses ``parse_date`` and the ``non-specified`` sentinel for an
-    open bound (see batch/subsetting.py). It does NOT require nanosecond
-    precision (unlike ``verify_datatime_param``, which the synchronous data
-    endpoint uses). Mirroring it here keeps the size estimate consistent with
-    the real download request.
-
-    Accepts a bare date (``2008-08-05``), a full datetime, or the
-    ``non-specified`` sentinel. Naive values are assumed UTC. Returns None for
-    an open bound so the estimate covers the dataset's whole range, matching the
-    batch's 1970-01-01 / today defaults.
-
-    :raises HTTPException: 400 if the string cannot be parsed
-    """
-    if req_date is None or req_date == NON_SPECIFIED_DATE:
-        return None
-    try:
-        # parse_date localises naive timestamps to UTC. Handle already-aware
-        # input (e.g. a trailing 'Z') gracefully too.
-        ts = pd.Timestamp(req_date)
-        if ts.tz is None:
-            return parse_date(req_date)
-        return ts.tz_convert(pytz.UTC)
-    except (ValueError, TypeError):
-        error_message = ErrorResponse(
-            status_code=HTTPStatus.BAD_REQUEST,
-            details=(
-                f"Incorrect date format [{name}]. Expected ISO-8601 "
-                f"(e.g. 2008-08-05 or 2008-08-05T00:00:00Z) or 'non-specified'"
-            ),
-            parameters=f"{name}={req_date}",
-        )
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST, detail=error_message.details
-        )
 
 
 def _verify_depth_param(

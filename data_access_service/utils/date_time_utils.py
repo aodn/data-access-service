@@ -26,6 +26,7 @@ from data_access_service.core.constants import (
     MAX_PARQUET_SPLIT,
     STR_TIME_UPPER_CASE,
 )
+from data_access_service.models.subset_request import NON_SPECIFIED_DATE
 
 YEAR_MONTH_DAY = "%Y-%m-%d"
 YEAR_MONTH_DAY_TIME_NANO = "%Y-%m-%d %H:%M:%S.fffffffff"
@@ -507,6 +508,18 @@ def split_yearmonths_into_dict(yearmonths, chunk_size: int):
     for i in range(0, len(yearmonths), chunk_size):
         result[i // chunk_size] = yearmonths[i : i + chunk_size]
     return result
+
+
+def resolve_non_specified_dates(start_date: str, end_date: str) -> Tuple[str, str]:
+    """
+    Resolve non-specified start and end dates to default values.
+    defaults: 1970-01-01 for an open start and today for an open end.
+    """
+    if start_date == NON_SPECIFIED_DATE:
+        start_date = "1970-01-01"
+    if end_date == NON_SPECIFIED_DATE:
+        end_date = pd.Timestamp.today().strftime("%Y-%m-%d")
+    return start_date, end_date
 
 
 def supply_day_with_nano_precision(

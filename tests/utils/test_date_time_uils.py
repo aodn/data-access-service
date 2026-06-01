@@ -23,7 +23,9 @@ from data_access_service.utils.date_time_utils import (
     split_date_range_binary,
     check_rows_with_date_range,
     supply_day_with_nano_precision,
+    resolve_non_specified_dates,
 )
+from data_access_service.models.subset_request import NON_SPECIFIED_DATE
 
 
 class TestDateTimeUtils(unittest.TestCase):
@@ -1273,3 +1275,21 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(dt1.microsecond, dt2.microsecond)
         self.assertEqual(dt1.nanosecond, dt2.nanosecond)
         self.assertEqual(dt1.tzinfo, dt2.tzinfo)
+
+    def test_resolve_non_specified_dates_both_open(self):
+        # Both bounds open -> 1970-01-01 / today, matching batch init().
+        start, end = resolve_non_specified_dates(NON_SPECIFIED_DATE, NON_SPECIFIED_DATE)
+        self.assertEqual(start, "1970-01-01")
+        self.assertEqual(end, pd.Timestamp.today().strftime("%Y-%m-%d"))
+
+    def test_resolve_non_specified_dates_passthrough(self):
+        # Concrete values are returned unchanged.
+        start, end = resolve_non_specified_dates("2008-08-05", "2008-08-10")
+        self.assertEqual(start, "2008-08-05")
+        self.assertEqual(end, "2008-08-10")
+
+    def test_resolve_non_specified_dates_mixed(self):
+        # Only the open bound is replaced; the concrete one is left alone.
+        start, end = resolve_non_specified_dates("2008-08-05", NON_SPECIFIED_DATE)
+        self.assertEqual(start, "2008-08-05")
+        self.assertEqual(end, pd.Timestamp.today().strftime("%Y-%m-%d"))

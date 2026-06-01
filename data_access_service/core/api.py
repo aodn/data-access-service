@@ -1000,6 +1000,20 @@ class API(BaseAPI):
         output_format: str,
     ) -> dict:
         """Zarr branch of estimate_dataset_size."""
+        if date_start is not None and date_end is not None:
+            # Lazy import to avoid circular dependency
+            from data_access_service.batch.subsetting_helper import (
+                trim_date_range_for_keys,
+            )
+
+            date_start, date_end = trim_date_range_for_keys(
+                self, uuid, [key], date_start, date_end
+            )
+            if date_start is None or date_end is None:
+                # Requested range is entirely outside the dataset's extent: the
+                # batch download emails "no data", the estimate reports zero size.
+                return self._empty_estimate(uuid, key, output_format)
+
         # get_data returns a lazily-sliced xarray.Dataset; chunks are NOT loaded.
         dataset: xarray.Dataset = ds.get_data(
             self._timestamp_to_zarr_slice_str(date_start),
@@ -1027,7 +1041,7 @@ class API(BaseAPI):
         uncompressed_bytes = int(dataset.nbytes)
 
         # Row count: use the size of the time dimension when present, else the
-        # product of all dimensions as a fallback (best-effort for gridded data).
+        # product of all dimensions as a fallback
         time_name = next(
             (d for d in dataset.sizes if str(d).upper() == STR_TIME_UPPER_CASE),
             None,
@@ -1059,6 +1073,21 @@ class API(BaseAPI):
             "estimated_output_bytes": output_bytes,
             "is_estimate": True,
             "notes": "; ".join(notes),
+        }
+
+    @staticmethod
+    def _empty_estimate(uuid: str, key: str, output_format: str) -> dict:
+        """Zero-size estimate, returned when the requested range is outside the
+        dataset's temporal extent (the batch download produces no data here)."""
+        return {
+            "uuid": uuid,
+            "key": key,
+            "format": output_format,
+            "estimated_row_count": 0,
+            "estimated_uncompressed_bytes": 0,
+            "estimated_output_bytes": 0,
+            "is_estimate": True,
+            "notes": "requested date range is outside the dataset's temporal extent",
         }
 
     def _estimate_geotiff_output_bytes(

@@ -24,13 +24,14 @@ from data_access_service.utils.date_time_utils import (
     ensure_timezone,
     MIN_DATE,
     DATE_FORMAT,
+    resolve_non_specified_dates,
+    supply_day_with_nano_precision,
 )
 from data_access_service.models.subset_request import NON_SPECIFIED_DATE
 from data_access_service.utils.routes_helper import (
     HealthCheckResponse,
     get_api_instance,
     verify_datatime_param,
-    parse_subset_date_param,
     fetch_data,
     async_response_json,
     generate_feature_collection,
@@ -150,8 +151,18 @@ async def estimate_size(
     logger.info(
         "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
     )
-    start_date = parse_subset_date_param("start_date", start_date)
-    end_date = parse_subset_date_param("end_date", end_date)
+
+    start_str, end_str = resolve_non_specified_dates(start_date, end_date)
+    try:
+        start_date, end_date = supply_day_with_nano_precision(start_str, end_str)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=(
+                "Incorrect date format. Expected ISO-8601 (e.g. 2008-08-05), "
+                "month format MM-YYYY, or 'non-specified'."
+            ),
+        )
 
     try:
         result = api_instance.estimate_dataset_size(
