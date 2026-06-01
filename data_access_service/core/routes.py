@@ -25,10 +25,12 @@ from data_access_service.utils.date_time_utils import (
     MIN_DATE,
     DATE_FORMAT,
 )
+from data_access_service.models.subset_request import NON_SPECIFIED_DATE
 from data_access_service.utils.routes_helper import (
     HealthCheckResponse,
     get_api_instance,
     verify_datatime_param,
+    parse_subset_date_param,
     fetch_data,
     async_response_json,
     generate_feature_collection,
@@ -116,6 +118,68 @@ async def has_data(
     end_date = verify_datatime_param("end_date", end_date)
     result = str(api_instance.has_data(uuid, key, start_date, end_date)).lower()
     return Response(result, media_type="application/json")
+
+
+@router.get("/data/{uuid}/{key}/estimate_size", dependencies=[Depends(api_key_auth)])
+async def estimate_size(
+    uuid: str,
+    key: str,
+    request: Request,
+    start_date: Optional[str] = Query(default=NON_SPECIFIED_DATE),
+    end_date: Optional[str] = Query(default=NON_SPECIFIED_DATE),
+    columns: Optional[List[str]] = Query(default=None),
+    lat_min: Optional[float] = Query(default=None),
+    lat_max: Optional[float] = Query(default=None),
+    lon_min: Optional[float] = Query(default=None),
+    lon_max: Optional[float] = Query(default=None),
+    f: Optional[str] = Query(default="netcdf"),
+):
+    """Estimate the download size of a dataset selection
+
+    Dates use the same lenient contract as the async batch download (no nanosecond-precision requirement) so the estimate matches the real download request.
+
+    Currently only zarr datasets are supported; parquet returns 501.
+    """
+    api_instance = get_api_instance(request)
+    if not api_instance.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
+
+    logger.info(
+        "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
+    )
+    start_date = parse_subset_date_param("start_date", start_date)
+    end_date = parse_subset_date_param("end_date", end_date)
+
+    try:
+        result = api_instance.estimate_dataset_size(
+            uuid,
+            key,
+            date_start=start_date,
+            date_end=end_date,
+            lat_min=lat_min,
+            lat_max=lat_max,
+            lon_min=lon_min,
+            lon_max=lon_max,
+            columns=columns,
+            output_format=f,
+        )
+    except ValueError as e:
+        # Unsupported output format -> 400
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except NotImplementedError as e:
+        # Parquet path not built yet -> 501
+        raise HTTPException(status_code=HTTPStatus.NOT_IMPLEMENTED, detail=str(e))
+
+    if result is None:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"Dataset not found for uuid={uuid}, key={key}",
+        )
+
+    return Response(content=json.dumps(result), media_type="application/json")
 
 
 @router.get("/data/{uuid}/{key}/temporal_extent", dependencies=[Depends(api_key_auth)])
