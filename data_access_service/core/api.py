@@ -91,7 +91,7 @@ class BaseAPI:
         date_end: pd.Timestamp = None,
         multi_polygon=None,
         columns: list[str] = None,
-        output_format: str = "netcdf",
+        output_format: str = None,
     ) -> Optional[dict]:
         pass
 
@@ -905,9 +905,12 @@ class API(BaseAPI):
 
     @staticmethod
     def _timestamp_to_zarr_slice_str(ts: pd.Timestamp | None) -> str | None:
-        """Convert a pandas Timestamp into the plain date string ZarrDataSource expects.
+        """
+        Convert a pandas Timestamp into the plain date string ZarrDataSource expects.
 
-        ZarrDataSource.get_data slices the time coordinate with a string and cannot compare timezone-aware values, so we drop the tz (the values are already UTC by convention). Returns None unchanged so the slice stays open.
+        ZarrDataSource.get_data slices the time coordinate with a string and cannot compare timezone-aware
+        values, so we drop the tz (the values are already UTC by convention). Returns None unchanged
+        so the slice stays open.
         """
         if ts is None:
             return None
@@ -925,7 +928,8 @@ class API(BaseAPI):
         columns: list[str] = None,
         output_format: str = None,
     ) -> Optional[dict]:
-        """Estimate the total download size across one or more keys of a dataset.
+        """
+        Estimate the total download size across one or more keys of a dataset.
 
         :return: aggregated estimate dict, or None if no requested key exists
         :raises ValueError: if output_format is none or not supported
@@ -990,12 +994,8 @@ class API(BaseAPI):
         columns: list[str] = None,
         output_format: str = "netcdf",
     ) -> Optional[dict]:
-        """Estimate the download size of ONE key without downloading the data.
-
-        Private per-key worker for :meth:`estimate_datasets_size` (which owns
-        ``output_format`` validation and ``*`` expansion). Callers always go
-        through the multi-key entry point, matching the batch download which
-        only accepts a keys array.
+        """
+        Estimate the download size of ONE key without downloading the data.
 
         :param uuid: Dataset UUID
         :param key: Dataset key (a UUID may map to several datasets)
@@ -1111,6 +1111,7 @@ class API(BaseAPI):
             )
 
             # Restrict to requested data variables, if any (reduces output size).
+            # Columns subsetting not implemented yet but we want to account for it in the estimate
             if columns:
                 mapped = self.map_column_names(uuid, key, columns) or []
                 present = [c for c in mapped if c in dataset.data_vars]
@@ -1175,7 +1176,8 @@ class API(BaseAPI):
         key: str,
         notes: list[str],
     ) -> int:
-        """Estimate GeoTIFF download size for a zarr selection
+        """
+        Estimate GeoTIFF download size for a zarr selection
 
         GeoTIFF is not a flat ratio on nbytes. The real export writes one .tif per (eligible gridded variable x time step), each raster sized lat_size x lon_size, then bundles them into a ZIP. Only numeric variables that have BOTH the lat and
         lon dimensions are exported; everything else is dropped.
@@ -1193,8 +1195,7 @@ class API(BaseAPI):
         lon_name = lon_mapped[0] if lon_mapped else None
         time_name = time_mapped[0] if time_mapped else None
 
-        # Most datasets grid on the resolved lat/lon dim names;
-        # curvilinear grids index by integer I/J instead. The real
+        # curvilinear grids index by integer I/J instead of lon/lat. The real
         # exporter remaps I/J -> lat/lon before writing (subset_zarr.py).
         # But a size estimate only needs the cell COUNT so we don't do
         # conversion here.

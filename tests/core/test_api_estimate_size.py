@@ -343,7 +343,9 @@ def test_multi_key_sums_and_keeps_breakdown():
         ]
     )
 
-    result = api.estimate_datasets_size(UUID, keys=["a.zarr", "b.zarr"])
+    result = api.estimate_datasets_size(
+        UUID, keys=["a.zarr", "b.zarr"], output_format="netcdf"
+    )
 
     assert result["keys"] == ["a.zarr", "b.zarr"]
     assert result["estimated_uncompressed_bytes"] == 300
@@ -366,7 +368,7 @@ def test_star_expands_to_all_keys():
         ]
     )
 
-    result = api.estimate_datasets_size(UUID, keys=["*"])
+    result = api.estimate_datasets_size(UUID, keys=["*"], output_format="netcdf")
 
     api.get_mapped_meta_data.assert_called_once_with(UUID)
     assert api._estimate_single_key_size.call_count == 2
@@ -381,7 +383,7 @@ def test_none_keys_means_all_keys():
         return_value=_single_result("only.zarr", 30, 12)
     )
 
-    result = api.estimate_datasets_size(UUID, keys=None)
+    result = api.estimate_datasets_size(UUID, keys=None, output_format="netcdf")
 
     api.get_mapped_meta_data.assert_called_once_with(UUID)
     assert result["keys"] == ["only.zarr"]
@@ -393,7 +395,9 @@ def test_missing_key_skipped_and_noted():
         side_effect=[_single_result("a.zarr", 100, 40), None]  # b.zarr not found
     )
 
-    result = api.estimate_datasets_size(UUID, keys=["a.zarr", "b.zarr"])
+    result = api.estimate_datasets_size(
+        UUID, keys=["a.zarr", "b.zarr"], output_format="netcdf"
+    )
 
     assert result["keys"] == ["a.zarr"]
     assert result["estimated_uncompressed_bytes"] == 100
@@ -403,4 +407,7 @@ def test_missing_key_skipped_and_noted():
 def test_all_keys_missing_returns_none():
     api = API()
     api._estimate_single_key_size = MagicMock(return_value=None)
-    assert api.estimate_datasets_size(UUID, keys=["nope.zarr"]) is None
+    assert (
+        api.estimate_datasets_size(UUID, keys=["nope.zarr"], output_format="netcdf")
+        is None
+    )
