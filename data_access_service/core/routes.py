@@ -29,7 +29,7 @@ from data_access_service.utils.date_time_utils import (
     resolve_non_specified_dates,
     supply_day_with_nano_precision,
 )
-from data_access_service.models.subset_request import NON_SPECIFIED_DATE
+from data_access_service.models.estimate_size_request import EstimateSizeRequest
 from data_access_service.utils.routes_helper import (
     HealthCheckResponse,
     get_api_instance,
@@ -123,17 +123,8 @@ async def has_data(
     return Response(result, media_type="application/json")
 
 
-@router.get("/data/{uuid}/{key}/estimate_size", dependencies=[Depends(api_key_auth)])
-async def estimate_size(
-    uuid: str,
-    key: str,
-    request: Request,
-    start_date: Optional[str] = Query(default=NON_SPECIFIED_DATE),
-    end_date: Optional[str] = Query(default=NON_SPECIFIED_DATE),
-    columns: Optional[List[str]] = Query(default=None),
-    multi_polygon: Optional[str] = Query(default=None),
-    f: Optional[str] = Query(default="netcdf"),
-):
+@router.post("/data/{uuid}/estimate_size", dependencies=[Depends(api_key_auth)])
+async def estimate_size_multi(uuid: str, request: Request, body: EstimateSizeRequest):
     api_instance = get_api_instance(request)
     if not api_instance.get_api_status():
         raise HTTPException(
@@ -141,12 +132,11 @@ async def estimate_size(
             detail="API is not ready. Metadata initialization is still in progress.",
         )
 
-    logger.info(
-        "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
-    )
-
-    start_str, end_str = resolve_non_specified_dates(start_date, end_date)
     try:
+        # Resolve non-specified dates
+        start_str, end_str = resolve_non_specified_dates(body.start_date, body.end_date)
+
+        # Supply day and nano precision to the resolved date strings, and validate the format
         start_date, end_date = supply_day_with_nano_precision(start_str, end_str)
     except (ValueError, TypeError):
         raise HTTPException(
@@ -157,50 +147,51 @@ async def estimate_size(
             ),
         )
 
+    # MultiPolygonHelper takes a GeoJSON string (or geojson object)
+    multi_polygon = body.multi_polygon
+    if isinstance(multi_polygon, dict):
+        multi_polygon = json.dumps(multi_polygon)
+
     logger.debug(
-        "estimate_size start: uuid=%s key=%s start=%s end=%s f=%s "
+        "estimate_size_multi start: uuid=%s keys=%s start=%s end=%s f=%s "
         "has_polygon=%s polygon_len=%s columns=%s",
         uuid,
-        key,
+        body.keys,
         start_date,
         end_date,
-        f,
+        body.output_format,
         multi_polygon is not None,
         len(multi_polygon) if multi_polygon else 0,
-        columns,
+        body.columns,
     )
     t0 = (
         time.perf_counter()
     )  # for performance tracking of this endpoint (debug purpose)
 
     try:
-        # Offload the blocking, CPU/metadata work to a threadpool thread so the
-        # async event loop stays responsive (health checks, other requests).
+        # Offload the blocking, CPU/metadata work to a threadpool thread
         result = await run_in_threadpool(
-            api_instance.estimate_dataset_size,
+            api_instance.estimate_datasets_size,
             uuid,
-            key,
+            keys=body.keys,
             date_start=start_date,
             date_end=end_date,
             multi_polygon=multi_polygon,
-            columns=columns,
-            output_format=f,
+            columns=body.columns,
+            output_format=body.output_format,
         )
     except (ValueError, TypeError) as e:
-        # Unsupported output format, invalid multi_polygon GeoJSON, or
-        # out-of-range lon -> 400 (client input error)
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except NotImplementedError as e:
-        # Parquet path not built yet -> 501
         raise HTTPException(status_code=HTTPStatus.NOT_IMPLEMENTED, detail=str(e))
 
     elapsed = time.perf_counter() - t0
-    logger.debug("estimate_size done in %.3fs: result=%s", elapsed, result)
+    logger.info("estimate_size_multi done in %.3fs", elapsed)
 
     if result is None:
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
-            detail=f"Dataset not found for uuid={uuid}, key={key}",
+            detail=f"No matching keys found for uuid={uuid}, keys={body.keys}",
         )
 
     return Response(content=json.dumps(result), media_type="application/json")

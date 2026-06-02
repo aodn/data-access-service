@@ -83,10 +83,10 @@ class BaseAPI:
     ) -> Optional[ddf.DataFrame]:
         pass
 
-    def estimate_dataset_size(
+    def estimate_datasets_size(
         self,
         uuid: str,
-        key: str,
+        keys: list[str] = None,
         date_start: pd.Timestamp = None,
         date_end: pd.Timestamp = None,
         multi_polygon=None,
@@ -915,7 +915,72 @@ class API(BaseAPI):
             ts = ts.tz_convert(timezone.utc).tz_localize(None)
         return ts.strftime("%Y-%m-%d %H:%M:%S")
 
-    def estimate_dataset_size(
+    def estimate_datasets_size(
+        self,
+        uuid: str,
+        keys: list[str] = None,
+        date_start: pd.Timestamp = None,
+        date_end: pd.Timestamp = None,
+        multi_polygon=None,
+        columns: list[str] = None,
+        output_format: str = None,
+    ) -> Optional[dict]:
+        """Estimate the total download size across one or more keys of a dataset.
+
+        :return: aggregated estimate dict, or None if no requested key exists
+        :raises ValueError: if output_format is none or not supported
+        """
+        if output_format is None or output_format not in SUPPORTED_OUTPUT_FORMATS:
+            raise ValueError(
+                f"output_format must be one of {sorted(SUPPORTED_OUTPUT_FORMATS)}, "
+                f"got '{output_format}'"
+            )
+
+        # Resolve keys, expanding "*" (or an absent list) to all keys of the
+        # dataset - identical to the batch download (subsetting.py).
+        if not keys or "*" in keys:
+            keys = list((self.get_mapped_meta_data(uuid) or {}).keys())
+
+        per_key: list[dict] = []
+        missing: list[str] = []
+        for key in keys:
+            single = self._estimate_single_key_size(
+                uuid,
+                key,
+                date_start=date_start,
+                date_end=date_end,
+                multi_polygon=multi_polygon,
+                columns=columns,
+                output_format=output_format,
+            )
+            if single is None:
+                missing.append(key)
+                continue
+            per_key.append(single)
+
+        if not per_key:
+            # No requested key exists in this dataset -> 404 at the route.
+            return None
+
+        notes: list[str] = []
+        if missing:
+            notes.append(f"keys not found and skipped: {missing}")
+        if len(per_key) > 1:
+            notes.append(f"summed {len(per_key)} keys")
+
+        return {
+            "uuid": uuid,
+            "keys": [r["key"] for r in per_key],
+            "format": output_format,
+            "estimated_uncompressed_bytes": sum(
+                r["estimated_uncompressed_bytes"] for r in per_key
+            ),
+            "estimated_output_bytes": sum(r["estimated_output_bytes"] for r in per_key),
+            "notes": "; ".join(notes),
+            "per_key": per_key,
+        }
+
+    def _estimate_single_key_size(
         self,
         uuid: str,
         key: str,
@@ -925,7 +990,12 @@ class API(BaseAPI):
         columns: list[str] = None,
         output_format: str = "netcdf",
     ) -> Optional[dict]:
-        """Estimate the download size of a dataset selection without downloading the data.
+        """Estimate the download size of ONE key without downloading the data.
+
+        Private per-key worker for :meth:`estimate_datasets_size` (which owns
+        ``output_format`` validation and ``*`` expansion). Callers always go
+        through the multi-key entry point, matching the batch download which
+        only accepts a keys array.
 
         :param uuid: Dataset UUID
         :param key: Dataset key (a UUID may map to several datasets)
@@ -935,15 +1005,8 @@ class API(BaseAPI):
             no spatial filter (whole dataset)
         :param columns: If given, only these data variables count toward the size
         :param output_format: One of SUPPORTED_OUTPUT_FORMATS (netcdf/geotiff/csv)
-        :return: A dict with the estimate, or None if the dataset is not found
-        :raises ValueError: if output_format is not supported
+        :return: A dict with the estimate, or None if the key is not found
         """
-        if output_format not in SUPPORTED_OUTPUT_FORMATS:
-            raise ValueError(
-                f"output_format must be one of {sorted(SUPPORTED_OUTPUT_FORMATS)}, "
-                f"got '{output_format}'"
-            )
-
         ds = self.get_datasource(uuid, key)
         if ds is None:
             return None
@@ -1027,8 +1090,6 @@ class API(BaseAPI):
 
         total_uncompressed = 0
         total_output = 0
-        cell_row_count = 0  # accumulated only for the no-TIME (gridded cells) case
-        time_row_count: int | None = None
         columns_note_done = False
 
         log.debug(
@@ -1060,23 +1121,8 @@ class API(BaseAPI):
                     notes.append(f"columns not found and ignored: {missing}")
             columns_note_done = True
 
-            # .nbytes / .sizes are metadata only (no compute); sum across bboxes.
-            bbox_bytes = int(dataset.nbytes)
-            total_uncompressed += bbox_bytes
-
-            # Row count: the TIME dim when present, else the product of all dims.
-            time_name = next(
-                (d for d in dataset.sizes if str(d).upper() == STR_TIME_UPPER_CASE),
-                None,
-            )
-            if time_name is not None:
-                # TIME is not spatially filtered, so it is identical for every bbox
-                time_row_count = int(dataset.sizes[time_name])
-            else:
-                prod = 1
-                for size in dataset.sizes.values():
-                    prod *= int(size)
-                cell_row_count += prod
+            # .nbytes is metadata only (no compute); sum across bboxes.
+            total_uncompressed += int(dataset.nbytes)
 
             # Output size depends on format - geotiff is NOT a flat multiplier on
             # nbytes so it has its own dimension-based estimate.
@@ -1088,8 +1134,6 @@ class API(BaseAPI):
                 ratio = OUTPUT_FORMAT_COMPRESSION_RATIO[output_format]
                 total_output += int(int(dataset.nbytes) * ratio)
 
-        row_count = time_row_count if time_row_count is not None else cell_row_count
-
         if output_format != "geotiff":
             ratio = OUTPUT_FORMAT_COMPRESSION_RATIO[output_format]
             notes.append(f"compression ratio assumed: {ratio} for {output_format}")
@@ -1097,20 +1141,17 @@ class API(BaseAPI):
         deduped_notes = list(dict.fromkeys(notes))
 
         log.debug(
-            "_estimate_zarr_size: totals uncompressed=%d output=%d row_count=%d",
+            "_estimate_zarr_size: totals uncompressed=%d output=%d",
             total_uncompressed,
             total_output,
-            row_count,
         )
 
         return {
             "uuid": uuid,
             "key": key,
             "format": output_format,
-            "estimated_row_count": row_count,
             "estimated_uncompressed_bytes": total_uncompressed,
             "estimated_output_bytes": total_output,
-            "is_estimate": True,
             "notes": "; ".join(deduped_notes),
         }
 
@@ -1122,10 +1163,8 @@ class API(BaseAPI):
             "uuid": uuid,
             "key": key,
             "format": output_format,
-            "estimated_row_count": 0,
             "estimated_uncompressed_bytes": 0,
             "estimated_output_bytes": 0,
-            "is_estimate": True,
             "notes": "requested date range is outside the dataset's temporal extent",
         }
 

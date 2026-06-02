@@ -1,8 +1,11 @@
-"""Unit tests for BaseAPI.estimate_dataset_size — zarr path (issue #8182, plan §5a).
+"""Unit tests for the estimate-size path (zarr).
 
-The zarr branch reads xarray.Dataset.nbytes on a lazily-sliced dataset, so we
-mock get_datasource to return a fake ZarrDataSource whose get_data returns a
-small in-memory xarray.Dataset with known sizes.
+Two layers:
+- ``API._estimate_single_key_size`` — per-key worker; the zarr branch reads
+  xarray.Dataset.nbytes on a lazily-sliced dataset, so we mock get_datasource to
+  return a fake ZarrDataSource whose get_data returns a small in-memory dataset.
+- ``API.estimate_datasets_size`` — public multi-key aggregator (sums per key,
+  expands "*", owns output_format validation).
 """
 
 import numpy as np
@@ -76,19 +79,16 @@ def test_zarr_estimate_basic():
     dataset = _make_dataset()
     api, mock_ds = _api_with_zarr(dataset)
 
-    result = api.estimate_dataset_size(UUID, KEY, output_format="netcdf")
+    result = api._estimate_single_key_size(UUID, KEY, output_format="netcdf")
 
     assert result["uuid"] == UUID
     assert result["key"] == KEY
     assert result["format"] == "netcdf"
-    # 5 time steps -> 5 rows.
-    assert result["estimated_row_count"] == 5
     # .nbytes sums across all data vars + coords; no compute needed.
     assert result["estimated_uncompressed_bytes"] == dataset.nbytes
     assert result["estimated_output_bytes"] == int(
         dataset.nbytes * COMPRESSION_RATIO_NETCDF
     )
-    assert result["is_estimate"] is True
     mock_ds.get_data.assert_called_once()
 
 
@@ -99,7 +99,7 @@ def test_geotiff_non_gridded_falls_back_to_flat_ratio():
     # _make_dataset has no lat/lon dims -> no gridded vars -> flat-ratio fallback.
     api.map_column_names = MagicMock(side_effect=_identity_map)
 
-    result = api.estimate_dataset_size(UUID, KEY, output_format="geotiff")
+    result = api._estimate_single_key_size(UUID, KEY, output_format="geotiff")
 
     assert result["format"] == "geotiff"
     assert result["estimated_output_bytes"] == int(
@@ -114,7 +114,7 @@ def test_geotiff_gridded_dimension_based():
     api, _ = _api_with_zarr(dataset)
     api.map_column_names = MagicMock(side_effect=_identity_map)
 
-    result = api.estimate_dataset_size(UUID, KEY, output_format="geotiff")
+    result = api._estimate_single_key_size(UUID, KEY, output_format="geotiff")
 
     raw = 3 * 4 * 5 * 4  # n_time x lat x lon x bytes_per_pixel(float32)
     assert result["estimated_output_bytes"] == int(raw * GEOTIFF_ZIP_RATIO)
@@ -123,7 +123,7 @@ def test_geotiff_gridded_dimension_based():
 
 
 def test_geotiff_ij_grid_uses_ij_sizes():
-    # Curvilinear grid: dims are (TIME, I, J); lat/lon are 2D vars on (I, J).
+    # Curvilinear grid: dims are (TIME, I, J)
     # The estimate should treat I/J as the grid dims (no coord conversion needed).
     times = pd.date_range("2020-01-01", periods=2)
     ii, jj = 4, 6
@@ -138,7 +138,7 @@ def test_geotiff_ij_grid_uses_ij_sizes():
     api, _ = _api_with_zarr(ds)
     api.map_column_names = MagicMock(side_effect=_identity_map)
 
-    result = api.estimate_dataset_size(UUID, KEY, output_format="geotiff")
+    result = api._estimate_single_key_size(UUID, KEY, output_format="geotiff")
 
     raw = 2 * ii * jj * 4  # n_time x I x J x float32
     assert result["estimated_output_bytes"] == int(raw * GEOTIFF_ZIP_RATIO)
@@ -153,22 +153,23 @@ def test_geotiff_integer_var_treated_as_float32():
     api, _ = _api_with_zarr(dataset)
     api.map_column_names = MagicMock(side_effect=_identity_map)
 
-    result = api.estimate_dataset_size(UUID, KEY, output_format="geotiff")
+    result = api._estimate_single_key_size(UUID, KEY, output_format="geotiff")
 
     raw = 2 * 3 * 3 * GEOTIFF_INT_PIXEL_BYTES
     assert result["estimated_output_bytes"] == int(raw * GEOTIFF_ZIP_RATIO)
 
 
 def test_unsupported_format_raises():
+    # output_format validation lives in the public multi-key entry point.
     api, _ = _api_with_zarr(_make_dataset())
     with pytest.raises(ValueError, match="output_format must be one of"):
-        api.estimate_dataset_size(UUID, KEY, output_format="zarr")
+        api.estimate_datasets_size(UUID, keys=[KEY], output_format="zarr")
 
 
 def test_dataset_not_found_returns_none():
     api = API()
     api.get_datasource = MagicMock(return_value=None)
-    assert api.estimate_dataset_size(UUID, KEY) is None
+    assert api._estimate_single_key_size(UUID, KEY) is None
 
 
 def test_columns_subset_reduces_size():
@@ -177,7 +178,7 @@ def test_columns_subset_reduces_size():
     # Pretend the requested column maps straight through to "TEMP".
     api.map_column_names = MagicMock(return_value=["TEMP"])
 
-    result = api.estimate_dataset_size(UUID, KEY, columns=["TEMP"])
+    result = api._estimate_single_key_size(UUID, KEY, columns=["TEMP"])
 
     # Only TEMP (+ TIME coord) should count, less than the full dataset.
     assert result["estimated_uncompressed_bytes"] < dataset.nbytes
@@ -209,7 +210,7 @@ def test_multi_polygon_single_resolves_to_bbox():
     api.normalize_to_0_360_if_needed = MagicMock(side_effect=lambda u, k, lon: lon)
 
     polygon = _single_polygon_geojson(lon_min=10, lat_min=20, lon_max=30, lat_max=40)
-    result = api.estimate_dataset_size(UUID, KEY, multi_polygon=polygon)
+    result = api._estimate_single_key_size(UUID, KEY, multi_polygon=polygon)
 
     assert result["estimated_uncompressed_bytes"] == dataset.nbytes
     mock_ds.get_data.assert_called_once()
@@ -224,7 +225,7 @@ def test_no_spatial_filter_uses_open_slice():
     dataset = _make_dataset()
     api, mock_ds = _api_with_zarr(dataset)
 
-    result = api.estimate_dataset_size(UUID, KEY)
+    result = api._estimate_single_key_size(UUID, KEY)
 
     assert result["estimated_uncompressed_bytes"] == dataset.nbytes
     mock_ds.get_data.assert_called_once()
@@ -233,8 +234,7 @@ def test_no_spatial_filter_uses_open_slice():
 
 
 def test_multi_polygon_multiple_bboxes_summed():
-    # Two polygons -> get_data is called per bbox and the per-bbox .nbytes are
-    # SUMMED (no xarray.merge, so no union grid is allocated -> flat memory).
+    # Two polygons -> get_data is called per bbox and the per-bbox .nbytes are SUMMED
     dataset = _make_dataset()
     api, mock_ds = _api_with_zarr(dataset)
     api.normalize_to_0_360_if_needed = MagicMock(side_effect=lambda u, k, lon: lon)
@@ -251,14 +251,12 @@ def test_multi_polygon_multiple_bboxes_summed():
         + "]]}"
     )
 
-    result = api.estimate_dataset_size(UUID, KEY, multi_polygon=polygon)
+    result = api._estimate_single_key_size(UUID, KEY, multi_polygon=polygon)
 
     assert mock_ds.get_data.call_count == 2
     assert "summed 2 polygon bboxes" in result["notes"]
     # each bbox returns the same mock dataset -> bytes are summed (2x)
     assert result["estimated_uncompressed_bytes"] == 2 * dataset.nbytes
-    # TIME is not spatially filtered, so the row count is NOT doubled
-    assert result["estimated_row_count"] == dataset.sizes["TIME"]
 
 
 def test_invalid_multi_polygon_raises():
@@ -267,7 +265,7 @@ def test_invalid_multi_polygon_raises():
     api, _ = _api_with_zarr(_make_dataset())
     bad = '{"type": "Point", "coordinates": [10, 20]}'
     with pytest.raises(TypeError):
-        api.estimate_dataset_size(UUID, KEY, multi_polygon=bad)
+        api._estimate_single_key_size(UUID, KEY, multi_polygon=bad)
 
 
 def test_parquet_path_not_implemented_yet():
@@ -276,30 +274,27 @@ def test_parquet_path_not_implemented_yet():
     api = API()
     api.get_datasource = MagicMock(return_value=MagicMock(spec=ParquetDataSource))
     with pytest.raises(NotImplementedError):
-        api.estimate_dataset_size(UUID, KEY)
+        api._estimate_single_key_size(UUID, KEY)
 
 
 def test_date_range_clamped_to_extent_then_estimated():
     # With both bounds given, the request is clamped to the dataset's temporal
-    # extent (trim_date_range_for_keys) before slicing - same as batch download.
+    # extent (trim_date_range_for_keys) before slicing
     dataset = _make_dataset()  # TIME = 2020-01-01 .. 2020-01-05
     api, mock_ds = _api_with_zarr(dataset)
     api.get_temporal_extent = MagicMock(
         return_value=(pd.Timestamp("2020-01-01"), pd.Timestamp("2020-01-05"))
     )
 
-    result = api.estimate_dataset_size(
+    result = api._estimate_single_key_size(
         UUID,
         KEY,
         date_start=pd.Timestamp("2020-01-02", tz="UTC"),
         date_end=pd.Timestamp("2020-01-04", tz="UTC"),
     )
 
-    # Inside the extent -> a real estimate (not the empty one) and get_data ran.
     assert result["estimated_uncompressed_bytes"] == dataset.nbytes
     mock_ds.get_data.assert_called_once()
-    # The slice passed to the lib must be tz-naive strings (xarray can't compare
-    # tz-aware values against the naive time coordinate).
     passed_start, passed_end = mock_ds.get_data.call_args.args[:2]
     assert passed_start == "2020-01-02 00:00:00"
     assert "+" not in passed_start and "+" not in passed_end
@@ -314,16 +309,98 @@ def test_request_outside_extent_returns_empty_estimate():
         return_value=(pd.Timestamp("2020-01-01"), pd.Timestamp("2020-01-05"))
     )
 
-    result = api.estimate_dataset_size(
+    result = api._estimate_single_key_size(
         UUID,
         KEY,
         date_start=pd.Timestamp("1990-01-01", tz="UTC"),
         date_end=pd.Timestamp("1990-12-31", tz="UTC"),
     )
 
-    assert result["estimated_row_count"] == 0
     assert result["estimated_uncompressed_bytes"] == 0
     assert result["estimated_output_bytes"] == 0
-    assert result["is_estimate"] is True
     assert "outside" in result["notes"]
     mock_ds.get_data.assert_not_called()
+
+
+def _single_result(key, unc, out):
+    """A stand-in single-key estimate result, as _estimate_single_key_size returns."""
+    return {
+        "uuid": UUID,
+        "key": key,
+        "format": "netcdf",
+        "estimated_uncompressed_bytes": unc,
+        "estimated_output_bytes": out,
+        "notes": "",
+    }
+
+
+def test_multi_key_sums_and_keeps_breakdown():
+    api = API()
+    api._estimate_single_key_size = MagicMock(
+        side_effect=[
+            _single_result("a.zarr", 100, 40),
+            _single_result("b.zarr", 200, 80),
+        ]
+    )
+
+    result = api.estimate_datasets_size(UUID, keys=["a.zarr", "b.zarr"])
+
+    assert result["keys"] == ["a.zarr", "b.zarr"]
+    assert result["estimated_uncompressed_bytes"] == 300
+    assert result["estimated_output_bytes"] == 120
+    assert "summed 2 keys" in result["notes"]
+    # per-key breakdown is preserved
+    assert [r["key"] for r in result["per_key"]] == ["a.zarr", "b.zarr"]
+
+
+def test_star_expands_to_all_keys():
+    api = API()
+    # "*" -> resolved from metadata, same as the batch download.
+    api.get_mapped_meta_data = MagicMock(
+        return_value={"a.zarr": object(), "b.zarr": object()}
+    )
+    api._estimate_single_key_size = MagicMock(
+        side_effect=[
+            _single_result("a.zarr", 10, 4),
+            _single_result("b.zarr", 10, 4),
+        ]
+    )
+
+    result = api.estimate_datasets_size(UUID, keys=["*"])
+
+    api.get_mapped_meta_data.assert_called_once_with(UUID)
+    assert api._estimate_single_key_size.call_count == 2
+    assert result["keys"] == ["a.zarr", "b.zarr"]
+    assert result["estimated_uncompressed_bytes"] == 20
+
+
+def test_none_keys_means_all_keys():
+    api = API()
+    api.get_mapped_meta_data = MagicMock(return_value={"only.zarr": object()})
+    api._estimate_single_key_size = MagicMock(
+        return_value=_single_result("only.zarr", 30, 12)
+    )
+
+    result = api.estimate_datasets_size(UUID, keys=None)
+
+    api.get_mapped_meta_data.assert_called_once_with(UUID)
+    assert result["keys"] == ["only.zarr"]
+
+
+def test_missing_key_skipped_and_noted():
+    api = API()
+    api._estimate_single_key_size = MagicMock(
+        side_effect=[_single_result("a.zarr", 100, 40), None]  # b.zarr not found
+    )
+
+    result = api.estimate_datasets_size(UUID, keys=["a.zarr", "b.zarr"])
+
+    assert result["keys"] == ["a.zarr"]
+    assert result["estimated_uncompressed_bytes"] == 100
+    assert "keys not found and skipped: ['b.zarr']" in result["notes"]
+
+
+def test_all_keys_missing_returns_none():
+    api = API()
+    api._estimate_single_key_size = MagicMock(return_value=None)
+    assert api.estimate_datasets_size(UUID, keys=["nope.zarr"]) is None
