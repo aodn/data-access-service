@@ -81,6 +81,8 @@ def _generate_partial_json_array(
     else:
         ddf = filtered
 
+    cfg = Config.get_config()
+
     for partition in ddf.to_delayed():
         partition_df = convert_non_numeric_to_str(partition.compute())
 
@@ -130,7 +132,7 @@ def _generate_partial_json_array(
                     )
 
             #  may need to add more field here
-            lon_keys = ["LONGITUDE", "longitude", "lon", "decimalLongitude", "J"]
+            lon_keys = cfg.get_column_name_mapping("longitude")
             for key in lon_keys:
                 if key in record:
                     filtered_record[STR_LONGITUDE_LOWER_CASE] = (
@@ -140,7 +142,7 @@ def _generate_partial_json_array(
                     )
                     break
 
-            lat_keys = ["LATITUDE", "latitude", "lat", "decimalLatitude", "I"]
+            lat_keys = cfg.get_column_name_mapping("latitude")
             for key in lat_keys:
                 if key in record:
                     filtered_record[STR_LATITUDE_LOWER_CASE] = (
