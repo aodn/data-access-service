@@ -1,10 +1,12 @@
 import json
+import time
 from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Optional, List
 import uuid as uuid_module
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from xarray import Dataset
 
@@ -132,10 +134,6 @@ async def estimate_size(
     multi_polygon: Optional[str] = Query(default=None),
     f: Optional[str] = Query(default="netcdf"),
 ):
-    """Estimate the download size of a dataset selection
-
-    Currently only zarr datasets are supported; parquet returns 501.
-    """
     api_instance = get_api_instance(request)
     if not api_instance.get_api_status():
         raise HTTPException(
@@ -159,8 +157,27 @@ async def estimate_size(
             ),
         )
 
+    logger.debug(
+        "estimate_size start: uuid=%s key=%s start=%s end=%s f=%s "
+        "has_polygon=%s polygon_len=%s columns=%s",
+        uuid,
+        key,
+        start_date,
+        end_date,
+        f,
+        multi_polygon is not None,
+        len(multi_polygon) if multi_polygon else 0,
+        columns,
+    )
+    t0 = (
+        time.perf_counter()
+    )  # for performance tracking of this endpoint (debug purpose)
+
     try:
-        result = api_instance.estimate_dataset_size(
+        # Offload the blocking, CPU/metadata work to a threadpool thread so the
+        # async event loop stays responsive (health checks, other requests).
+        result = await run_in_threadpool(
+            api_instance.estimate_dataset_size,
             uuid,
             key,
             date_start=start_date,
@@ -176,6 +193,9 @@ async def estimate_size(
     except NotImplementedError as e:
         # Parquet path not built yet -> 501
         raise HTTPException(status_code=HTTPStatus.NOT_IMPLEMENTED, detail=str(e))
+
+    elapsed = time.perf_counter() - t0
+    logger.debug("estimate_size done in %.3fs: result=%s", elapsed, result)
 
     if result is None:
         raise HTTPException(

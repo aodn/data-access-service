@@ -1031,7 +1031,17 @@ class API(BaseAPI):
         time_row_count: int | None = None
         columns_note_done = False
 
-        for la_min, la_max, lo_min, lo_max in spatial_slices:
+        log.debug(
+            "_estimate_zarr_size: uuid=%s key=%s slice=[%s..%s] bboxes=%d format=%s",
+            uuid,
+            key,
+            date_start_str,
+            date_end_str,
+            len(spatial_slices),
+            output_format,
+        )
+
+        for i, (la_min, la_max, lo_min, lo_max) in enumerate(spatial_slices):
             # get_data returns a lazily-sliced xarray.Dataset; chunks are NOT
             # loaded. We measure this one bbox and discard it before the next,
             # so no union grid is ever materialised.
@@ -1051,7 +1061,8 @@ class API(BaseAPI):
             columns_note_done = True
 
             # .nbytes / .sizes are metadata only (no compute); sum across bboxes.
-            total_uncompressed += int(dataset.nbytes)
+            bbox_bytes = int(dataset.nbytes)
+            total_uncompressed += bbox_bytes
 
             # Row count: the TIME dim when present, else the product of all dims.
             time_name = next(
@@ -1059,8 +1070,7 @@ class API(BaseAPI):
                 None,
             )
             if time_name is not None:
-                # TIME is not spatially filtered, so it is identical for every
-                # bbox -> record it once instead of summing.
+                # TIME is not spatially filtered, so it is identical for every bbox
                 time_row_count = int(dataset.sizes[time_name])
             else:
                 prod = 1
@@ -1084,8 +1094,14 @@ class API(BaseAPI):
             ratio = OUTPUT_FORMAT_COMPRESSION_RATIO[output_format]
             notes.append(f"compression ratio assumed: {ratio} for {output_format}")
 
-        # Per-bbox calls may append duplicate notes (e.g. geotiff); dedupe in order.
         deduped_notes = list(dict.fromkeys(notes))
+
+        log.debug(
+            "_estimate_zarr_size: totals uncompressed=%d output=%d row_count=%d",
+            total_uncompressed,
+            total_output,
+            row_count,
+        )
 
         return {
             "uuid": uuid,
