@@ -132,7 +132,7 @@ def _generate_partial_json_array(
                     )
 
             #  may need to add more field here
-            lon_keys = cfg.get_column_name_mapping("longitude")
+            lon_keys = cfg.get_column_name_mapping()["longitude"]
             for key in lon_keys:
                 if key in record:
                     filtered_record[STR_LONGITUDE_LOWER_CASE] = (
@@ -142,7 +142,7 @@ def _generate_partial_json_array(
                     )
                     break
 
-            lat_keys = cfg.get_column_name_mapping("latitude")
+            lat_keys = cfg.get_column_name_mapping()["latitude"]
             for key in lat_keys:
                 if key in record:
                     filtered_record[STR_LATITUDE_LOWER_CASE] = (
