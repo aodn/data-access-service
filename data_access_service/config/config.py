@@ -74,14 +74,17 @@ class Config:
     @staticmethod
     def get_config(profile: EnvType = None):
         if profile is None:
-            profile = EnvType(os.getenv("PROFILE", EnvType.DEV))
-
-        print(f"Env profile is : {profile}")
+            if os.getenv("PYTEST_CURRENT_TEST") is not None:
+                # User do not specify profile but running pytest so it must be testing
+                profile = EnvType.TESTING
+            else:
+                profile = EnvType(os.getenv("PROFILE", EnvType.DEV))
 
         # Use lock to ensure thread-safe singleton instantiation
         with Config._lock:
             # Check if instance exists for the given profile
             if profile not in Config._instances:
+                print(f"Env profile is : {profile}")
                 match profile:
                     case EnvType.PRODUCTION:
                         Config._instances[profile] = ProdConfig()
@@ -109,11 +112,10 @@ class Config:
         return self.batch
 
     def get_csv_bucket_name(self):
-        return (
-            self.config["aws"]["s3"]["bucket_name"]["csv"]
-            if self.config is not None
-            else None
-        )
+        if self.config is None:
+            return None
+        val = self.config["aws"]["s3"]["bucket_name"]["csv"]
+        return val.strip() if isinstance(val, str) else val
 
     def get_duckdb_maxmem(self):
         if self.config is None:
@@ -121,11 +123,10 @@ class Config:
         return self.config.get("duckdb", {}).get("maxmem", "800M")
 
     def get_wave_buoy_backup_bucket_name(self):
-        return (
-            self.config["aws"]["s3"]["bucket_name"]["wave_buoy_backup"]
-            if self.config is not None
-            else None
-        )
+        if self.config is None:
+            return None
+        val = self.config["aws"]["s3"]["bucket_name"]["wave_buoy_backup"]
+        return val.strip() if isinstance(val, str) else val
 
     def get_job_queue_name(self):
         return (
