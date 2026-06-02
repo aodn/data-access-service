@@ -7,4 +7,4 @@ dependencies:
   - pip<24.1
   - virtualenv==20.28.1 # https://github.com/python-poetry/poetry/issues/10056#issuecomment-2594269592
   - pip:
-      - poetry==2.1.4
+      - poetry==2.2.1

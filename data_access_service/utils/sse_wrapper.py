@@ -37,10 +37,21 @@ async def _collect_records(
     Collect all records from the async generator into a list.
     This allows the data fetching to run as an independent asyncio task,
     so a heartbeat loop can run concurrently while data is being fetched.
+
+    We explicitly close the generator in finally to guarantee that any
+    resource cleanup (e.g. memory_lock release inside fetch_data) happens,
+    even in error or cancellation scenarios.
     """
     result = []
-    async for record in async_function(*function_args):
-        result.append(record)
+    agen = async_function(*function_args)
+    try:
+        async for record in agen:
+            result.append(record)
+    finally:
+        try:
+            await agen.aclose()
+        except Exception:
+            pass  # best effort
     return result
 
 

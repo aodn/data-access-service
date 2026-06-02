@@ -4,10 +4,10 @@ import pandas as pd
 
 from data_access_service import API
 from data_access_service.batch.batch_enums import Parameters
-from data_access_service.models.multi_polygon_helper import MultiPolygonHelper
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.server import api_setup, app
 from data_access_service.utils.date_time_utils import ensure_timezone
+from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
 
 
 def get_keys(parameters: dict) -> list[str]:
@@ -87,6 +87,7 @@ def trim_date_range_for_keys(
         minute=0,
         second=0,
         microsecond=0,
+        # pyrefly: ignore [unexpected-keyword]
         nanosecond=0,
     )
     trimmed_end_date = trimmed_end_date.replace(
@@ -94,6 +95,7 @@ def trim_date_range_for_keys(
         minute=59,
         second=59,
         microsecond=999999,
+        # pyrefly: ignore [unexpected-keyword]
         nanosecond=999,
     )
     return trimmed_start_date, trimmed_end_date

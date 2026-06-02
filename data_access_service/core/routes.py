@@ -63,12 +63,25 @@ async def health_check(request: Request):
 @router.get("/metadata/{uuid}", dependencies=[Depends(api_key_auth)])
 async def get_mapped_metadata(uuid: Optional[str] = None, request: Request = None):
     api_instance = get_api_instance(request)
+    # Check API initialization status first
+    if not api_instance.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
+
     return api_instance.get_mapped_meta_data(uuid)
 
 
 @router.get("/metadata/{uuid}/raw", dependencies=[Depends(api_key_auth)])
 async def get_raw_metadata(uuid: str, request: Request):
     api_instance = get_api_instance(request)
+    # Check API initialization status first
+    if not api_instance.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
     return api_instance.get_raw_meta_data(uuid)
 
 
@@ -89,6 +102,13 @@ async def has_data(
     end_date: Optional[str] = datetime.now(timezone.utc).strftime(DATE_FORMAT),
 ):
     api_instance = get_api_instance(request)
+    # Check API initialization status first
+    if not api_instance.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
+
     logger.info(
         "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
     )
@@ -100,7 +120,14 @@ async def has_data(
 
 @router.get("/data/{uuid}/{key}/temporal_extent", dependencies=[Depends(api_key_auth)])
 async def get_temporal_extent(uuid: str, key: str, request: Request):
+
     api_instance = get_api_instance(request)
+    # Check API initialization status first
+    if not api_instance.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
     try:
         start_date, end_date = api_instance.get_temporal_extent(uuid, key)
         result = [
@@ -143,6 +170,12 @@ async def get_indexing_values(
         )
 
     api = get_api_instance(request)
+    # Check API initialization status first
+    if not api.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
     data_source = api.get_dataset(
         uuid=uuid,
         key=key,
@@ -210,6 +243,12 @@ async def get_zarr_rectangles(
         )
 
     api = get_api_instance(request)
+    # Check API initialization status first
+    if not api.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
     data_source = api.get_dataset(
         uuid=uuid,
         key=key,
@@ -356,7 +395,12 @@ async def get_data(
     f: Optional[str] = Query(default="json"),
 ):
     api_instance = get_api_instance(request)
-
+    # Check API initialization status first
+    if not api_instance.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
     # for debug purpose: track request with an assigned id which is ranomly generated
     request_id = str(uuid_module.uuid4())
     logger.debug("Receiving request: %s", request_id)

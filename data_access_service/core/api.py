@@ -1,9 +1,14 @@
+from data_access_service import Config
 import asyncio
 import gzip
 import math
 import os
+import gc
 
 import duckdb
+import json
+import zlib
+
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -370,8 +375,24 @@ class API(BaseAPI):
         # UUID to metadata mapper
         self._instance = DataQuery.GetAodn()
         self._metadata = None
-        self._is_ready = False
-        self.memconn = duckdb.connect(":memory:cloud_optimized")
+        try:
+            config = Config.get_config()
+
+            temp_dir = os.path.join(os.getcwd(), ".duckdb_temp")
+            os.makedirs(temp_dir, exist_ok=True)
+
+            self._memconn = duckdb.connect(
+                # use disk instead of memory as system low of memory and OOM
+                # ":memory:cloud_optimized",
+                "/tmp/wave_buoy.duckdb",
+                config={
+                    "threads": 1,
+                    "temp_directory": temp_dir,
+                    "max_memory": config.get_duckdb_maxmem(),
+                },
+            )
+        except Exception as e:
+            log.warning(f"Failed to set DuckDB memory/temp limits: {e}")
 
     def destroy(self):
         log.info("Destroying API instance")
@@ -386,7 +407,7 @@ class API(BaseAPI):
                 # Do nothing as we end process
                 pass
 
-        self.memconn.close()
+        self._memconn.close()
 
     async def async_initialize_metadata(self):
         # Use ThreadPoolExecutor to run blocking calls in a separate thread
@@ -407,7 +428,16 @@ class API(BaseAPI):
         self._metadata = self._instance.get_metadata()
         self.refresh_uuid_dataset_map()
 
-        log.info("Done init")
+        # Free up catalog metadata memory and trigger garbage collection
+        self._metadata = None
+        gc.collect()
+
+        process = psutil.Process()
+        rss_mb = process.memory_info().rss / (1024 * 1024)
+        vms_mb = process.memory_info().vms / (1024 * 1024)
+        log.info(
+            f"Done init. Memory usage: RSS = {rss_mb:.2f} MB, VMS = {vms_mb:.2f} MB"
+        )
         # init finalised, set as ready
         self._is_ready = True
 
@@ -418,17 +448,27 @@ class API(BaseAPI):
         # used for checking if the API instance is ready
         return self._is_ready
 
+    def get_memconn(self):
+        return self._memconn
+
+    def get_aodn_instance(self):
+        return self._instance
+
     def fetch_wave_buoy_data(self, buoy_name: str, start_date: str, end_date: str):
         buoy_name = unquote_plus(buoy_name)
         print("Fetching data for buoy:", buoy_name)
-        waveBuoyPositionQueryResult = self.memconn.execute(
-            f"""SELECT
+        waveBuoyPositionQueryResult = (
+            self.get_memconn()
+            .execute(
+                f"""SELECT
             LATITUDE,
             LONGITUDE
             FROM wave_buoy_realtime_nonqc
             WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (WPFM IS NOT NULL OR WPMH IS NOT NULL) AND (WHTH IS NOT NULL OR WSSH IS NOT NULL)
             LIMIT 1"""
-        ).df()
+            )
+            .df()
+        )
 
         ds = ddf.from_pandas(waveBuoyPositionQueryResult)
         lat = (
@@ -445,12 +485,16 @@ class API(BaseAPI):
         if lat is None or lon is None:
             return {}
 
-        waveBuoyDataQueryResult = self.memconn.execute(
-            f"""SELECT SSWMD, WPFM, WPMH, WHTH, WSSH, TIME
+        waveBuoyDataQueryResult = (
+            self.get_memconn()
+            .execute(
+                f"""SELECT SSWMD, WPFM, WPMH, WHTH, WSSH, TIME
             FROM wave_buoy_realtime_nonqc
             WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (WPFM IS NOT NULL OR WPMH IS NOT NULL) AND (WHTH IS NOT NULL OR WSSH IS NOT NULL)
             ORDER BY TIME"""
-        ).df()
+            )
+            .df()
+        )
         feature = {
             "type": "Feature",
             "properties": {
@@ -483,24 +527,32 @@ class API(BaseAPI):
         return feature
 
     def fetch_wave_buoy_latest_date(self):
-        result = self.memconn.execute(
-            f"""SELECT
+        result = (
+            self.get_memconn()
+            .execute(
+                f"""SELECT
             MAX(TIME) AS TIME
             FROM wave_buoy_realtime_nonqc"""
-        ).df()
+            )
+            .df()
+        )
         # DuckDB return pandas Timestamp which is timezone-naive like 2026-04-21 23:25:00, we need to convert it to ISO format with Z. The time is in UTC because the data source is in UTC, so we can just add Z at the end to indicate it is UTC time.
         return result["TIME"].item().isoformat() + "Z"
 
     def fetch_all_unique_wave_buoy_sites(self):
-        result = self.memconn.execute(
-            """SELECT
+        result = (
+            self.get_memconn()
+            .execute(
+                """SELECT
             site_name,
             MAX(TIME) AS TIME,
             first(LATITUDE) AS LATITUDE,
             first(LONGITUDE) AS LONGITUDE
             FROM wave_buoy_realtime_nonqc
             GROUP BY site_name"""
-        ).df()
+            )
+            .df()
+        )
         feature_collection = {
             "type": "FeatureCollection",
             "features": [],
@@ -525,8 +577,10 @@ class API(BaseAPI):
         return feature_collection
 
     def fetch_wave_buoy_sites(self, start_date: str, end_date: str):
-        result = self.memconn.execute(
-            f"""SELECT
+        result = (
+            self.get_memconn()
+            .execute(
+                f"""SELECT
             site_name,
             first(TIME) AS TIME,
             first(LATITUDE) AS LATITUDE,
@@ -534,7 +588,9 @@ class API(BaseAPI):
             FROM wave_buoy_realtime_nonqc
             WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND (WPFM IS NOT NULL OR WPMH IS NOT NULL) AND (WHTH IS NOT NULL OR WSSH IS NOT NULL)
             GROUP BY site_name"""
-        ).df()
+            )
+            .df()
+        )
         feature_collection = {
             "type": "FeatureCollection",
             "features": [],
@@ -568,42 +624,32 @@ class API(BaseAPI):
             log.error("Metadata catalog from cloud-optimised lib is empty.")
 
         for key in catalog:
-            uuid = None
-            try:
-                data = catalog.get(key)
-                uuid = API.get_metadata_uuid(data)
+            data = catalog.get(key)
+            uuid = API.get_metadata_uuid(data)
 
-                if uuid is not None and uuid != "":
-                    log.info("Adding uuid " + uuid + " name " + key)
+            if uuid is not None and uuid != "":
+                log.info("Adding uuid " + uuid + " name " + key)
+                if uuid not in self._raw:
+                    self._raw[uuid] = dict()
+                # Save memory compress the content
+                self._raw[uuid][key] = zlib.compress(json.dumps(data).encode("utf-8"))
 
-                    if uuid not in self._raw:
-                        self._raw[uuid] = dict()
-                    self._raw[uuid][key] = data
-
-                    if uuid not in self._cached_metadata:
-                        self._cached_metadata[uuid] = dict()
-
-                    self._cached_metadata[uuid][key] = Descriptor(
-                        uuid=uuid,
-                        dname=key,
-                        lat=self._extract_coordinate(
-                            data, uuid, key, STR_LATITUDE_UPPER_CASE
-                        ),
-                        lng=self._extract_coordinate(
-                            data, uuid, key, STR_LONGITUDE_UPPER_CASE
-                        ),
-                        depth=BaseAPI._extract_depth(data),
-                    )
-                else:
-                    log.error("Missing UUID entry for dataset " + key)
-
-            except Exception as e:
-                log.error(
-                    "Failed to refresh UUID dataset map for dataset=%s uuid=%s. Error: %s",
-                    key,
-                    uuid,
-                    e,
+                if uuid not in self._cached_metadata:
+                    self._cached_metadata[uuid] = dict()
+                # We can add directly because the dict() created
+                self._cached_metadata[uuid][key] = Descriptor(
+                    uuid=uuid,
+                    dname=key,
+                    lat=self._extract_coordinate(
+                        data, uuid, key, STR_LATITUDE_UPPER_CASE
+                    ),
+                    lng=self._extract_coordinate(
+                        data, uuid, key, STR_LONGITUDE_UPPER_CASE
+                    ),
+                    depth=BaseAPI._extract_depth(data),
                 )
+            else:
+                log.error("Mising UUID entry for dataset " + key)
 
     def get_mapped_meta_data(self, uuid: str | None):
         if uuid is not None:
@@ -615,13 +661,17 @@ class API(BaseAPI):
         if value is not None:
             return value
         else:
-            return {"not_exist": Descriptor(uuid=uuid)}
+            return {"not_exist": Descriptor(uuid=uuid if uuid is not None else "*")}
 
     def get_raw_meta_data(self, uuid: str) -> Dict[str, Any]:
         value = self._raw.get(uuid)
 
         if value is not None:
-            return BaseAPI.fix_encode_error_nested_dict(value)
+            decompressed = {
+                key: json.loads(zlib.decompress(val).decode("utf-8"))
+                for key, val in value.items()
+            }
+            return BaseAPI.fix_encode_error_nested_dict(decompressed)
         else:
             return dict()
 
@@ -632,7 +682,7 @@ class API(BaseAPI):
     def has_data(
         self, uuid: str, key: str, start_date: pd.Timestamp, end_date: pd.Timestamp
     ):
-        md: Dict[str, Descriptor] = self._cached_metadata.get(uuid)
+        md: Dict[str, Descriptor] | None = self._cached_metadata.get(uuid)
         if md is not None and md[key] is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
             tes, tee = ds.get_temporal_extent()
@@ -642,7 +692,7 @@ class API(BaseAPI):
     def get_temporal_extent(
         self, uuid: str, key: str
     ) -> Tuple[pd.Timestamp | None, pd.Timestamp | None]:
-        md: Dict[str, Descriptor] = self._cached_metadata.get(uuid)
+        md: Dict[str, Descriptor] | None = self._cached_metadata.get(uuid)
         if md is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
             start_date, end_date = ds.get_temporal_extent()
@@ -668,72 +718,29 @@ class API(BaseAPI):
             return columns
 
         meta: Dict[str, Any] = self.get_raw_meta_data(uuid)[key]
+        columns_map = Config.get_config().get_column_name_mapping()
         output = list()
         for column in columns:
-
-            # You want TIME field but not in there, try map to something else
-            if column.casefold() == "TIME".casefold() and (
-                "TIME" not in meta or "time" not in meta
-            ):
-                match meta:
-                    case meta if "JULD" in meta:
-                        output.append("JULD")
-                    case meta if "detection_timestamp" in meta:
-                        output.append("detection_timestamp")
-                    case meta if "TIME" in meta:
-                        output.append("TIME")
-                    case meta if "time" in meta:
-                        output.append("time")
-                    case meta if "eventDate" in meta:
-                        output.append("eventDate")
-                    case meta if "timestamp" in meta:
+            # If the column name can map to target data source column name
+            if column.casefold() in columns_map:
+                candidates = columns_map.get(column.casefold())
+                if candidates is not None:
+                    for candidate in candidates:
+                        if candidate in meta:
+                            output.append(candidate)
+                            break
+                    else:
                         log.error(
-                            f"For most datasets, timestamp should not be the field to express the accurate time. "
+                            f"Column {column} is mapped to {candidates} but not in the metadata. "
                             f"Please check this dataset(uuid: {uuid}) if it is correct."
                         )
-                        output.append("timestamp")
-
-            # You want depth field, but it is not in data
-            elif column.casefold() == "DEPTH".casefold() and (
-                "DEPTH" not in meta or "depth" not in meta
-            ):
-                # Just ignore the field in the query, assume zero
-                pass
-            elif column.casefold() == STR_LATITUDE_UPPER_CASE.casefold() and (
-                STR_LATITUDE_UPPER_CASE not in meta
-                or STR_LATITUDE_LOWER_CASE not in meta
-            ):
-                match meta:
-                    case meta if STR_LATITUDE_LOWER_CASE in meta:
-                        output.append(STR_LATITUDE_LOWER_CASE)
-                    case meta if STR_LATITUDE_UPPER_CASE in meta:
-                        output.append(STR_LATITUDE_UPPER_CASE)
-                    case meta if "lat" in meta:
-                        output.append("lat")
-                    # some data-uplift datasets use this, e.g., "aggregated_seabird_nonqc.parquet"
-                    case meta if "decimalLatitude" in meta:
-                        output.append("decimalLatitude")
-            elif column.casefold() == STR_LONGITUDE_UPPER_CASE.casefold() and (
-                STR_LONGITUDE_UPPER_CASE not in meta
-                or STR_LONGITUDE_LOWER_CASE not in meta
-            ):
-                match meta:
-                    case meta if STR_LONGITUDE_LOWER_CASE in meta:
-                        output.append(STR_LONGITUDE_LOWER_CASE)
-                    case meta if STR_LONGITUDE_UPPER_CASE in meta:
-                        output.append(STR_LONGITUDE_UPPER_CASE)
-                    case meta if "lon" in meta:
-                        output.append("lon")
-                    # some data-uplift datasets use this, e.g., "aggregated_seabird_nonqc.parquet"
-                    case meta if "decimalLongitude" in meta:
-                        output.append("decimalLongitude")
             else:
                 output.append(column)
 
         return output
 
     def get_datasource(self, uuid: str, key: str) -> Optional[DataQuery.DataSource]:
-        mds: Dict[str, Descriptor] = self._cached_metadata.get(uuid)
+        mds: Dict[str, Descriptor] | None = self._cached_metadata.get(uuid)
         if mds is not None and key in mds:
             md = mds[key]
             if md is not None:
@@ -858,7 +865,24 @@ class API(BaseAPI):
                         lon_max,
                         scalar_filter,
                     )
-            except ValueError as e:
+            except (ValueError, TypeError, IndexError, KeyError) as e:
+                err_msg = str(e)
+                # Some datasets (particularly secondary ones under a shared UUID)
+                # have degenerate TIME coordinates (all-NaN or non-monotonic).
+                # The upstream library raises this pandas slicing error in those cases.
+                # Handle gracefully by returning no data instead of failing the request.
+                if (
+                    "non-monotonic" in err_msg
+                    or "DatetimeIndex" in err_msg
+                    or "partial slicing" in err_msg
+                ):
+                    log.warning(
+                        "Dataset has unusable TIME coordinate, returning empty result for %s/%s: %s",
+                        uuid,
+                        key,
+                        err_msg,
+                    )
+                    return None
                 log.error(f"Error when query ds.get_data: {e}")
                 raise e
             except Exception as v:

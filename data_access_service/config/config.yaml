@@ -1,0 +1,24 @@
+# Order of values under each key matters, do not change it. Else you will get test errors.
+column_name_mapping:
+  time:
+    - TIME
+    - time
+    - JULD
+    - eventDate
+    - detection_timestamp
+    - timestamp
+  depth:
+  latitude:
+    - LATITUDE
+    - latitude
+    - lat
+    # add this for data-uplift aggregated datasets for co-index
+    - decimalLatitude
+    - I
+  longitude:
+    - LONGITUDE
+    - longitude
+    - lon
+    # add this for data-uplift aggregated datasets for co-index
+    - decimalLongitude
+    - J
