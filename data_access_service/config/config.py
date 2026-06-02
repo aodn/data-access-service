@@ -80,12 +80,11 @@ class Config:
             else:
                 profile = EnvType(os.getenv("PROFILE", EnvType.DEV))
 
-        print(f"Env profile is : {profile}")
-
         # Use lock to ensure thread-safe singleton instantiation
         with Config._lock:
             # Check if instance exists for the given profile
             if profile not in Config._instances:
+                print(f"Env profile is : {profile}")
                 match profile:
                     case EnvType.PRODUCTION:
                         Config._instances[profile] = ProdConfig()
