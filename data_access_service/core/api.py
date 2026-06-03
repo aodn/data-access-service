@@ -634,34 +634,47 @@ class API(BaseAPI):
         # A map contains dataset name and Metadata class, which is not
         # so useful in our case, we need UUID
         catalog = self._metadata.metadata_catalog_uncached()
+        if catalog == {}:
+            log.error("Metadata catalog from cloud-optimised lib is empty.")
 
         for key in catalog:
-            data = catalog.get(key)
-            uuid = API.get_metadata_uuid(data)
+            uuid = None
+            try:
+                data = catalog.get(key)
+                uuid = API.get_metadata_uuid(data)
 
-            if uuid is not None and uuid != "":
-                log.info("Adding uuid " + uuid + " name " + key)
-                if uuid not in self._raw:
-                    self._raw[uuid] = dict()
-                # Save memory compress the content
-                self._raw[uuid][key] = zlib.compress(json.dumps(data).encode("utf-8"))
+                if uuid is not None and uuid != "":
+                    log.info("Adding uuid " + uuid + " name " + key)
+                    if uuid not in self._raw:
+                        self._raw[uuid] = dict()
+                    # Save memory compress the content
+                    self._raw[uuid][key] = zlib.compress(
+                        json.dumps(data).encode("utf-8")
+                    )
 
-                if uuid not in self._cached_metadata:
-                    self._cached_metadata[uuid] = dict()
-                # We can add directly because the dict() created
-                self._cached_metadata[uuid][key] = Descriptor(
-                    uuid=uuid,
-                    dname=key,
-                    lat=self._extract_coordinate(
-                        data, uuid, key, STR_LATITUDE_UPPER_CASE
-                    ),
-                    lng=self._extract_coordinate(
-                        data, uuid, key, STR_LONGITUDE_UPPER_CASE
-                    ),
-                    depth=BaseAPI._extract_depth(data),
+                    if uuid not in self._cached_metadata:
+                        self._cached_metadata[uuid] = dict()
+                    # We can add directly because the dict() created
+                    self._cached_metadata[uuid][key] = Descriptor(
+                        uuid=uuid,
+                        dname=key,
+                        lat=self._extract_coordinate(
+                            data, uuid, key, STR_LATITUDE_UPPER_CASE
+                        ),
+                        lng=self._extract_coordinate(
+                            data, uuid, key, STR_LONGITUDE_UPPER_CASE
+                        ),
+                        depth=BaseAPI._extract_depth(data),
+                    )
+                else:
+                    log.error("Missing UUID entry for dataset " + key)
+            except Exception as e:
+                log.error(
+                    "Failed to refresh UUID dataset map for dataset=%s uuid=%s. Error: %s",
+                    key,
+                    uuid,
+                    e,
                 )
-            else:
-                log.error("Mising UUID entry for dataset " + key)
 
     def get_mapped_meta_data(self, uuid: str | None):
         if uuid is not None:
