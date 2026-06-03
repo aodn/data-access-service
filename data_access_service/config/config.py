@@ -1,3 +1,5 @@
+from typing import List
+
 import yaml
 import boto3
 import os
@@ -9,6 +11,11 @@ from pathlib import Path
 from enum import Enum
 from botocore.client import BaseClient
 from dotenv import load_dotenv
+
+from data_access_service.models.pmtiles_types import (
+    PmtilesGenerationConfig,
+    HexLayerSpec,
+)
 
 
 class EnvType(Enum):
@@ -138,6 +145,66 @@ class Config:
 
     def get_api_key(self):
         return os.getenv("API_KEY")
+
+    def get_pmtiles_generation_config(self, parquet_stem: str):
+
+        batch = self.is_batch()
+        return PmtilesGenerationConfig(
+            output_pmtiles=f"data/output/{parquet_stem}.pmtiles",
+            staged_parquet_dir=f"data/parquet_staged/{parquet_stem}",
+            geojsonseq_dir="geojsonseq_tmp",
+            duckdb_temp_dir="duckdb_tmp",
+            memory_limit="20GB" if batch else "4GB",
+            threads=8 if batch else 4,
+            fetch_size=500_000 if batch else 100_000,
+        )
+
+    def get_hex_layer_specs(self, parquet_stem: str) -> List[HexLayerSpec]:
+
+        return [
+            HexLayerSpec(
+                name="hex_z0",
+                h3_resolution=2,
+                minzoom=0,
+                maxzoom=1,
+                output_path=f"data/intermediate/{parquet_stem}_hex_z0.geojsonseq",
+            ),
+            HexLayerSpec(
+                name="hex_z2",
+                h3_resolution=3,
+                minzoom=2,
+                maxzoom=3,
+                output_path=f"data/intermediate/{parquet_stem}_hex_z2.geojsonseq",
+            ),
+            HexLayerSpec(
+                name="hex_z4",
+                h3_resolution=4,
+                minzoom=4,
+                maxzoom=5,
+                output_path=f"data/intermediate/{parquet_stem}_hex_z4.geojsonseq",
+            ),
+            HexLayerSpec(
+                name="hex_z6",
+                h3_resolution=6,
+                minzoom=6,
+                maxzoom=7,
+                output_path=f"data/intermediate/{parquet_stem}_hex_z6.geojsonseq",
+            ),
+            HexLayerSpec(
+                name="hex_z8",
+                h3_resolution=7,
+                minzoom=8,
+                maxzoom=9,
+                output_path=f"data/intermediate/{parquet_stem}_hex_z8.geojsonseq",
+            ),
+            HexLayerSpec(
+                name="hex_z10",
+                h3_resolution=8,
+                minzoom=10,
+                maxzoom=12,
+                output_path=f"data/intermediate/{parquet_stem}_hex_z10.geojsonseq",
+            ),
+        ]
 
 
 class IntTestConfig(Config):

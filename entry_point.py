@@ -4,7 +4,7 @@ import boto3
 
 from data_access_service import init_log, Config, API
 from data_access_service.batch import subsetting
-from data_access_service.batch.pmtiles_generator import (
+from data_access_service.batch.pmtiles.generator import (
     generate_pmtiles_for_all_parquets,
 )
 
