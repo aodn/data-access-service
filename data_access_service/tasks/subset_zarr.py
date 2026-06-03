@@ -556,7 +556,9 @@ class ZarrProcessor:
         )
         self.log.info(f"Available memory in MB: {available_memory / (1024 * 1024):.2f}")
         safe_memory_per_thread = int(
-            available_memory * memory_fraction / self.get_available_thread_count()
+            available_memory
+            * memory_fraction
+            / self.config.get_available_thread_count()
         )
         self.log.info(
             "Chunk size: %d MB per thread", safe_memory_per_thread / (1024**2)
