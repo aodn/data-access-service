@@ -48,12 +48,16 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI):
             )
             ###############################################
             with tempfile.TemporaryDirectory() as tempdirname:
-                generate_pmtiles_for(
+                abs_path = generate_pmtiles_for(
                     dataset_uuid=uuid, parquet_name=dname, temp_dir=tempdirname, api=api
+                )
+                aws.upload_file_to_s3(
+                    abs_path,
+                    "havier-example-bucket",
+                    f"visualization/{uuid}/{dname}.pmtiles",
                 )
 
         except Exception as e:
-
             logger.error(f"Error processing dataset {uuid!r}, parquet {dname!r}: {e}")
 
 
