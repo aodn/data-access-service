@@ -3,9 +3,9 @@ import time
 import json
 from typing import Dict, Sequence, Optional
 import duckdb
-from .types import HexLayerSpec
 from .features import build_hex_feature
 from .stager import _build_staged_parquet
+from ...models.pmtiles_types import HexLayerSpec
 
 
 def aggregate_single_layer(

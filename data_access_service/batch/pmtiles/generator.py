@@ -129,3 +129,24 @@ def generate_pmtiles_for(
     logger.info(f"generate_pmtiles_for: finished in {time.time() - t0:.1f}s")
 
     return abs_pmtiles_file_path
+
+
+def ensure_tippecanoe():
+    import shutil
+    import subprocess
+
+    if shutil.which("tippecanoe"):
+        return
+
+    subprocess.run(["apt-get", "update"], check=True)
+
+    subprocess.run(
+        [
+            "apt-get",
+            "install",
+            "-y",
+            "--no-install-recommends",
+            "tippecanoe=2.35.0-1",
+        ],
+        check=True,
+    )

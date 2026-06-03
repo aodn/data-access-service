@@ -3,7 +3,7 @@ import time
 import subprocess
 from typing import List, Optional, Sequence
 from .aggregator import aggregate_from_point_to_hex
-from .types import HexLayerSpec
+from ...models.pmtiles_types import HexLayerSpec
 
 
 def run_tippecanoe(
