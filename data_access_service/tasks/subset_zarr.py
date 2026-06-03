@@ -414,15 +414,17 @@ class ZarrProcessor:
 
     def __get_dim_names(self, key: str):
         """Resolve the actual lat, lon, and time dimension names for a dataset."""
-        return self.api.map_column_names(
-            uuid=self.uuid,
-            key=key,
-            columns=[
-                STR_LONGITUDE_LOWER_CASE,
-                STR_LONGITUDE_LOWER_CASE,
-                STR_TIME_LOWER_CASE,
-            ],
-        )
+        """Resolve the actual lat, lon, and time dimension names for a dataset."""
+        lat_name = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_LATITUDE_LOWER_CASE]
+        )[0]
+        lon_name = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_LONGITUDE_LOWER_CASE]
+        )[0]
+        time_name = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_TIME_LOWER_CASE]
+        )[0]
+        return lat_name, lon_name, time_name
 
     def __get_geotiff_compatible_vars(
         self, dataset: xarray.Dataset, lat_name: str, lon_name: str
@@ -582,15 +584,15 @@ class ZarrProcessor:
 
     def get_all_subset_conditions(self, key: str, bbox: BoundingBox) -> dict[str, list]:
         # Please add more conditions if they are supported in the future
-        time_dim, lat_dim, lon_dim = self.api.map_column_names(
-            uuid=self.uuid,
-            key=key,
-            columns=[
-                STR_TIME_LOWER_CASE,
-                STR_LATITUDE_LOWER_CASE,
-                STR_LONGITUDE_LOWER_CASE,
-            ],
-        )
+        time_dim = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_TIME_LOWER_CASE]
+        )[0]
+        lat_dim = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_LATITUDE_LOWER_CASE]
+        )[0]
+        lon_dim = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_LONGITUDE_LOWER_CASE]
+        )[0]
 
         return {
             time_dim: [
