@@ -2,6 +2,7 @@ import yaml
 import boto3
 import os
 import tempfile
+import psutil
 import logging.config
 
 from threading import Lock
@@ -184,6 +185,9 @@ class Config:
     def get_api_key(self):
         return os.getenv("API_KEY")
 
+    def get_available_thread_count(self) -> int | None:
+        return psutil.cpu_count(logical=True)
+
 
 class IntTestConfig(Config):
     def __init__(self):
@@ -214,6 +218,9 @@ class IntTestConfig(Config):
     def get_temp_folder(job_id: str) -> str:
         return f"/tmp/tmp{job_id}"
 
+    def get_available_thread_count(self) -> int | None:
+        return 1
+
 
 class DevConfig(Config):
     def __init__(self):
@@ -225,6 +232,9 @@ class DevConfig(Config):
         self.batch = boto3.client("batch", region_name="ap-southeast-2")
         self.s3 = boto3.client("s3")
         self.ses = boto3.client("ses", region_name="ap-southeast-2")
+
+    def get_available_thread_count(self) -> int | None:
+        return 1
 
 
 class EdgeConfig(Config):

@@ -19,9 +19,9 @@ from data_access_service import init_log, Config, API
 from data_access_service.batch.subsetting_helper import trim_date_range_for_keys
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.constants import (
-    STR_TIME_UPPER_CASE,
-    STR_LATITUDE_UPPER_CASE,
-    STR_LONGITUDE_UPPER_CASE,
+    STR_LONGITUDE_LOWER_CASE,
+    STR_TIME_LOWER_CASE,
+    STR_LATITUDE_LOWER_CASE,
 )
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
@@ -148,7 +148,7 @@ class ZarrProcessor:
             conditions = self.get_all_subset_conditions(key, bbox)
 
             time_dim = self.api.map_column_names(
-                uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
+                uuid=self.uuid, key=key, columns=[STR_TIME_LOWER_CASE]
             )[0]
             time_per_chunk = self.__get_time_steps_per_chunk(dataset, time_dim)
             self.log.info(
@@ -222,7 +222,7 @@ class ZarrProcessor:
         dataset = convert_object_dtype_variables(dataset, logger=self.log)
 
         time_dim = self.api.map_column_names(
-            uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
+            uuid=self.uuid, key=key, columns=[STR_TIME_LOWER_CASE]
         )[0]
         time_per_chunk = self.__get_time_steps_per_chunk(dataset, time_dim)
         self.log.info("Chunking dataset with %d time steps per chunk", time_per_chunk)
@@ -232,7 +232,7 @@ class ZarrProcessor:
             for var, da in dataset.data_vars.items()
             if da.dtype.kind in {"i", "u", "f"}  # integer, unsigned, float
         }
-        thread_count = self.get_available_thread_count()
+        thread_count = self.config.get_available_thread_count()
 
         # set the thread count for dask, for the to_netcdf operation later
         dask.config.set(num_workers=thread_count)
@@ -414,16 +414,15 @@ class ZarrProcessor:
 
     def __get_dim_names(self, key: str):
         """Resolve the actual lat, lon, and time dimension names for a dataset."""
-        lat_name = self.api.map_column_names(
-            uuid=self.uuid, key=key, columns=[STR_LATITUDE_UPPER_CASE]
-        )[0]
-        lon_name = self.api.map_column_names(
-            uuid=self.uuid, key=key, columns=[STR_LONGITUDE_UPPER_CASE]
-        )[0]
-        time_name = self.api.map_column_names(
-            uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
-        )[0]
-        return lat_name, lon_name, time_name
+        return self.api.map_column_names(
+            uuid=self.uuid,
+            key=key,
+            columns=[
+                STR_LONGITUDE_LOWER_CASE,
+                STR_LONGITUDE_LOWER_CASE,
+                STR_TIME_LOWER_CASE,
+            ],
+        )
 
     def __get_geotiff_compatible_vars(
         self, dataset: xarray.Dataset, lat_name: str, lon_name: str
@@ -540,15 +539,6 @@ class ZarrProcessor:
         zip_path.unlink(missing_ok=True)
         return url
 
-    def get_available_thread_count(self):
-        if os.getenv("PROFILE") in (None, "dev", "testing"):
-            self.log.info("Running in dev or testing mode, using 1 thread")
-            return 1
-
-        cpu_count = psutil.cpu_count(logical=True)
-        self.log.info(f"Available thread count: {cpu_count}")
-        return cpu_count
-
     def __get_time_steps_per_chunk(
         self, dataset: xarray.Dataset, time_dim: str, memory_fraction: float = 0.1
     ) -> int:
@@ -592,15 +582,15 @@ class ZarrProcessor:
 
     def get_all_subset_conditions(self, key: str, bbox: BoundingBox) -> dict[str, list]:
         # Please add more conditions if they are supported in the future
-        time_dim = self.api.map_column_names(
-            uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
-        )[0]
-        lat_dim = self.api.map_column_names(
-            uuid=self.uuid, key=key, columns=[STR_LATITUDE_UPPER_CASE]
-        )[0]
-        lon_dim = self.api.map_column_names(
-            uuid=self.uuid, key=key, columns=[STR_LONGITUDE_UPPER_CASE]
-        )[0]
+        time_dim, lat_dim, lon_dim = self.api.map_column_names(
+            uuid=self.uuid,
+            key=key,
+            columns=[
+                STR_TIME_LOWER_CASE,
+                STR_LATITUDE_LOWER_CASE,
+                STR_LONGITUDE_LOWER_CASE,
+            ],
+        )
 
         return {
             time_dim: [
