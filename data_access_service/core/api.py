@@ -8,6 +8,7 @@ import gc
 import duckdb
 import json
 import zlib
+import secrets
 
 
 from concurrent.futures import ThreadPoolExecutor
@@ -28,9 +29,7 @@ from xarray.core.utils import Frozen
 
 from data_access_service.core.constants import (
     STR_LATITUDE_UPPER_CASE,
-    STR_LATITUDE_LOWER_CASE,
     STR_LONGITUDE_UPPER_CASE,
-    STR_LONGITUDE_LOWER_CASE,
     STR_TIME_UPPER_CASE,
 )
 from data_access_service.core.descriptor import Depth, Descriptor, Coordinate
@@ -383,8 +382,9 @@ class API(BaseAPI):
 
             self._memconn = duckdb.connect(
                 # use disk instead of memory as system low of memory and OOM
-                # ":memory:cloud_optimized",
-                "/tmp/wave_buoy.duckdb",
+                # ":memory:cloud_optimized", with random token we can run
+                # multiple instance locally during test
+                f"/tmp/wave_buoy_{secrets.token_urlsafe(16)}.duckdb",
                 config={
                     "threads": 1,
                     "temp_directory": temp_dir,
