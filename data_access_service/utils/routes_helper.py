@@ -565,11 +565,13 @@ def generate_rect_features(
     ]
 
     geometry = Geometry(type="Polygon", coordinates=[rect_polygon])
+    # Do not use len() to check size, some zarr have empty dim with single value,
+    # which cause exception
     feature = Feature(
         geometry=geometry,
         properties={
             "date": rounded_time.value,
-            "count": len(lats) * len(lons) * rounded_time.count,
+            "count": lats.size * lons.size * rounded_time.count,
         },
     )
     return [feature]
