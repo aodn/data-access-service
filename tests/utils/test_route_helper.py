@@ -79,3 +79,41 @@ def test_generate_rect_feature_collection():
 
     actual_result = json.dumps(feature_collection)
     assert json.loads(actual_result) == json.loads(expected_result)
+
+
+def test_generate_rect_features_scalar_coords():
+    # Create a mock xarray.Dataset with scalar (0-dimensional) lat and lon coordinates,
+    # and a 1-dimensional time coordinate of length 1.
+    dataset = xarray.Dataset(
+        coords={
+            "lat": ([], -32.0),
+            "lon": ([], 115.0),
+            "time": (["time"], [pd.Timestamp("2026-06-05")]),
+        }
+    )
+
+    # Verify that the coordinate values are indeed 0-dimensional (scalar) arrays
+    assert dataset.coords["lat"].values.ndim == 0
+    assert dataset.coords["lon"].values.ndim == 0
+
+    # Call generate_rect_features; this should not throw an exception (such as TypeError: len() of unsized object)
+    features = generate_rect_features(dataset, "lat", "lon", "time")
+
+    # Verify the results are correct
+    assert features is not None
+    assert len(features) == 1
+
+    feature = features[0]
+    assert feature["geometry"]["type"] == "Polygon"
+    assert feature["properties"]["date"] == "2026-06"
+    assert feature["properties"]["count"] == 1  # 1 * 1 * 1
+
+    # Verify the coordinates form a correct bounding rectangle
+    expected_polygon = [
+        [115.0, -32.0],
+        [115.0, -32.0],
+        [115.0, -32.0],
+        [115.0, -32.0],
+        [115.0, -32.0],
+    ]
+    assert feature["geometry"]["coordinates"] == [expected_polygon]
