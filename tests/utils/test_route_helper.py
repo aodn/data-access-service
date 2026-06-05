@@ -117,3 +117,52 @@ def test_generate_rect_features_scalar_coords():
         [115.0, -32.0],
     ]
     assert feature["geometry"]["coordinates"] == [expected_polygon]
+
+
+def test_generate_rect_features_multidimensional_coords():
+    import numpy as np
+
+    # Create 3x3 grid coordinates where the lat/lon are 2D arrays (ndim == 2)
+    # representing a curvilinear or swath grid.
+    lats_data = np.array([[10.0, 11.0, 12.0], [13.0, 14.0, 15.0], [16.0, 17.0, 18.0]])
+    lons_data = np.array(
+        [[100.0, 101.0, 102.0], [103.0, 104.0, 105.0], [106.0, 107.0, 108.0]]
+    )
+
+    dataset = xarray.Dataset(
+        coords={
+            "lat": (["y", "x"], lats_data),
+            "lon": (["y", "x"], lons_data),
+            "time": (["time"], [pd.Timestamp("2026-06-05")]),
+        }
+    )
+
+    # Verify that the coordinates are 2-dimensional (ndim == 2)
+    assert dataset.coords["lat"].values.ndim == 2
+    assert dataset.coords["lon"].values.ndim == 2
+
+    # Call generate_rect_features
+    features = generate_rect_features(dataset, "lat", "lon", "time")
+
+    # Verify results are correct
+    assert features is not None
+    assert len(features) == 1
+
+    feature = features[0]
+    assert feature["geometry"]["type"] == "Polygon"
+    assert feature["properties"]["date"] == "2026-06"
+
+    # count should be lats.size * lons.size * rounded_time.count = 9 * 9 * 1 = 81
+    assert feature["properties"]["count"] == 81
+
+    # Verify the coordinates form a correct bounding rectangle
+    # Min lat: 10.0, Max lat: 18.0
+    # Min lon: 100.0, Max lon: 108.0
+    expected_polygon = [
+        [100.0, 10.0],
+        [100.0, 18.0],
+        [108.0, 18.0],
+        [108.0, 10.0],
+        [100.0, 10.0],
+    ]
+    assert feature["geometry"]["coordinates"] == [expected_polygon]
