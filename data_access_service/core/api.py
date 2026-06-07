@@ -1,4 +1,3 @@
-from data_access_service import Config
 import asyncio
 import gzip
 import math
@@ -12,13 +11,14 @@ import secrets
 
 
 from concurrent.futures import ThreadPoolExecutor
+from data_access_service import Config
 
 import dask.dataframe as ddf
 import pandas as pd
 import logging
 import xarray
 
-from datetime import timedelta, timezone
+from datetime import timedelta, timezone, date as dt_date
 from io import BytesIO
 from typing import Optional, Dict, Any, List, Tuple, Hashable
 from aodn_cloud_optimised.lib import DataQuery
@@ -714,6 +714,10 @@ class API(BaseAPI):
                 )
 
             if end_date is not None:
+                # Some dataset has future date
+                if end_date > dt_date.today():
+                    end_date = dt_date.today()
+
                 end_date = end_date.replace(
                     hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
                 )
