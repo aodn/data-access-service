@@ -1,4 +1,3 @@
-from data_access_service import Config
 import asyncio
 import gzip
 import math
@@ -12,6 +11,7 @@ import secrets
 
 
 from concurrent.futures import ThreadPoolExecutor
+from data_access_service import Config
 
 import dask.dataframe as ddf
 import pandas as pd
@@ -714,9 +714,19 @@ class API(BaseAPI):
                 )
 
             if end_date is not None:
+                # Some dataset has future date, we need to do a safety check
+                if end_date.tzinfo is None:
+                    now_compare = pd.Timestamp.now()
+                else:
+                    now_compare = pd.Timestamp.now(tz="UTC")
+                    end_date = end_date.tz_convert("UTC")
+
                 end_date = end_date.replace(
                     hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
                 )
+
+                if end_date > now_compare:
+                    end_date = now_compare
             return start_date, end_date
         else:
             return None, None

@@ -426,3 +426,63 @@ class TestApi(unittest.TestCase):
 
             # WSSH: both NaN, so empty
             self.assertEqual(len(result["properties"]["WSSH"]), 0)
+
+    def test_get_temporal_extent_future_and_past_dates(self):
+        api = API()
+        uuid = "test-uuid"
+        key = "test-key"
+
+        mock_descriptor = MagicMock()
+        mock_descriptor.dname = "test-dname"
+        api._cached_metadata = {uuid: {key: mock_descriptor}}
+
+        mock_ds = MagicMock()
+        api._instance = MagicMock()
+        api._instance.get_dataset.return_value = mock_ds
+
+        # Case A: Naive end_date in the future
+        future_naive = pd.Timestamp.now() + pd.Timedelta(days=5)
+        start_naive = pd.Timestamp("2020-01-01 12:00:00")
+        mock_ds.get_temporal_extent.return_value = (start_naive, future_naive)
+
+        start_res, end_res = api.get_temporal_extent(uuid, key)
+        self.assertEqual(start_res, pd.Timestamp("2020-01-01 00:00:00"))
+        self.assertIsNotNone(end_res)
+        self.assertLessEqual(end_res, pd.Timestamp.now())
+        self.assertIsNone(end_res.tzinfo)
+
+        # Case B: Aware end_date in the future
+        future_aware = pd.Timestamp.now(tz="UTC") + pd.Timedelta(days=5)
+        start_aware = pd.Timestamp("2020-01-01 12:00:00", tz="UTC")
+        mock_ds.get_temporal_extent.return_value = (start_aware, future_aware)
+
+        start_res, end_res = api.get_temporal_extent(uuid, key)
+        self.assertEqual(start_res, pd.Timestamp("2020-01-01 00:00:00", tz="UTC"))
+        self.assertIsNotNone(end_res)
+        self.assertLessEqual(end_res, pd.Timestamp.now(tz="UTC"))
+        self.assertIsNotNone(end_res.tzinfo)
+
+        # Case C: Naive end_date in the past
+        past_naive = pd.Timestamp.now() - pd.Timedelta(days=5)
+        mock_ds.get_temporal_extent.return_value = (start_naive, past_naive)
+
+        start_res, end_res = api.get_temporal_extent(uuid, key)
+        expected_end_naive = past_naive.replace(
+            hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
+        )
+        self.assertEqual(end_res, expected_end_naive)
+
+        # Case D: Aware end_date in the past
+        past_aware = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=5)
+        mock_ds.get_temporal_extent.return_value = (start_aware, past_aware)
+
+        start_res, end_res = api.get_temporal_extent(uuid, key)
+        expected_end_aware = past_aware.tz_convert("UTC").replace(
+            hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
+        )
+        self.assertEqual(end_res, expected_end_aware)
+
+        # Case E: Cached metadata does not exist
+        start_res, end_res = api.get_temporal_extent("non-existent-uuid", key)
+        self.assertIsNone(start_res)
+        self.assertIsNone(end_res)
