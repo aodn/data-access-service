@@ -75,9 +75,9 @@ def generate_pmtiles(
     resolved_layers = []
     for layer in layers:
         resolved_path = (
-            layer.output_path
-            if os.path.dirname(layer.output_path)
-            else os.path.join(geojsonseq_dir, layer.output_path)
+            layer.layer_geojsonseq_file_name
+            if os.path.dirname(layer.layer_geojsonseq_file_name)
+            else os.path.join(geojsonseq_dir, layer.layer_geojsonseq_file_name)
         )
         resolved_layers.append(
             HexLayerSpec(
@@ -85,7 +85,7 @@ def generate_pmtiles(
                 h3_resolution=layer.h3_resolution,
                 minzoom=layer.minzoom,
                 maxzoom=layer.maxzoom,
-                output_path=resolved_path,
+                layer_geojsonseq_file_name=resolved_path,
             )
         )
 
@@ -111,7 +111,9 @@ def generate_pmtiles(
 
     logger.info("generate_pmtiles: [Step 2/2] Running tippecanoe → .pmtiles...")
     run_tippecanoe(
-        geojsonseq_paths=[layer.output_path for layer in resolved_layers],
+        geojsonseq_paths=[
+            layer.layer_geojsonseq_file_name for layer in resolved_layers
+        ],
         output_pmtiles=output_pmtiles,
         extra_args=tippecanoe_extra_args,
     )

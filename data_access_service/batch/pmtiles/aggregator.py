@@ -22,7 +22,7 @@ def aggregate_single_layer(
 
     logger.info(
         f"[{layer.name}] Starting layer: h3_resolution={layer.h3_resolution}, "
-        f"zoom={layer.minzoom}-{layer.maxzoom}, output={layer.output_path!r}"
+        f"zoom={layer.minzoom}-{layer.maxzoom}, output={layer.layer_geojsonseq_file_name!r}"
     )
     logger.debug(
         f"[{layer.name}] staged_path={staged_path!r}, max_resolution={max_resolution}"
@@ -67,17 +67,19 @@ def aggregate_single_layer(
         f"[{layer.name}] Aggregation result: {distinct_hexes:,} unique H3 cells, {monthly_rows:,} (cell, month) rows"
     )
 
-    logger.info(f"[{layer.name}] Streaming results → GeoJSONSeq: {layer.output_path!r}")
+    logger.info(
+        f"[{layer.name}] Streaming results → GeoJSONSeq: {layer.layer_geojsonseq_file_name!r}"
+    )
     cursor = con.execute("SELECT h, ym, c FROM monthly_counts ORDER BY h, ym")
 
-    os.makedirs(os.path.dirname(layer.output_path) or ".", exist_ok=True)
+    os.makedirs(os.path.dirname(layer.layer_geojsonseq_file_name) or ".", exist_ok=True)
 
     written = 0
     current_h: Optional[str] = None
     current_counts: Dict[int, int] = {}
     t1 = time.monotonic()
 
-    with open(layer.output_path, "w", encoding="utf-8") as output_file:
+    with open(layer.layer_geojsonseq_file_name, "w", encoding="utf-8") as output_file:
         while True:
             rows = cursor.fetchmany(fetch_size)
             if not rows:
@@ -132,7 +134,7 @@ def aggregate_single_layer(
     stream_elapsed = time.monotonic() - t1
     con.execute("DROP TABLE IF EXISTS monthly_counts")
     logger.info(
-        f"[{layer.name}] Done: wrote {written:,} GeoJSON features to {layer.output_path!r} in {stream_elapsed:.1f}s"
+        f"[{layer.name}] Done: wrote {written:,} GeoJSON features to {layer.layer_geojsonseq_file_name!r} in {stream_elapsed:.1f}s"
     )
 
     return written
