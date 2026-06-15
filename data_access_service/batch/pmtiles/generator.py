@@ -4,6 +4,7 @@ import time
 from data_access_service.core.api import BaseAPI
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service import Config, init_log
+from .processors.hexbin_processor import HexbinProcessor
 from .tippecanoe import generate_pmtiles
 from data_access_service.core.constants import (
     STR_LONGITUDE_UPPER_CASE,
@@ -42,25 +43,17 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI):
             # Do everything in a temp directory to avoid filling up disk space.
             # The temp directory and all its contents will be automatically deleted after the with block.
             with tempfile.TemporaryDirectory() as tempdirname:
-                abs_path = generate_pmtiles_for(
-                    dataset_uuid=uuid, parquet_name=dname, work_dir=tempdirname, api=api
-                )
-                aws.upload_file_to_s3(
-                    abs_path,
-                    "havier-example-bucket",
-                    f"visualization/{uuid}/{dname}.pmtiles",
-                )
 
-                #         ###############################
                 vis_style = get_visualization_style(uuid=uuid, dname=dname)
                 if vis_style == PmtilesVisualizationStyle.HEXAGONS:
-                    layers: List[HexLayerSpec] = config.get_hex_layer_specs(dname=dname)
-                    abs_path = generate_pmtiles_for(
-                        dataset_uuid=uuid,
-                        parquet_name=dname,
-                        layers=layers,
-                        work_dir=tempdirname,
-                        api=api,
+                    hex_processor = HexbinProcessor(
+                        work_dir=tempdirname, uuid=uuid, dataset_name=dname, api=api
+                    )
+                    pmtiles_path = hex_processor.process()
+                    aws.upload_file_to_s3(
+                        pmtiles_path,
+                        "havier-example-bucket",
+                        f"visualization/{uuid}/{dname}.pmtiles",
                     )
 
         except Exception as e:

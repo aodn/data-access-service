@@ -35,7 +35,7 @@ class AbstractProcessor(ABC):
         self.logger = init_log(self.config)
         self.con = duckdb.connect(database=self.pmtiles_config.duckdb_database)
 
-    def process(self):
+    def process(self) -> str:
 
         self.logger.info(
             f"Processing dataset {self.dataset_name} with UUID {self.uuid}..."
@@ -72,10 +72,11 @@ class AbstractProcessor(ABC):
             self.logger.info(
                 f"Generating pmtiles file for dataset {self.dataset_name} with UUID {self.uuid}..."
             )
-            self.generate_pmtiles_file(geojsonseq_paths=geojsonseq_paths)
+            pmtile_path = self.generate_pmtiles_file(geojsonseq_paths=geojsonseq_paths)
             self.logger.info(
-                f"Finished generating pmtiles file for dataset {self.dataset_name} with UUID {self.uuid}"
+                f"Finished generating pmtiles file for dataset {self.dataset_name} with UUID {self.uuid}. Output path: {pmtile_path}"
             )
+            return pmtile_path
 
         finally:
             self.con.close()
@@ -135,7 +136,7 @@ class AbstractProcessor(ABC):
         self,
         geojsonseq_paths: List[str],
         extra_args: Optional[List[str]] = None,
-    ):
+    ) -> str:
         output_pmtiles_path = self.get_output_pmtiles_path()
         os.makedirs(os.path.dirname(os.path.abspath(output_pmtiles_path)))
 
@@ -163,6 +164,7 @@ class AbstractProcessor(ABC):
         self.logger.info(
             f"Finished generating {output_pmtiles_path!r} in {time.monotonic() - t0:.1f}s"
         )
+        return output_pmtiles_path
 
     @abstractmethod
     def get_layers(self) -> Sequence[PmtilesLayerSpec]:
