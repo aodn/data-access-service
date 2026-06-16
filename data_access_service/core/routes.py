@@ -20,9 +20,8 @@ from data_access_service.models.ExtendedFeatureCollection import (
     ExtendedFeatureCollection,
 )
 from data_access_service.models.duckdb_repository import (
-    MooringRepository,
+    REPOSITORY_CLASSES,
     ParquetRepository,
-    WaveBuoyRepository,
 )
 from data_access_service.schemas.sites import (
     LatestTime,
@@ -54,20 +53,6 @@ from data_access_service.utils.sse_wrapper import sse_wrapper
 router = APIRouter(prefix=Config.BASE_URL)
 config = Config.get_config()
 logger = init_log(config)
-
-
-# URL ``{product}`` segment -> repository class. The instances are built once at
-# startup (see ``data_access_service.server``) and stored on
-# ``app.state.repositories``; ``get_repo`` resolves them per request.
-REPOSITORY_CLASSES: dict[str, type[ParquetRepository]] = {
-    "mooring": MooringRepository,
-    "wave-buoy": WaveBuoyRepository,
-}
-
-
-def build_repositories(session) -> dict[str, ParquetRepository]:
-    """Instantiate one repository per product, all sharing one ``DuckDBSession``."""
-    return {name: cls(session) for name, cls in REPOSITORY_CLASSES.items()}
 
 
 def get_repo(product: str, request: Request) -> ParquetRepository:
@@ -381,19 +366,6 @@ def get_feature_collection_of_items_with_data_between_dates(
     """
     return site_feature_collection(
         repo.sites_in_date_range(start_date, end_date),
-        site_column=repo.site_column,
-    )
-
-
-@router.get(
-    "/data/feature-collection/{product}/all", dependencies=[Depends(api_key_auth)]
-)
-def get_feature_collection_of_items_all(
-    repo: ParquetRepository = Depends(get_repo),
-) -> SiteFeatureCollection:
-    """Every site's latest location as a ``SiteFeatureCollection`` (no date filter)."""
-    return site_feature_collection(
-        repo.sites_in_date_range(None, None),
         site_column=repo.site_column,
     )
 

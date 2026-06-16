@@ -301,3 +301,15 @@ class WaveBuoyRepository(ParquetRepository):
     site_column: ClassVar[str] = "site_name"
     latitude_column: ClassVar[str] = "LATITUDE"
     longitude_column: ClassVar[str] = "LONGITUDE"
+
+
+# Instantiated once at startup in data_access_service.server
+REPOSITORY_CLASSES: dict[str, type[ParquetRepository]] = {
+    "mooring": MooringRepository,
+    "wave-buoy": WaveBuoyRepository,
+}
+
+
+def build_repositories(session: DuckDBSession) -> dict[str, ParquetRepository]:
+    """Instantiate one repository per product, all sharing one ``DuckDBSession``."""
+    return {name: cls(session) for name, cls in REPOSITORY_CLASSES.items()}

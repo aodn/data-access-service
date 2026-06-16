@@ -9,8 +9,9 @@ from pathlib import Path
 from data_access_service import Config
 from data_access_service.config.config import IntTestConfig
 from data_access_service.core.api import API
-from data_access_service.core.routes import router as api_router, build_repositories
+from data_access_service.core.routes import router as api_router
 from data_access_service.core.scheduler import TaskScheduler
+from data_access_service.models.duckdb_repository import build_repositories
 from data_access_service.models.duckdb_session import DuckDBSession
 
 
@@ -73,8 +74,8 @@ async def lifespan(application: FastAPI):
     scheduler = None
     if not isinstance(Config.get_config(), IntTestConfig):
         session = _build_duckdb_session()
-        application.state.duckdb_session = session  # type: ignore
-        application.state.repositories = build_repositories(session)  # type: ignore
+        application.state.duckdb_session = session  
+        application.state.repositories = build_repositories(session)  
         scheduler = TaskScheduler(api, application.state.repositories)
         # Check for running event loop first to avoid creating an unawaited coroutine
         asyncio.create_task(

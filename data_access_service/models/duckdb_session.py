@@ -13,13 +13,7 @@ from typing import Any
 import boto3
 import duckdb
 
-"""
-    There are two different ways to make an object work with with statement: 
-    a context manager (defining ``__enter__`` and ``__exit__``) or a context decorator 
-    (using ``@contextlib.contextmanager``). 
-    We can see ``__enter__`` and ``__exit__`` created in this class, so we can use it 
-    as a context manager.
-"""
+
 class DuckDBSession:
     """Owns the DuckDB connection and its extension/region configuration.
 
