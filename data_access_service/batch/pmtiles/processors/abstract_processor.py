@@ -35,18 +35,16 @@ class AbstractProcessor(ABC):
         self.logger = init_log(self.config)
         self.con = duckdb.connect(database=self.pmtiles_config.duckdb_database)
 
-    def process(self) -> str:
-
-        self.logger.info(
-            f"Processing dataset {self.dataset_name} with UUID {self.uuid}..."
-        )
-
+        # These dirs are relative dir names. If they start with "/", they will be absolute dir names and will cause further problems.
         if self.pmtiles_config.staged_parquet_dir.startswith(
             "/"
         ) or self.pmtiles_config.duckdb_temp_dir.startswith("/"):
             raise ValueError("dir must be a relative path")
 
+    def process(self) -> str:
+
         try:
+            # First step, configure duckdb
             configure_duckdb(
                 con=self.con,
                 memory_limit=self.pmtiles_config.memory_limit,
@@ -56,19 +54,22 @@ class AbstractProcessor(ABC):
                 threads=self.pmtiles_config.threads,
             )
             self.logger.info(
-                f"DuckDB configured with memory_limit={self.pmtiles_config.memory_limit}, "
+                f"DuckDB configured with memory_limit={self.pmtiles_config.memory_limit}, thread count= {self.pmtiles_config.threads} "
             )
 
+            # Second step, abstract and cache parquet
             self.build_staging_parquet()
             self.logger.info(
                 f"Finished building staging parquet for dataset {self.dataset_name} with UUID {self.uuid}"
             )
 
+            # Third step, generate GeoJSONSeq files from staging parquet. GeoJSONSeq files are data input of PMTiles
             geojsonseq_paths = self.generate_geojsonseq_files()
             self.logger.info(
                 f"Finished generating GeoJSONSeq files for dataset {self.dataset_name} with UUID {self.uuid}: {geojsonseq_paths}"
             )
 
+            # Fourth step, use all GeoJSONSeq files to generate PMTiles file.
             self.logger.info(
                 f"Generating pmtiles file for dataset {self.dataset_name} with UUID {self.uuid}..."
             )
@@ -82,6 +83,7 @@ class AbstractProcessor(ABC):
             self.con.close()
             self.logger.debug("DuckDB connection closed")
 
+    # The s3 uri of the source parquet. It is not http URL of s3 objects.
     def get_s3_uri(self):
         return f"s3://{BUCKET_OPTIMISED_DEFAULT}/{self.dataset_name}/**/*.parquet"
 
@@ -166,14 +168,20 @@ class AbstractProcessor(ABC):
         )
         return output_pmtiles_path
 
+    # The layers are the layer config of the PMTiles file. Different Visualization styles should have different layer configs.
+    # PmtilesLayerSpec is the superclass of different style layer configs.
     @abstractmethod
     def get_layers(self) -> Sequence[PmtilesLayerSpec]:
         pass
 
+    # The staging parquet is a local parquet which is cached, abstracted and simply pre-calculated parquet according to remote source parquet.
+    # This step saves the IOs and speed up the processing.
     @abstractmethod
     def build_staging_parquet(self):
         pass
 
+    # The GeoJSONSeq files are generated from staging parquet. Each GeoJSONSeq file corresponds to one layer in PMTiles.
+    # All the GeoJSONSeq files are data source of the PMTiles.
     @abstractmethod
     def generate_geojsonseq_files(self) -> List[str]:
         pass

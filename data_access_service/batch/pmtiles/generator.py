@@ -38,17 +38,24 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI):
     for uuid, dname in uuid_dname_pair:
         try:
             logger.info(
-                "Starting processing of uuid: " + uuid + ",  dataset name " + dname + ""
+                "Start PMTiles processing of uuid: "
+                + uuid
+                + ",  dataset name "
+                + dname
+                + ""
             )
             # Do everything in a temp directory to avoid filling up disk space.
             # The temp directory and all its contents will be automatically deleted after the with block.
             with tempfile.TemporaryDirectory() as tempdirname:
 
                 vis_style = get_visualization_style(uuid=uuid, dname=dname)
+
                 if vis_style == PmtilesVisualizationStyle.HEXAGONS:
+                    logger.info("Visualization style: HEXAGONS")
                     hex_processor = HexbinProcessor(
                         work_dir=tempdirname, uuid=uuid, dataset_name=dname, api=api
                     )
+                    logger.info("Hexbin Processor has been initialized.")
                     pmtiles_path = hex_processor.process()
                     aws.upload_file_to_s3(
                         pmtiles_path,
