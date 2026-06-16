@@ -8,7 +8,7 @@ import duckdb
 from aodn_cloud_optimised.lib.DataQuery import BUCKET_OPTIMISED_DEFAULT
 
 from data_access_service import Config, init_log
-from data_access_service.batch.pmtiles.sql_utils import configure_duckdb
+from data_access_service.utils.duckdb_sql_utils import configure_duckdb
 from data_access_service.core.api import BaseAPI
 from data_access_service.core.constants import (
     STR_LATITUDE_UPPER_CASE,

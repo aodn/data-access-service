@@ -2,11 +2,11 @@ import json
 import os
 from typing import Sequence, List, Optional, Dict
 
-from data_access_service.batch.pmtiles.features import build_hex_feature
+from data_access_service.batch.pmtiles.helpers.features_helper import build_hex_feature
 from data_access_service.batch.pmtiles.processors.abstract_processor import (
     AbstractProcessor,
 )
-from data_access_service.batch.pmtiles.sql_utils import (
+from data_access_service.utils.duckdb_sql_utils import (
     quote_identifier,
     build_ym_expression,
     detect_time_type,

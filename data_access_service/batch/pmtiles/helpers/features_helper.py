@@ -1,5 +1,5 @@
 from typing import Dict
-from .geometry import build_hex_geometry
+from .geometry_helper import build_hex_geometry
 
 
 def build_hex_feature(
