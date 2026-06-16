@@ -43,6 +43,7 @@ from data_access_service.utils.routes_helper import (
     HealthCheckResponse,
     get_api_instance,
     verify_datatime_param,
+    parse_utc_datetime,
     fetch_data,
     async_response_json,
     generate_feature_collection,
@@ -351,9 +352,7 @@ async def get_zarr_rectangles(
     )
 
 
-@router.get(
-    "/data/feature-collection/{product}", dependencies=[Depends(api_key_auth)]
-)
+@router.get("/data/feature-collection/{product}", dependencies=[Depends(api_key_auth)])
 def get_feature_collection_of_items_with_data_between_dates(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -361,9 +360,12 @@ def get_feature_collection_of_items_with_data_between_dates(
 ) -> SiteFeatureCollection:
     """Sites with data in ``[start_date, end_date]`` as a ``SiteFeatureCollection``.
 
-    ``start_date`` / ``end_date`` are optional ISO 8601 (UTC); either may be
-    omitted (omitting both returns all sites).
+    ``start_date`` / ``end_date`` are optional ISO 8601; either may be omitted
+    (omitting both returns all sites). They are normalized to naive UTC to match
+    the dataset's ``TIMESTAMP_NS`` time column.
     """
+    start_date = parse_utc_datetime("start_date", start_date)
+    end_date = parse_utc_datetime("end_date", end_date)
     return site_feature_collection(
         repo.sites_in_date_range(start_date, end_date),
         site_column=repo.site_column,
@@ -393,11 +395,14 @@ def get_feature_collection_of_item_details(
 ) -> SiteDetailsFeature:
     """One site's observation timeseries as a single details ``Feature``.
 
-    ``start_date`` / ``end_date`` are optional ISO 8601 (UTC); either may be
-    omitted (omitting both returns the full series). Each ``value_columns`` entry
-    becomes a ``[time_ms, value]`` series; for a grouped dataset (mooring) the
-    series are nested per depth under a ``"NOMINAL_DEPTH_<value>"`` key.
+    ``start_date`` / ``end_date`` are optional ISO 8601; either may be omitted
+    (omitting both returns the full series). They are normalized to naive UTC to
+    match the dataset's ``TIMESTAMP_NS`` time column. Each ``value_columns``
+    entry becomes a ``[time_ms, value]`` series; for a grouped dataset (mooring)
+    the series are nested per depth under a ``"NOMINAL_DEPTH_<value>"`` key.
     """
+    start_date = parse_utc_datetime("start_date", start_date)
+    end_date = parse_utc_datetime("end_date", end_date)
     rows = repo.site_details(site, start_date, end_date)
     return site_details_feature_collection(
         rows,

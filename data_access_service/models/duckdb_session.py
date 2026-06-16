@@ -34,12 +34,12 @@ class DuckDBSession:
         extensions: Iterable[str] = ("httpfs", "json"),
     ) -> None:
         self.conn = duckdb.connect(database=database)
-        # Track active cursors so they can be interrupted on close; 
+        # Track active cursors so they can be interrupted on close;
         self._active_cursors: set[Any] = set()
         self._cursors_lock = threading.Lock()
         for ext in extensions:
             self.conn.execute(f"INSTALL {ext}; LOAD {ext};")
-        
+
         self.conn.execute(f"SET GLOBAL s3_region = '{region}';")
 
     def execute(self, sql: str, params: Sequence[Any] | None = None):
@@ -63,9 +63,7 @@ class DuckDBSession:
                 self._active_cursors.discard(cursor)
 
     def create_s3_secret(self, bucket: str) -> None:
-        """Create a DuckDB S3 secret scoped to ``bucket`` from boto3 credentials.
-
-        """
+        """Create a DuckDB S3 secret scoped to ``bucket`` from boto3 credentials."""
         boto_session = boto3.Session()
         creds = boto_session.get_credentials().get_frozen_credentials()
         region = boto_session.region_name or "ap-southeast-2"

@@ -102,7 +102,7 @@ class ParquetRepository(ABC):
             cols.append(self.group_column)
         cols += [c for c in self.value_columns if c not in cols]
         return cols
-    
+
     def _configure_s3(self) -> None:
         """Create the S3 secret DuckDB uses to read the primary dataset."""
         self.session.create_s3_secret(self.bucket)
@@ -268,7 +268,7 @@ class ParquetRepository(ABC):
 
 class MooringRepository(ParquetRepository):
     """Reads over the mooring-timeseries realtime-QC dataset."""
-    
+
     table: ClassVar[str] = "mooring_timeseries_realtime_qc"
     bucket: ClassVar[str] = "aodn-cloud-optimised"
     backup_bucket: ClassVar[str] = Config.get_config().get_mooring_backup_bucket_name()
@@ -286,17 +286,17 @@ class MooringRepository(ParquetRepository):
 
 class WaveBuoyRepository(ParquetRepository):
     """Reads over the realtime (non-QC) wave-buoy dataset."""
-    
+
     table: ClassVar[str] = "wave_buoy_realtime_nonqc"
     bucket: ClassVar[str] = "aodn-cloud-optimised"
-    backup_bucket: ClassVar[str] = Config.get_config().get_wave_buoy_backup_bucket_name()
+    backup_bucket: ClassVar[str] = (
+        Config.get_config().get_wave_buoy_backup_bucket_name()
+    )
     dataset: ClassVar[str] = f"s3://{bucket}/{table}.parquet"
     backup_dataset: ClassVar[str] = (
         f"s3://{backup_bucket}/imoslive/BUOY/{table}.parquet"
     )
-    value_columns: ClassVar[tuple[str, ...]] = (
-       'WSSH', 'SSWMD', 'WPFM', 'WPMH', 'WHTH'
-    )
+    value_columns: ClassVar[tuple[str, ...]] = ("WSSH", "SSWMD", "WPFM", "WPMH", "WHTH")
     time_column: ClassVar[str] = "TIME"
     site_column: ClassVar[str] = "site_name"
     latitude_column: ClassVar[str] = "LATITUDE"

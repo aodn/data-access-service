@@ -74,13 +74,11 @@ async def lifespan(application: FastAPI):
     scheduler = None
     if not isinstance(Config.get_config(), IntTestConfig):
         session = _build_duckdb_session()
-        application.state.duckdb_session = session  
-        application.state.repositories = build_repositories(session)  
+        application.state.duckdb_session = session
+        application.state.repositories = build_repositories(session)
         scheduler = TaskScheduler(api, application.state.repositories)
         # Check for running event loop first to avoid creating an unawaited coroutine
-        asyncio.create_task(
-            scheduler.start_with_initial_run(), name="repository_cache"
-        )
+        asyncio.create_task(scheduler.start_with_initial_run(), name="repository_cache")
 
     yield
 
