@@ -128,6 +128,12 @@ class Config:
         val = self.config["aws"]["s3"]["bucket_name"]["wave_buoy_backup"]
         return val.strip() if isinstance(val, str) else val
 
+    def get_mooring_backup_bucket_name(self):
+        if self.config is None:
+            return None
+        val = self.config["aws"]["s3"]["bucket_name"]["mooring_backup"]
+        return val.strip() if isinstance(val, str) else val
+
     def get_job_queue_name(self):
         return (
             self.config["aws"]["batch"]["job_queue"]

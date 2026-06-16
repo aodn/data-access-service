@@ -3,6 +3,7 @@ aws:
     bucket_name:
       csv: aodn-cloud-optimized-subset-dev
       wave_buoy_backup: aodn-cloud-optimized-wave-buoy-backup-testing
+      mooring_backup: aodn-cloud-optimized-wave-buoy-backup-testing
   ses:
     sender_email: no.reply@aodn.org.au
   batch:

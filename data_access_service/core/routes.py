@@ -19,6 +19,21 @@ from data_access_service.core.constants import (
 from data_access_service.models.ExtendedFeatureCollection import (
     ExtendedFeatureCollection,
 )
+from data_access_service.models.duckdb_repository import (
+    MooringRepository,
+    ParquetRepository,
+    WaveBuoyRepository,
+)
+from data_access_service.schemas.sites import (
+    LatestTime,
+    SiteDetailsFeature,
+    SiteFeatureCollection,
+)
+from data_access_service.utils.geojson import (
+    _iso,
+    site_details_feature_collection,
+    site_feature_collection,
+)
 from data_access_service.utils.api_utils import api_key_auth
 from data_access_service.utils.date_time_utils import (
     ensure_timezone,
@@ -39,6 +54,41 @@ from data_access_service.utils.sse_wrapper import sse_wrapper
 router = APIRouter(prefix=Config.BASE_URL)
 config = Config.get_config()
 logger = init_log(config)
+
+
+# URL ``{product}`` segment -> repository class. The instances are built once at
+# startup (see ``data_access_service.server``) and stored on
+# ``app.state.repositories``; ``get_repo`` resolves them per request.
+REPOSITORY_CLASSES: dict[str, type[ParquetRepository]] = {
+    "mooring": MooringRepository,
+    "wave-buoy": WaveBuoyRepository,
+}
+
+
+def build_repositories(session) -> dict[str, ParquetRepository]:
+    """Instantiate one repository per product, all sharing one ``DuckDBSession``."""
+    return {name: cls(session) for name, cls in REPOSITORY_CLASSES.items()}
+
+
+def get_repo(product: str, request: Request) -> ParquetRepository:
+    """Resolve the repository for the ``{product}`` path segment.
+
+    404 if the product is unknown; 503 if its table has not been loaded yet (the
+    startup pre-load / refresh is still in progress).
+    """
+    repositories = getattr(request.app.state, "repositories", {})
+    repo = repositories.get(product)
+    if repo is None:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"Unknown product '{product}'. Available: {', '.join(REPOSITORY_CLASSES)}",
+        )
+    if not repo.is_loaded():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail=f"Data for '{product}' is not ready yet.",
+        )
+    return repo
 
 
 @router.get("/health", response_model=HealthCheckResponse)
@@ -316,67 +366,74 @@ async def get_zarr_rectangles(
     )
 
 
-@router.get("/data/feature-collection/wave-buoy", dependencies=[Depends(api_key_auth)])
-async def get_feature_collection_of_items_with_data_between_dates(
-    request: Request,
-    start_date: Optional[str] = Query(default=MIN_DATE),
-    end_date: Optional[str] = Query(
-        default=datetime.now(timezone.utc).strftime(DATE_FORMAT)
-    ),
-):
-
-    start_date = verify_datatime_param("start_date", start_date)
-    end_date = verify_datatime_param("end_date", end_date)
-    api_instance = get_api_instance(request)
-    return Response(
-        content=json.dumps(api_instance.fetch_wave_buoy_sites(start_date, end_date)),
-        media_type="application/json",
-    )
-
-
 @router.get(
-    "/data/feature-collection/wave-buoy/all", dependencies=[Depends(api_key_auth)]
+    "/data/feature-collection/{product}", dependencies=[Depends(api_key_auth)]
 )
-async def get_feature_collection_of_items_all(request: Request):
-    api_instance = get_api_instance(request)
-    return Response(
-        content=json.dumps(api_instance.fetch_all_unique_wave_buoy_sites()),
-        media_type="application/json",
+def get_feature_collection_of_items_with_data_between_dates(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    repo: ParquetRepository = Depends(get_repo),
+) -> SiteFeatureCollection:
+    """Sites with data in ``[start_date, end_date]`` as a ``SiteFeatureCollection``.
+
+    ``start_date`` / ``end_date`` are optional ISO 8601 (UTC); either may be
+    omitted (omitting both returns all sites).
+    """
+    return site_feature_collection(
+        repo.sites_in_date_range(start_date, end_date),
+        site_column=repo.site_column,
     )
 
 
 @router.get(
-    "/data/feature-collection/wave-buoy/latest", dependencies=[Depends(api_key_auth)]
+    "/data/feature-collection/{product}/all", dependencies=[Depends(api_key_auth)]
 )
-async def get_feature_collection_of_items_latest_dates(request: Request):
-    api_instance = get_api_instance(request)
-    return Response(
-        content=json.dumps(api_instance.fetch_wave_buoy_latest_date()),
-        media_type="application/json",
+def get_feature_collection_of_items_all(
+    repo: ParquetRepository = Depends(get_repo),
+) -> SiteFeatureCollection:
+    """Every site's latest location as a ``SiteFeatureCollection`` (no date filter)."""
+    return site_feature_collection(
+        repo.sites_in_date_range(None, None),
+        site_column=repo.site_column,
     )
 
 
 @router.get(
-    "/data/feature-collection/wave-buoy/{buoy_name}",
+    "/data/feature-collection/{product}/latest", dependencies=[Depends(api_key_auth)]
+)
+def get_feature_collection_of_items_latest_dates(
+    repo: ParquetRepository = Depends(get_repo),
+) -> LatestTime:
+    """The single most recent observation time across all sites."""
+    latest = repo.latest_time()
+    return {"time": _iso(latest) if latest is not None else None}
+
+
+@router.get(
+    "/data/feature-collection/{product}/{site}",
     dependencies=[Depends(api_key_auth)],
 )
-async def get_feature_collection_of_items_with_data_between_dates(
-    request: Request,
-    buoy_name: str,
-    start_date: Optional[str] = Query(default=MIN_DATE),
-    end_date: Optional[str] = Query(
-        default=datetime.now(timezone.utc).strftime(DATE_FORMAT)
-    ),
-):
-    start_date = verify_datatime_param("start_date", start_date)
-    end_date = verify_datatime_param("end_date", end_date)
-    api_instance = get_api_instance(request)
+def get_feature_collection_of_item_details(
+    site: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    repo: ParquetRepository = Depends(get_repo),
+) -> SiteDetailsFeature:
+    """One site's observation timeseries as a single details ``Feature``.
 
-    return Response(
-        content=json.dumps(
-            api_instance.fetch_wave_buoy_data(buoy_name, start_date, end_date)
-        ),
-        media_type="application/json",
+    ``start_date`` / ``end_date`` are optional ISO 8601 (UTC); either may be
+    omitted (omitting both returns the full series). Each ``value_columns`` entry
+    becomes a ``[time_ms, value]`` series; for a grouped dataset (mooring) the
+    series are nested per depth under a ``"NOMINAL_DEPTH_<value>"`` key.
+    """
+    rows = repo.site_details(site, start_date, end_date)
+    return site_details_feature_collection(
+        rows,
+        time_column=repo.time_column,
+        longitude_column=repo.longitude_column,
+        latitude_column=repo.latitude_column,
+        value_columns=list(repo.value_columns),
+        group_column=repo.group_column,
     )
 
 
