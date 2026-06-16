@@ -17,6 +17,7 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI):
     metadata_list = api.get_mapped_meta_data(uuid=None)
     ensure_tippecanoe()
     uuid_dname_pair = []
+
     for k, v in metadata_list.items():
         dataset_names = v.keys()
         for dataset_name in dataset_names:
@@ -24,9 +25,13 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI):
             if dataset_name.endswith(".parquet"):
                 uuid_dname_pair.append((k, dataset_name))
 
+    logger.info(f"{len(uuid_dname_pair)} datasets to process.")
+    index = 1
     for uuid, dname in uuid_dname_pair:
         try:
-            logger.info(f"Start PMTiles processing of uuid: {uuid}, parquet: {dname}")
+            logger.info(
+                f"Start generating PMTiles for uuid: {uuid}, dataset: {dname}. Process: {index}/{len(uuid_dname_pair)}"
+            )
 
             # Do everything in a temp directory to avoid filling up disk space.
             # The temp directory and all its contents will be automatically deleted after the with block.
@@ -51,9 +56,10 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI):
                     logger.info(
                         f"Pmtiles file of dataset {dname}, uuid {uuid} uploaded to S3."
                     )
-
+            index += 1
         except Exception as e:
             logger.error(f"Error processing dataset {uuid}, parquet {dname}: {e}")
+            index += 1
 
 
 def get_visualization_style(uuid: str, dname: str) -> PmtilesVisualizationStyle:
