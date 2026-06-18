@@ -126,8 +126,7 @@ class ParquetRepository(ABC):
             SELECT {cols}
             FROM read_parquet(
                 '{self.dataset}/**/*.parquet',
-                hive_partitioning=true,
-                union_by_name=true
+                hive_partitioning=true
             )"""
         )
         return self

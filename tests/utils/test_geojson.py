@@ -99,9 +99,7 @@ def test_site_feature_collection_one_feature_per_site():
 
 
 def test_site_feature_collection_empty():
-    rows = pd.DataFrame(
-        {"site_code": [], "latitude": [], "longitude": [], "time": []}
-    )
+    rows = pd.DataFrame({"site_code": [], "latitude": [], "longitude": [], "time": []})
     fc = site_feature_collection(rows, site_column="site_code")
     assert fc == {"type": "FeatureCollection", "features": []}
 
@@ -112,9 +110,7 @@ def test_site_feature_collection_empty():
 def _details_rows():
     return pd.DataFrame(
         {
-            "TIME": pd.to_datetime(
-                ["2024-01-01", "2024-01-02", "2024-01-01"]
-            ),
+            "TIME": pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-01"]),
             "LATITUDE": [-30.0, -30.0, -30.0],
             "LONGITUDE": [150.0, 150.0, 150.0],
             "NOMINAL_DEPTH": [10, 10, 20],

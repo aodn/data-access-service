@@ -24,7 +24,9 @@ class _FakeRepo:
 
 def _request(repositories):
     # get_repo reaches request.app.state.repositories
-    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(repositories=repositories)))
+    return SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(repositories=repositories))
+    )
 
 
 def test_get_repo_returns_loaded_repository():
