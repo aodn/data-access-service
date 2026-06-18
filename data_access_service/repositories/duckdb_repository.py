@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from typing import ClassVar
 
 from data_access_service.config.config import Config
-from data_access_service.models.duckdb_session import DuckDBSession
+from data_access_service.repositories.duckdb_session import DuckDBSession
 
 
 def quote_ident(name: str) -> str:

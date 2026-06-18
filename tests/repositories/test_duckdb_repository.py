@@ -9,11 +9,11 @@ session's S3-secret creation is patched out (no AWS credentials in tests).
 import pandas as pd
 import pytest
 
-from data_access_service.models.duckdb_repository import (
+from data_access_service.repositories.duckdb_repository import (
     ParquetRepository,
     quote_ident,
 )
-from data_access_service.models.duckdb_session import DuckDBSession
+from data_access_service.repositories.duckdb_session import DuckDBSession
 
 
 class _GroupedRepo(ParquetRepository):

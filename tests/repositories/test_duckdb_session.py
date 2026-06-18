@@ -6,7 +6,7 @@ network — the behaviours under test don't need S3.
 
 import pytest
 
-from data_access_service.models.duckdb_session import DuckDBSession
+from data_access_service.repositories.duckdb_session import DuckDBSession
 
 
 def test_execute_returns_relation():

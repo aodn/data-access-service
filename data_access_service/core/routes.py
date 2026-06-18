@@ -16,22 +16,14 @@ from data_access_service.core.constants import (
     STR_LONGITUDE_UPPER_CASE,
     STR_TIME_UPPER_CASE,
 )
+from data_access_service.core.site_feature_service import SiteFeatureService
 from data_access_service.models.ExtendedFeatureCollection import (
     ExtendedFeatureCollection,
-)
-from data_access_service.models.duckdb_repository import (
-    REPOSITORY_CLASSES,
-    ParquetRepository,
 )
 from data_access_service.schemas.sites import (
     LatestTime,
     SiteDetailsFeature,
     SiteFeatureCollection,
-)
-from data_access_service.utils.geojson import (
-    _iso,
-    site_details_feature_collection,
-    site_feature_collection,
 )
 from data_access_service.utils.api_utils import api_key_auth
 from data_access_service.utils.date_time_utils import (
@@ -42,8 +34,8 @@ from data_access_service.utils.date_time_utils import (
 from data_access_service.utils.routes_helper import (
     HealthCheckResponse,
     get_api_instance,
+    get_site_service,
     verify_datatime_param,
-    parse_utc_datetime,
     fetch_data,
     async_response_json,
     generate_feature_collection,
@@ -54,27 +46,6 @@ from data_access_service.utils.sse_wrapper import sse_wrapper
 router = APIRouter(prefix=Config.BASE_URL)
 config = Config.get_config()
 logger = init_log(config)
-
-
-def get_repo(product: str, request: Request) -> ParquetRepository:
-    """Resolve the repository for the ``{product}`` path segment.
-
-    404 if the product is unknown; 503 if its table has not been loaded yet (the
-    startup pre-load / refresh is still in progress).
-    """
-    repositories = getattr(request.app.state, "repositories", {})
-    repo = repositories.get(product)
-    if repo is None:
-        raise HTTPException(
-            status_code=HTTPStatus.NOT_FOUND,
-            detail=f"Unknown product '{product}'. Available: {', '.join(REPOSITORY_CLASSES)}",
-        )
-    if not repo.is_loaded():
-        raise HTTPException(
-            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
-            detail=f"Data for '{product}' is not ready yet.",
-        )
-    return repo
 
 
 @router.get("/health", response_model=HealthCheckResponse)
@@ -356,31 +327,20 @@ async def get_zarr_rectangles(
 def get_feature_collection_of_items_with_data_between_dates(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    repo: ParquetRepository = Depends(get_repo),
+    service: SiteFeatureService = Depends(get_site_service),
 ) -> SiteFeatureCollection:
-    """Sites with data in ``[start_date, end_date]`` as a ``SiteFeatureCollection``.
-
-    ``start_date`` / ``end_date`` are optional ISO 8601; either may be omitted
-    (omitting both returns all sites). They are normalized to naive UTC to match
-    the dataset's ``TIMESTAMP_NS`` time column.
-    """
-    start_date = parse_utc_datetime("start_date", start_date)
-    end_date = parse_utc_datetime("end_date", end_date)
-    return site_feature_collection(
-        repo.sites_in_date_range(start_date, end_date),
-        site_column=repo.site_column,
-    )
+    """Sites with data in ``[start_date, end_date]`` as a ``SiteFeatureCollection``."""
+    return service.sites_with_data_between(start_date, end_date)
 
 
 @router.get(
     "/data/feature-collection/{product}/latest", dependencies=[Depends(api_key_auth)]
 )
 def get_feature_collection_of_items_latest_dates(
-    repo: ParquetRepository = Depends(get_repo),
+    service: SiteFeatureService = Depends(get_site_service),
 ) -> LatestTime:
     """The single most recent observation time across all sites."""
-    latest = repo.latest_time()
-    return {"time": _iso(latest) if latest is not None else None}
+    return service.latest_time()
 
 
 @router.get(
@@ -391,27 +351,10 @@ def get_feature_collection_of_item_details(
     site: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    repo: ParquetRepository = Depends(get_repo),
+    service: SiteFeatureService = Depends(get_site_service),
 ) -> SiteDetailsFeature:
-    """One site's observation timeseries as a single details ``Feature``.
-
-    ``start_date`` / ``end_date`` are optional ISO 8601; either may be omitted
-    (omitting both returns the full series). They are normalized to naive UTC to
-    match the dataset's ``TIMESTAMP_NS`` time column. Each ``value_columns``
-    entry becomes a ``[time_ms, value]`` series; for a grouped dataset (mooring)
-    the series are nested per depth under a ``"NOMINAL_DEPTH_<value>"`` key.
-    """
-    start_date = parse_utc_datetime("start_date", start_date)
-    end_date = parse_utc_datetime("end_date", end_date)
-    rows = repo.site_details(site, start_date, end_date)
-    return site_details_feature_collection(
-        rows,
-        time_column=repo.time_column,
-        longitude_column=repo.longitude_column,
-        latitude_column=repo.latitude_column,
-        value_columns=list(repo.value_columns),
-        group_column=repo.group_column,
-    )
+    """One site's observation timeseries as a single details ``Feature``."""
+    return service.site_details(site, start_date, end_date)
 
 
 @router.get("/data/{uuid}/{key}", dependencies=[Depends(api_key_auth)])

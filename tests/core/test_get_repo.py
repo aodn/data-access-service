@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from data_access_service.core.routes import get_repo
+from data_access_service.utils.routes_helper import get_repo
 
 
 class _FakeRepo:

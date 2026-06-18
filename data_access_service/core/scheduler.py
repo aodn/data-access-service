@@ -6,7 +6,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from data_access_service import API
-from data_access_service.models.duckdb_repository import ParquetRepository
+from data_access_service.repositories.duckdb_repository import ParquetRepository
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class TaskScheduler:
     """Refreshes every registered :class:`ParquetRepository` on a schedule.
 
     Each repository owns its own dataset locations and the SQL to (re)load it
-    (see :mod:`data_access_service.models.duckdb_repository`); this scheduler just
+    (see :mod:`data_access_service.repositories.duckdb_repository`); this scheduler just
     drives the loads. The repositories share the single ``DuckDBSession`` built in
     :mod:`data_access_service.server`, so every read endpoint sees the refreshed
     tables.

@@ -11,8 +11,8 @@ from data_access_service.config.config import IntTestConfig
 from data_access_service.core.api import API
 from data_access_service.core.routes import router as api_router
 from data_access_service.core.scheduler import TaskScheduler
-from data_access_service.models.duckdb_repository import build_repositories
-from data_access_service.models.duckdb_session import DuckDBSession
+from data_access_service.repositories.duckdb_repository import build_repositories
+from data_access_service.repositories.duckdb_session import DuckDBSession
 
 
 def _build_duckdb_session() -> DuckDBSession:

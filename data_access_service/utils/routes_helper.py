@@ -21,7 +21,7 @@ import xarray
 import xarray as xr
 from dask.dataframe import DataFrame
 from dateutil import parser
-from fastapi import HTTPException, Request, BackgroundTasks
+from fastapi import Depends, HTTPException, Request, BackgroundTasks
 from fastapi.responses import Response, FileResponse
 from geojson import Feature, FeatureCollection
 from geojson.geometry import Geometry
@@ -43,6 +43,10 @@ from data_access_service.core.constants import (
 )
 from data_access_service.core.error import ErrorResponse
 from data_access_service.models.value_count import ValueCount
+from data_access_service.repositories.duckdb_repository import (
+    REPOSITORY_CLASSES,
+    ParquetRepository,
+)
 from data_access_service.utils.date_time_utils import (
     DATE_FORMAT,
     ensure_timezone,
@@ -450,6 +454,36 @@ class HealthCheckResponse(BaseModel):
 def get_api_instance(request: Request) -> API:
     instance = request.app.state.api_instance
     return instance
+
+
+def get_repo(product: str, request: Request) -> ParquetRepository:
+    """Resolve the repository for the ``{product}`` path segment.
+
+    404 if the product is unknown; 503 if its table has not been loaded yet (the
+    startup pre-load / refresh is still in progress).
+    """
+    repositories = getattr(request.app.state, "repositories", {})
+    repo = repositories.get(product)
+    if repo is None:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"Unknown product '{product}'. Available: {', '.join(REPOSITORY_CLASSES)}",
+        )
+    if not repo.is_loaded():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail=f"Data for '{product}' is not ready yet.",
+        )
+    return repo
+
+
+def get_site_service(repo: ParquetRepository = Depends(get_repo)):
+    """Service over the resolved product repository for the feature-collection routes."""
+    # Imported lazily: SiteFeatureService -> parse_utc_datetime in this module would
+    # otherwise form an import cycle at module load.
+    from data_access_service.core.site_feature_service import SiteFeatureService
+
+    return SiteFeatureService(repo)
 
 
 def calculate_cell_coordinates(lat_min, lat_max, lon_min, lon_max):
