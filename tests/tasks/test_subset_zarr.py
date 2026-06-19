@@ -478,7 +478,7 @@ class TestSubsetZarr(TestWithS3):
         After:   UCUR(TIME, LATITUDE, LONGITUDE)
         """
         import numpy as np
-        from unittest.mock import MagicMock
+        from data_access_service.utils import geotiff_export
 
         # Build a fake radar-like dataset with I,J dims
         expected_lats = np.array([-30.0, -29.0, -28.0])
@@ -495,19 +495,8 @@ class TestSubsetZarr(TestWithS3):
             coords={"TIME": [0, 1]},
         )
 
-        # Mock the processor (we only need log and dim name lookup)
-        mock_processor = MagicMock(spec=ZarrProcessor)
-        mock_processor.log = MagicMock()
-        mock_processor._ZarrProcessor__get_dim_names.return_value = (
-            "LATITUDE",
-            "LONGITUDE",
-            "TIME",
-        )
-
         # Run the conversion
-        converted = ZarrProcessor._ZarrProcessor__convert_ij_dims_to_latlon(
-            mock_processor, ds, "test.zarr"
-        )
+        converted = geotiff_export.convert_ij_dims_to_latlon(ds, "LATITUDE", "LONGITUDE")
 
         # I,J should be replaced by LATITUDE/LONGITUDE
         assert "I" not in converted.dims
