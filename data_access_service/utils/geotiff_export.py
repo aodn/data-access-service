@@ -1,6 +1,7 @@
 """Export a subset Zarr Dataset to GeoTIFF files in a ZIP archive."""
 
 import gc
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -33,6 +34,65 @@ def prepare_grid_for_geotiff(
             f"{lon_drift:.4f} deg), will warp to a regular grid for GeoTIFF"
         )
     return dataset
+
+
+def build_geotiff_zip(
+    dataset: xarray.Dataset,
+    zip_path: Path,
+    dataset_base: str,
+    lat_name: str,
+    lon_name: str,
+    time_name: str,
+    log=None,
+) -> None:
+    """Convert a Dataset to GeoTIFF files in a single ZIP archive.
+
+    Output structure:
+        {dataset}_geotiff.zip
+          ├── {variable}/
+          │     ├── {dataset}_{variable}_{YYYY-MM-DD}.tif
+          │     └── ...
+          └── ...
+
+    Raises ValueError if no variable can be exported.
+    """
+    is_curvilinear = has_ij_dims(dataset)
+    if is_curvilinear:
+        # Curvilinear variables are indexed by (I, J); exclude the lat/lon arrays.
+        data_vars = [
+            var
+            for var in dataset.data_vars
+            if dataset[var].dtype.kind in ("i", "u", "f")
+            and "I" in dataset[var].dims
+            and "J" in dataset[var].dims
+            and var not in (lat_name, lon_name)
+        ]
+    else:
+        data_vars = get_geotiff_compatible_vars(dataset, lat_name, lon_name)
+
+    if not data_vars:
+        raise ValueError(
+            f"No gridded numeric variables found for GeoTIFF export of {dataset_base}."
+        )
+
+    lat_ascending = (
+        False if is_curvilinear else is_lat_ascending(dataset, lat_name, log)
+    )
+
+    with tempfile.TemporaryDirectory() as tif_dir:
+        write_all_tifs_to_zip(
+            zip_path,
+            dataset,
+            dataset_base,
+            data_vars,
+            time_name,
+            lat_name,
+            lon_name,
+            lat_ascending,
+            is_curvilinear,
+            Path(tif_dir),
+            log,
+        )
 
 
 def write_all_tifs_to_zip(
@@ -100,6 +160,8 @@ def regular_slice_to_geotiff(
     log=None,
 ) -> None:
     """Write a single 2D DataArray slice to a GeoTIFF file."""
+    import rioxarray  # noqa: F401
+
     if lat_ascending:
         slice_data = slice_data.sortby(lat_name, ascending=False)
 
@@ -108,6 +170,7 @@ def regular_slice_to_geotiff(
     slice_data.attrs.pop("_FillValue", None)
     slice_data.encoding.pop("_FillValue", None)
 
+    # AODN zarr has no CRS, so write it as plain WGS84 (EPSG:4326).
     slice_data = slice_data.rio.set_spatial_dims(x_dim=lon_name, y_dim=lat_name)
     slice_data = slice_data.rio.write_crs("EPSG:4326")
     slice_data = slice_data.rio.write_nodata(np.nan)

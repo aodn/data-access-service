@@ -359,77 +359,16 @@ class ZarrProcessor:
             return [f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"]
 
     def __write_to_s3_as_geotiff(self, dataset: xarray.Dataset, key: str) -> List[str]:
-        """Convert an xarray Dataset to GeoTIFF files in a single ZIP archive.
-
-        Output structure (uploaded to S3):
-            {dataset}_geotiff.zip
-              ├── {variable}/
-              │     ├── {dataset}_{variable}_{YYYY-MM-DD}.tif
-              │     └── ...
-              └── ...
-
-        GeoTIFF requires gridded data (lat/lon as dimensions) with:
-        - CRS set to EPSG:4326 (WGS84), since AODN zarr datasets don't embed CRS
-        - Descending latitude (north-to-south) for rasterio's affine transform
-        - Explicit nodata sentinel for NaN values
-        """
-        import rioxarray  # noqa: F401
-
+        """Build the GeoTIFF ZIP for the dataset and upload it to S3."""
         lat_name, lon_name, time_name = self.__get_dim_names(key)
-
-        # A curvilinear grid still has raw I/J dims; its variables are indexed by
-        # (I, J), a reduced grid's by lat/lon.
-        is_curvilinear = geotiff_export.has_ij_dims(dataset)
-        if is_curvilinear:
-            data_vars = [
-                var
-                for var in dataset.data_vars
-                if dataset[var].dtype.kind in ("i", "u", "f")
-                and "I" in dataset[var].dims
-                and "J" in dataset[var].dims
-                and var not in (lat_name, lon_name)
-            ]
-        else:
-            data_vars = geotiff_export.get_geotiff_compatible_vars(
-                dataset, lat_name, lon_name
-            )
-
-        if not data_vars:
-            raise ValueError(
-                f"No gridded numeric variables found in dataset {key} for GeoTIFF export."
-            )
-
-        self.log.info(
-            f"GeoTIFF export: lat_dim={lat_name}, lon_dim={lon_name}, "
-            f"time_dim={time_name}, vars={data_vars}"
-        )
-
-        lat_ascending = (
-            False
-            if is_curvilinear
-            else geotiff_export.is_lat_ascending(dataset, lat_name, self.log)
-        )
         dataset_base = key.replace(".zarr", "")
         zip_name = f"{dataset_base}_geotiff.zip"
 
         with tempfile.TemporaryDirectory() as work_dir:
-            work_dir = Path(work_dir)
-            zip_path = work_dir / zip_name
-
-            geotiff_export.write_all_tifs_to_zip(
-                zip_path=zip_path,
-                dataset=dataset,
-                dataset_base=dataset_base,
-                data_vars=data_vars,
-                time_name=time_name,
-                lat_name=lat_name,
-                lon_name=lon_name,
-                lat_ascending=lat_ascending,
-                is_curvilinear=is_curvilinear,
-                work_dir=work_dir,
-                log=self.log,
+            zip_path = Path(work_dir) / zip_name
+            geotiff_export.build_geotiff_zip(
+                dataset, zip_path, dataset_base, lat_name, lon_name, time_name, self.log
             )
-
             url = self.__upload_zip_to_s3(zip_path, zip_name)
 
         self.log.info(f"Exported GeoTIFF ZIP for {key}")
