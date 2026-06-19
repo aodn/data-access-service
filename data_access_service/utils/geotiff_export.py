@@ -7,6 +7,24 @@ from pathlib import Path
 import numpy as np
 import xarray
 
+# Treat differences below this (degrees) as zero, to absorb float rounding.
+REGULAR_GRID_TOLERANCE = 1e-6
+
+
+def grid_drift(lat_2d: np.ndarray, lon_2d: np.ndarray):
+    """How much the grid bends: max lat change along a row, lon change down a column."""
+    # Example: row [-30, -30.02, -30.04] varies by up to 0.04, so its drift is 0.04.
+    lat_drift = float(np.nanmax(np.abs(lat_2d - lat_2d[:, [0]])))
+    lon_drift = float(np.nanmax(np.abs(lon_2d - lon_2d[[0], :])))
+    return lat_drift, lon_drift
+
+
+def is_regular_grid(
+    lat_drift: float, lon_drift: float, tolerance: float = REGULAR_GRID_TOLERANCE
+) -> bool:
+    """True if the grid is effectively straight (it bends less than the tolerance)."""
+    return lat_drift <= tolerance and lon_drift <= tolerance
+
 
 def convert_ij_dims_to_latlon(
     dataset: xarray.Dataset, lat_name: str, lon_name: str, log=None
@@ -62,11 +80,16 @@ def write_all_tifs_to_zip(
     lat_name: str,
     lon_name: str,
     lat_ascending: bool,
+    is_curvilinear: bool,
     work_dir: Path,
     log=None,
 ) -> None:
     """Write one TIF per variable per time step into a single ZIP archive."""
     time_values = dataset[time_name].values
+
+    # A curvilinear grid stores lat/lon as 2D arrays that don't change over time.
+    lat_2d = dataset[lat_name].values if is_curvilinear else None
+    lon_2d = dataset[lon_name].values if is_curvilinear else None
 
     if log:
         log.info(
@@ -88,9 +111,14 @@ def write_all_tifs_to_zip(
                 tif_name = f"{dataset_base}_{var_name}_{date_str}.tif"
                 tif_path = work_dir / tif_name
 
-                slice_to_geotiff(
-                    slice_data, tif_path, lat_name, lon_name, lat_ascending, log
-                )
+                if is_curvilinear:
+                    curvilinear_slice_to_geotiff(
+                        slice_data, tif_path, lat_2d, lon_2d, log
+                    )
+                else:
+                    slice_to_geotiff(
+                        slice_data, tif_path, lat_name, lon_name, lat_ascending, log
+                    )
 
                 zf.write(tif_path, arcname=f"{var_name}/{tif_name}")
                 tif_path.unlink(missing_ok=True)
@@ -136,3 +164,52 @@ def slice_to_geotiff(
     slice_data = slice_data.rio.write_nodata(np.nan)
 
     slice_data.rio.to_raster(str(tif_path))
+
+
+def curvilinear_slice_to_geotiff(
+    slice_data: xarray.DataArray,
+    tif_path: Path,
+    lat_2d: np.ndarray,
+    lon_2d: np.ndarray,
+    log=None,
+) -> None:
+    """Warp a curvilinear (I, J) slice onto a regular lat/lon GeoTIFF.
+
+    A curvilinear grid has no straight axes, so we anchor a sample of pixels to
+    their true lon/lat (ground control points) and let GDAL warp the rest - the
+    standard way to handle satellite swath / rotated grids.
+    """
+    import rioxarray  # noqa: F401
+    from rasterio.control import GroundControlPoint
+    from rasterio.enums import Resampling
+
+    # 1. Reduce to 2D: drop extra dims like depth (take the first index).
+    extra_dims = [d for d in slice_data.dims if d not in ("I", "J")]
+    for dim in extra_dims:
+        slice_data = slice_data.isel({dim: 0})
+    if extra_dims and log:
+        log.warning(f"Selected first index for extra dims: {extra_dims}")
+
+    # 2. Use float so missing cells can be marked with NaN nodata.
+    if slice_data.dtype.kind in ("i", "u"):
+        slice_data = slice_data.astype(np.float32)
+
+    # 3. Build ground control points: sample ~20 pixels per axis and record each
+    #    one's true lon/lat. Example: with 100 rows, take every 5th plus the last.
+    n_i, n_j = lat_2d.shape
+    rows = sorted(set(range(0, n_i, max(1, n_i // 20))) | {n_i - 1})
+    cols = sorted(set(range(0, n_j, max(1, n_j // 20))) | {n_j - 1})
+    gcps = [
+        GroundControlPoint(row=i, col=j, x=float(lon_2d[i, j]), y=float(lat_2d[i, j]))
+        for i in rows
+        for j in cols
+        if np.isfinite(lat_2d[i, j]) and np.isfinite(lon_2d[i, j])
+    ]
+
+    # 4. Attach the GCPs and warp onto a regular WGS84 grid (bilinear resampling).
+    slice_data = slice_data.rio.set_spatial_dims(x_dim="J", y_dim="I")
+    slice_data = slice_data.rio.write_gcps(gcps, "EPSG:4326")
+    slice_data = slice_data.rio.write_nodata(np.nan)
+    warped = slice_data.rio.reproject("EPSG:4326", resampling=Resampling.bilinear)
+
+    warped.rio.to_raster(str(tif_path))

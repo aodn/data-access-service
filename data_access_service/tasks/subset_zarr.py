@@ -136,16 +136,28 @@ class ZarrProcessor:
     def __get_zarr_dataset_for_(self, key: str) -> xarray.Dataset | None:
 
         zarr_store = self.api._instance.get_dataset(key).zarr_store
-        # Only GeoTIFF needs 1D lat/lon axes; NetCDF keeps the original 2D coords.
+        # GeoTIFF needs 1D lat/lon axes. A regular grid reduces to 1D losslessly;
+        # a curvilinear grid keeps its 2D coords and is warped at write time.
+        # NetCDF keeps the 2D coords as-is.
         if (
             self.output_format == "geotiff"
             and "I" in zarr_store.dims
             and "J" in zarr_store.dims
         ):
             lat_name, lon_name, _ = self.__get_dim_names(key)
-            zarr_store = geotiff_export.convert_ij_dims_to_latlon(
-                zarr_store, lat_name, lon_name, self.log
+            lat_drift, lon_drift = geotiff_export.grid_drift(
+                zarr_store[lat_name].values, zarr_store[lon_name].values
             )
+            if geotiff_export.is_regular_grid(lat_drift, lon_drift):
+                self.log.info("Regular grid, reducing I/J to 1D lat/lon")
+                zarr_store = geotiff_export.convert_ij_dims_to_latlon(
+                    zarr_store, lat_name, lon_name, self.log
+                )
+            else:
+                self.log.info(
+                    f"Curvilinear grid (lat drift {lat_drift:.4f}, lon drift "
+                    f"{lon_drift:.4f} deg), will warp to a regular grid for GeoTIFF"
+                )
 
         # apply subsetting conditions for each bbox and merge them
         merged_dataset: xarray.Dataset | None = None
@@ -363,9 +375,23 @@ class ZarrProcessor:
         import rioxarray  # noqa: F401
 
         lat_name, lon_name, time_name = self.__get_dim_names(key)
-        data_vars = geotiff_export.get_geotiff_compatible_vars(
-            dataset, lat_name, lon_name
-        )
+
+        # A curvilinear grid still has raw I/J dims; its variables are indexed by
+        # (I, J), a reduced grid's by lat/lon.
+        is_curvilinear = "I" in dataset.dims and "J" in dataset.dims
+        if is_curvilinear:
+            data_vars = [
+                var
+                for var in dataset.data_vars
+                if dataset[var].dtype.kind in ("i", "u", "f")
+                and "I" in dataset[var].dims
+                and "J" in dataset[var].dims
+                and var not in (lat_name, lon_name)
+            ]
+        else:
+            data_vars = geotiff_export.get_geotiff_compatible_vars(
+                dataset, lat_name, lon_name
+            )
 
         if not data_vars:
             raise ValueError(
@@ -377,7 +403,11 @@ class ZarrProcessor:
             f"time_dim={time_name}, vars={data_vars}"
         )
 
-        lat_ascending = geotiff_export.is_lat_ascending(dataset, lat_name, self.log)
+        lat_ascending = (
+            False
+            if is_curvilinear
+            else geotiff_export.is_lat_ascending(dataset, lat_name, self.log)
+        )
         dataset_base = key.replace(".zarr", "")
         zip_name = f"{dataset_base}_geotiff.zip"
 
@@ -394,6 +424,7 @@ class ZarrProcessor:
                 lat_name=lat_name,
                 lon_name=lon_name,
                 lat_ascending=lat_ascending,
+                is_curvilinear=is_curvilinear,
                 work_dir=work_dir,
                 log=self.log,
             )
