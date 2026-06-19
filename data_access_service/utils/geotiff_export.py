@@ -79,22 +79,7 @@ def regular_slice_to_geotiff(
     if lat_ascending:
         slice_data = slice_data.sortby(lat_name, ascending=False)
 
-    # Ensure the slice is exactly 2D (lat, lon). Extra dims left after
-    # squeeze() (e.g. depth, level) would produce a multi-band TIF that
-    # QGIS may not open correctly.
-    if slice_data.ndim != 2:
-        extra_dims = [d for d in slice_data.dims if d not in (lat_name, lon_name)]
-        for dim in extra_dims:
-            slice_data = slice_data.isel({dim: 0})
-        if log:
-            log.warning(
-                f"Slice had {slice_data.ndim + len(extra_dims)} dims, "
-                f"selected first index for extra dims: {extra_dims}"
-            )
-
-    # Convert integer data to float so NaN nodata is representable
-    if slice_data.dtype.kind in ("i", "u"):
-        slice_data = slice_data.astype(np.float32)
+    slice_data = _to_2d_float(slice_data, (lat_name, lon_name), log)
 
     slice_data.attrs.pop("_FillValue", None)
     slice_data.encoding.pop("_FillValue", None)
@@ -123,18 +108,10 @@ def curvilinear_slice_to_geotiff(
     from rasterio.control import GroundControlPoint
     from rasterio.enums import Resampling
 
-    # 1. Reduce to 2D: drop extra dims like depth (take the first index).
-    extra_dims = [d for d in slice_data.dims if d not in ("I", "J")]
-    for dim in extra_dims:
-        slice_data = slice_data.isel({dim: 0})
-    if extra_dims and log:
-        log.warning(f"Selected first index for extra dims: {extra_dims}")
+    # 1. Reduce to a 2D float grid (drop extra dims like depth).
+    slice_data = _to_2d_float(slice_data, ("I", "J"), log)
 
-    # 2. Use float so missing cells can be marked with NaN nodata.
-    if slice_data.dtype.kind in ("i", "u"):
-        slice_data = slice_data.astype(np.float32)
-
-    # 3. Build ground control points: sample ~20 pixels per axis and record each
+    # 2. Build ground control points: sample ~20 pixels per axis and record each
     #    one's true lon/lat. Example: with 100 rows, take every 5th plus the last.
     n_i, n_j = lat_2d.shape
     rows = sorted(set(range(0, n_i, max(1, n_i // 20))) | {n_i - 1})
@@ -146,13 +123,26 @@ def curvilinear_slice_to_geotiff(
         if np.isfinite(lat_2d[i, j]) and np.isfinite(lon_2d[i, j])
     ]
 
-    # 4. Attach the GCPs and warp onto a regular WGS84 grid (bilinear resampling).
+    # 3. Attach the GCPs and warp onto a regular WGS84 grid (bilinear resampling).
     slice_data = slice_data.rio.set_spatial_dims(x_dim="J", y_dim="I")
     slice_data = slice_data.rio.write_gcps(gcps, "EPSG:4326")
     slice_data = slice_data.rio.write_nodata(np.nan)
     warped = slice_data.rio.reproject("EPSG:4326", resampling=Resampling.bilinear)
 
     warped.rio.to_raster(str(tif_path))
+
+
+def _to_2d_float(slice_data: xarray.DataArray, keep_dims, log=None):
+    """Drop any extra dim (keep only keep_dims) and make the values float."""
+    extra_dims = [d for d in slice_data.dims if d not in keep_dims]
+    for dim in extra_dims:
+        slice_data = slice_data.isel({dim: 0})
+    if extra_dims and log:
+        log.warning(f"Selected first index for extra dims: {extra_dims}")
+    # float so NaN can mark nodata
+    if slice_data.dtype.kind in ("i", "u"):
+        slice_data = slice_data.astype(np.float32)
+    return slice_data
 
 
 def get_geotiff_compatible_vars(
