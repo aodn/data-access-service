@@ -11,66 +11,6 @@ import xarray
 REGULAR_GRID_TOLERANCE = 1e-6
 
 
-def grid_drift(lat_2d: np.ndarray, lon_2d: np.ndarray):
-    """How much the grid bends: max lat change along a row, lon change down a column."""
-    # Example: row [-30, -30.02, -30.04] varies by up to 0.04, so its drift is 0.04.
-    lat_drift = float(np.nanmax(np.abs(lat_2d - lat_2d[:, [0]])))
-    lon_drift = float(np.nanmax(np.abs(lon_2d - lon_2d[[0], :])))
-    return lat_drift, lon_drift
-
-
-def is_regular_grid(
-    lat_drift: float, lon_drift: float, tolerance: float = REGULAR_GRID_TOLERANCE
-) -> bool:
-    """True if the grid is effectively straight (it bends less than the tolerance)."""
-    return lat_drift <= tolerance and lon_drift <= tolerance
-
-
-def convert_ij_dims_to_latlon(
-    dataset: xarray.Dataset, lat_name: str, lon_name: str, log=None
-) -> xarray.Dataset:
-    """Convert (TIME, I, J) datasets to (TIME, LATITUDE, LONGITUDE)."""
-    lats = dataset[lat_name].values[:, 0]
-    lons = dataset[lon_name].values[0, :]
-
-    if log:
-        log.info(
-            f"Converting I({len(lats)})→{lat_name}, " f"J({len(lons)})→{lon_name}"
-        )
-
-    # Replace 2D index dims (I,J) with 1D coordinate dims (lat,lon)
-    dataset = dataset.drop_vars([lat_name, lon_name])
-    dataset = dataset.rename({"I": lat_name, "J": lon_name})
-    dataset = dataset.assign_coords({lat_name: lats, lon_name: lons})
-
-    return dataset
-
-
-def get_geotiff_compatible_vars(
-    dataset: xarray.Dataset, lat_name: str, lon_name: str
-) -> list:
-    """Filter variables that can be exported as GeoTIFF: must be numeric and have lat/lon dims."""
-    results = []
-    for var in dataset.data_vars:
-        is_numeric = dataset[var].dtype.kind in ("i", "u", "f")
-        has_latlon = lat_name in dataset[var].dims and lon_name in dataset[var].dims
-        if is_numeric and has_latlon:
-            results.append(var)
-    return results
-
-
-def is_lat_ascending(dataset: xarray.Dataset, lat_name: str, log=None) -> bool:
-    """Check if latitude is ascending (south-to-north). Rasterio expects descending."""
-    lat_values = dataset[lat_name].values
-    ascending = lat_values[0] < lat_values[-1] if len(lat_values) > 1 else False
-    if ascending and log:
-        log.info(
-            f"Latitude is ascending ({lat_values[0]} -> {lat_values[-1]}), "
-            "will sort descending for rasterio"
-        )
-    return ascending
-
-
 def write_all_tifs_to_zip(
     zip_path: Path,
     dataset: xarray.Dataset,
@@ -105,7 +45,7 @@ def write_all_tifs_to_zip(
                 # Don't .squeeze() here: a bbox that selects a single
                 # lat or lon cell would collapse that dim away, breaking
                 # set_spatial_dims later. Extra non-spatial dims are
-                # handled explicitly in slice_to_geotiff.
+                # handled explicitly in regular_slice_to_geotiff.
                 slice_data = dataset[var_name].sel({time_name: t}).compute()
 
                 tif_name = f"{dataset_base}_{var_name}_{date_str}.tif"
@@ -116,7 +56,7 @@ def write_all_tifs_to_zip(
                         slice_data, tif_path, lat_2d, lon_2d, log
                     )
                 else:
-                    slice_to_geotiff(
+                    regular_slice_to_geotiff(
                         slice_data, tif_path, lat_name, lon_name, lat_ascending, log
                     )
 
@@ -127,7 +67,7 @@ def write_all_tifs_to_zip(
                 gc.collect()
 
 
-def slice_to_geotiff(
+def regular_slice_to_geotiff(
     slice_data: xarray.DataArray,
     tif_path: Path,
     lat_name: str,
@@ -213,3 +153,63 @@ def curvilinear_slice_to_geotiff(
     warped = slice_data.rio.reproject("EPSG:4326", resampling=Resampling.bilinear)
 
     warped.rio.to_raster(str(tif_path))
+
+
+def get_geotiff_compatible_vars(
+    dataset: xarray.Dataset, lat_name: str, lon_name: str
+) -> list:
+    """Filter variables that can be exported as GeoTIFF: must be numeric and have lat/lon dims."""
+    results = []
+    for var in dataset.data_vars:
+        is_numeric = dataset[var].dtype.kind in ("i", "u", "f")
+        has_latlon = lat_name in dataset[var].dims and lon_name in dataset[var].dims
+        if is_numeric and has_latlon:
+            results.append(var)
+    return results
+
+
+def is_lat_ascending(dataset: xarray.Dataset, lat_name: str, log=None) -> bool:
+    """Check if latitude is ascending (south-to-north). Rasterio expects descending."""
+    lat_values = dataset[lat_name].values
+    ascending = lat_values[0] < lat_values[-1] if len(lat_values) > 1 else False
+    if ascending and log:
+        log.info(
+            f"Latitude is ascending ({lat_values[0]} -> {lat_values[-1]}), "
+            "will sort descending for rasterio"
+        )
+    return ascending
+
+
+def grid_drift(lat_2d: np.ndarray, lon_2d: np.ndarray):
+    """How much the grid bends: max lat change along a row, lon change down a column."""
+    # Example: row [-30, -30.02, -30.04] varies by up to 0.04, so its drift is 0.04.
+    lat_drift = float(np.nanmax(np.abs(lat_2d - lat_2d[:, [0]])))
+    lon_drift = float(np.nanmax(np.abs(lon_2d - lon_2d[[0], :])))
+    return lat_drift, lon_drift
+
+
+def is_regular_grid(
+    lat_drift: float, lon_drift: float, tolerance: float = REGULAR_GRID_TOLERANCE
+) -> bool:
+    """True if the grid is effectively straight (it bends less than the tolerance)."""
+    return lat_drift <= tolerance and lon_drift <= tolerance
+
+
+def convert_ij_dims_to_latlon(
+    dataset: xarray.Dataset, lat_name: str, lon_name: str, log=None
+) -> xarray.Dataset:
+    """Convert (TIME, I, J) datasets to (TIME, LATITUDE, LONGITUDE)."""
+    lats = dataset[lat_name].values[:, 0]
+    lons = dataset[lon_name].values[0, :]
+
+    if log:
+        log.info(
+            f"Converting I({len(lats)})→{lat_name}, " f"J({len(lons)})→{lon_name}"
+        )
+
+    # Replace 2D index dims (I,J) with 1D coordinate dims (lat,lon)
+    dataset = dataset.drop_vars([lat_name, lon_name])
+    dataset = dataset.rename({"I": lat_name, "J": lon_name})
+    dataset = dataset.assign_coords({lat_name: lats, lon_name: lons})
+
+    return dataset
