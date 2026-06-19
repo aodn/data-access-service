@@ -3,6 +3,7 @@ aws:
     bucket_name:
       csv: aodn-cloud-optimized-subset-edge
       wave_buoy_backup: datavis-apps-edge-data
+      mooring_backup: datavis-apps-edge-data
   ses:
     sender_email: no.reply@aodn.org.au
   batch:

@@ -3,6 +3,7 @@ aws:
     bucket_name:
       csv: test-bucket
       wave_buoy_backup: test-wave-buoy-backup-bucket
+      mooring_backup: test-mooring-backup-bucket
   ses:
     sender_email: no.reply@aodn.org.au
   batch:

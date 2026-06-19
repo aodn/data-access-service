@@ -16,8 +16,14 @@ from data_access_service.core.constants import (
     STR_LONGITUDE_UPPER_CASE,
     STR_TIME_UPPER_CASE,
 )
+from data_access_service.core.site_feature_service import SiteFeatureService
 from data_access_service.models.ExtendedFeatureCollection import (
     ExtendedFeatureCollection,
+)
+from data_access_service.schemas.sites import (
+    LatestTime,
+    SiteDetailsFeature,
+    SiteFeatureCollection,
 )
 from data_access_service.utils.api_utils import api_key_auth
 from data_access_service.utils.date_time_utils import (
@@ -28,6 +34,7 @@ from data_access_service.utils.date_time_utils import (
 from data_access_service.utils.routes_helper import (
     HealthCheckResponse,
     get_api_instance,
+    get_site_service,
     verify_datatime_param,
     fetch_data,
     async_response_json,
@@ -316,68 +323,38 @@ async def get_zarr_rectangles(
     )
 
 
-@router.get("/data/feature-collection/wave-buoy", dependencies=[Depends(api_key_auth)])
-async def get_feature_collection_of_items_with_data_between_dates(
-    request: Request,
-    start_date: Optional[str] = Query(default=MIN_DATE),
-    end_date: Optional[str] = Query(
-        default=datetime.now(timezone.utc).strftime(DATE_FORMAT)
-    ),
-):
-
-    start_date = verify_datatime_param("start_date", start_date)
-    end_date = verify_datatime_param("end_date", end_date)
-    api_instance = get_api_instance(request)
-    return Response(
-        content=json.dumps(api_instance.fetch_wave_buoy_sites(start_date, end_date)),
-        media_type="application/json",
-    )
+@router.get("/data/feature-collection/{product}", dependencies=[Depends(api_key_auth)])
+def get_feature_collection_of_items_with_data_between_dates(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    service: SiteFeatureService = Depends(get_site_service),
+) -> SiteFeatureCollection:
+    """Sites with data in ``[start_date, end_date]`` as a ``SiteFeatureCollection``."""
+    return service.sites_with_data_between(start_date, end_date)
 
 
 @router.get(
-    "/data/feature-collection/wave-buoy/all", dependencies=[Depends(api_key_auth)]
+    "/data/feature-collection/{product}/latest", dependencies=[Depends(api_key_auth)]
 )
-async def get_feature_collection_of_items_all(request: Request):
-    api_instance = get_api_instance(request)
-    return Response(
-        content=json.dumps(api_instance.fetch_all_unique_wave_buoy_sites()),
-        media_type="application/json",
-    )
+def get_feature_collection_of_items_latest_dates(
+    service: SiteFeatureService = Depends(get_site_service),
+) -> LatestTime:
+    """The single most recent observation time across all sites."""
+    return service.latest_time()
 
 
 @router.get(
-    "/data/feature-collection/wave-buoy/latest", dependencies=[Depends(api_key_auth)]
-)
-async def get_feature_collection_of_items_latest_dates(request: Request):
-    api_instance = get_api_instance(request)
-    return Response(
-        content=json.dumps(api_instance.fetch_wave_buoy_latest_date()),
-        media_type="application/json",
-    )
-
-
-@router.get(
-    "/data/feature-collection/wave-buoy/{buoy_name}",
+    "/data/feature-collection/{product}/{site}",
     dependencies=[Depends(api_key_auth)],
 )
-async def get_feature_collection_of_items_with_data_between_dates(
-    request: Request,
-    buoy_name: str,
-    start_date: Optional[str] = Query(default=MIN_DATE),
-    end_date: Optional[str] = Query(
-        default=datetime.now(timezone.utc).strftime(DATE_FORMAT)
-    ),
-):
-    start_date = verify_datatime_param("start_date", start_date)
-    end_date = verify_datatime_param("end_date", end_date)
-    api_instance = get_api_instance(request)
-
-    return Response(
-        content=json.dumps(
-            api_instance.fetch_wave_buoy_data(buoy_name, start_date, end_date)
-        ),
-        media_type="application/json",
-    )
+def get_feature_collection_of_item_details(
+    site: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    service: SiteFeatureService = Depends(get_site_service),
+) -> SiteDetailsFeature:
+    """One site's observation timeseries as a single details ``Feature``."""
+    return service.site_details(site, start_date, end_date)
 
 
 @router.get("/data/{uuid}/{key}", dependencies=[Depends(api_key_auth)])

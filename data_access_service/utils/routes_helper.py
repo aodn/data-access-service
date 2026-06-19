@@ -5,7 +5,7 @@ import os
 import re
 import tempfile
 import threading
-from datetime import datetime, timezone
+from datetime import timezone
 from http import HTTPStatus
 from os import error
 from queue import Queue
@@ -21,7 +21,7 @@ import xarray
 import xarray as xr
 from dask.dataframe import DataFrame
 from dateutil import parser
-from fastapi import HTTPException, Request, BackgroundTasks
+from fastapi import Depends, HTTPException, Request, BackgroundTasks
 from fastapi.responses import Response, FileResponse
 from geojson import Feature, FeatureCollection
 from geojson.geometry import Geometry
@@ -43,8 +43,13 @@ from data_access_service.core.constants import (
 )
 from data_access_service.core.error import ErrorResponse
 from data_access_service.models.value_count import ValueCount
+from data_access_service.repositories.duckdb_repository import (
+    REPOSITORY_CLASSES,
+    ParquetRepository,
+)
 from data_access_service.utils.date_time_utils import (
     DATE_FORMAT,
+    ensure_timezone,
 )
 
 logger = init_log(Config.get_config())
@@ -194,7 +199,7 @@ def verify_datatime_param(name: str, req_date: str) -> pd.Timestamp:
             if _date.tz is None:
                 _date = _date.tz_localize(pytz.UTC)
 
-    except (ValueError, TypeError) as e:
+    except (ValueError, TypeError):
         error_message = ErrorResponse(
             status_code=HTTPStatus.BAD_REQUEST,
             details=f"Incorrect format [{name}]",
@@ -208,13 +213,40 @@ def verify_datatime_param(name: str, req_date: str) -> pd.Timestamp:
     return _date
 
 
+def parse_utc_datetime(name: str, value: Optional[str]) -> Optional[str]:
+    """Validate an optional ISO-8601 query param and normalize it to naive UTC.
+
+    The mooring/wave-buoy ``TIME`` columns are tz-naive ``TIMESTAMP_NS`` holding
+    UTC instants, so a value bound into ``TIME >= ?`` must itself be naive UTC to
+    compare correctly. This:
+
+      * returns ``None`` unchanged (the endpoints read that as "no bound");
+      * parses ``value``, assuming UTC when it carries no offset and converting
+        to UTC when it does, then drops the tz so it lines up with the column;
+      * raises HTTP 400 (not a downstream DuckDB 500) when it can't be parsed.
+
+    Returns the normalized ``YYYY-MM-DDTHH:MM:SS[.ffffff]`` string.
+    """
+    if value is None:
+        return None
+    try:
+        ts = pd.Timestamp(value)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=f"Invalid datetime for [{name}]: {value!r}. "
+            "Expected ISO 8601, e.g. 2024-01-01T00:00:00Z",
+        )
+    return ensure_timezone(ts).tz_convert("UTC").tz_localize(None).isoformat()
+
+
 def _verify_depth_param(
     name: str, req_value: numpy.double | None
 ) -> numpy.double | None:
     if req_value is not None and req_value > 0.0:
         error_message = ErrorResponse(
             status_code=HTTPStatus.BAD_REQUEST,
-            details=f"Depth cannot greater than zero",
+            details="Depth cannot greater than zero",
             parameters=f"{name}={req_value}",
         )
 
@@ -422,6 +454,36 @@ class HealthCheckResponse(BaseModel):
 def get_api_instance(request: Request) -> API:
     instance = request.app.state.api_instance
     return instance
+
+
+def get_repo(product: str, request: Request) -> ParquetRepository:
+    """Resolve the repository for the ``{product}`` path segment.
+
+    404 if the product is unknown; 503 if its table has not been loaded yet (the
+    startup pre-load / refresh is still in progress).
+    """
+    repositories = getattr(request.app.state, "repositories", {})
+    repo = repositories.get(product)
+    if repo is None:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"Unknown product '{product}'. Available: {', '.join(REPOSITORY_CLASSES)}",
+        )
+    if not repo.is_loaded():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail=f"Data for '{product}' is not ready yet.",
+        )
+    return repo
+
+
+def get_site_service(repo: ParquetRepository = Depends(get_repo)):
+    """Service over the resolved product repository for the feature-collection routes."""
+    # Imported lazily: SiteFeatureService -> parse_utc_datetime in this module would
+    # otherwise form an import cycle at module load.
+    from data_access_service.core.site_feature_service import SiteFeatureService
+
+    return SiteFeatureService(repo)
 
 
 def calculate_cell_coordinates(lat_min, lat_max, lon_min, lon_max):
