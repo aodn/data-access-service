@@ -105,23 +105,17 @@ class ZarrProcessor:
         )
         urls: List[str] = []
 
-        FORMAT_WRITERS = {
-            "netcdf": self.__write_to_s3_as_netcdf,
-            "geotiff": self.__write_to_s3_as_geotiff,
-        }
-        format_writer = FORMAT_WRITERS.get(self.output_format)
-        if format_writer is None:
-            raise ValueError(f"Unsupported format: {self.output_format}")
+        prepare, write = self.__format_handler()
 
         self.log.info("Datasets to process: %s", self.keys)
         for key in self.keys:
             self.log.info("Processing dataset: %s", key)
-            dataset = self.__get_zarr_dataset_for_(key=key)
+            dataset = self.__get_zarr_dataset_for_(key=key, prepare=prepare)
             if dataset is None:
                 self.log.info("No data found for dataset: %s, skipping...", key)
                 continue
 
-            download_uri = format_writer(dataset=dataset, key=key)
+            download_uri = write(dataset=dataset, key=key)
             urls.extend(download_uri)
         subject = f"Finish processing data file whose uuid is:  {self.uuid}"
 
@@ -133,31 +127,38 @@ class ZarrProcessor:
             recipient=self.recipient, subject=subject, html_body=html_content
         )
 
-    def __get_zarr_dataset_for_(self, key: str) -> xarray.Dataset | None:
+    def __format_handler(self):
+        """Return the (prepare, write) pair for the requested output format.
+
+        Each format is self-contained: prepare does any format-specific tweak to
+        the dataset before subsetting, write saves it and returns download URLs.
+        Add a new format by adding one entry here - no other code changes.
+        """
+        handlers = {
+            "netcdf": (self.__prepare_netcdf, self.__write_to_s3_as_netcdf),
+            "geotiff": (self.__prepare_geotiff, self.__write_to_s3_as_geotiff),
+        }
+        if self.output_format not in handlers:
+            raise ValueError(f"Unsupported format: {self.output_format}")
+        return handlers[self.output_format]
+
+    def __prepare_netcdf(self, zarr_store, key):
+        """NetCDF keeps the dataset as-is (2D coords are written losslessly)."""
+        return zarr_store
+
+    def __prepare_geotiff(self, zarr_store, key):
+        """GeoTIFF needs 1D axes, so reduce a regular grid (curvilinear stays 2D)."""
+        if not geotiff_export.has_ij_dims(zarr_store):
+            return zarr_store
+        lat_name, lon_name, _ = self.__get_dim_names(key)
+        return geotiff_export.prepare_grid_for_geotiff(
+            zarr_store, lat_name, lon_name, self.log
+        )
+
+    def __get_zarr_dataset_for_(self, key: str, prepare) -> xarray.Dataset | None:
 
         zarr_store = self.api._instance.get_dataset(key).zarr_store
-        # GeoTIFF needs 1D lat/lon axes. A regular grid reduces to 1D losslessly;
-        # a curvilinear grid keeps its 2D coords and is warped at write time.
-        # NetCDF keeps the 2D coords as-is.
-        if (
-            self.output_format == "geotiff"
-            and "I" in zarr_store.dims
-            and "J" in zarr_store.dims
-        ):
-            lat_name, lon_name, _ = self.__get_dim_names(key)
-            lat_drift, lon_drift = geotiff_export.grid_drift(
-                zarr_store[lat_name].values, zarr_store[lon_name].values
-            )
-            if geotiff_export.is_regular_grid(lat_drift, lon_drift):
-                self.log.info("Regular grid, reducing I/J to 1D lat/lon")
-                zarr_store = geotiff_export.convert_ij_dims_to_latlon(
-                    zarr_store, lat_name, lon_name, self.log
-                )
-            else:
-                self.log.info(
-                    f"Curvilinear grid (lat drift {lat_drift:.4f}, lon drift "
-                    f"{lon_drift:.4f} deg), will warp to a regular grid for GeoTIFF"
-                )
+        zarr_store = prepare(zarr_store, key)  # format-specific prep, no `if format`
 
         # apply subsetting conditions for each bbox and merge them
         merged_dataset: xarray.Dataset | None = None
@@ -378,7 +379,7 @@ class ZarrProcessor:
 
         # A curvilinear grid still has raw I/J dims; its variables are indexed by
         # (I, J), a reduced grid's by lat/lon.
-        is_curvilinear = "I" in dataset.dims and "J" in dataset.dims
+        is_curvilinear = geotiff_export.has_ij_dims(dataset)
         if is_curvilinear:
             data_vars = [
                 var

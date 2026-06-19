@@ -180,6 +180,35 @@ def is_lat_ascending(dataset: xarray.Dataset, lat_name: str, log=None) -> bool:
     return ascending
 
 
+def prepare_grid_for_geotiff(
+    dataset: xarray.Dataset, lat_name: str, lon_name: str, log=None
+) -> xarray.Dataset:
+    """Get a 2D (I, J) grid ready for GeoTIFF.
+
+    A regular grid is reduced to 1D lat/lon here; a curvilinear grid is left as
+    2D and gets warped per slice at write time.
+    """
+    lat_drift, lon_drift = grid_drift(
+        dataset[lat_name].values, dataset[lon_name].values
+    )
+    if is_regular_grid(lat_drift, lon_drift):
+        if log:
+            log.info("Regular grid, reducing I/J to 1D lat/lon")
+        return convert_ij_dims_to_latlon(dataset, lat_name, lon_name, log)
+
+    if log:
+        log.info(
+            f"Curvilinear grid (lat drift {lat_drift:.4f}, lon drift "
+            f"{lon_drift:.4f} deg), will warp to a regular grid for GeoTIFF"
+        )
+    return dataset
+
+
+def has_ij_dims(dataset: xarray.Dataset) -> bool:
+    """True if the dataset still has raw I/J axes (a 2D, not-yet-reduced grid)."""
+    return "I" in dataset.dims and "J" in dataset.dims
+
+
 def grid_drift(lat_2d: np.ndarray, lon_2d: np.ndarray):
     """How much the grid bends: max lat change along a row, lon change down a column."""
     # Example: row [-30, -30.02, -30.04] varies by up to 0.04, so its drift is 0.04.
