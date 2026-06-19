@@ -6,6 +6,7 @@ from data_access_service.utils import geotiff_export
 # Feature: GeoTIFF I/J grid handler (ticket 8564) - a straight grid collapses to
 # 1D losslessly; a tilted (curvilinear) grid must stay 2D so it is not drifted.
 
+
 def _grid(lat, lon):
     """Wrap hand-written 2D lat/lon tables into an (I, J) dataset."""
     lat, lon = np.array(lat, float), np.array(lon, float)
@@ -57,7 +58,9 @@ def test_collapsing_a_straight_grid_to_1d_has_no_drift():
 
     # how far each original point moved from the new 1D axes
     lat_drift = np.max(np.abs(ds["LATITUDE"].values - out["LATITUDE"].values[:, None]))
-    lon_drift = np.max(np.abs(ds["LONGITUDE"].values - out["LONGITUDE"].values[None, :]))
+    lon_drift = np.max(
+        np.abs(ds["LONGITUDE"].values - out["LONGITUDE"].values[None, :])
+    )
     assert lat_drift == 0
     assert lon_drift == 0
 
