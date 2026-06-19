@@ -136,7 +136,12 @@ class ZarrProcessor:
     def __get_zarr_dataset_for_(self, key: str) -> xarray.Dataset | None:
 
         zarr_store = self.api._instance.get_dataset(key).zarr_store
-        if "I" in zarr_store.dims and "J" in zarr_store.dims:
+        # Only GeoTIFF needs 1D lat/lon axes; NetCDF keeps the original 2D coords.
+        if (
+            self.output_format == "geotiff"
+            and "I" in zarr_store.dims
+            and "J" in zarr_store.dims
+        ):
             zarr_store = self.__convert_ij_dims_to_latlon(zarr_store, key)
 
         # apply subsetting conditions for each bbox and merge them
