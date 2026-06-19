@@ -3,6 +3,8 @@ import xarray
 
 from data_access_service.utils import geotiff_export
 
+# Feature: GeoTIFF I/J grid handler (ticket 8564) - a straight grid collapses to
+# 1D losslessly; a tilted (curvilinear) grid must stay 2D so it is not drifted.
 
 def _grid(lat, lon):
     """Wrap hand-written 2D lat/lon tables into an (I, J) dataset."""
@@ -47,17 +49,27 @@ def test_a_tilted_grid_has_drift():
     assert lat_drift > 0 and lon_drift > 0
 
 
-def test_geotiff_collapses_a_straight_grid_to_1d():
-    out = geotiff_export.prepare_grid_for_geotiff(
-        _straight_grid(), "LATITUDE", "LONGITUDE"
-    )
-    assert not geotiff_export.has_ij_dims(out)  # collapsed to 1D
-    np.testing.assert_array_equal(out["LATITUDE"].values, [-30, -29])
-    np.testing.assert_array_equal(out["LONGITUDE"].values, [110, 111, 112])
+def test_collapsing_a_straight_grid_to_1d_has_no_drift():
+    """A straight grid collapses to 1D losslessly, so every original point still
+    sits exactly on the new 1D axes (drift == 0)."""
+    ds = _straight_grid()
+    out = geotiff_export.prepare_grid_for_geotiff(ds, "LATITUDE", "LONGITUDE")
+
+    # how far each original point moved from the new 1D axes
+    lat_drift = np.max(np.abs(ds["LATITUDE"].values - out["LATITUDE"].values[:, None]))
+    lon_drift = np.max(np.abs(ds["LONGITUDE"].values - out["LONGITUDE"].values[None, :]))
+    assert lat_drift == 0
+    assert lon_drift == 0
 
 
-def test_geotiff_keeps_a_tilted_grid_2d():
+def test_a_tilted_grid_is_not_drifted():
+    """The bug collapsed a tilted grid to 1D and moved its points. The fix keeps
+    the grid 2D, so every coordinate stays put (drift == 0)."""
     ds = _tilted_grid()
     out = geotiff_export.prepare_grid_for_geotiff(ds, "LATITUDE", "LONGITUDE")
-    assert geotiff_export.has_ij_dims(out)  # stays 2D, coordinates not moved
-    np.testing.assert_array_equal(out["LATITUDE"].values, ds["LATITUDE"].values)
+
+    # how far each coordinate moved after processing
+    lat_drift = np.max(np.abs(out["LATITUDE"].values - ds["LATITUDE"].values))
+    lon_drift = np.max(np.abs(out["LONGITUDE"].values - ds["LONGITUDE"].values))
+    assert lat_drift == 0
+    assert lon_drift == 0
