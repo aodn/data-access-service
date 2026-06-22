@@ -46,7 +46,7 @@ def generate_pmtiles_for_parquets(api: BaseAPI, uuid: str, dname: str):
                 #  is valid or not before uploading to S3. We don't want to upload an invalid pmtiles file to S3 and cause errors
                 aws.upload_file_to_s3(
                     pmtiles_path,
-                    config.get_visualization_bucket_name(),
+                    config.get_pmtiles_config().bucket_name,
                     f"visualization/{uuid}/{dname}.pmtiles",
                 )
                 logger.info(
