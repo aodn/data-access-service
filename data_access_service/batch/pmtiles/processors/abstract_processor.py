@@ -13,7 +13,7 @@ from data_access_service.core.constants import (
     STR_LONGITUDE_UPPER_CASE,
     STR_TIME_UPPER_CASE,
 )
-from data_access_service.core.duckdbclient import PmtileDuckDBClient
+from data_access_service.core.duckdbclient import PmTileDuckDBClient
 from data_access_service.models.pmtiles_types import (
     PmtilesGenerationConfig,
     PmtilesLayerSpec,
@@ -29,9 +29,7 @@ class AbstractProcessor(ABC):
         self.api = api
         self.config = Config.get_config()
         self.logger = init_log(self.config)
-
-        pm_client = PmtileDuckDBClient()
-        self.con: duckdb.DuckDBPyConnection = pm_client.get_instance()
+        self.pm_client = PmTileDuckDBClient()
 
         # These dirs are relative dir names. If they start with "/", they will be absolute dir names and will cause further problems.
         self.pmtiles_config: PmtilesGenerationConfig = self.config.get_pmtiles_config()
@@ -65,7 +63,7 @@ class AbstractProcessor(ABC):
             return pmtile_path
 
         finally:
-            self.con.close()
+            self.pm_client.close()
             self.logger.debug("DuckDB connection closed")
 
     # The s3 uri of the source parquet. It is not http URL of s3 objects.

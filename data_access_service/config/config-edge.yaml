@@ -11,4 +11,4 @@ aws:
     job_definition: generate-csv-data-file
 pmtiles:
   config:
-    bucket_name: aodn-pmtiles-edge
+    bucket_name: apps-edge-data

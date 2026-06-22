@@ -3,7 +3,7 @@ from .geometry_helper import build_hex_geometry
 
 
 def build_hex_feature(
-    cell: str,
+    cell: str | None,
     month_counts: Dict[int, int],
     layer_name: str,
     minzoom: int,

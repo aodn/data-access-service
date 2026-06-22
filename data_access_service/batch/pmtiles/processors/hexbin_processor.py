@@ -6,7 +6,7 @@ from data_access_service.batch.pmtiles.helpers.features_help import build_hex_fe
 from data_access_service.batch.pmtiles.processors.abstract_processor import (
     AbstractProcessor,
 )
-from data_access_service.core.duckdbclient import PmtileDuckDBClient
+from data_access_service.core.duckdbclient import PmTileDuckDBClient
 
 from data_access_service.models.pmtiles_types import HexLayerSpec
 
@@ -21,13 +21,13 @@ class HexbinProcessor(AbstractProcessor):
         lon_name = self.get_lon_col_name()
         lat_name = self.get_lat_col_name()
         time_col_name = self.get_time_col_name()
-        quoted_lon = PmtileDuckDBClient.quote_identifier(lon_name)
-        quoted_lat = PmtileDuckDBClient.quote_identifier(lat_name)
-        quoted_time = PmtileDuckDBClient.quote_identifier(time_col_name)
-        time_type = PmtileDuckDBClient.detect_time_type(
+        quoted_lon = PmTileDuckDBClient.quote_identifier(lon_name)
+        quoted_lat = PmTileDuckDBClient.quote_identifier(lat_name)
+        quoted_time = PmTileDuckDBClient.quote_identifier(time_col_name)
+        time_type = self.pm_client.detect_time_type(
             input_path=self.get_s3_uri(), time_col=time_col_name
         )
-        ym = PmtileDuckDBClient.build_ym_expression(
+        ym = PmTileDuckDBClient.build_ym_expression(
             time_col=time_col_name, time_type=time_type
         )
 
@@ -54,7 +54,7 @@ class HexbinProcessor(AbstractProcessor):
                     HAVING h_high IS NOT NULL
                 ) TO '{self.get_staged_path()}' (FORMAT PARQUET)
             """
-        self.con.execute(sql)
+        self.pm_client.execute(sql)
         self.logger.info("High-res parquet file complete.")
 
     def get_layers(self) -> Sequence[HexLayerSpec]:
@@ -81,7 +81,7 @@ class HexbinProcessor(AbstractProcessor):
         return max(layer.h3_resolution for layer in self.get_layers())
 
     def __generate_hex_geojsonseq_file(self, layer: HexLayerSpec, max_res: int) -> str:
-        self.con.execute("DROP TABLE IF EXISTS monthly_counts")
+        self.pm_client.execute("DROP TABLE IF EXISTS monthly_counts")
 
         if layer.h3_resolution == max_res:
             sql = f"""
@@ -105,19 +105,21 @@ class HexbinProcessor(AbstractProcessor):
                         ORDER BY h, ym
                     """
 
-        self.con.execute(sql)
+        self.pm_client.execute(sql)
 
-        monthly_rows = self.con.execute(
+        monthly_rows = self.pm_client.execute(
             "SELECT COUNT(*) FROM monthly_counts"
         ).fetchone()[0]
-        distinct_hexes = self.con.execute(
+        distinct_hexes = self.pm_client.execute(
             "SELECT COUNT(DISTINCT h) FROM monthly_counts"
         ).fetchone()[0]
         self.logger.info(
             f"{layer.name} Aggregation result: {distinct_hexes:,} unique H3 cells, {monthly_rows:,} (cell, month) rows"
         )
 
-        cursor = self.con.execute("SELECT h, ym, c FROM monthly_counts ORDER BY h, ym")
+        cursor = self.pm_client.execute(
+            "SELECT h, ym, c FROM monthly_counts ORDER BY h, ym"
+        )
 
         os.makedirs(
             os.path.dirname(layer.layer_geojsonseq_file_name) or ".", exist_ok=True
