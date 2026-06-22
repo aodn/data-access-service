@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from xarray import Dataset
 
 from data_access_service import init_log
+from data_access_service.batch.pmtiles.generator import generate_pmtiles_for_parquets
 from data_access_service.config.config import Config
 from data_access_service.core.api import API
 from data_access_service.core.constants import (
@@ -440,3 +441,9 @@ async def get_data(
             return async_response_json(result, compress)
 
         return None
+
+
+@router.put("/data/{uuid}/{key}/pmtiles", dependencies=[Depends(api_key_auth)])
+async def create_pmtiles(request: Request, uuid: str, key: str):
+    api_instance = get_api_instance(request)
+    generate_pmtiles_for_parquets(api_instance, uuid, key)

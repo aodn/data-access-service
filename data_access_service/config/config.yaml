@@ -24,3 +24,38 @@ column_name_mapping:
     - decimalLongitude
     - release_longitude
     - ssm_lon
+pmtiles:
+  config:
+    output_pmtiles_dir: "data/output"
+    staged_parquet_dir: "data/parquet_staged"
+    geojsonseq_dir: "geojsonseq_tmp"
+    duckdb_temp_dir: "duckdb_tmp"
+    duckdb_database: ":memory:"
+    memory_limit: "20G"
+    threads: 8
+    fetch_size: 500000
+  layers:
+    hex_z0:
+      h3_resolution: 2
+      minzoom: 0
+      maxzoom: 1
+    hex_z2:
+      h3_resolution: 3
+      minzoom: 2
+      maxzoom: 3
+    hex_z4:
+      h3_resolution: 4
+      minzoom: 4
+      maxzoom: 5
+    hex_z6:
+      h3_resolution: 6
+      minzoom: 6
+      maxzoom: 7
+    hex_z8:
+      h3_resolution: 7
+      minzoom: 8
+      maxzoom: 9
+    hex_z10:
+      h3_resolution: 8
+      minzoom: 10
+      maxzoom: 12
