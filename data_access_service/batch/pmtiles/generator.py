@@ -47,7 +47,7 @@ def generate_pmtiles_for_parquets(api: BaseAPI, uuid: str, dname: str):
                 aws.upload_file_to_s3(
                     pmtiles_path,
                     config.get_pmtiles_config().bucket_name,
-                    f"visualization/{uuid}/{dname}.pmtiles",
+                    f"portal/visualization/{uuid}/{dname}.pmtiles",
                 )
                 logger.info(
                     f"Pmtiles file of dataset {dname}, uuid {uuid} uploaded to S3."
