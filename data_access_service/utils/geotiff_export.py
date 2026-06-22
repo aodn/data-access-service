@@ -191,10 +191,7 @@ def curvilinear_slice_to_geotiff(
     their true lon/lat (ground control points) and let GDAL warp the rest - the
     standard way to handle satellite swath / rotated grids.
 
-    TODO(8564): not yet verified on real data. Run on a curvilinear dataset
-    (uuid 38dd003d) with rioxarray/rasterio and confirm the output pixels land
-    at the correct lon/lat - a valid-looking GeoTIFF is not enough. The sparse
-    GCP + default polynomial warp may need TPS for accuracy.
+    GCPs need an explicit z (GDAL rejects z=None).
     """
     import rioxarray  # noqa: F401
     from rasterio.control import GroundControlPoint
@@ -209,7 +206,9 @@ def curvilinear_slice_to_geotiff(
     rows = sorted(set(range(0, n_i, max(1, n_i // 20))) | {n_i - 1})
     cols = sorted(set(range(0, n_j, max(1, n_j // 20))) | {n_j - 1})
     gcps = [
-        GroundControlPoint(row=i, col=j, x=float(lon_2d[i, j]), y=float(lat_2d[i, j]))
+        GroundControlPoint(
+            row=i, col=j, x=float(lon_2d[i, j]), y=float(lat_2d[i, j]), z=0.0
+        )
         for i in rows
         for j in cols
         if np.isfinite(lat_2d[i, j]) and np.isfinite(lon_2d[i, j])
