@@ -14,6 +14,12 @@ class DuckDBClient:
     def get_instance(self):
         pass
 
+    def close(self):
+        pass
+
+    def execute(self, query: str) -> duckdb.DuckDBPyConnection:
+        pass
+
 
 class PmTileDuckDBClient(DuckDBClient):
     # Process-global singletons
@@ -66,8 +72,8 @@ class PmTileDuckDBClient(DuckDBClient):
         self._duckdb_client.close()
         self._duckdb_client = None
 
-    def execute(self, query: str):
-        self._con.execute(query)
+    def execute(self, query: str) -> duckdb.DuckDBPyConnection:
+        return self._con.execute(query)
 
     def detect_time_type(
         self,
