@@ -446,4 +446,10 @@ async def get_data(
 @router.put("/data/{uuid}/{key}/pmtiles", dependencies=[Depends(api_key_auth)])
 async def create_pmtiles(request: Request, uuid: str, key: str):
     api_instance = get_api_instance(request)
+    # Check API initialization status first
+    if not api_instance.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
     generate_pmtiles_for_parquets(api_instance, uuid, key)

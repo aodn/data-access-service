@@ -11,4 +11,4 @@ aws:
     job_definition: generate-csv-data-file
 pmtiles:
   config:
-    bucket_name: apps-staging-data
+    bucket_name: aodn-apps-staging-data
