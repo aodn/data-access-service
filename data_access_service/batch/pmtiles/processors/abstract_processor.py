@@ -1,6 +1,5 @@
 import subprocess
 import time
-import duckdb
 import os
 
 from abc import ABC, abstractmethod

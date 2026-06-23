@@ -11,4 +11,4 @@ aws:
     job_definition: generate-csv-data-file-dev
 pmtiles:
   config:
-    bucket_name: aodn-apps-dev-data
+    bucket_name: portal-dev-data

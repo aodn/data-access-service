@@ -11,4 +11,4 @@ aws:
     job_definition: generate-csv-data-file
 pmtiles:
   config:
-    bucket_name: aodn-apps-edge-data
+    bucket_name: portal-edge-data
