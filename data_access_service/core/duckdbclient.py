@@ -1,5 +1,5 @@
 import duckdb
-
+import os
 from tempfile import TemporaryDirectory
 from data_access_service.models.pmtiles_types import PmtilesGenerationConfig
 from data_access_service import Config
@@ -42,8 +42,11 @@ class PmTileDuckDBClient(DuckDBClient):
                         prefix=self._config.duckdb_temp_dir
                     )
 
+                    # Get the absolute string path of the generated temp folder
+                    temp_path = PmTileDuckDBClient._temp_dir_object.name
+
                     db_config = {
-                        "temp_directory": PmTileDuckDBClient._temp_dir_object.name,
+                        "temp_directory": temp_path,
                         "memory_limit": self._config.memory_limit,
                         "threads": str(int(self._config.threads)),
                         "preserve_insertion_order": "false",
@@ -59,7 +62,16 @@ class PmTileDuckDBClient(DuckDBClient):
                     }
 
                     # Establish the primary process-global connection
-                    db = duckdb.connect(self._config.duckdb_database, config=db_config)
+                    if self._config.duckdb_database == ":memory:":
+                        db = duckdb.connect(
+                            self._config.duckdb_database, config=db_config
+                        )
+                    else:
+                        target_database = os.path.join(
+                            temp_path, self._config.duckdb_database
+                        )
+                        db = duckdb.connect(target_database, config=db_config)
+
                     db.execute("INSTALL httpfs; LOAD httpfs;")
                     db.execute("INSTALL h3 FROM community; LOAD h3;")
 

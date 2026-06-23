@@ -31,6 +31,7 @@ from data_access_service.utils.date_time_utils import (
     ensure_timezone,
     MIN_DATE,
     DATE_FORMAT,
+    time_it,
 )
 from data_access_service.utils.routes_helper import (
     HealthCheckResponse,
@@ -443,8 +444,9 @@ async def get_data(
         return None
 
 
-@router.put("/data/{uuid}/{key}/pmtiles", dependencies=[Depends(api_key_auth)])
-async def create_pmtiles(request: Request, uuid: str, key: str):
+@router.put("/pmtiles/{uuid}/{key}", dependencies=[Depends(api_key_auth)])
+@time_it
+def create_pmtiles(request: Request, uuid: str, key: str):
     api_instance = get_api_instance(request)
     # Check API initialization status first
     if not api_instance.get_api_status():

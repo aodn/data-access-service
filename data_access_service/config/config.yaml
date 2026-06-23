@@ -30,8 +30,8 @@ pmtiles:
     staged_parquet_dir: "portal/pmtiles/parquet_staged"
     geojsonseq_dir: "geojsonseq_tmp"
     duckdb_temp_dir: "duckdb_tmp"
-    duckdb_database: ":memory:"
-    memory_limit: "20G"
+    duckdb_database: "disk_db.duckdb"
+    memory_limit: "1G"
     threads: 8
     fetch_size: 500000
   layers:
