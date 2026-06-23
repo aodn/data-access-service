@@ -30,6 +30,7 @@ class PmTileDuckDBClient(DuckDBClient):
     def __init__(self):
         super().__init__()
         self._con = self.get_instance()
+        self._lock = Lock()
 
     def get_instance(self):
         """Initializes the single global DB instance if it does not exist."""
@@ -65,11 +66,18 @@ class PmTileDuckDBClient(DuckDBClient):
                     PmTileDuckDBClient._global_db_connection = db
 
         # CRITICAL: Return a thread-safe, independent cursor from the global connection
-        self._duckdb_client = PmTileDuckDBClient._global_db_connection.cursor()
+        if self._duckdb_client is None:
+            with self._lock:
+                if self._duckdb_client is None:
+                    self._duckdb_client = (
+                        PmTileDuckDBClient._global_db_connection.cursor()
+                    )
         return self._duckdb_client
 
     def close(self):
-        self._duckdb_client.close()
+        if self._duckdb_client is not None:
+            with self._lock:
+                self._duckdb_client.close()
         self._duckdb_client = None
 
     def execute(self, query: str) -> duckdb.DuckDBPyConnection:
