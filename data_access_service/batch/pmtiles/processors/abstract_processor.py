@@ -17,6 +17,7 @@ from data_access_service.models.pmtiles_types import (
     PmtilesGenerationConfig,
     PmtilesLayerSpec,
 )
+from data_access_service.utils.date_time_utils import time_it
 
 
 class AbstractProcessor(ABC):
@@ -116,6 +117,7 @@ class AbstractProcessor(ABC):
             )
         return time_mapped[0]
 
+    @time_it
     def generate_pmtiles_file(
         self,
         geojsonseq_paths: List[str],
