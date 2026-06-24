@@ -122,10 +122,15 @@ class AbstractProcessor(ABC):
         self,
         geojsonseq_paths: List[str],
         extra_args: Optional[List[str]] = None,
+        max_threads: int = 1,
     ) -> str:
         output_pmtiles_path = self.get_output_pmtiles_path()
         os.makedirs(os.path.dirname(os.path.abspath(output_pmtiles_path)))
 
+        # The memory usage increase linearly with the number of threads,
+        # By default, Tippecanoe spins up as many parallel worker threads as you have CPU cores. Each concurrent thread
+        # processes geographic tiles independently, which multiplies the amount of geometry held in your RAM
+        # simultaneously.
         cmd = [
             "tippecanoe",
             f"--output={output_pmtiles_path}",
@@ -141,15 +146,16 @@ class AbstractProcessor(ABC):
         if extra_args:
             cmd.extend(extra_args)
 
+        env = {**os.environ, "TIPPECANOE_MAX_THREADS": str(max_threads)}
+
         self.logger.info(
             f"Generating {output_pmtiles_path!r} from {len(geojsonseq_paths)} GeoJSONSeq file(s) using Tippecanoe"
         )
-        self.logger.debug(f"Full Tippecanoe command: {' '.join(cmd)}")
-        t0 = time.monotonic()
-        subprocess.run(cmd, check=True)
-        self.logger.info(
-            f"Finished generating {output_pmtiles_path!r} in {time.monotonic() - t0:.1f}s"
+        self.logger.debug(
+            f"Full Tippecanoe command: TIPPECANOE_MAX_THREADS={max_threads} {' '.join(cmd)}"
         )
+        subprocess.run(cmd, check=True, env=env)
+        self.logger.info(f"Finished generating {output_pmtiles_path!r}")
         return output_pmtiles_path
 
     # The layers are the layer config of the PMTiles file. Different Visualization styles should have different layer configs.
