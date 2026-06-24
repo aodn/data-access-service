@@ -91,7 +91,11 @@ class TaskScheduler:
     def _refresh_task(self):
         """Refresh every registered repository (the scheduled job)."""
         if not Config.is_profile_in(
-            EnvType.EDGE, EnvType.STAGING, EnvType.PRODUCTION,EnvType.DEV,EnvType.TESTING
+            EnvType.EDGE,
+            EnvType.STAGING,
+            EnvType.PRODUCTION,
+            EnvType.DEV,
+            EnvType.TESTING,
         ):
             logger.info(
                 "Skipping refresh task on '%s' profile", Config.resolve_profile()

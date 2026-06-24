@@ -14,9 +14,6 @@ from data_access_service.sites.sites_repository import build_repositories
 from data_access_service.core.duckdbclient import ParquetDuckDBClient
 
 
-
-
-
 def api_setup(application: FastAPI) -> API:
     """
     This function is not async which can be use in test, the lifespan however
