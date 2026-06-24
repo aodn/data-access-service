@@ -73,30 +73,6 @@ poetry install
    $ poetry install
    ```
 
-   ```bash
-   # You should not need to install lib locally, if your python version is correct.
-   # https://arrow.apache.org/install/
-   sudo apt update
-   sudo apt install -y -V ca-certificates lsb-release wget
-   wget https://apache.jfrog.io/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
-   sudo apt install -y -V ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
-   sudo apt update
-   sudo apt install -y -V libarrow-dev # For C++
-   sudo apt install -y -V libarrow-glib-dev # For GLib (C)
-   sudo apt install -y -V libarrow-dataset-dev # For Apache Arrow Dataset C++
-   sudo apt install -y -V libarrow-dataset-glib-dev # For Apache Arrow Dataset GLib (C)
-   sudo apt install -y -V libarrow-acero-dev # For Apache Arrow Acero
-   sudo apt install -y -V libarrow-flight-dev # For Apache Arrow Flight C++
-   sudo apt install -y -V libarrow-flight-glib-dev # For Apache Arrow Flight GLib (C)
-   sudo apt install -y -V libarrow-flight-sql-dev # For Apache Arrow Flight SQL C++
-   sudo apt install -y -V libarrow-flight-sql-glib-dev # For Apache Arrow Flight SQL GLib (C)
-   sudo apt install -y -V libgandiva-dev # For Gandiva C++
-   sudo apt install -y -V libgandiva-glib-dev # For Gandiva GLib (C)
-   sudo apt install -y -V libparquet-dev # For Apache Parquet C++
-   sudo apt install -y -V libparquet-glib-dev # For Apache Parquet GLib (C)
-   sudo apt install -y ninja-build
-   ```
-
 3. **Run the app:**
    In project root folder, create a '.env' file, which contains your API key, e.g.:
 
@@ -104,11 +80,15 @@ poetry install
    API_KEY="your_actual_api_key_here"
    ```
 
-   Host will be `http://localhost:5000` and default profile is DEV
+   Host will be `http://localhost:5000` and default profile is DEV, make sure you export the AWS key of edge env
+   else you will see s3 upload failed for some operations
 
-   ```bash
-   $ python -m data_access_service.server
-   ```
+      ```bash
+      export AWS_ACCESS_KEY_ID="???"
+      export AWS_SECRET_ACCESS_KEY="???"
+      export AWS_SESSION_TOKEN="???"
+      $ python -m data_access_service.server
+      ```
 
 ### Code formatting
 
@@ -213,3 +193,43 @@ Another part of this project is to run batch jobs for dataset subsetting.
   4. run the ogc-api project locally and run the portal project locally (make sure your local portal is pointing to the local ogc-api project).
   5. Go to localhost:5173, and navigate to an IMOS hosted dataset. On the detail page, select any date range and / or spatial area, and click "Download" button. This will trigger the batch job.
   6. For dev stage, if you cannot receive the email, please make sure the email address you provided has added into the AWS SES verified email list.
+
+## Styles
+
+We are using [material ui](https://mui.com/material-ui/) and our configuration theme file it's in `AppTheme.ts`
+
+## Automated UI tests
+
+See [`playwright/README.md`](./playwright/README.md).
+
+## Commit
+
+We are using [gitmoji](https://gitmoji.dev/)(OPTIONAL) with husky and commitlint. Here you have an example of the most used ones:
+
+- :art: - Improving structure/format of the code.
+- :zap: - Improving performance.
+- :fire: - Removing code or files.
+- :bug: - Fixing a bug.
+- :ambulance: - Critical hotfix.
+- :sparkles: - Introducing new features.
+- :memo: - Adding or updating documentation.
+- :rocket: - Deploying stuff.
+- :lipstick: - Updating the UI and style files.
+- :tada: - Beginning a project.
+
+Example of use:
+`:wrench: add husky and commitlint config`
+
+## Branching name
+
+- `hotfix/`: for quickly fixing critical issues,
+- `usually/`: with a temporary solution
+- `bugfix/`: for fixing a bug
+- `feature/`: for adding, removing or modifying a feature
+- `test/`: for experimenting something which is not an issue
+- `wip/`: for a work in progress
+
+And add the issue id after an `/` followed with an explanation of the task.
+
+Example of use:
+`feature/5348-create-react-app`
