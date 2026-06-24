@@ -9,3 +9,6 @@ aws:
   batch:
     job_queue: generate-csv-data-file
     job_definition: generate-csv-data-file
+pmtiles:
+  config:
+    bucket_name: aodnportal-staging-data
