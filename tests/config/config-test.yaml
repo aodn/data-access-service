@@ -9,3 +9,6 @@ aws:
   batch:
     job_queue: generate-csv-data-file-test
     job_definition: generate-csv-data-file-test
+pmtiles:
+  config:
+    bucket_name: apps-test-data

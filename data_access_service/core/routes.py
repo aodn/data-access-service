@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from xarray import Dataset
 
 from data_access_service import init_log
+from data_access_service.batch.pmtiles.generator import generate_pmtiles_for_parquets
 from data_access_service.config.config import Config
 from data_access_service.core.api import API
 from data_access_service.core.constants import (
@@ -30,6 +31,7 @@ from data_access_service.utils.date_time_utils import (
     ensure_timezone,
     MIN_DATE,
     DATE_FORMAT,
+    time_it,
 )
 from data_access_service.utils.routes_helper import (
     HealthCheckResponse,
@@ -440,3 +442,16 @@ async def get_data(
             return async_response_json(result, compress)
 
         return None
+
+
+@router.put("/pmtiles/{uuid}/{key}", dependencies=[Depends(api_key_auth)])
+@time_it
+def create_pmtiles(request: Request, uuid: str, key: str):
+    api_instance = get_api_instance(request)
+    # Check API initialization status first
+    if not api_instance.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
+    generate_pmtiles_for_parquets(api_instance, uuid, key)

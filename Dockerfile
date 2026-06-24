@@ -1,6 +1,10 @@
 FROM mambaorg/micromamba:2 AS conda-base
 # Using micromamba (a fast alternative to conda) to build the exact environment
 
+# Temp work around due to deps in cloud optimized lib use xarray lib that is fork by Loz with some fix
+# "xarray @ git+https://github.com/lbesnard/xarray.git@2025.06.01.dev2#egg=xarray[complete]",
+ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_XARRAY=2025.6.1.dev2
+
 USER root
 WORKDIR /app
 RUN useradd -l -m -s /bin/bash appuser
