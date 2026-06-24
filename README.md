@@ -90,7 +90,7 @@ poetry install
       $ python -m data_access_service.server
       ```
 
-### Code formatting
+## Code formatting
 
 The command below is for manual checks; checks are also executed when you run `git commit`.
 
@@ -113,6 +113,39 @@ To verify `poetry.lock` is in sync with `pyproject.toml`:
 ```shell
 pre-commit run poetry-lock --all-files
 ```
+
+### Commit
+
+We are using [gitmoji](https://gitmoji.dev/)(OPTIONAL) with husky and commitlint. Here you have an example of the most used ones:
+
+- :art: - Improving structure/format of the code.
+- :zap: - Improving performance.
+- :fire: - Removing code or files.
+- :bug: - Fixing a bug.
+- :ambulance: - Critical hotfix.
+- :sparkles: - Introducing new features.
+- :memo: - Adding or updating documentation.
+- :rocket: - Deploying stuff.
+- :lipstick: - Updating the UI and style files.
+- :tada: - Beginning a project.
+
+Example of use:
+`:wrench: add husky and commitlint config`
+
+### Branching name
+
+- `hotfix/`: for quickly fixing critical issues,
+- `usually/`: with a temporary solution
+- `bugfix/`: for fixing a bug
+- `feature/`: for adding, removing or modifying a feature
+- `test/`: for experimenting something which is not an issue
+- `wip/`: for a work in progress
+
+And add the issue id after an `/` followed with an explanation of the task.
+
+Example of use:
+`feature/5348-create-react-app`
+
 
 ## Environment variables
 
@@ -193,43 +226,3 @@ Another part of this project is to run batch jobs for dataset subsetting.
   4. run the ogc-api project locally and run the portal project locally (make sure your local portal is pointing to the local ogc-api project).
   5. Go to localhost:5173, and navigate to an IMOS hosted dataset. On the detail page, select any date range and / or spatial area, and click "Download" button. This will trigger the batch job.
   6. For dev stage, if you cannot receive the email, please make sure the email address you provided has added into the AWS SES verified email list.
-
-## Styles
-
-We are using [material ui](https://mui.com/material-ui/) and our configuration theme file it's in `AppTheme.ts`
-
-## Automated UI tests
-
-See [`playwright/README.md`](./playwright/README.md).
-
-## Commit
-
-We are using [gitmoji](https://gitmoji.dev/)(OPTIONAL) with husky and commitlint. Here you have an example of the most used ones:
-
-- :art: - Improving structure/format of the code.
-- :zap: - Improving performance.
-- :fire: - Removing code or files.
-- :bug: - Fixing a bug.
-- :ambulance: - Critical hotfix.
-- :sparkles: - Introducing new features.
-- :memo: - Adding or updating documentation.
-- :rocket: - Deploying stuff.
-- :lipstick: - Updating the UI and style files.
-- :tada: - Beginning a project.
-
-Example of use:
-`:wrench: add husky and commitlint config`
-
-## Branching name
-
-- `hotfix/`: for quickly fixing critical issues,
-- `usually/`: with a temporary solution
-- `bugfix/`: for fixing a bug
-- `feature/`: for adding, removing or modifying a feature
-- `test/`: for experimenting something which is not an issue
-- `wip/`: for a work in progress
-
-And add the issue id after an `/` followed with an explanation of the task.
-
-Example of use:
-`feature/5348-create-react-app`
