@@ -4,6 +4,9 @@ import boto3
 
 from data_access_service import init_log, Config, API
 from data_access_service.batch import subsetting
+from data_access_service.batch.pmtiles.generator import (
+    generate_pmtiles_for_all_parquets,
+)
 
 logger = init_log(Config.get_config())
 
@@ -45,5 +48,7 @@ match call_type:
         subsetting.prepare_data(api, job_index=job_index, parameters=parameters)
     case "sub-setting-data-collection":
         subsetting.collect_data(parameters=parameters)
+    case "generate-pmtiles-for-parquet":
+        generate_pmtiles_for_all_parquets(api=api)
     case _:
         logger.error("Unknow call type", call_type)

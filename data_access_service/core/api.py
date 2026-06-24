@@ -1,16 +1,15 @@
-from data_access_service import Config
 import asyncio
 import gzip
 import math
 import os
 import gc
 
-import duckdb
 import json
 import zlib
 
 
 from concurrent.futures import ThreadPoolExecutor
+from data_access_service import Config
 
 import dask.dataframe as ddf
 import pandas as pd
@@ -28,9 +27,7 @@ from xarray.core.utils import Frozen
 
 from data_access_service.core.constants import (
     STR_LATITUDE_UPPER_CASE,
-    STR_LATITUDE_LOWER_CASE,
     STR_LONGITUDE_UPPER_CASE,
-    STR_LONGITUDE_LOWER_CASE,
     STR_TIME_UPPER_CASE,
     OUTPUT_FORMAT_COMPRESSION_RATIO,
     COMPRESSION_RATIO_GEOTIFF,
@@ -39,7 +36,6 @@ from data_access_service.core.constants import (
 )
 from data_access_service.models.subset_request import SUPPORTED_OUTPUT_FORMATS
 from data_access_service.core.descriptor import Depth, Descriptor, Coordinate
-from urllib.parse import unquote_plus
 
 
 log = logging.getLogger(__name__)
@@ -389,24 +385,6 @@ class API(BaseAPI):
         # UUID to metadata mapper
         self._instance = DataQuery.GetAodn()
         self._metadata = None
-        try:
-            config = Config.get_config()
-
-            temp_dir = os.path.join(os.getcwd(), ".duckdb_temp")
-            os.makedirs(temp_dir, exist_ok=True)
-
-            self._memconn = duckdb.connect(
-                # use disk instead of memory as system low of memory and OOM
-                # ":memory:cloud_optimized",
-                "/tmp/wave_buoy.duckdb",
-                config={
-                    "threads": 1,
-                    "temp_directory": temp_dir,
-                    "max_memory": config.get_duckdb_maxmem(),
-                },
-            )
-        except Exception as e:
-            log.warning(f"Failed to set DuckDB memory/temp limits: {e}")
 
     def destroy(self):
         log.info("Destroying API instance")
@@ -420,8 +398,6 @@ class API(BaseAPI):
             except OSError as e:
                 # Do nothing as we end process
                 pass
-
-        self._memconn.close()
 
     async def async_initialize_metadata(self):
         # Use ThreadPoolExecutor to run blocking calls in a separate thread
@@ -462,172 +438,8 @@ class API(BaseAPI):
         # used for checking if the API instance is ready
         return self._is_ready
 
-    def get_memconn(self):
-        return self._memconn
-
     def get_aodn_instance(self):
         return self._instance
-
-    def fetch_wave_buoy_data(self, buoy_name: str, start_date: str, end_date: str):
-        buoy_name = unquote_plus(buoy_name)
-        print("Fetching data for buoy:", buoy_name)
-        waveBuoyPositionQueryResult = (
-            self.get_memconn()
-            .execute(
-                f"""SELECT
-            LATITUDE,
-            LONGITUDE
-            FROM wave_buoy_realtime_nonqc
-            WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (WPFM IS NOT NULL OR WPMH IS NOT NULL) AND (WHTH IS NOT NULL OR WSSH IS NOT NULL)
-            LIMIT 1"""
-            )
-            .df()
-        )
-
-        ds = ddf.from_pandas(waveBuoyPositionQueryResult)
-        lat = (
-            ds[STR_LATITUDE_UPPER_CASE].compute().values[0]
-            if len(ds[STR_LATITUDE_UPPER_CASE].compute().values) > 0
-            else None
-        )
-        lon = (
-            ds[STR_LONGITUDE_UPPER_CASE].compute().values[0]
-            if len(ds[STR_LONGITUDE_UPPER_CASE].compute().values) > 0
-            else None
-        )
-
-        if lat is None or lon is None:
-            return {}
-
-        waveBuoyDataQueryResult = (
-            self.get_memconn()
-            .execute(
-                f"""SELECT SSWMD, WPFM, WPMH, WHTH, WSSH, TIME
-            FROM wave_buoy_realtime_nonqc
-            WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND site_name = '{buoy_name}' AND (WPFM IS NOT NULL OR WPMH IS NOT NULL) AND (WHTH IS NOT NULL OR WSSH IS NOT NULL)
-            ORDER BY TIME"""
-            )
-            .df()
-        )
-        feature = {
-            "type": "Feature",
-            "properties": {
-                "SSWMD": [],
-                "WPFM": [],
-                "WPMH": [],
-                "WHTH": [],
-                "WSSH": [],
-            },
-            "geometry": {
-                "type": "Point",
-                "coordinates": [lon, lat],
-            },
-        }
-
-        for _, row in waveBuoyDataQueryResult.iterrows():
-            # make it milliseconds since epoch, compatible with Highcharts, the time is in UTC because the data source is in UTC, so we can just use timestamp without timezone conversion
-            time_sec = int(row["TIME"].timestamp() * 1000)
-            if pd.notna(row["SSWMD"]):
-                feature["properties"]["SSWMD"].append([time_sec, row["SSWMD"]])
-            if pd.notna(row["WPFM"]):
-                feature["properties"]["WPFM"].append([time_sec, row["WPFM"]])
-            if pd.notna(row["WPMH"]):
-                feature["properties"]["WPMH"].append([time_sec, row["WPMH"]])
-            if pd.notna(row["WHTH"]):
-                feature["properties"]["WHTH"].append([time_sec, row["WHTH"]])
-            if pd.notna(row["WSSH"]):
-                feature["properties"]["WSSH"].append([time_sec, row["WSSH"]])
-
-        return feature
-
-    def fetch_wave_buoy_latest_date(self):
-        result = (
-            self.get_memconn()
-            .execute(
-                f"""SELECT
-            MAX(TIME) AS TIME
-            FROM wave_buoy_realtime_nonqc"""
-            )
-            .df()
-        )
-        # DuckDB return pandas Timestamp which is timezone-naive like 2026-04-21 23:25:00, we need to convert it to ISO format with Z. The time is in UTC because the data source is in UTC, so we can just add Z at the end to indicate it is UTC time.
-        return result["TIME"].item().isoformat() + "Z"
-
-    def fetch_all_unique_wave_buoy_sites(self):
-        result = (
-            self.get_memconn()
-            .execute(
-                """SELECT
-            site_name,
-            MAX(TIME) AS TIME,
-            first(LATITUDE) AS LATITUDE,
-            first(LONGITUDE) AS LONGITUDE
-            FROM wave_buoy_realtime_nonqc
-            GROUP BY site_name"""
-            )
-            .df()
-        )
-        feature_collection = {
-            "type": "FeatureCollection",
-            "features": [],
-        }
-        for _, row in result.iterrows():
-            feature = {
-                "type": "Feature",
-                "properties": {
-                    "buoy": row["site_name"],
-                    "date": row["TIME"].isoformat() + "Z",
-                },
-                "geometry": {
-                    "type": "Point",
-                    "coordinates": [
-                        row[STR_LONGITUDE_UPPER_CASE],
-                        row[STR_LATITUDE_UPPER_CASE],
-                    ],
-                },
-            }
-            feature_collection["features"].append(feature)
-
-        return feature_collection
-
-    def fetch_wave_buoy_sites(self, start_date: str, end_date: str):
-        result = (
-            self.get_memconn()
-            .execute(
-                f"""SELECT
-            site_name,
-            first(TIME) AS TIME,
-            first(LATITUDE) AS LATITUDE,
-            first(LONGITUDE) AS LONGITUDE
-            FROM wave_buoy_realtime_nonqc
-            WHERE TIME >= '{start_date}' AND TIME < '{end_date}' AND (WPFM IS NOT NULL OR WPMH IS NOT NULL) AND (WHTH IS NOT NULL OR WSSH IS NOT NULL)
-            GROUP BY site_name"""
-            )
-            .df()
-        )
-        feature_collection = {
-            "type": "FeatureCollection",
-            "features": [],
-        }
-        for _, row in result.iterrows():
-            feature = {
-                "type": "Feature",
-                "properties": {
-                    "buoy": row["site_name"],
-                    # DuckDB return pandas Timestamp which is timezone-naive like 2026-04-21 23:25:00, we need to convert it to ISO format with Z. The time is in UTC because the data source is in UTC, so we can just add Z at the end to indicate it is UTC time.
-                    "date": row["TIME"].isoformat() + "Z",
-                },
-                "geometry": {
-                    "type": "Point",
-                    "coordinates": [
-                        row[STR_LONGITUDE_UPPER_CASE],
-                        row[STR_LATITUDE_UPPER_CASE],
-                    ],
-                },
-            }
-            feature_collection["features"].append(feature)
-
-        return feature_collection
 
     # Do not use cache, so that we can refresh it again
     def refresh_uuid_dataset_map(self):
@@ -728,9 +540,19 @@ class API(BaseAPI):
                 )
 
             if end_date is not None:
+                # Some dataset has future date, we need to do a safety check
+                if end_date.tzinfo is None:
+                    now_compare = pd.Timestamp.now()
+                else:
+                    now_compare = pd.Timestamp.now(tz="UTC")
+                    end_date = end_date.tz_convert("UTC")
+
                 end_date = end_date.replace(
                     hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
                 )
+
+                if end_date > now_compare:
+                    end_date = now_compare
             return start_date, end_date
         else:
             return None, None

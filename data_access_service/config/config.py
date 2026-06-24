@@ -1,3 +1,4 @@
+from typing import List
 import yaml
 import boto3
 import os
@@ -10,6 +11,10 @@ from enum import Enum
 from typing import Dict
 from botocore.client import BaseClient
 from dotenv import load_dotenv
+from data_access_service.models.pmtiles_types import (
+    PmtilesGenerationConfig,
+    HexLayerSpec,
+)
 
 
 class EnvType(Enum):
@@ -128,6 +133,12 @@ class Config:
         val = self.config["aws"]["s3"]["bucket_name"]["wave_buoy_backup"]
         return val.strip() if isinstance(val, str) else val
 
+    def get_mooring_backup_bucket_name(self):
+        if self.config is None:
+            return None
+        val = self.config["aws"]["s3"]["bucket_name"]["mooring_backup"]
+        return val.strip() if isinstance(val, str) else val
+
     def get_job_queue_name(self):
         return (
             self.config["aws"]["batch"]["job_queue"]
@@ -183,6 +194,44 @@ class Config:
 
     def get_api_key(self):
         return os.getenv("API_KEY")
+
+    def get_pmtiles_config(self) -> PmtilesGenerationConfig:
+        pmconfig = self.config.get("pmtiles", {}).get("config", {})
+        return PmtilesGenerationConfig(
+            output_pmtiles_dir=pmconfig["output_pmtiles_dir"],
+            staged_parquet_dir=pmconfig["staged_parquet_dir"],
+            geojsonseq_dir=pmconfig["geojsonseq_dir"],
+            duckdb_temp_dir=pmconfig["duckdb_temp_dir"],
+            duckdb_database=pmconfig["duckdb_database"],
+            memory_limit=pmconfig["memory_limit"],
+            threads=pmconfig["threads"],
+            fetch_size=pmconfig["fetch_size"],
+            bucket_name=pmconfig["bucket_name"],
+        )
+
+    def get_hex_layer_specs(self, dname: str) -> List[HexLayerSpec] | None:
+        """
+        Returns the list of hex layer specifications for a given dataset.
+        :param dname: The name of the dataset.
+        """
+        if dname.endswith(".parquet"):
+            dname = dname.removesuffix(".parquet")
+            hex_layer_specs = self.config.get("pmtiles", {}).get("layers", {})
+
+            specs = []
+            for spec_name, spec_value in hex_layer_specs.items():
+                specs.append(
+                    HexLayerSpec(
+                        name=spec_name,
+                        h3_resolution=spec_value["h3_resolution"],
+                        minzoom=spec_value["minzoom"],
+                        maxzoom=spec_value["maxzoom"],
+                        layer_geojsonseq_file_name=f"{dname}_{spec_name}.geojsonseq",
+                    )
+                )
+            return specs
+        else:
+            return None
 
 
 class IntTestConfig(Config):

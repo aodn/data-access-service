@@ -2,13 +2,16 @@ import re
 import pandas as pd
 import pytz
 import pyarrow
-from pyarrow import compute as pc
 import numpy as np
 import heapq
-from pandas import Timestamp
+import time
 
+from pandas import Timestamp
+from functools import wraps
+from pyarrow import compute as pc
 from typing import Tuple
 from datetime import datetime
+from inspect import iscoroutinefunction
 
 from aodn_cloud_optimised.lib.DataQuery import (
     DataSource,
@@ -587,3 +590,23 @@ def split_date_range(
             index = index + 1
 
     return date_ranges
+
+
+def time_it(func):
+    @wraps(func)
+    async def async_wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = await func(*args, **kwargs)
+        end = time.perf_counter()
+        log.info(f"[{func.__name__}] took {end - start:.6f} seconds.")
+        return result
+
+    @wraps(func)
+    def sync_wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        end = time.perf_counter()
+        log.info(f"[{func.__name__}] took {end - start:.6f} seconds.")
+        return result
+
+    return async_wrapper if iscoroutinefunction(func) else sync_wrapper
