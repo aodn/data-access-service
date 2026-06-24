@@ -28,7 +28,7 @@ def _build_duckdb_session() -> DuckDBSession:
     db_path = f"/tmp/data_access_{secrets.token_urlsafe(16)}.duckdb"
 
     session = DuckDBSession(database=db_path)
-    session.execute("SET GLOBAL threads = 1")
+    session.execute(f"SET GLOBAL threads = {config.get_duckdb_threads()}")
     session.execute(f"SET GLOBAL memory_limit = '{config.get_duckdb_maxmem()}'")
     session.execute(f"SET GLOBAL temp_directory = '{temp_dir}'")
     return session
