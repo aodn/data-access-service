@@ -26,6 +26,7 @@ from data_access_service.schemas.sites import (
     SiteDetailsFeature,
     SiteFeatureCollection,
 )
+from data_access_service.utils import sse_utils
 from data_access_service.utils.api_utils import api_key_auth
 from data_access_service.utils.date_time_utils import (
     ensure_timezone,
@@ -43,6 +44,7 @@ from data_access_service.utils.routes_helper import (
     generate_feature_collection,
     generate_rect_features,
 )
+from data_access_service.utils.sse_utils import sse_it
 from data_access_service.utils.sse_wrapper import sse_wrapper
 
 router = APIRouter(prefix=Config.BASE_URL)
@@ -446,6 +448,7 @@ async def get_data(
 
 @router.put("/pmtiles/{uuid}/{key}", dependencies=[Depends(api_key_auth)])
 @time_it
+@sse_it
 def create_pmtiles(request: Request, uuid: str, key: str):
     api_instance = get_api_instance(request)
     # Check API initialization status first
@@ -454,4 +457,4 @@ def create_pmtiles(request: Request, uuid: str, key: str):
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
             detail="API is not ready. Metadata initialization is still in progress.",
         )
-    generate_pmtiles_for_parquets(api_instance, uuid, key)
+    return generate_pmtiles_for_parquets(api_instance, uuid, key)
