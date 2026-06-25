@@ -17,11 +17,11 @@ from data_access_service.core.constants import (
     STR_LONGITUDE_UPPER_CASE,
     STR_TIME_UPPER_CASE,
 )
-from data_access_service.core.site_feature_service import SiteFeatureService
+from data_access_service.sites.site_feature_service import SiteFeatureService
 from data_access_service.models.ExtendedFeatureCollection import (
     ExtendedFeatureCollection,
 )
-from data_access_service.schemas.sites import (
+from data_access_service.sites.sites import (
     LatestTime,
     SiteDetailsFeature,
     SiteFeatureCollection,

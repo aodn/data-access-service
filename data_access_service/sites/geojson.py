@@ -29,7 +29,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from data_access_service.schemas.sites import (
+from data_access_service.sites.sites import (
     SeriesByColumn,
     SiteDetailsFeature,
     SiteDetailsProperties,

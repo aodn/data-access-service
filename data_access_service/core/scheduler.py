@@ -6,7 +6,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from data_access_service import API
-from data_access_service.repositories.duckdb_repository import ParquetRepository
+from data_access_service import Config
+from data_access_service.config.config import EnvType
+from data_access_service.sites.sites_repository import ParquetRepository
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +32,8 @@ class TaskScheduler:
     """Refreshes every registered :class:`ParquetRepository` on a schedule.
 
     Each repository owns its own dataset locations and the SQL to (re)load it
-    (see :mod:`data_access_service.repositories.duckdb_repository`); this scheduler just
-    drives the loads. The repositories share the single ``DuckDBSession`` built in
+    (see :mod:`data_access_service.sites.duckdb_repository`); this scheduler just
+    drives the loads. The repositories share the single ``ParquetDuckDBClient`` built in
     :mod:`data_access_service.server`, so every read endpoint sees the refreshed
     tables.
     """
@@ -88,6 +90,17 @@ class TaskScheduler:
 
     def _refresh_task(self):
         """Refresh every registered repository (the scheduled job)."""
+        if not Config.is_profile_in(
+            EnvType.EDGE,
+            EnvType.STAGING,
+            EnvType.PRODUCTION,
+            EnvType.DEV,
+            EnvType.TESTING,
+        ):
+            logger.info(
+                "Skipping refresh task on '%s' profile", Config.resolve_profile()
+            )
+            return
         logger.info("Refresh task is running...")
         for name, repo in self.repositories.items():
             self._refresh_repository(name, repo)

@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 from fastapi import HTTPException
 
-from data_access_service.core.site_feature_service import SiteFeatureService
+from data_access_service.sites.site_feature_service import SiteFeatureService
 
 
 class _FakeRepo:

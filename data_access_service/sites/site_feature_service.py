@@ -12,13 +12,13 @@ the resolved repo (see ``get_site_service`` in :mod:`data_access_service.utils.r
 
 from __future__ import annotations
 
-from data_access_service.repositories.duckdb_repository import ParquetRepository
-from data_access_service.schemas.sites import (
+from data_access_service.sites.sites_repository import ParquetRepository
+from data_access_service.sites.sites import (
     LatestTime,
     SiteDetailsFeature,
     SiteFeatureCollection,
 )
-from data_access_service.utils.geojson import (
+from data_access_service.sites.geojson import (
     _iso,
     site_details_feature_collection,
     site_feature_collection,
