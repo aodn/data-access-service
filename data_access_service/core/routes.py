@@ -452,12 +452,6 @@ async def get_data(
 @router.post("/data/{uuid}/estimate_size", dependencies=[Depends(api_key_auth)])
 async def estimate_size_multi(uuid: str, request: Request, body: EstimateSizeRequest):
     api_instance = get_api_instance(request)
-
-
-@router.put("/pmtiles/{uuid}/{key}", dependencies=[Depends(api_key_auth)])
-@time_it
-def create_pmtiles(request: Request, uuid: str, key: str):
-    api_instance = get_api_instance(request)
     # Check API initialization status first
     if not api_instance.get_api_status():
         raise HTTPException(
@@ -527,4 +521,16 @@ def create_pmtiles(request: Request, uuid: str, key: str):
         )
 
     return Response(content=json.dumps(result), media_type="application/json")
+
+
+@router.put("/pmtiles/{uuid}/{key}", dependencies=[Depends(api_key_auth)])
+@time_it
+def create_pmtiles(request: Request, uuid: str, key: str):
+    api_instance = get_api_instance(request)
+    # Check API initialization status first
+    if not api_instance.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
     generate_pmtiles_for_parquets(api_instance, uuid, key)
