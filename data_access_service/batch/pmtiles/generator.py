@@ -24,7 +24,7 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI):
                 generate_pmtiles_for_parquets(api, k, dataset_name)
 
 
-def generate_pmtiles_for_parquets(api: BaseAPI, uuid: str, dname: str):
+def generate_pmtiles_for_parquets(api: BaseAPI, uuid: str, dname: str) -> bool:
 
     try:
         logger.info(f"Start generating PMTiles for uuid: {uuid}, dataset: {dname}")
@@ -54,6 +54,9 @@ def generate_pmtiles_for_parquets(api: BaseAPI, uuid: str, dname: str):
                 )
     except Exception as e:
         logger.error(f"Error processing dataset {uuid}, parquet {dname}: {e}")
+        return False
+
+    return True
 
 
 def get_visualization_style(uuid: str, dname: str) -> PmtilesVisualizationStyle:
