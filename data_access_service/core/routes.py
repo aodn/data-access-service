@@ -81,7 +81,15 @@ async def get_mapped_metadata(uuid: Optional[str] = None, request: Request = Non
             detail="API is not ready. Metadata initialization is still in progress.",
         )
 
-    return api_instance.get_mapped_meta_data(uuid)
+    metadata = api_instance.get_mapped_meta_data(uuid)
+
+    if metadata.get("not_exist") is not None:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail="Dataset not found.",
+        )
+
+    return metadata
 
 
 @router.get("/metadata/{uuid}/raw", dependencies=[Depends(api_key_auth)])
