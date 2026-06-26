@@ -2,6 +2,7 @@ from typing import List
 import yaml
 import boto3
 import os
+import secrets
 import tempfile
 import logging.config
 
@@ -12,6 +13,7 @@ from typing import Dict
 from botocore.client import BaseClient
 from dotenv import load_dotenv
 from data_access_service.models.pmtiles_types import (
+    ParquetsGenerationConfig,
     PmtilesGenerationConfig,
     HexLayerSpec,
 )
@@ -77,13 +79,24 @@ class Config:
         return Config._deep_merge(base, override)
 
     @staticmethod
-    def get_config(profile: EnvType = None):
+    def resolve_profile(profile: EnvType = None) -> EnvType:
+        """Resolve the active profile, falling back to env detection when not given."""
         if profile is None:
             if os.getenv("PYTEST_CURRENT_TEST") is not None:
                 # User do not specify profile but running pytest so it must be testing
                 profile = EnvType.TESTING
             else:
                 profile = EnvType(os.getenv("PROFILE", EnvType.DEV))
+        return profile
+
+    @staticmethod
+    def is_profile_in(*env_types: EnvType) -> bool:
+        """True if the current active profile is one of the given EnvTypes."""
+        return Config.resolve_profile() in env_types
+
+    @staticmethod
+    def get_config(profile: EnvType = None):
+        profile = Config.resolve_profile(profile)
 
         # Use lock to ensure thread-safe singleton instantiation
         with Config._lock:
@@ -126,6 +139,11 @@ class Config:
         if self.config is None:
             return "800M"
         return self.config.get("duckdb", {}).get("maxmem", "800M")
+
+    def get_duckdb_threads(self):
+        if self.config is None:
+            return 8
+        return self.config.get("duckdb", {}).get("threads", 8)
 
     def get_wave_buoy_backup_bucket_name(self):
         if self.config is None:
@@ -207,6 +225,22 @@ class Config:
             threads=pmconfig["threads"],
             fetch_size=pmconfig["fetch_size"],
             bucket_name=pmconfig["bucket_name"],
+        )
+
+    def get_parquets_config(self) -> ParquetsGenerationConfig:
+        """DuckDB tuning for the API's on-disk Parquet read client.
+
+        On disk (not ``:memory:``) with a memory limit and a temp dir so large
+        dataset loads spill to disk instead of OOM-killing the container. A
+        random db path lets multiple instances run locally without clashing.
+        """
+        return ParquetsGenerationConfig(
+            database=f"/tmp/data_access_{secrets.token_urlsafe(16)}.duckdb",
+            memory_limit=self.get_duckdb_maxmem(),
+            threads=self.get_duckdb_threads(),
+            temp_directory=os.path.join(os.getcwd(), ".duckdb_temp"),
+            region="ap-southeast-2",
+            extensions=("httpfs", "json"),
         )
 
     def get_hex_layer_specs(self, dname: str) -> List[HexLayerSpec] | None:

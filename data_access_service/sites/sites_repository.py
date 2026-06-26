@@ -1,6 +1,6 @@
-"""A base Parquet repository over a DuckDB session.
+"""A base Parquet repository over a DuckDB client.
 
-``ParquetRepository`` binds one :class:`~session.DuckDBSession` to one Parquet
+``ParquetRepository`` binds one :class:`ParquetDuckDBClient` to one Parquet
 dataset — each dataset gets its own subclass (see :mod:`mooring`) that declares
 where it lives and adds dataset-specific reads.
 """
@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from typing import ClassVar
 
 from data_access_service.config.config import Config
-from data_access_service.repositories.duckdb_session import DuckDBSession
+from data_access_service.core.duckdbclient import ParquetDuckDBClient
 
 
 def quote_ident(name: str) -> str:
@@ -75,7 +75,7 @@ class ParquetRepository(ABC):
                 f"{cls.__name__} must define class attributes: {', '.join(missing)}"
             )
 
-    def __init__(self, session: DuckDBSession) -> None:
+    def __init__(self, session: ParquetDuckDBClient) -> None:
         if type(self) is ParquetRepository:
             raise TypeError(
                 "ParquetRepository is abstract; instantiate a dataset subclass"
@@ -126,7 +126,8 @@ class ParquetRepository(ABC):
             SELECT {cols}
             FROM read_parquet(
                 '{self.dataset}/**/*.parquet',
-                hive_partitioning=true
+                hive_partitioning=true,
+                union_by_name=true
             )"""
         )
         return self
@@ -309,6 +310,6 @@ REPOSITORY_CLASSES: dict[str, type[ParquetRepository]] = {
 }
 
 
-def build_repositories(session: DuckDBSession) -> dict[str, ParquetRepository]:
-    """Instantiate one repository per product, all sharing one ``DuckDBSession``."""
+def build_repositories(session: ParquetDuckDBClient) -> dict[str, ParquetRepository]:
+    """Instantiate one repository per product, all sharing one ``ParquetDuckDBClient``."""
     return {name: cls(session) for name, cls in REPOSITORY_CLASSES.items()}

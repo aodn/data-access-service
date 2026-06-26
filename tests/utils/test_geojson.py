@@ -1,4 +1,4 @@
-"""Unit tests for the GeoJSON transforms in data_access_service.utils.geojson.
+"""Unit tests for the GeoJSON transforms in data_access_service.sites.geojson.
 
 Pure data transforms — every function takes a pandas DataFrame (a repository
 read's output) and returns a GeoJSON dict. No DuckDB or S3 involved here.
@@ -6,7 +6,7 @@ read's output) and returns a GeoJSON dict. No DuckDB or S3 involved here.
 
 import pandas as pd
 
-from data_access_service.utils.geojson import (
+from data_access_service.sites.geojson import (
     _iso,
     _native,
     _point,

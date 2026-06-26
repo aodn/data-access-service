@@ -1,7 +1,7 @@
 """Unit tests for ParquetRepository.
 
 The read methods (sites_in_date_range / latest_time / site_details) build SQL
-and run it against the bound DuckDBSession. We exercise them against an
+and run it against the bound ParquetDuckDBClient. We exercise them against an
 in-memory DuckDB seeded from a DataFrame, so no S3 / load() is needed. The
 session's S3-secret creation is patched out (no AWS credentials in tests).
 """
@@ -9,11 +9,11 @@ session's S3-secret creation is patched out (no AWS credentials in tests).
 import pandas as pd
 import pytest
 
-from data_access_service.repositories.duckdb_repository import (
+from data_access_service.sites.sites_repository import (
     ParquetRepository,
     quote_ident,
 )
-from data_access_service.repositories.duckdb_session import DuckDBSession
+from data_access_service.core.duckdbclient import ParquetDuckDBClient
 
 
 class _GroupedRepo(ParquetRepository):
@@ -50,16 +50,18 @@ class _UngroupedRepo(ParquetRepository):
 @pytest.fixture
 def session(monkeypatch):
     # No AWS in tests, and these repos never call load(), so stub the S3 secret.
-    monkeypatch.setattr(DuckDBSession, "create_s3_secret", lambda self, bucket: None)
-    # extensions=() avoids any network (httpfs download) — not needed without load().
-    s = DuckDBSession(database=":memory:", extensions=())
+    monkeypatch.setattr(
+        ParquetDuckDBClient, "create_s3_secret", lambda self, bucket: None
+    )
+    # The autouse memory_parquets_config fixture keeps this in-memory + offline.
+    s = ParquetDuckDBClient()
     yield s
     s.close()
 
 
 def _materialize(repo: ParquetRepository, df: pd.DataFrame) -> None:
     """Seed the repo's table from a DataFrame, standing in for load()."""
-    conn = repo.session.conn
+    conn = repo.session.get_instance()
     conn.register("_seed_df", df)
     conn.execute(
         f"CREATE OR REPLACE TABLE {quote_ident(repo.table)} AS SELECT * FROM _seed_df"

@@ -19,11 +19,11 @@ from data_access_service.core.constants import (
     STR_LONGITUDE_UPPER_CASE,
     STR_TIME_UPPER_CASE,
 )
-from data_access_service.core.site_feature_service import SiteFeatureService
+from data_access_service.sites.site_feature_service import SiteFeatureService
 from data_access_service.models.ExtendedFeatureCollection import (
     ExtendedFeatureCollection,
 )
-from data_access_service.schemas.sites import (
+from data_access_service.sites.sites import (
     LatestTime,
     SiteDetailsFeature,
     SiteFeatureCollection,
@@ -86,7 +86,15 @@ async def get_mapped_metadata(uuid: Optional[str] = None, request: Request = Non
             detail="API is not ready. Metadata initialization is still in progress.",
         )
 
-    return api_instance.get_mapped_meta_data(uuid)
+    metadata = api_instance.get_mapped_meta_data(uuid)
+
+    if metadata.get("not_exist") is not None:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail="Dataset not found.",
+        )
+
+    return metadata
 
 
 @router.get("/metadata/{uuid}/raw", dependencies=[Depends(api_key_auth)])

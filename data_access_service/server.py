@@ -1,6 +1,5 @@
 import asyncio
 import os
-import secrets
 import uvicorn
 
 from fastapi import FastAPI
@@ -11,27 +10,8 @@ from data_access_service.config.config import IntTestConfig
 from data_access_service.core.api import API
 from data_access_service.core.routes import router as api_router
 from data_access_service.core.scheduler import TaskScheduler
-from data_access_service.repositories.duckdb_repository import build_repositories
-from data_access_service.repositories.duckdb_session import DuckDBSession
-
-
-def _build_duckdb_session() -> DuckDBSession:
-    """Build the single on-disk DuckDB session shared by every repository.
-
-    On disk (not ``:memory:``) with a memory limit and a temp dir so large
-    dataset loads spill to disk instead of OOM-killing the container. A random
-    db path lets multiple instances run locally without clashing.
-    """
-    config = Config.get_config()
-    temp_dir = os.path.join(os.getcwd(), ".duckdb_temp")
-    os.makedirs(temp_dir, exist_ok=True)
-    db_path = f"/tmp/data_access_{secrets.token_urlsafe(16)}.duckdb"
-
-    session = DuckDBSession(database=db_path)
-    session.execute("SET GLOBAL threads = 1")
-    session.execute(f"SET GLOBAL memory_limit = '{config.get_duckdb_maxmem()}'")
-    session.execute(f"SET GLOBAL temp_directory = '{temp_dir}'")
-    return session
+from data_access_service.sites.sites_repository import build_repositories
+from data_access_service.core.duckdbclient import ParquetDuckDBClient
 
 
 def api_setup(application: FastAPI) -> API:
@@ -73,7 +53,7 @@ async def lifespan(application: FastAPI):
     session = None
     scheduler = None
     if not isinstance(Config.get_config(), IntTestConfig):
-        session = _build_duckdb_session()
+        session = ParquetDuckDBClient()
         application.state.duckdb_session = session
         application.state.repositories = build_repositories(session)
         scheduler = TaskScheduler(api, application.state.repositories)

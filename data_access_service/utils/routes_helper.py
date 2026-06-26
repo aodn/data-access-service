@@ -43,7 +43,7 @@ from data_access_service.core.constants import (
 )
 from data_access_service.core.error import ErrorResponse
 from data_access_service.models.value_count import ValueCount
-from data_access_service.repositories.duckdb_repository import (
+from data_access_service.sites.sites_repository import (
     REPOSITORY_CLASSES,
     ParquetRepository,
 )
@@ -481,7 +481,7 @@ def get_site_service(repo: ParquetRepository = Depends(get_repo)):
     """Service over the resolved product repository for the feature-collection routes."""
     # Imported lazily: SiteFeatureService -> parse_utc_datetime in this module would
     # otherwise form an import cycle at module load.
-    from data_access_service.core.site_feature_service import SiteFeatureService
+    from data_access_service.sites.site_feature_service import SiteFeatureService
 
     return SiteFeatureService(repo)
 
