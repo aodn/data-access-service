@@ -61,6 +61,10 @@ class HexbinProcessor(AbstractProcessor):
         return self.config.get_hex_layer_specs(self.dataset_name)
 
     def generate_geojsonseq_files(self) -> List[str]:
+        """
+        Query and generate files for combine into PMTiles
+        :return:
+        """
 
         layers = self.get_layers()
         if not isinstance(layers[0], HexLayerSpec):
