@@ -2,7 +2,6 @@ from typing import List
 import yaml
 import boto3
 import os
-import secrets
 import tempfile
 import logging.config
 
@@ -135,16 +134,6 @@ class Config:
         val = self.config["aws"]["s3"]["bucket_name"]["csv"]
         return val.strip() if isinstance(val, str) else val
 
-    def get_duckdb_maxmem(self):
-        if self.config is None:
-            return "800M"
-        return self.config.get("duckdb", {}).get("maxmem", "800M")
-
-    def get_duckdb_threads(self):
-        if self.config is None:
-            return 8
-        return self.config.get("duckdb", {}).get("threads", 8)
-
     def get_wave_buoy_backup_bucket_name(self):
         if self.config is None:
             return None
@@ -231,16 +220,18 @@ class Config:
         """DuckDB tuning for the API's on-disk Parquet read client.
 
         On disk (not ``:memory:``) with a memory limit and a temp dir so large
-        dataset loads spill to disk instead of OOM-killing the container. A
-        random db path lets multiple instances run locally without clashing.
+        dataset loads spill to disk instead of OOM-killing the container. There
+        is exactly one client instance per process, so a static database path
+        and temp dir are safe.
         """
+        pqconfig = self.config.get("parquet", {}).get("config", {})
         return ParquetsGenerationConfig(
-            database=f"/tmp/data_access_{secrets.token_urlsafe(16)}.duckdb",
-            memory_limit=self.get_duckdb_maxmem(),
-            threads=self.get_duckdb_threads(),
-            temp_directory=os.path.join(os.getcwd(), ".duckdb_temp"),
-            region="ap-southeast-2",
-            extensions=("httpfs", "json"),
+            duckdb_database=os.path.join("/tmp", pqconfig["duckdb_database"]),
+            memory_limit=pqconfig["memory_limit"],
+            threads=pqconfig["threads"],
+            duckdb_temp_dir=os.path.join(os.getcwd(), pqconfig["duckdb_temp_dir"]),
+            region=pqconfig["region"],
+            extensions=tuple(pqconfig["extensions"]),
         )
 
     def get_hex_layer_specs(self, dname: str) -> List[HexLayerSpec] | None:

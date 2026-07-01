@@ -215,7 +215,7 @@ class ParquetDuckDBClient(DuckDBClient):
         self._config: ParquetsGenerationConfig = (
             Config.get_config().get_parquets_config()
         )
-        self._database = self._config.database
+        self._database = self._config.duckdb_database
         self._region = self._config.region
         self._extensions = tuple(self._config.extensions)
         self._duckdb_client = None
@@ -243,8 +243,8 @@ class ParquetDuckDBClient(DuckDBClient):
                         "threads": str(int(self._config.threads)),
                     }
                     if self._database != ":memory:":
-                        os.makedirs(self._config.temp_directory, exist_ok=True)
-                        db_config["temp_directory"] = self._config.temp_directory
+                        os.makedirs(self._config.duckdb_temp_dir, exist_ok=True)
+                        db_config["temp_directory"] = self._config.duckdb_temp_dir
                     db = duckdb.connect(database=self._database, config=db_config)
                     for ext in self._extensions:
                         db.execute(f"INSTALL {ext}; LOAD {ext};")

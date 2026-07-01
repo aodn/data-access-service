@@ -24,6 +24,16 @@ column_name_mapping:
     - decimalLongitude
     - release_longitude
     - ssm_lon
+parquet:
+  config:
+    duckdb_database: "data_access.duckdb"
+    duckdb_temp_dir: ".duckdb_temp"
+    memory_limit: "800M"
+    threads: 8
+    region: "ap-southeast-2"
+    extensions:
+      - httpfs
+      - json
 pmtiles:
   config:
     output_pmtiles_dir: "portal/pmtiles/output"
