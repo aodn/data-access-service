@@ -47,6 +47,26 @@ class _UngroupedRepo(ParquetRepository):
     value_columns = ("WHTH",)
 
 
+class _QcRepo(ParquetRepository):
+    """Grouped, with both value columns QC-gated."""
+
+    table = "test_qc"
+    bucket = "test-bucket"
+    backup_bucket = "test-backup"
+    dataset = "s3://test-bucket/test_qc.parquet"
+    backup_dataset = "s3://test-backup/test_qc.parquet"
+    time_column = "TIME"
+    site_column = "site_code"
+    latitude_column = "LATITUDE"
+    longitude_column = "LONGITUDE"
+    group_column = "NOMINAL_DEPTH"
+    value_columns = ("TEMP", "PSAL")
+    value_columns_quality_control_columns = (
+        "TEMP_quality_control",
+        "PSAL_quality_control",
+    )
+
+
 @pytest.fixture
 def session(monkeypatch):
     # No AWS in tests, and these repos never call load(), so stub the S3 secret.
@@ -222,3 +242,79 @@ def test_site_details_unknown_site_is_empty(session, grouped_rows):
     _materialize(repo, grouped_rows)
     rows = repo.site_details("does-not-exist")
     assert len(rows) == 0
+
+
+# --- value_columns_quality_control_columns -----------------------------------
+
+
+def test_qc_columns_default_to_empty():
+    assert _GroupedRepo.value_columns_quality_control_columns == ()
+    assert _UngroupedRepo.value_columns_quality_control_columns == ()
+
+
+def test_qc_columns_length_must_match_value_columns_or_be_empty():
+    with pytest.raises(TypeError) as excinfo:
+
+        class _MismatchedQcRepo(ParquetRepository):
+            table = "x"
+            bucket = "test-bucket"
+            backup_bucket = "test-backup"
+            dataset = "s3://test-bucket/x.parquet"
+            backup_dataset = "s3://test-backup/x.parquet"
+            time_column = "TIME"
+            site_column = "site_code"
+            latitude_column = "LATITUDE"
+            longitude_column = "LONGITUDE"
+            value_columns = ("TEMP", "PSAL")
+            value_columns_quality_control_columns = ("TEMP_quality_control",)
+
+    assert "value_columns_quality_control_columns" in str(excinfo.value)
+
+
+def test_load_columns_includes_qc_columns(session):
+    repo = _QcRepo(session)
+    assert repo.load_columns == [
+        "TIME",
+        "site_code",
+        "LATITUDE",
+        "LONGITUDE",
+        "NOMINAL_DEPTH",
+        "TEMP",
+        "PSAL",
+        "TEMP_quality_control",
+        "PSAL_quality_control",
+    ]
+
+
+@pytest.fixture
+def qc_rows():
+    return pd.DataFrame(
+        {
+            "site_code": ["A", "A", "A"],
+            "TIME": pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"]),
+            "LATITUDE": [-30.0, -30.0, -30.0],
+            "LONGITUDE": [150.0, 150.0, 150.0],
+            "NOMINAL_DEPTH": [10, 10, 10],
+            "TEMP": [20.0, 21.0, 22.0],
+            "PSAL": [35.0, 34.0, 33.0],
+            "TEMP_quality_control": [1, 4, 1],  # 4 = bad -> TEMP nulled on row 2
+            "PSAL_quality_control": [1, 1, 9],  # 9 = bad -> PSAL nulled on row 3
+        }
+    )
+
+
+def test_site_details_nulls_bad_quality_values_only(session, qc_rows):
+    repo = _QcRepo(session)
+    _materialize(repo, qc_rows)
+    rows = repo.site_details("A")
+
+    # good quality values pass through unchanged; bad ones become NaN
+    assert list(rows["TEMP"].isna()) == [False, True, False]
+    assert list(rows["PSAL"].isna()) == [False, False, True]
+    assert rows.iloc[0]["TEMP"] == 20.0
+    assert rows.iloc[2]["TEMP"] == 22.0
+    # only the failing value in a row is nulled; its sibling column is untouched
+    assert rows.iloc[1]["PSAL"] == 34.0
+    # QC columns themselves aren't exposed in the output
+    assert "TEMP_quality_control" not in rows.columns
+    assert "PSAL_quality_control" not in rows.columns
