@@ -220,16 +220,20 @@ class Config:
         """DuckDB tuning for the API's on-disk Parquet read client.
 
         On disk (not ``:memory:``) with a memory limit and a temp dir so large
-        dataset loads spill to disk instead of OOM-killing the container. There
-        is exactly one client instance per process, so a static database path
-        and temp dir are safe.
+        dataset loads spill to disk instead of OOM-killing the container. More
+        than one client can be created within the same process (e.g. multiple
+        test clients each triggering their own app lifespan), so the database
+        file lives inside a freshly generated temp directory each call (same
+        trick as :meth:`get_pmtiles_config`'s ``duckdb_temp_dir``) to avoid
+        DuckDB file-lock conflicts between them.
         """
         pqconfig = self.config.get("parquet", {}).get("config", {})
+        temp_dir = tempfile.mkdtemp(prefix=pqconfig["duckdb_temp_dir"])
         return ParquetsGenerationConfig(
-            duckdb_database=os.path.join("/tmp", pqconfig["duckdb_database"]),
+            duckdb_database=os.path.join(temp_dir, pqconfig["duckdb_database"]),
             memory_limit=pqconfig["memory_limit"],
             threads=pqconfig["threads"],
-            duckdb_temp_dir=os.path.join(os.getcwd(), pqconfig["duckdb_temp_dir"]),
+            duckdb_temp_dir=temp_dir,
             region=pqconfig["region"],
             extensions=tuple(pqconfig["extensions"]),
         )

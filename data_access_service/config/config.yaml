@@ -26,8 +26,8 @@ column_name_mapping:
     - ssm_lon
 parquet:
   config:
-    duckdb_database: "data_access.duckdb"
-    duckdb_temp_dir: ".duckdb_temp"
+    duckdb_database: "parquet_disk_db.duckdb"
+    duckdb_temp_dir: "parquet_duckdb_tmp"
     memory_limit: "800M"
     threads: 8
     region: "ap-southeast-2"
