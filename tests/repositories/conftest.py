@@ -14,10 +14,10 @@ def memory_parquets_config(monkeypatch):
     network (no httpfs download).
     """
     cfg = ParquetsGenerationConfig(
-        database=":memory:",
+        duckdb_database=":memory:",
         memory_limit="800M",
         threads=8,
-        temp_directory="/tmp",
+        duckdb_temp_dir="/tmp",
         region="ap-southeast-2",
         extensions=(),
     )

@@ -28,10 +28,10 @@ class ParquetsGenerationConfig:
     takes no constructor arguments (tests override this config instead).
     """
 
-    database: str
+    duckdb_database: str
     memory_limit: str
     threads: int
-    temp_directory: str
+    duckdb_temp_dir: str
     region: str
     extensions: tuple[str, ...]
 

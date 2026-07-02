@@ -53,6 +53,7 @@ class ParquetRepository(ABC):
     longitude_column: ClassVar[str]
     value_columns: ClassVar[Sequence[str]]
     group_column: ClassVar[str | None] = None
+    value_columns_quality_control_columns: ClassVar[Sequence[str]] = ()
 
     def __init_subclass__(cls, **kwargs) -> None:
         """Require every subclass to define the no-default class attributes.
@@ -74,6 +75,12 @@ class ParquetRepository(ABC):
             raise TypeError(
                 f"{cls.__name__} must define class attributes: {', '.join(missing)}"
             )
+        qc_columns = cls.value_columns_quality_control_columns
+        if qc_columns and len(qc_columns) != len(cls.value_columns):
+            raise TypeError(
+                f"{cls.__name__}.value_columns_quality_control_columns must be "
+                "empty or the same length as value_columns"
+            )
 
     def __init__(self, session: ParquetDuckDBClient) -> None:
         if type(self) is ParquetRepository:
@@ -85,12 +92,24 @@ class ParquetRepository(ABC):
         self._configure_backup_s3()
 
     @property
+    def value_quality_control_map(self) -> dict[str, str]:
+        """Map each ``value_columns`` entry to its QC column, for those that have one.
+
+        Built by pairing ``value_columns`` and ``value_columns_quality_control_columns``
+        index-for-index. Empty when the dataset declares no QC columns.
+        """
+        if not self.value_columns_quality_control_columns:
+            return {}
+        return dict(zip(self.value_columns, self.value_columns_quality_control_columns))
+
+    @property
     def load_columns(self) -> list[str]:
         """The column subset to materialize on :meth:`load`.
 
         Derived from the schema columns (time, site, location, plus
-        ``group_column`` when set) and the dataset's ``value_columns`` — the
-        union of everything any read needs, with no duplicates.
+        ``group_column`` when set), the dataset's ``value_columns``, and any
+        ``value_columns_quality_control_columns`` — the union of everything
+        any read needs, with no duplicates.
         """
         cols = [
             self.time_column,
@@ -101,6 +120,7 @@ class ParquetRepository(ABC):
         if self.group_column is not None:
             cols.append(self.group_column)
         cols += [c for c in self.value_columns if c not in cols]
+        cols += [c for c in self.value_columns_quality_control_columns if c not in cols]
         return cols
 
     def _configure_s3(self) -> None:
@@ -236,12 +256,28 @@ class ParquetRepository(ABC):
 
         Rows are ordered by ``group_column`` then time for a grouped dataset
         (mooring, by sensor depth) and by time alone otherwise (wave buoy).
+
+        Any ``value_columns`` entry paired with a QC column (via
+        ``value_columns_quality_control_columns``) is nulled out row-by-row
+        wherever its QC value isn't ``1`` — the rest of that row, including
+        other value columns, is left untouched.
         """
         required = [self.time_column, self.latitude_column, self.longitude_column]
         if self.group_column is not None:
             required.append(self.group_column)
-        selected = required + [c for c in self.value_columns if c not in required]
-        cols = ", ".join(quote_ident(c) for c in selected)
+        qc_map = self.value_quality_control_map
+        value_exprs = []
+        for c in self.value_columns:
+            if c in required:
+                continue
+            if c in qc_map:
+                value_exprs.append(
+                    f"CASE WHEN {quote_ident(qc_map[c])} = 1 THEN {quote_ident(c)} "
+                    f"ELSE NULL END AS {quote_ident(c)}"
+                )
+            else:
+                value_exprs.append(quote_ident(c))
+        cols = ", ".join([quote_ident(c) for c in required] + value_exprs)
 
         time = quote_ident(self.time_column)
         order = time
@@ -277,6 +313,11 @@ class MooringRepository(ParquetRepository):
         f"s3://{backup_bucket}/imoslive/MOORING/{table}.parquet"
     )
     value_columns: ClassVar[tuple[str, ...]] = ("TEMP", "PSAL", "DOX1")
+    value_columns_quality_control_columns: ClassVar[tuple[str, ...]] = (
+        "TEMP_quality_control",
+        "PSAL_quality_control",
+        "DOX1_quality_control",
+    )
     group_column: ClassVar[str] = "NOMINAL_DEPTH"
     time_column: ClassVar[str] = "TIME"
     site_column: ClassVar[str] = "site_code"
