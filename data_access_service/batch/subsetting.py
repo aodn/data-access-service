@@ -1,8 +1,6 @@
 import json
 from dataclasses import replace
 
-import pandas
-
 from data_access_service import init_log, Config, API
 from data_access_service.batch.batch_enums import Parameters
 from data_access_service.batch.subsetting_helper import (
@@ -10,7 +8,7 @@ from data_access_service.batch.subsetting_helper import (
     get_subset_request,
 )
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.models.subset_request import NON_SPECIFIED_DATE, SubsetRequest
+from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.tasks.generate_dataset import process_data_files
 from data_access_service.tasks.subset_zarr import ZarrProcessor
@@ -18,6 +16,7 @@ from data_access_service.utils.date_time_utils import (
     supply_day_with_nano_precision,
     split_date_range,
     parse_date,
+    resolve_non_specified_dates,
 )
 
 
@@ -31,12 +30,9 @@ def init(api: API, job_id_of_init, parameters):
     request = get_subset_request(parameters)
 
     # Users may not specify start date and end date
-    start_date_str = request.start_date
-    end_date_str = request.end_date
-    if start_date_str == NON_SPECIFIED_DATE:
-        start_date_str = "1970-01-01"
-    if end_date_str == NON_SPECIFIED_DATE:
-        end_date_str = pandas.Timestamp.today().strftime("%Y-%m-%d")
+    start_date_str, end_date_str = resolve_non_specified_dates(
+        request.start_date, request.end_date
+    )
     if start_date_str != request.start_date or end_date_str != request.end_date:
         request = replace(request, start_date=start_date_str, end_date=end_date_str)
 
