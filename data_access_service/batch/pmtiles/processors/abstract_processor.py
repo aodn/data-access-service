@@ -53,6 +53,11 @@ class AbstractProcessor(ABC):
                 f"Finished generating GeoJSONSeq files for dataset {self.dataset_name} with UUID {self.uuid}: {geojsonseq_paths}"
             )
 
+            # The staged parquet is only read while generating GeoJSONSeq files;
+            # remove it now so it does not sit on disk alongside the geojsonseq
+            # files and tippecanoe's temp files during the peak-disk step below.
+            self._remove_staged_parquet()
+
             # Fourth step, use all GeoJSONSeq files to generate PMTiles file.
             self.logger.info(
                 f"Generating pmtiles file for dataset {self.dataset_name} with UUID {self.uuid}..."
@@ -61,6 +66,7 @@ class AbstractProcessor(ABC):
             self.logger.info(
                 f"Finished generating pmtiles file for dataset {self.dataset_name} with UUID {self.uuid}. Output path: {pmtile_path}"
             )
+            self._remove_geojsonseq_files(geojsonseq_paths)
             return pmtile_path
 
         finally:
@@ -87,6 +93,22 @@ class AbstractProcessor(ABC):
 
     def get_geojsonseq_dir(self) -> str:
         return os.path.join(self.work_dir, self.pmtiles_config.geojsonseq_dir)
+
+    def _remove_staged_parquet(self) -> None:
+        staged_path = self.get_staged_path()
+        if os.path.exists(staged_path):
+            os.remove(staged_path)
+            self.logger.info(
+                f"Removed staged parquet {staged_path!r} to free disk before tippecanoe"
+            )
+
+    def _remove_geojsonseq_files(self, geojsonseq_paths: List[str]) -> None:
+        for path in geojsonseq_paths:
+            if os.path.exists(path):
+                os.remove(path)
+        self.logger.info(
+            f"Removed {len(geojsonseq_paths)} GeoJSONSeq file(s) after PMTiles generation"
+        )
 
     def get_lat_col_name(self) -> str:
         lat_mapped = self.api.map_column_names(
