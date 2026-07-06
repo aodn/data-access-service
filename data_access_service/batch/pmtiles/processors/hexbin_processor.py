@@ -9,6 +9,7 @@ from data_access_service.batch.pmtiles.processors.abstract_processor import (
 from data_access_service.core.duckdbclient import PmTileDuckDBClient
 
 from data_access_service.models.pmtiles_types import HexLayerSpec
+from data_access_service.utils.memory_utils import log_memory_usage
 
 
 class HexbinProcessor(AbstractProcessor):
@@ -32,6 +33,7 @@ class HexbinProcessor(AbstractProcessor):
         )
 
         self.logger.info("Staging high-res parquet file...")
+        log_memory_usage(self.logger, "before staging scan")
 
         sql = f"""
                 COPY (
@@ -56,6 +58,7 @@ class HexbinProcessor(AbstractProcessor):
             """
         self.pm_client.execute(sql)
         self.logger.info("High-res parquet file complete.")
+        log_memory_usage(self.logger, "after staging scan")
 
     def get_layers(self) -> Sequence[HexLayerSpec]:
         return self.config.get_hex_layer_specs(self.dataset_name)
@@ -188,4 +191,5 @@ class HexbinProcessor(AbstractProcessor):
                         f"[{layer.name}] Skipping invalid H3 cell {current_h!r}: {e}"
                     )
 
+        log_memory_usage(self.logger, f"after {layer.name} geojsonseq written")
         return geojsonseq_file_path

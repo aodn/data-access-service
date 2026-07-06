@@ -18,6 +18,7 @@ from data_access_service.models.pmtiles_types import (
     PmtilesLayerSpec,
 )
 from data_access_service.utils.date_time_utils import time_it
+from data_access_service.utils.memory_utils import log_memory_usage
 
 
 class AbstractProcessor(ABC):
@@ -154,7 +155,10 @@ class AbstractProcessor(ABC):
         self.logger.debug(
             f"Full Tippecanoe command: TIPPECANOE_MAX_THREADS={max_threads} {' '.join(cmd)}"
         )
+        # Only covers this Python process
+        log_memory_usage(self.logger, "before tippecanoe")
         subprocess.run(cmd, check=True, env=env)
+        log_memory_usage(self.logger, "after tippecanoe")
         self.logger.info(f"Finished generating {output_pmtiles_path!r}")
         return output_pmtiles_path
 
