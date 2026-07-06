@@ -17,9 +17,10 @@ def build_hex_feature(
         if count != 0:
             properties[f"m{ym}"] = count
 
+    # No feature "id": Tippecanoe only accepts numeric IDs and H3 cell values
+    # exceed the safe integer range anyway; the cell is in properties["h"].
     feature = {
         "type": "Feature",
-        "id": cell,
         "properties": properties,
         "geometry": build_hex_geometry(cell),
     }

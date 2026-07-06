@@ -64,7 +64,10 @@ class TestHexbinProcessor(TestWithS3):
                             """
                     )
 
-                    hex_processor.process()
+                    # Run the pipeline steps individually, in the same order as
+                    # process(), so intermediate outputs can be asserted before
+                    # the cleanup steps remove them.
+                    hex_processor.build_staging_parquet()
 
                     staged_parquet_path = hex_processor.get_staged_path()
 
@@ -76,6 +79,8 @@ class TestHexbinProcessor(TestWithS3):
                         "c",
                     ], "df columns are not correct"
                     assert df[["h_high", "ym"]].duplicated().sum() == 0
+
+                    geojsonseq_paths = hex_processor.generate_geojsonseq_files()
 
                     geojsonseq_dir = hex_processor.get_geojsonseq_dir()
 
@@ -93,11 +98,26 @@ class TestHexbinProcessor(TestWithS3):
                         total_features == 12
                     ), f"total features should be 12 based on the test data, but got {total_features}"
 
+                    hex_processor._remove_staged_parquet()
+                    assert not os.path.exists(
+                        staged_parquet_path
+                    ), "staged parquet should be removed before tippecanoe"
+
+                    hex_processor.generate_pmtiles_file(
+                        geojsonseq_paths=geojsonseq_paths
+                    )
+
                     # check pmtiles file exists
                     pmtiles_path = hex_processor.get_output_pmtiles_path()
                     assert os.path.exists(
                         pmtiles_path
                     ), f"pmtiles file not exists at {pmtiles_path}"
+
+                    hex_processor._remove_geojsonseq_files(geojsonseq_paths)
+                    for path in geojsonseq_paths:
+                        assert not os.path.exists(
+                            path
+                        ), "geojsonseq files should be removed after pmtiles generation"
 
                     with open_pmtiles(pmtiles_path) as reader:
                         header = reader.header()
