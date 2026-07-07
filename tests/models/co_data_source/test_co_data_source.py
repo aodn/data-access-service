@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from data_access_service import Config
 from data_access_service.exceptions.dataset_not_found_error import DatasetNotFoundError
 from data_access_service.models.co_data_source.abstract_data_src import (
     AbstractDataSrc,
@@ -285,10 +286,12 @@ class TestCsiroDataSrc:
 
 def _make_registry(aodn_catalog=None, csiro_catalog=None):
     """Build a CODataRegistry with both sources fully mocked."""
+    config = Config.get_config()
+    ONLY_CSIRO_DATASET_NAME = config.get_csiro_datasets()[0]
     if aodn_catalog is None:
         aodn_catalog = {"aodn_dataset.parquet": {"uuid": "aaa"}}
     if csiro_catalog is None:
-        csiro_catalog = {CsiroDataSrc.THE_ONLY_DATASET_NAME: {"uuid": "bbb"}}
+        csiro_catalog = {ONLY_CSIRO_DATASET_NAME: {"uuid": "bbb"}}
 
     mock_aodn_metadata = MagicMock()
     mock_aodn_metadata.catalog = dict(aodn_catalog)
@@ -315,12 +318,15 @@ def _make_registry(aodn_catalog=None, csiro_catalog=None):
 
 
 class TestCODataRegistry:
+    config = Config.get_config()
+    ONLY_CSIRO_DATASET_NAME = config.get_csiro_datasets()[0]
+
     def test_get_metadata_merges_catalogs_from_all_sources(self):
         registry, mock_aodn_src, mock_csiro_src = _make_registry()
         metadata = registry.get_metadata()
         # Both datasets should appear in the merged catalog
         assert "aodn_dataset.parquet" in metadata.catalog
-        assert CsiroDataSrc.THE_ONLY_DATASET_NAME in metadata.catalog
+        assert self.ONLY_CSIRO_DATASET_NAME in metadata.catalog
 
     def test_get_metadata_raises_on_conflicting_dataset_names(self):
         # Same key in both AODN and CSIRO catalogs → conflict
@@ -345,13 +351,13 @@ class TestCODataRegistry:
 
         # AODN raises DatasetNotFoundError, CSIRO returns the dataset
         mock_aodn_src.get_dataset.side_effect = DatasetNotFoundError(
-            dataset_name=CsiroDataSrc.THE_ONLY_DATASET_NAME,
+            self.ONLY_CSIRO_DATASET_NAME,
             data_source_name=AODN,
         )
         expected = MagicMock()
         mock_csiro_src.get_dataset.return_value = expected
 
-        result = registry.get_dataset(CsiroDataSrc.THE_ONLY_DATASET_NAME)
+        result = registry.get_dataset(self.ONLY_CSIRO_DATASET_NAME)
         assert result is expected
 
     def test_get_dataset_raises_when_not_found_in_any_source(self):
