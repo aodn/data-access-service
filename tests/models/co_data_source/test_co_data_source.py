@@ -28,6 +28,9 @@ from data_access_service.models.co_data_source.co_data_registory import CODataRe
 KNOWN_DATASET = "some_dataset.parquet"
 UNKNOWN_DATASET = "does_not_exist.parquet"
 
+config = Config.get_config()
+ONLY_CSIRO_DATASET_NAME = config.get_csiro_datasets()[0]["dataset_name"]
+
 
 def _make_mock_get_aodn(catalog: dict | None = None) -> MagicMock:
     """Return a mock GetAodn whose get_dataset() returns a mock DataSource."""
@@ -203,7 +206,7 @@ class TestCsiroDataSrc:
 
     def test_get_dataset_returns_dataset_for_known_name(self):
         src, mock_aodn = self._make_src()
-        result = src.get_dataset(CsiroDataSrc.THE_ONLY_DATASET_NAME)
+        result = src.get_dataset(ONLY_CSIRO_DATASET_NAME)
         assert result is mock_aodn.get_dataset.return_value
 
     def test_init_raises_when_api_returns_non_200(self):
@@ -235,9 +238,7 @@ class TestCsiroDataSrc:
         }
         src, _ = self._make_src(metadata=metadata_without_uuid)
         catalog = src.get_metadata_catalog()
-        uuid = catalog[CsiroDataSrc.THE_ONLY_DATASET_NAME]["global_attributes"][
-            "metadata_uuid"
-        ]
+        uuid = catalog[ONLY_CSIRO_DATASET_NAME]["global_attributes"]["metadata_uuid"]
         assert uuid == "154a59da-b88a-4231-97df-c0407a6f0ec4"
 
     def test_metadata_catalog_preserves_existing_uuid(self):
@@ -249,9 +250,7 @@ class TestCsiroDataSrc:
         src, _ = self._make_src(metadata=metadata_with_uuid)
         catalog = src.get_metadata_catalog()
         assert (
-            catalog[CsiroDataSrc.THE_ONLY_DATASET_NAME]["global_attributes"][
-                "metadata_uuid"
-            ]
+            catalog[ONLY_CSIRO_DATASET_NAME]["global_attributes"]["metadata_uuid"]
             == "existing-uuid"
         )
 
@@ -286,8 +285,6 @@ class TestCsiroDataSrc:
 
 def _make_registry(aodn_catalog=None, csiro_catalog=None):
     """Build a CODataRegistry with both sources fully mocked."""
-    config = Config.get_config()
-    ONLY_CSIRO_DATASET_NAME = config.get_csiro_datasets()[0]
     if aodn_catalog is None:
         aodn_catalog = {"aodn_dataset.parquet": {"uuid": "aaa"}}
     if csiro_catalog is None:
@@ -318,15 +315,13 @@ def _make_registry(aodn_catalog=None, csiro_catalog=None):
 
 
 class TestCODataRegistry:
-    config = Config.get_config()
-    ONLY_CSIRO_DATASET_NAME = config.get_csiro_datasets()[0]
 
     def test_get_metadata_merges_catalogs_from_all_sources(self):
         registry, mock_aodn_src, mock_csiro_src = _make_registry()
         metadata = registry.get_metadata()
         # Both datasets should appear in the merged catalog
         assert "aodn_dataset.parquet" in metadata.catalog
-        assert self.ONLY_CSIRO_DATASET_NAME in metadata.catalog
+        assert ONLY_CSIRO_DATASET_NAME in metadata.catalog
 
     def test_get_metadata_raises_on_conflicting_dataset_names(self):
         # Same key in both AODN and CSIRO catalogs → conflict
@@ -351,13 +346,13 @@ class TestCODataRegistry:
 
         # AODN raises DatasetNotFoundError, CSIRO returns the dataset
         mock_aodn_src.get_dataset.side_effect = DatasetNotFoundError(
-            self.ONLY_CSIRO_DATASET_NAME,
+            ONLY_CSIRO_DATASET_NAME,
             data_source_name=AODN,
         )
         expected = MagicMock()
         mock_csiro_src.get_dataset.return_value = expected
 
-        result = registry.get_dataset(self.ONLY_CSIRO_DATASET_NAME)
+        result = registry.get_dataset(ONLY_CSIRO_DATASET_NAME)
         assert result is expected
 
     def test_get_dataset_raises_when_not_found_in_any_source(self):
