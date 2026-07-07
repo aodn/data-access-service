@@ -44,9 +44,9 @@ class CsiroDataSrc(AbstractDataSrc):
     def get_name(self) -> str:
         return self.name
 
-    def get_data_src(self) -> dict[str, GetAodn]:
-        """Returns a dict of dataset_name -> GetAodn instance for all configured CSIRO datasets."""
-        return self.__data_srcs
+    def get_data_src(self) -> GetAodn:
+        """Returns the hard-coded GetAodn instance for the UWY dataset as temp solution"""
+        return self.__data_srcs["uwy_csiro.parquet"]
 
     def __build_metadata_catalog(self) -> dict:
         catalog = {}
