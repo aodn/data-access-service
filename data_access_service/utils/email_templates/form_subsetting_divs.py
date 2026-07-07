@@ -1,13 +1,34 @@
+import logging
 import pandas
+from datetime import datetime
 from data_access_service.models.subset_request import NON_SPECIFIED_DATE
+from data_access_service.utils.email_templates.subsetting_geometry import (
+    split_bboxes_and_polygons,
+)
+
+logger = logging.getLogger(__name__)
 from data_access_service.utils.email_templates.form_bbox_divs import form_bbox_divs
+from data_access_service.utils.email_templates.form_polygon_divs import (
+    form_polygon_divs,
+)
 from data_access_service.utils.email_templates.email_images import (
     TIME_RANGE_IMG,
 )
 
 
-def form_subsetting_divs(start_date, end_date, bboxes):
-    """Form subsetting section with time range and bounding boxes"""
+def _to_display_date(value):
+    """Format an ISO date (YYYY-MM-DD) as the Australian dd/mm/yyyy.
+
+    Any value that is not a plain ISO date is returned unchanged.
+    """
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").strftime("%d/%m/%Y")
+    except (ValueError, TypeError):
+        return value
+
+
+def form_subsetting_divs(start_date, end_date, multi_polygon):
+    """Form subsetting section with time range, bounding boxes and polygons"""
 
     # Hide if dates are NON_SPECIFIED_DATE or match default values (1970-01-01 to today)
     has_dates = False
@@ -26,34 +47,32 @@ def form_subsetting_divs(start_date, end_date, bboxes):
 
         has_dates = not is_non_specified and not is_default
 
-    # Check if bboxes exist and are not global extent
-    has_bboxes = False
-    if bboxes and len(bboxes) > 0:
-        # Check if any bbox is NOT the global extent
-        for bbox in bboxes:
-            # Assuming bbox has attributes: north, south, east, west
-            is_global = (
-                bbox.max_lat == 90
-                and bbox.min_lat == -90
-                and bbox.min_lon == -180
-                and bbox.max_lon == 180
-            )
-            if not is_global:
-                has_bboxes = True
-                break
+    # Split the spatial selection into bounding boxes (<=4 vertices) and freeform polygons (>4).
+    # Never let a malformed geometry break the whole email - omit the spatial section instead.
+    try:
+        bboxes, polygons = split_bboxes_and_polygons(multi_polygon)
+    except Exception:
+        logger.warning(
+            "Could not parse multi_polygon for email; omitting spatial section",
+            exc_info=True,
+        )
+        bboxes, polygons = [], []
+    has_bboxes = len(bboxes) > 0
+    has_polygons = len(polygons) > 0
 
     # If no subsetting data at all, return empty string
-    if not has_dates and not has_bboxes:
+    if not has_dates and not has_bboxes and not has_polygons:
         return ""
 
-    # Form bbox divs if they exist and are not all global
-    bbox_divs = ""
-    if has_bboxes:
-        bbox_divs = form_bbox_divs(bboxes)
+    # Form spatial divs if they exist
+    bbox_divs = form_bbox_divs(bboxes) if has_bboxes else ""
+    polygon_divs = form_polygon_divs(polygons) if has_polygons else ""
 
-    # Form time range section if dates exist
+    # Form time range section if dates exist (Australian dd/mm/yyyy display format)
     time_range_section = ""
     if has_dates:
+        display_start = _to_display_date(start_date)
+        display_end = _to_display_date(end_date)
         time_range_section = f"""
     <!--[if mso | IE]></td></tr></table></td></tr><tr><td width="600px"><table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:568px;" width="568"><tr><td style="line-height:0;font-size:0;mso-line-height-rule:exactly;"><![endif]-->
     <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:568px;">
@@ -110,7 +129,7 @@ def form_subsetting_divs(start_date, end_date, bboxes):
                                                     <tr>
                                                         <td align="left" width="100%">
                                                             <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 14px; font-weight: 500; line-height: 157%; text-align: left; color: #090c02">
-                                                                <p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">{start_date} - {end_date}</p>
+                                                                <p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">{display_start} - {display_end}</p>
                                                             </div>
                                                         </td>
                                                     </tr>
@@ -224,6 +243,7 @@ def form_subsetting_divs(start_date, end_date, bboxes):
         </table>
     </div>
     {bbox_divs}
+    {polygon_divs}
     {time_range_section}
     <div style="margin:0px auto;max-width:568px;">
         <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">

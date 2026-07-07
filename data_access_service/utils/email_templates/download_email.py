@@ -34,8 +34,9 @@ def get_download_email_html_body(
 
     start_date = subset_request.start_date
     end_date = subset_request.end_date
-    bboxes = subset_request.bboxes if subset_request.bboxes else []
-    subsetting_section = form_subsetting_divs(start_date, end_date, bboxes)
+    subsetting_section = form_subsetting_divs(
+        start_date, end_date, subset_request.multi_polygon
+    )
     object_url_str = "<br>".join(
         [
             f'<a href="{url}" style="color:#2571e9;text-decoration:underline;">{url}</a>'
