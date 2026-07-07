@@ -5,7 +5,7 @@ import os
 import re
 import tempfile
 import threading
-from datetime import datetime, timezone
+from datetime import timezone
 from http import HTTPStatus
 from os import error
 from queue import Queue
@@ -21,7 +21,7 @@ import xarray
 import xarray as xr
 from dask.dataframe import DataFrame
 from dateutil import parser
-from fastapi import HTTPException, Request, BackgroundTasks
+from fastapi import Depends, HTTPException, Request, BackgroundTasks
 from fastapi.responses import Response, FileResponse
 from geojson import Feature, FeatureCollection
 from geojson.geometry import Geometry
@@ -43,11 +43,17 @@ from data_access_service.core.constants import (
 )
 from data_access_service.core.error import ErrorResponse
 from data_access_service.models.value_count import ValueCount
+from data_access_service.sites.sites_repository import (
+    REPOSITORY_CLASSES,
+    ParquetRepository,
+)
 from data_access_service.utils.date_time_utils import (
     DATE_FORMAT,
+    ensure_timezone,
 )
 
 logger = init_log(Config.get_config())
+memory_lock = threading.Lock()
 
 
 # Make all non-numeric and str field to str so that json do not throw serializable error
@@ -79,6 +85,8 @@ def _generate_partial_json_array(
         ddf = filtered.repartition(npartitions=partition_size)
     else:
         ddf = filtered
+
+    cfg = Config.get_config()
 
     for partition in ddf.to_delayed():
         partition_df = convert_non_numeric_to_str(partition.compute())
@@ -129,56 +137,25 @@ def _generate_partial_json_array(
                     )
 
             #  may need to add more field here
-            if "LONGITUDE" in record:
-                filtered_record[STR_LONGITUDE_LOWER_CASE] = (
-                    round(record["LONGITUDE"], COORDINATE_INDEX_PRECISION)
-                    if record["LONGITUDE"] is not None
-                    else None
-                )
-            elif "longitude" in record:
-                filtered_record[STR_LONGITUDE_LOWER_CASE] = (
-                    round(record["longitude"], COORDINATE_INDEX_PRECISION)
-                    if record["longitude"] is not None
-                    else None
-                )
-            elif "lon" in record:
-                filtered_record[STR_LONGITUDE_LOWER_CASE] = (
-                    round(record["lon"], COORDINATE_INDEX_PRECISION)
-                    if record["lon"] is not None
-                    else None
-                )
-            elif "decimalLongitude" in record:
-                filtered_record[STR_LONGITUDE_LOWER_CASE] = (
-                    round(record["decimalLongitude"], COORDINATE_INDEX_PRECISION)
-                    if record["decimalLongitude"] is not None
-                    else None
-                )
+            lon_keys = cfg.get_column_name_mapping()["longitude"]
+            for key in lon_keys:
+                if key in record:
+                    filtered_record[STR_LONGITUDE_LOWER_CASE] = (
+                        round(record[key], COORDINATE_INDEX_PRECISION)
+                        if record[key] is not None
+                        else None
+                    )
+                    break
 
-            if "LATITUDE" in record:
-                filtered_record[STR_LATITUDE_LOWER_CASE] = (
-                    round(record["LATITUDE"], COORDINATE_INDEX_PRECISION)
-                    if record["LATITUDE"] is not None
-                    else None
-                )
-            elif "latitude" in record:
-                filtered_record[STR_LATITUDE_LOWER_CASE] = (
-                    round(record["latitude"], COORDINATE_INDEX_PRECISION)
-                    if record["latitude"] is not None
-                    else None
-                )
-            elif "lat" in record:
-                filtered_record[STR_LATITUDE_LOWER_CASE] = (
-                    round(record["lat"], COORDINATE_INDEX_PRECISION)
-                    if record["lat"] is not None
-                    else None
-                )
-            # add this for data-uplift aggregated datasets for co-index
-            elif "decimalLatitude" in record:
-                filtered_record[STR_LATITUDE_LOWER_CASE] = (
-                    round(record["decimalLatitude"], COORDINATE_INDEX_PRECISION)
-                    if record["decimalLatitude"] is not None
-                    else None
-                )
+            lat_keys = cfg.get_column_name_mapping()["latitude"]
+            for key in lat_keys:
+                if key in record:
+                    filtered_record[STR_LATITUDE_LOWER_CASE] = (
+                        round(record[key], COORDINATE_INDEX_PRECISION)
+                        if record[key] is not None
+                        else None
+                    )
+                    break
 
             if "DEPTH" in record:
                 filtered_record[STR_DEPTH_LOWER_CASE] = (
@@ -222,7 +199,7 @@ def verify_datatime_param(name: str, req_date: str) -> pd.Timestamp:
             if _date.tz is None:
                 _date = _date.tz_localize(pytz.UTC)
 
-    except (ValueError, TypeError) as e:
+    except (ValueError, TypeError):
         error_message = ErrorResponse(
             status_code=HTTPStatus.BAD_REQUEST,
             details=f"Incorrect format [{name}]",
@@ -236,13 +213,40 @@ def verify_datatime_param(name: str, req_date: str) -> pd.Timestamp:
     return _date
 
 
+def parse_utc_datetime(name: str, value: Optional[str]) -> Optional[str]:
+    """Validate an optional ISO-8601 query param and normalize it to naive UTC.
+
+    The mooring/wave-buoy ``TIME`` columns are tz-naive ``TIMESTAMP_NS`` holding
+    UTC instants, so a value bound into ``TIME >= ?`` must itself be naive UTC to
+    compare correctly. This:
+
+      * returns ``None`` unchanged (the endpoints read that as "no bound");
+      * parses ``value``, assuming UTC when it carries no offset and converting
+        to UTC when it does, then drops the tz so it lines up with the column;
+      * raises HTTP 400 (not a downstream DuckDB 500) when it can't be parsed.
+
+    Returns the normalized ``YYYY-MM-DDTHH:MM:SS[.ffffff]`` string.
+    """
+    if value is None:
+        return None
+    try:
+        ts = pd.Timestamp(value)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=f"Invalid datetime for [{name}]: {value!r}. "
+            "Expected ISO 8601, e.g. 2024-01-01T00:00:00Z",
+        )
+    return ensure_timezone(ts).tz_convert("UTC").tz_localize(None).isoformat()
+
+
 def _verify_depth_param(
     name: str, req_value: numpy.double | None
 ) -> numpy.double | None:
     if req_value is not None and req_value > 0.0:
         error_message = ErrorResponse(
             status_code=HTTPStatus.BAD_REQUEST,
-            details=f"Depth cannot greater than zero",
+            details="Depth cannot greater than zero",
             parameters=f"{name}={req_value}",
         )
 
@@ -273,12 +277,21 @@ def async_response_json(result: AsyncGenerator[dict, None], compress: bool):
         try:
 
             async def collect():
-                async for i in result:
-                    if i is not None:
-                        result_queue.put(i)  # Thread-safe append
-                    else:
-                        break
-                result_queue.put(None)  # Sentinel to indicate completion
+                try:
+                    async for i in result:
+                        if i is not None:
+                            result_queue.put(i)  # Thread-safe append
+                        else:
+                            break
+                    result_queue.put(None)  # Sentinel to indicate completion
+                finally:
+                    # Always close the async generator so that the finally block
+                    # inside fetch_data() runs and releases memory_lock.
+                    # This is critical when the consumer breaks early or on errors.
+                    try:
+                        await result.aclose()
+                    except Exception:
+                        pass
 
             loop.run_until_complete(collect())
         finally:
@@ -357,6 +370,9 @@ async def fetch_data(
     end_depth: float | None,
     columns: List[str],
 ) -> AsyncGenerator[dict | None, None]:
+    logger.debug("Background thread waiting for memory_lock")
+    memory_lock.acquire()
+    logger.debug("Background thread acquired memory_lock")
     try:
         result: Optional[dd.DataFrame | xr.Dataset] = api_instance.get_dataset(
             uuid=uuid,
@@ -369,11 +385,8 @@ async def fetch_data(
         if result is None:
             # Indicate end of generator record
             yield None
+            return
 
-    except Exception as e:
-        # Indicate end of generator record
-        yield None
-    else:
         # Now we need to change the xarray if type match to 2D dataframe for processing
         if isinstance(result, xr.Dataset):
             # A way to get row count without compute and load all for xarray,
@@ -416,6 +429,22 @@ async def fetch_data(
         ):
             yield record
 
+    except Exception as e:
+        # Log with uuid/key context so we can identify which specific dataset
+        # under a UUID caused the problem (common with multi-dataset UUIDs).
+        logger.error(
+            "Error in fetch_data (uuid=%s, key=%s): %s",
+            uuid,
+            key,
+            str(e),
+            exc_info=True,
+        )
+        # Indicate end of generator record (caller will see empty result)
+        yield None
+    finally:
+        memory_lock.release()
+        logger.debug("Background thread released memory_lock")
+
 
 class HealthCheckResponse(BaseModel):
     status: str
@@ -425,6 +454,36 @@ class HealthCheckResponse(BaseModel):
 def get_api_instance(request: Request) -> API:
     instance = request.app.state.api_instance
     return instance
+
+
+def get_repo(product: str, request: Request) -> ParquetRepository:
+    """Resolve the repository for the ``{product}`` path segment.
+
+    404 if the product is unknown; 503 if its table has not been loaded yet (the
+    startup pre-load / refresh is still in progress).
+    """
+    repositories = getattr(request.app.state, "repositories", {})
+    repo = repositories.get(product)
+    if repo is None:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"Unknown product '{product}'. Available: {', '.join(REPOSITORY_CLASSES)}",
+        )
+    if not repo.is_loaded():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail=f"Data for '{product}' is not ready yet.",
+        )
+    return repo
+
+
+def get_site_service(repo: ParquetRepository = Depends(get_repo)):
+    """Service over the resolved product repository for the feature-collection routes."""
+    # Imported lazily: SiteFeatureService -> parse_utc_datetime in this module would
+    # otherwise form an import cycle at module load.
+    from data_access_service.sites.site_feature_service import SiteFeatureService
+
+    return SiteFeatureService(repo)
 
 
 def calculate_cell_coordinates(lat_min, lat_max, lon_min, lon_max):
@@ -568,11 +627,13 @@ def generate_rect_features(
     ]
 
     geometry = Geometry(type="Polygon", coordinates=[rect_polygon])
+    # Do not use len() to check size, some zarr have empty dim with single value,
+    # which cause exception
     feature = Feature(
         geometry=geometry,
         properties={
             "date": rounded_time.value,
-            "count": len(lats) * len(lons) * rounded_time.count,
+            "count": lats.size * lons.size * rounded_time.count,
         },
     )
     return [feature]

@@ -1,0 +1,71 @@
+# Order of values under each key matters, do not change it. Else you will get test errors.
+column_name_mapping:
+  time:
+    - TIME
+    - time
+    - JULD
+    - eventDate
+    - detection_timestamp
+    - timestamp
+  depth:
+  latitude:
+    - LATITUDE
+    - latitude
+    - lat
+    # add this for data-uplift aggregated datasets for co-index
+    - decimalLatitude
+    - release_latitude
+    - ssm_lat
+  longitude:
+    - LONGITUDE
+    - longitude
+    - lon
+    # add this for data-uplift aggregated datasets for co-index
+    - decimalLongitude
+    - release_longitude
+    - ssm_lon
+parquet:
+  config:
+    duckdb_database: "parquet_disk_db.duckdb"
+    duckdb_temp_dir: "parquet_duckdb_tmp"
+    memory_limit: "800M"
+    threads: 8
+    region: "ap-southeast-2"
+    extensions:
+      - httpfs
+      - json
+pmtiles:
+  config:
+    output_pmtiles_dir: "portal/pmtiles/output"
+    staged_parquet_dir: "portal/pmtiles/parquet_staged"
+    geojsonseq_dir: "geojsonseq_tmp"
+    duckdb_temp_dir: "duckdb_tmp"
+    duckdb_database: "disk_db.duckdb"
+    memory_limit: "4G"
+    threads: 8
+    fetch_size: 50000
+  layers:
+    hex_z0:
+      h3_resolution: 2
+      minzoom: 0
+      maxzoom: 1
+    hex_z2:
+      h3_resolution: 3
+      minzoom: 2
+      maxzoom: 3
+    hex_z4:
+      h3_resolution: 4
+      minzoom: 4
+      maxzoom: 5
+    hex_z6:
+      h3_resolution: 6
+      minzoom: 6
+      maxzoom: 7
+    hex_z8:
+      h3_resolution: 7
+      minzoom: 8
+      maxzoom: 9
+    hex_z10:
+      h3_resolution: 8
+      minzoom: 10
+      maxzoom: 12

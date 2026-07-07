@@ -171,6 +171,42 @@ class TestApi(unittest.TestCase):
             ],
         )
 
+    def test_refresh_uuid_dataset_map_logs_dataset_failure_and_continues(self):
+        api = API()
+        api._metadata = MagicMock()
+        api._metadata.metadata_catalog_uncached.return_value = {
+            "bad_dataset.parquet": {},
+            "good_dataset.parquet": {
+                "dataset_metadata": {
+                    "uuid": "good-uuid",
+                }
+            },
+        }
+
+        def get_metadata_uuid(data):
+            if data == {}:
+                # mock raised error
+                raise ValueError("bad dataset metadata")
+            return "good-uuid"
+
+        with patch.object(API, "get_metadata_uuid", side_effect=get_metadata_uuid):
+            with patch.object(api, "_extract_coordinate", return_value=None):
+                with self.assertLogs(
+                    "data_access_service.core.api", level="ERROR"
+                ) as logs:
+                    api.refresh_uuid_dataset_map()
+
+        log_output = "\n".join(logs.output)
+
+        self.assertIn(
+            "Failed to refresh UUID dataset map for dataset=bad_dataset.parquet uuid=None",
+            log_output,
+        )
+        self.assertIn("good-uuid", api._raw)
+        self.assertIn("good_dataset.parquet", api._raw["good-uuid"])
+        self.assertIn("good-uuid", api._cached_metadata)
+        self.assertIn("good_dataset.parquet", api._cached_metadata["good-uuid"])
+
     def test_normalize_lon(self):
         """Test None"""
         self.assertEqual(BaseAPI.normalize_lon(None), None)
@@ -253,127 +289,62 @@ class TestApi(unittest.TestCase):
                 api.normalize_to_0_360_if_needed(uuid, key, 370)
                 api.normalize_to_0_360_if_needed(uuid, key, -370.0)
 
-    def test_fetch_wave_buoy_latest_date(self):
+    def test_get_temporal_extent_future_and_past_dates(self):
         api = API()
-        mock_df = pd.DataFrame({"TIME": [pd.Timestamp("2025-01-15 12:30:00")]})
-        api.memconn = MagicMock()
-        api.memconn.execute.return_value.df.return_value = mock_df
+        uuid = "test-uuid"
+        key = "test-key"
 
-        result = api.fetch_wave_buoy_latest_date()
+        mock_descriptor = MagicMock()
+        mock_descriptor.dname = "test-dname"
+        api._cached_metadata = {uuid: {key: mock_descriptor}}
 
-        self.assertEqual(result, "2025-01-15T12:30:00Z")
-        api.memconn.execute.assert_called_once()
+        mock_ds = MagicMock()
+        api._instance = MagicMock()
+        api._instance.get_dataset.return_value = mock_ds
 
-    def test_fetch_wave_buoy_sites(self):
-        api = API()
-        mock_df = pd.DataFrame(
-            {
-                "site_name": ["Brisbane", "Sydney"],
-                "TIME": [
-                    pd.Timestamp("2025-01-10 08:00:00"),
-                    pd.Timestamp("2025-01-11 09:00:00"),
-                ],
-                "LATITUDE": [-27.47, -33.87],
-                "LONGITUDE": [153.03, 151.21],
-            }
+        # Case A: Naive end_date in the future
+        future_naive = pd.Timestamp.now() + pd.Timedelta(days=5)
+        start_naive = pd.Timestamp("2020-01-01 12:00:00")
+        mock_ds.get_temporal_extent.return_value = (start_naive, future_naive)
+
+        start_res, end_res = api.get_temporal_extent(uuid, key)
+        self.assertEqual(start_res, pd.Timestamp("2020-01-01 00:00:00"))
+        self.assertIsNotNone(end_res)
+        self.assertLessEqual(end_res, pd.Timestamp.now())
+        self.assertIsNone(end_res.tzinfo)
+
+        # Case B: Aware end_date in the future
+        future_aware = pd.Timestamp.now(tz="UTC") + pd.Timedelta(days=5)
+        start_aware = pd.Timestamp("2020-01-01 12:00:00", tz="UTC")
+        mock_ds.get_temporal_extent.return_value = (start_aware, future_aware)
+
+        start_res, end_res = api.get_temporal_extent(uuid, key)
+        self.assertEqual(start_res, pd.Timestamp("2020-01-01 00:00:00", tz="UTC"))
+        self.assertIsNotNone(end_res)
+        self.assertLessEqual(end_res, pd.Timestamp.now(tz="UTC"))
+        self.assertIsNotNone(end_res.tzinfo)
+
+        # Case C: Naive end_date in the past
+        past_naive = pd.Timestamp.now() - pd.Timedelta(days=5)
+        mock_ds.get_temporal_extent.return_value = (start_naive, past_naive)
+
+        start_res, end_res = api.get_temporal_extent(uuid, key)
+        expected_end_naive = past_naive.replace(
+            hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
         )
-        api.memconn = MagicMock()
-        api.memconn.execute.return_value.df.return_value = mock_df
+        self.assertEqual(end_res, expected_end_naive)
 
-        result = api.fetch_wave_buoy_sites("2025-01-10", "2025-01-12")
+        # Case D: Aware end_date in the past
+        past_aware = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=5)
+        mock_ds.get_temporal_extent.return_value = (start_aware, past_aware)
 
-        self.assertEqual(result["type"], "FeatureCollection")
-        self.assertEqual(len(result["features"]), 2)
-
-        feature0 = result["features"][0]
-        self.assertEqual(feature0["type"], "Feature")
-        self.assertEqual(feature0["properties"]["buoy"], "Brisbane")
-        self.assertEqual(feature0["properties"]["date"], "2025-01-10T08:00:00Z")
-        self.assertEqual(feature0["geometry"]["type"], "Point")
-        self.assertEqual(feature0["geometry"]["coordinates"], [153.03, -27.47])
-
-        feature1 = result["features"][1]
-        self.assertEqual(feature1["properties"]["buoy"], "Sydney")
-        self.assertEqual(feature1["properties"]["date"], "2025-01-11T09:00:00Z")
-        self.assertEqual(feature1["geometry"]["coordinates"], [151.21, -33.87])
-
-    def test_fetch_all_unique_wave_buoy_sites(self):
-        api = API()
-        mock_df = pd.DataFrame(
-            {
-                "site_name": ["Brisbane", "Sydney", "Perth"],
-                "TIME": [
-                    pd.Timestamp("2025-03-01 10:00:00"),
-                    pd.Timestamp("2025-02-15 06:00:00"),
-                    pd.Timestamp("2025-01-20 14:00:00"),
-                ],
-                "LATITUDE": [-27.47, -33.87, -31.95],
-                "LONGITUDE": [153.03, 151.21, 115.86],
-            }
+        start_res, end_res = api.get_temporal_extent(uuid, key)
+        expected_end_aware = past_aware.tz_convert("UTC").replace(
+            hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
         )
-        api.memconn = MagicMock()
-        api.memconn.execute.return_value.df.return_value = mock_df
+        self.assertEqual(end_res, expected_end_aware)
 
-        result = api.fetch_all_unique_wave_buoy_sites()
-
-        self.assertEqual(result["type"], "FeatureCollection")
-        self.assertEqual(len(result["features"]), 3)
-        api.memconn.execute.assert_called_once()
-
-        feature0 = result["features"][0]
-        self.assertEqual(feature0["type"], "Feature")
-        self.assertEqual(feature0["properties"]["buoy"], "Brisbane")
-        self.assertEqual(feature0["properties"]["date"], "2025-03-01T10:00:00Z")
-        self.assertEqual(feature0["geometry"]["type"], "Point")
-        self.assertEqual(feature0["geometry"]["coordinates"], [153.03, -27.47])
-
-        feature1 = result["features"][1]
-        self.assertEqual(feature1["properties"]["buoy"], "Sydney")
-        self.assertEqual(feature1["properties"]["date"], "2025-02-15T06:00:00Z")
-        self.assertEqual(feature1["geometry"]["coordinates"], [151.21, -33.87])
-
-        feature2 = result["features"][2]
-        self.assertEqual(feature2["properties"]["buoy"], "Perth")
-        self.assertEqual(feature2["properties"]["date"], "2025-01-20T14:00:00Z")
-        self.assertEqual(feature2["geometry"]["coordinates"], [115.86, -31.95])
-
-    def test_fetch_wave_buoy_data(self):
-        api = API()
-        position_df = pd.DataFrame({"LATITUDE": [-27.47], "LONGITUDE": [153.03]})
-        data_df = pd.DataFrame(
-            {
-                "TIME": [
-                    pd.Timestamp("2025-01-10 08:00:00"),
-                    pd.Timestamp("2025-01-10 09:00:00"),
-                ],
-                "SSWMD": [180.0, np.nan],
-                "WPFM": [0.08, 0.09],
-                "WPMH": [np.nan, 5.0],
-                "WHTH": [1.2, 1.3],
-                "WSSH": [np.nan, np.nan],
-            }
-        )
-        api.memconn = MagicMock()
-        api.memconn.execute.return_value.df.side_effect = [position_df, data_df]
-
-        result = api.fetch_wave_buoy_data("Brisbane", "2025-01-10", "2025-01-11")
-
-        self.assertEqual(result["type"], "Feature")
-        self.assertEqual(result["geometry"]["coordinates"], [153.03, -27.47])
-
-        # SSWMD: first row has value, second is NaN
-        self.assertEqual(len(result["properties"]["SSWMD"]), 1)
-        self.assertAlmostEqual(result["properties"]["SSWMD"][0][1], 180.0)
-
-        # WPFM: both rows have values
-        self.assertEqual(len(result["properties"]["WPFM"]), 2)
-
-        # WPMH: only second row has value
-        self.assertEqual(len(result["properties"]["WPMH"]), 1)
-        self.assertAlmostEqual(result["properties"]["WPMH"][0][1], 5.0)
-
-        # WHTH: both rows have values
-        self.assertEqual(len(result["properties"]["WHTH"]), 2)
-
-        # WSSH: both NaN, so empty
-        self.assertEqual(len(result["properties"]["WSSH"]), 0)
+        # Case E: Cached metadata does not exist
+        start_res, end_res = api.get_temporal_extent("non-existent-uuid", key)
+        self.assertIsNone(start_res)
+        self.assertIsNone(end_res)

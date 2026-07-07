@@ -137,12 +137,18 @@ def prepare_data(api: API, job_index: str | None, parameters) -> str | None:
     start_date = parse_date(start_date_str)
     end_date = parse_date(end_date_str)
 
-    logger.info(f"UUID: {request.uuid}")
-    logger.info(f"KEY: {request.keys}")
-    logger.info(f"Date Ranges: {date_ranges_dict}")
-    logger.info(f"Multi Polygon: {request.multi_polygon}")
-    logger.info(f"Start Date:{start_date}")
-    logger.info(f"End Date:{end_date}")
+    logger.info(
+        f"""
+    ==============================
+    UUID: {request.uuid}
+    KEY: {request.keys}
+    Date Ranges: {date_ranges_dict}
+    Multi Polygon: {request.multi_polygon}
+    Start Date:{start_date}
+    End Date:{end_date}
+    ==============================
+    """
+    )
 
     return process_data_files(
         api,

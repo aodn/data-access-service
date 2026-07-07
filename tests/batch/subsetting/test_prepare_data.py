@@ -15,7 +15,7 @@ from aodn_cloud_optimised.lib.DataQuery import Metadata
 from data_access_service import API, init_log
 from data_access_service.batch.batch_enums import Parameters
 from data_access_service.batch.subsetting import prepare_data
-from data_access_service.config.config import Config, EnvType
+from data_access_service.config.config import Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.tasks.data_collection import collect_data_files
 from data_access_service.utils.date_time_utils import split_date_range
@@ -70,8 +70,8 @@ class TestDataGeneration(TestWithS3):
                     if prefix["Prefix"].endswith(".parquet/")
                 ]
 
-                assert len(folders) == 2
-                assert folders[0] == "animal_acoustic_tracking_delayed_qc.parquet/"
+                assert len(folders) == 3
+                assert folders[1] == "animal_acoustic_tracking_delayed_qc.parquet/"
 
                 # Verify DataQuery functionality
                 aodn = DataQuery.GetAodn()
@@ -310,14 +310,13 @@ class TestDataGeneration(TestWithS3):
                     )
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    def test_non_specified_multi_polygon(
-        self, aws_clients, setup_resources, upload_test_case_to_s3
+    def test_parquet_with_date32_type(
+        self,
+        aws_clients,
+        setup_resources,
+        upload_test_case_to_s3,
+        subset_request_factory,
     ):
-        # Use a different master_job_id to avoid conflicts with other tests
-        parameters = PREPARATION_PARAMETERS.copy()
-        parameters[Parameters.MASTER_JOB_ID.value] = "998"
-        parameters[Parameters.MULTI_POLYGON.value] = "non-specified"
-
         s3_client, _, _ = aws_clients
         config = Config.get_config()
         config.set_s3_client(s3_client)
@@ -338,8 +337,373 @@ class TestDataGeneration(TestWithS3):
                     if prefix["Prefix"].endswith(".parquet/")
                 ]
 
-                assert len(folders) == 2
-                assert folders[0] == "animal_acoustic_tracking_delayed_qc.parquet/"
+                assert len(folders) == 3
+                assert folders[0] == "aggregated_seabird_nonqc.parquet/"
+
+                # Verify DataQuery functionality
+                aodn = DataQuery.GetAodn()
+                metadata: Metadata = aodn.get_metadata()
+                assert (
+                    metadata.metadata_catalog().get("aggregated_seabird_nonqc.parquet")
+                    is not None
+                )
+
+                # prepare data according to the test parameters
+                api = API()
+                api.initialize_metadata()
+
+                # Clean any old S3 objects with prefix "994/" at the start
+                bucket_name = config.get_csv_bucket_name()
+                try:
+                    objs = s3_client.list_objects_v2(Bucket=bucket_name, Prefix="994/")
+                    if "Contents" in objs:
+                        for o in objs["Contents"]:
+                            s3_client.delete_object(Bucket=bucket_name, Key=o["Key"])
+                except Exception:
+                    pass
+
+                parameters = PREPARATION_PARAMETERS.copy()
+                parameters[Parameters.MASTER_JOB_ID.value] = "994"
+                parameters[Parameters.UUID.value] = (
+                    "ec2c0ef9-3645-4ded-b617-c8297f6eb250"
+                )
+                parameters[Parameters.MULTI_POLYGON.value] = None
+                parameters[Parameters.START_DATE.value] = "03-2025"
+                parameters[Parameters.END_DATE.value] = "04-2025"
+                parameters[Parameters.DATE_RANGES.value] = (
+                    '{"0": ["2025-03-01 00:00:00.000000000", "2025-03-05 23:59:59.999999999"], "1": ["2025-03-06 00:00:00.000000000", "2025-03-10 23:59:59.999999999"], "2": ["2025-03-11 00:00:00.000000000", "2025-03-20 23:59:59.999999999"], "3": ["2025-03-20 00:00:00.000000000", "2025-03-25 23:59:59.999999999"], "4": ["2025-03-26 00:00:00.000000000", "2025-03-30 23:59:59.999999999"]}'
+                )
+                parameters[Parameters.INTERMEDIATE_OUTPUT_FOLDER.value] = "/tmp/tmp994"
+
+                for i in range(5):
+                    prepare_data(
+                        api,
+                        job_index=str(i),
+                        parameters=parameters,
+                    )
+
+                bucket_name = config.get_csv_bucket_name()
+                response = s3_client.list_objects_v2(Bucket=bucket_name)
+
+                objects = []
+                if "Contents" in response:
+                    for obj in response["Contents"]:
+                        objects.append(obj["Key"])
+                #  in test parquet, only 1 data csv for the provided range and 1 dataschema csv for the parquet dataset
+                assert "994/temp/dataschema.json" in objects
+                assert (
+                    "994/temp/aggregated_seabird_nonqc.parquet/part-1/PARTITION_KEY=2025-03/part.0.parquet"
+                    in objects
+                )
+
+                # Check if the files are compressed and uploaded correctly
+                compressed_s3_key = "994/aggregated_seabird_nonqc.zip"
+
+                # Create dummy subset_request
+                subset_request = subset_request_factory(
+                    uuid="test-dataset-uuid",
+                    recipient="test@example.com",
+                )
+
+                collect_data_files(
+                    master_job_id="994",
+                    subset_request=subset_request,
+                )
+
+                response2 = s3_client.list_objects_v2(
+                    Bucket=bucket_name, Prefix=compressed_s3_key
+                )
+                assert "Contents" in response2
+                assert len(response2["Contents"]) == 1
+                assert response2["Contents"][0]["Key"] == compressed_s3_key
+
+                # Check if the email was sent correctly
+                mock_send_email.assert_called_once()
+                call_kwargs = mock_send_email.call_args.kwargs
+                assert call_kwargs["recipient"] == "test@example.com"
+                assert "test-dataset-uuid" in call_kwargs["subject"]
+                assert "html_body" in call_kwargs
+                assert "aggregated_seabird_nonqc.zip" in call_kwargs["html_body"]
+
+                # Download the zip file and check the content
+                names: list[str] = helper.extract_zip_from_s3(
+                    bucket_name, compressed_s3_key, "/tmp"
+                )
+
+                assert (
+                    len(names) == 2
+                ), "contain single data file plus one table schema file"
+
+                schema_files = [f for f in names if "dataschema.csv" in f]
+                data_files = [
+                    f for f in names if f.endswith(".csv") and "dataschema" not in f
+                ]
+
+                # Check values
+                schema_df = pd.read_csv(f"/tmp/{schema_files[0]}", index_col=0)
+                assert len(schema_df) > 0, "Schema should not be empty"
+
+                # Expect a csv in this case so we can load it back with panda
+                csv = pd.read_csv(f"/tmp/{data_files[0]}")
+                assert len(csv) == 93, f"Expected 93 rows, got {len(csv)}"
+
+            except Exception as ex:
+                raise ex
+            finally:
+                # Delete temp output folder as the name always same for testing
+                shutil.rmtree(config.get_temp_folder("994"), ignore_errors=True)
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_parquet_with_date32_type_with_multipolygon(
+        self,
+        aws_clients,
+        setup_resources,
+        upload_test_case_to_s3,
+        subset_request_factory,
+    ):
+        """
+        aggregated_moorings dataset with date32 column type, testing spatial and temporal subsetting and the
+        multipolygon have overlap. The code internally will handle it and we can compare result to make sure
+        the lat/lng is within the boundary of the multipolygon.
+        """
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+        helper = AWSHelper()
+
+        # Clean any old S3 objects with prefix "997/" at the start
+        bucket_name = config.get_csv_bucket_name()
+        try:
+            objs = s3_client.list_objects_v2(Bucket=bucket_name, Prefix="997/")
+            if "Contents" in objs:
+                for o in objs["Contents"]:
+                    s3_client.delete_object(Bucket=bucket_name, Key=o["Key"])
+        except Exception:
+            pass
+
+        # Mock query_unique_value for polygon partitions because aggregated_seabird_nonqc dataset
+        # in the test resources is only partitioned by timestamp, not by polygon.
+        orig_query_unique_value = DataQuery.query_unique_value
+
+        def mock_query_unique_value(dataset, partition):
+            if partition == "polygon":
+                return {
+                    "01030000000100000005000000000000000000000000000000008056C0000000000080664000000000008056C00000000000806640000000000080564000000000000000000000000000805640000000000000000000000000008056C0"
+                }
+            return orig_query_unique_value(dataset, partition)
+
+        with (
+            patch(
+                "aodn_cloud_optimised.lib.DataQuery.query_unique_value",
+                side_effect=mock_query_unique_value,
+            ),
+            patch.object(AWSHelper, "send_email") as mock_send_email,
+        ):
+            try:
+                # List objects in S3
+                response = s3_client.list_objects_v2(
+                    Bucket=DataQuery.BUCKET_OPTIMISED_DEFAULT,
+                    Prefix=DataQuery.ROOT_PREFIX_CLOUD_OPTIMISED_PATH,
+                    Delimiter="/",
+                )
+
+                folders = [
+                    prefix["Prefix"][len(prefix) - 1 :]
+                    for prefix in response.get("CommonPrefixes", [])
+                    if prefix["Prefix"].endswith(".parquet/")
+                ]
+
+                assert len(folders) == 3
+                assert folders[0] == "aggregated_seabird_nonqc.parquet/"
+
+                # Verify DataQuery functionality
+                aodn = DataQuery.GetAodn()
+                metadata: Metadata = aodn.get_metadata()
+                assert (
+                    metadata.metadata_catalog().get("aggregated_seabird_nonqc.parquet")
+                    is not None
+                )
+
+                # prepare data according to the test parameters
+                api = API()
+                api.initialize_metadata()
+
+                # An overlapping GeoJSON MultiPolygon (Box 1 and Box 2 overlap in the 146.0 to 147.0 longitude range)
+                # Due to the cloudlib only support bounding box, what happen is after the union of the two box we will get a larger box, then it will
+                # query data inside this larger box for the corresponding partitions.
+                # The return result will further filtered by the original multipolygon using shapely to povide result within the polygons.
+                overlapping_geojson_str = '{"type":"MultiPolygon","coordinates":[[[[144.0, -39.0], [144.0, -41.0], [147.0, -41.0], [147.0, -39.0], [144.0, -39.0]]], [[[146.0, -39.0], [146.0, -41.0], [149.0, -41.0], [149.0, -39.0], [146.0, -39.0]]]]}'
+
+                parameters = PREPARATION_PARAMETERS.copy()
+                parameters[Parameters.MASTER_JOB_ID.value] = "997"
+                parameters[Parameters.UUID.value] = (
+                    "ec2c0ef9-3645-4ded-b617-c8297f6eb250"
+                )
+                parameters[Parameters.MULTI_POLYGON.value] = overlapping_geojson_str
+                parameters[Parameters.START_DATE.value] = "03-2025"
+                parameters[Parameters.END_DATE.value] = "04-2025"
+                parameters[Parameters.DATE_RANGES.value] = (
+                    '{"0": ["2025-03-01 00:00:00.000000000", "2025-03-05 23:59:59.999999999"], "1": ["2025-03-06 00:00:00.000000000", "2025-03-10 23:59:59.999999999"], "2": ["2025-03-11 00:00:00.000000000", "2025-03-20 23:59:59.999999999"], "3": ["2025-03-20 00:00:00.000000000", "2025-03-25 23:59:59.999999999"], "4": ["2025-03-26 00:00:00.000000000", "2025-03-30 23:59:59.999999999"]}'
+                )
+                parameters[Parameters.INTERMEDIATE_OUTPUT_FOLDER.value] = "/tmp/tmp997"
+
+                for i in range(5):
+                    prepare_data(
+                        api,
+                        job_index=str(i),
+                        parameters=parameters,
+                    )
+
+                bucket_name = config.get_csv_bucket_name()
+                response = s3_client.list_objects_v2(Bucket=bucket_name)
+
+                objects = []
+                if "Contents" in response:
+                    for obj in response["Contents"]:
+                        objects.append(obj["Key"])
+                #  in test parquet, only 1 data csv for the provided range and 1 dataschema csv for the parquet dataset
+                assert "997/temp/dataschema.json" in objects
+                assert (
+                    "997/temp/aggregated_seabird_nonqc.parquet/part-2/PARTITION_KEY=2025-03/part.0.parquet"
+                    in objects
+                )
+
+                # Check if the files are compressed and uploaded correctly
+                compressed_s3_key = "997/aggregated_seabird_nonqc.zip"
+
+                # Create dummy subset_request
+                subset_request = subset_request_factory(
+                    uuid="test-dataset-uuid",
+                    recipient="test@example.com",
+                )
+
+                collect_data_files(
+                    master_job_id="997",
+                    subset_request=subset_request,
+                )
+
+                response2 = s3_client.list_objects_v2(
+                    Bucket=bucket_name, Prefix=compressed_s3_key
+                )
+                assert "Contents" in response2
+                assert len(response2["Contents"]) == 1
+                assert response2["Contents"][0]["Key"] == compressed_s3_key
+
+                # Check if the email was sent correctly
+                mock_send_email.assert_called_once()
+                call_kwargs = mock_send_email.call_args.kwargs
+                assert call_kwargs["recipient"] == "test@example.com"
+                assert "test-dataset-uuid" in call_kwargs["subject"]
+                assert "html_body" in call_kwargs
+                assert "aggregated_seabird_nonqc.zip" in call_kwargs["html_body"]
+
+                # Download the zip file and check the content
+                names: list[str] = helper.extract_zip_from_s3(
+                    bucket_name, compressed_s3_key, "/tmp"
+                )
+
+                assert (
+                    len(names) == 2
+                ), "contain single data file plus one table schema file"
+
+                schema_files = [f for f in names if "dataschema.csv" in f]
+                data_files = [
+                    f for f in names if f.endswith(".csv") and "dataschema" not in f
+                ]
+
+                # Check values
+                schema_df = pd.read_csv(f"/tmp/{schema_files[0]}", index_col=0)
+                assert len(schema_df) > 0, "Schema should not be empty"
+
+                # Expect a csv in this case so we can load it back with panda
+                csv = pd.read_csv(f"/tmp/{data_files[0]}")
+                assert (
+                    len(csv) == 66
+                ), f"Expected 66 rows inside the overlapping polygon union, got {len(csv)}"
+
+                # Validate all points are physically inside the unified overlapping polygons
+                from shapely.geometry import (
+                    Polygon as ShapelyPolygon,
+                    Point as ShapelyPoint,
+                )
+                from shapely.ops import unary_union
+
+                box1 = ShapelyPolygon(
+                    [
+                        [144.0, -39.0],
+                        [144.0, -41.0],
+                        [147.0, -41.0],
+                        [147.0, -39.0],
+                        [144.0, -39.0],
+                    ]
+                )
+                box2 = ShapelyPolygon(
+                    [
+                        [146.0, -39.0],
+                        [146.0, -41.0],
+                        [149.0, -41.0],
+                        [149.0, -39.0],
+                        [146.0, -39.0],
+                    ]
+                )
+                union_poly = unary_union([box1, box2])
+
+                for index, row in csv.iterrows():
+                    point = ShapelyPoint(
+                        row["decimalLongitude"], row["decimalLatitude"]
+                    )
+                    assert union_poly.contains(point) or union_poly.touches(
+                        point
+                    ), f"Point {point} is outside the multipolygon union"
+
+            except Exception as ex:
+                raise ex
+            finally:
+                # Delete temp output folder as the name always same for testing
+                shutil.rmtree(config.get_temp_folder("997"), ignore_errors=True)
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_non_specified_multi_polygon(
+        self, aws_clients, setup_resources, upload_test_case_to_s3
+    ):
+        # Use a different master_job_id to avoid conflicts with other tests
+        parameters = PREPARATION_PARAMETERS.copy()
+        parameters[Parameters.MASTER_JOB_ID.value] = "996"
+        parameters[Parameters.MULTI_POLYGON.value] = "non-specified"
+        parameters[Parameters.INTERMEDIATE_OUTPUT_FOLDER.value] = "/tmp/tmp996"
+
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+        helper = AWSHelper()
+
+        # Clean any old S3 objects with prefix "996/" at the start
+        bucket_name = config.get_csv_bucket_name()
+        try:
+            objs = s3_client.list_objects_v2(Bucket=bucket_name, Prefix="996/")
+            if "Contents" in objs:
+                for o in objs["Contents"]:
+                    s3_client.delete_object(Bucket=bucket_name, Key=o["Key"])
+        except Exception:
+            pass
+
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
+            try:
+                # List objects in S3
+                response = s3_client.list_objects_v2(
+                    Bucket=DataQuery.BUCKET_OPTIMISED_DEFAULT,
+                    Prefix=DataQuery.ROOT_PREFIX_CLOUD_OPTIMISED_PATH,
+                    Delimiter="/",
+                )
+
+                folders = [
+                    prefix["Prefix"][len(prefix) - 1 :]
+                    for prefix in response.get("CommonPrefixes", [])
+                    if prefix["Prefix"].endswith(".parquet/")
+                ]
+
+                assert len(folders) == 3
+                assert folders[1] == "animal_acoustic_tracking_delayed_qc.parquet/"
 
                 # Verify DataQuery functionality
                 aodn = DataQuery.GetAodn()
@@ -359,7 +723,7 @@ class TestDataGeneration(TestWithS3):
 
                 bucket_name = config.get_csv_bucket_name()
                 response = s3_client.list_objects_v2(
-                    Bucket=bucket_name, Prefix="998/temp/"
+                    Bucket=bucket_name, Prefix="996/temp/"
                 )
 
                 objects = []
@@ -369,13 +733,13 @@ class TestDataGeneration(TestWithS3):
                 #  in test parquet, only 1 data csv for the provided range and 1 dataschema.csv file for the parquet dataset
                 assert len(objects) == 2
                 assert (
-                    "998/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11/part.0.parquet"
+                    "996/temp/autonomous_underwater_vehicle.parquet/part-3/PARTITION_KEY=2010-11/part.0.parquet"
                     in objects
                 )
-                assert "998/temp/dataschema.json" in objects
+                assert "996/temp/dataschema.json" in objects
 
             except Exception as ex:
                 raise ex
             finally:
                 # Delete temp output folder as the name always same for testing
-                shutil.rmtree(config.get_temp_folder("998"), ignore_errors=True)
+                shutil.rmtree(config.get_temp_folder("996"), ignore_errors=True)

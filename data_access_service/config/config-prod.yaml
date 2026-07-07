@@ -7,8 +7,12 @@ aws:
     bucket_name:
       csv: aodn-cloud-optimized-subset-prod
       wave_buoy_backup: datavis-apps-prod-data
+      mooring_backup: datavis-apps-prod-data
   ses:
     sender_email: no.reply@aodn.org.au
   batch:
     job_queue: generate-csv-data-file
     job_definition: generate-csv-data-file
+pmtiles:
+  config:
+    bucket_name: aodnportal-production-data

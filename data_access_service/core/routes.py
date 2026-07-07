@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from xarray import Dataset
 
 from data_access_service import init_log
+from data_access_service.batch.pmtiles.generator import generate_pmtiles_for_parquets
 from data_access_service.config.config import Config
 from data_access_service.core.api import API
 from data_access_service.core.constants import (
@@ -16,24 +17,34 @@ from data_access_service.core.constants import (
     STR_LONGITUDE_UPPER_CASE,
     STR_TIME_UPPER_CASE,
 )
+from data_access_service.sites.site_feature_service import SiteFeatureService
 from data_access_service.models.ExtendedFeatureCollection import (
     ExtendedFeatureCollection,
 )
+from data_access_service.sites.sites import (
+    LatestTime,
+    SiteDetailsFeature,
+    SiteFeatureCollection,
+)
+from data_access_service.utils import sse_utils
 from data_access_service.utils.api_utils import api_key_auth
 from data_access_service.utils.date_time_utils import (
     ensure_timezone,
     MIN_DATE,
     DATE_FORMAT,
+    time_it,
 )
 from data_access_service.utils.routes_helper import (
     HealthCheckResponse,
     get_api_instance,
+    get_site_service,
     verify_datatime_param,
     fetch_data,
     async_response_json,
     generate_feature_collection,
     generate_rect_features,
 )
+from data_access_service.utils.sse_utils import sse_it
 from data_access_service.utils.sse_wrapper import sse_wrapper
 
 router = APIRouter(prefix=Config.BASE_URL)
@@ -63,12 +74,33 @@ async def health_check(request: Request):
 @router.get("/metadata/{uuid}", dependencies=[Depends(api_key_auth)])
 async def get_mapped_metadata(uuid: Optional[str] = None, request: Request = None):
     api_instance = get_api_instance(request)
-    return api_instance.get_mapped_meta_data(uuid)
+    # Check API initialization status first
+    if not api_instance.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
+
+    metadata = api_instance.get_mapped_meta_data(uuid)
+
+    if metadata.get("not_exist") is not None:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail="Dataset not found.",
+        )
+
+    return metadata
 
 
 @router.get("/metadata/{uuid}/raw", dependencies=[Depends(api_key_auth)])
 async def get_raw_metadata(uuid: str, request: Request):
     api_instance = get_api_instance(request)
+    # Check API initialization status first
+    if not api_instance.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
     return api_instance.get_raw_meta_data(uuid)
 
 
@@ -89,6 +121,13 @@ async def has_data(
     end_date: Optional[str] = datetime.now(timezone.utc).strftime(DATE_FORMAT),
 ):
     api_instance = get_api_instance(request)
+    # Check API initialization status first
+    if not api_instance.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
+
     logger.info(
         "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
     )
@@ -100,7 +139,14 @@ async def has_data(
 
 @router.get("/data/{uuid}/{key}/temporal_extent", dependencies=[Depends(api_key_auth)])
 async def get_temporal_extent(uuid: str, key: str, request: Request):
+
     api_instance = get_api_instance(request)
+    # Check API initialization status first
+    if not api_instance.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
     try:
         start_date, end_date = api_instance.get_temporal_extent(uuid, key)
         result = [
@@ -143,6 +189,12 @@ async def get_indexing_values(
         )
 
     api = get_api_instance(request)
+    # Check API initialization status first
+    if not api.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
     data_source = api.get_dataset(
         uuid=uuid,
         key=key,
@@ -210,6 +262,12 @@ async def get_zarr_rectangles(
         )
 
     api = get_api_instance(request)
+    # Check API initialization status first
+    if not api.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
     data_source = api.get_dataset(
         uuid=uuid,
         key=key,
@@ -277,68 +335,38 @@ async def get_zarr_rectangles(
     )
 
 
-@router.get("/data/feature-collection/wave-buoy", dependencies=[Depends(api_key_auth)])
-async def get_feature_collection_of_items_with_data_between_dates(
-    request: Request,
-    start_date: Optional[str] = Query(default=MIN_DATE),
-    end_date: Optional[str] = Query(
-        default=datetime.now(timezone.utc).strftime(DATE_FORMAT)
-    ),
-):
-
-    start_date = verify_datatime_param("start_date", start_date)
-    end_date = verify_datatime_param("end_date", end_date)
-    api_instance = get_api_instance(request)
-    return Response(
-        content=json.dumps(api_instance.fetch_wave_buoy_sites(start_date, end_date)),
-        media_type="application/json",
-    )
+@router.get("/data/feature-collection/{product}", dependencies=[Depends(api_key_auth)])
+def get_feature_collection_of_items_with_data_between_dates(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    service: SiteFeatureService = Depends(get_site_service),
+) -> SiteFeatureCollection:
+    """Sites with data in ``[start_date, end_date]`` as a ``SiteFeatureCollection``."""
+    return service.sites_with_data_between(start_date, end_date)
 
 
 @router.get(
-    "/data/feature-collection/wave-buoy/all", dependencies=[Depends(api_key_auth)]
+    "/data/feature-collection/{product}/latest", dependencies=[Depends(api_key_auth)]
 )
-async def get_feature_collection_of_items_all(request: Request):
-    api_instance = get_api_instance(request)
-    return Response(
-        content=json.dumps(api_instance.fetch_all_unique_wave_buoy_sites()),
-        media_type="application/json",
-    )
+def get_feature_collection_of_items_latest_dates(
+    service: SiteFeatureService = Depends(get_site_service),
+) -> LatestTime:
+    """The single most recent observation time across all sites."""
+    return service.latest_time()
 
 
 @router.get(
-    "/data/feature-collection/wave-buoy/latest", dependencies=[Depends(api_key_auth)]
-)
-async def get_feature_collection_of_items_latest_dates(request: Request):
-    api_instance = get_api_instance(request)
-    return Response(
-        content=json.dumps(api_instance.fetch_wave_buoy_latest_date()),
-        media_type="application/json",
-    )
-
-
-@router.get(
-    "/data/feature-collection/wave-buoy/{buoy_name}",
+    "/data/feature-collection/{product}/{site}",
     dependencies=[Depends(api_key_auth)],
 )
-async def get_feature_collection_of_items_with_data_between_dates(
-    request: Request,
-    buoy_name: str,
-    start_date: Optional[str] = Query(default=MIN_DATE),
-    end_date: Optional[str] = Query(
-        default=datetime.now(timezone.utc).strftime(DATE_FORMAT)
-    ),
-):
-    start_date = verify_datatime_param("start_date", start_date)
-    end_date = verify_datatime_param("end_date", end_date)
-    api_instance = get_api_instance(request)
-
-    return Response(
-        content=json.dumps(
-            api_instance.fetch_wave_buoy_data(buoy_name, start_date, end_date)
-        ),
-        media_type="application/json",
-    )
+def get_feature_collection_of_item_details(
+    site: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    service: SiteFeatureService = Depends(get_site_service),
+) -> SiteDetailsFeature:
+    """One site's observation timeseries as a single details ``Feature``."""
+    return service.site_details(site, start_date, end_date)
 
 
 @router.get("/data/{uuid}/{key}", dependencies=[Depends(api_key_auth)])
@@ -356,7 +384,12 @@ async def get_data(
     f: Optional[str] = Query(default="json"),
 ):
     api_instance = get_api_instance(request)
-
+    # Check API initialization status first
+    if not api_instance.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
     # for debug purpose: track request with an assigned id which is ranomly generated
     request_id = str(uuid_module.uuid4())
     logger.debug("Receiving request: %s", request_id)
@@ -419,3 +452,17 @@ async def get_data(
             return async_response_json(result, compress)
 
         return None
+
+
+@router.put("/pmtiles/{uuid}/{key}", dependencies=[Depends(api_key_auth)])
+@time_it
+@sse_it
+def create_pmtiles(request: Request, uuid: str, key: str):
+    api_instance = get_api_instance(request)
+    # Check API initialization status first
+    if not api_instance.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
+    return generate_pmtiles_for_parquets(api_instance, uuid, key)

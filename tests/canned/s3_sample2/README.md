@@ -6,6 +6,9 @@ corresponding ipnb in https://github.com/aodn/aodn_cloud_optimised/tree/main/not
 Noted: vessel_satellite_radiance_derived_product.zarr in intended to missing field as negative test case.
 
 ```python
+ds1 = aodn_dataset.get_data(date_start='2025-03-01', date_end='2025-03-13')
+ds1.to_parquet('/tmp/aggregated_seabird_nonqc.parquet', partition_cols=['timestamp'], engine="pyarrow")
+
 # These two dataset do not have depth
 ds1 = aodn_dataset.get_data(date_start='2024-02-04', date_end='2024-02-06')
 ds1.to_zarr('/tmp/vessel_satellite_radiance_delayed_qc.zarr', mode='w')
@@ -18,5 +21,6 @@ ds1.to_zarr('/tmp/satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr', 
 
 ds1 = aodn_dataset.get_data(date_start='2014-01-01', date_end='2014-01-10')
 ds1.to_zarr('/tmp/radar_CoffsHarbour_wind_delayed_qc.zarr', mode='w')
+
 # This one should have depth
 ```

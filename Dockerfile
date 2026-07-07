@@ -1,40 +1,49 @@
-FROM python:3.11-slim
+FROM mambaorg/micromamba:2 AS conda-base
+# Using micromamba (a fast alternative to conda) to build the exact environment
 
+# Temp work around due to deps in cloud optimized lib use xarray lib that is fork by Loz with some fix
+# "xarray @ git+https://github.com/lbesnard/xarray.git@2025.06.01.dev2#egg=xarray[complete]",
+ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_XARRAY=2025.6.1.dev2
+
+USER root
 WORKDIR /app
 RUN useradd -l -m -s /bin/bash appuser
 
+# 1. Copy the environment file first to leverage Docker caching
+COPY environment.yml /app/environment.yml
+
+# 2. Install all system dependencies and the Conda environment at once
+RUN apt update && \
+    apt -y upgrade && \
+    apt install -y nginx supervisor netcat-openbsd && \
+    rm -rf /var/lib/apt/lists/*
+
+# 3. Create the environment from your environment.yml
+# This ensures Python, pip, virtualenv, and poetry match perfectly
+RUN micromamba install -y -n base -f /app/environment.yml && \
+    micromamba clean --all --yes
+
+# Activate the environment globally for subsequent steps
+ARG MAMBA_DOCKERFILE_ACTIVATE=1
+
+# 4. Turn off virtualenv creation so poetry installs directly into the conda env
+RUN poetry config virtualenvs.create false
+
+# 5. Copy project source files
 COPY pyproject.toml poetry.lock README.md entry_point.py /app/
 COPY data_access_service /app/data_access_service
 COPY log_config.yaml /app/log_config.yaml
 
-# For Docker build to understand the possible env
-# nginx to allow offload of health check on busy python app to get fast response
-# supervisor use to start mutliple process
-# netcat-openbsd this image allow nginx to probe status correctly
-RUN apt update && \
-    apt -y upgrade && \
-    apt install -y nginx supervisor netcat-openbsd && \
-    pip3 install --upgrade pip && \
-    pip3 install virtualenv==20.28.1 && \
-    pip3 install poetry==2.1.4 && \
-    poetry config virtualenvs.create false && \
-    # Do NOT add `poetry lock` here — that would regenerate the lock against
-    # the latest PyPI on every build. May cause version conflict, please run
-    # locally and commit.
-    poetry install --no-root
+# 6. Install poetry dependencies
+RUN poetry install --no-root
 
 COPY das_site.conf  /etc/nginx/sites-available/
 RUN ln -s /etc/nginx/sites-available/das_site.conf /etc/nginx/sites-enabled/ \
     && rm /etc/nginx/sites-enabled/default \
-    && nginx -t  # Test config during build
+    && nginx -t
 
-# Copy Supervisor config to run both services
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 EXPOSE 8000
 
-# Run Supervisor as the main process, it starts an nginx server and our app. In case the app die, it
-# will restart the app. The ngnix is use to block too many request and offload the health check so
-# that we always get response even the app is busy. User who do not want this behavior should
-# use their own entry point to start the app
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
