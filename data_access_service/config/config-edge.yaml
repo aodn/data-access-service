@@ -7,8 +7,8 @@ aws:
   ses:
     sender_email: no.reply@aodn.org.au
   batch:
-    job_queue: generate-csv-data-file
-    job_definition: generate-csv-data-file
+    job_queue: data-access-service-batch-job-queue
+    job_definition: data-access-service-batch-job-definition
 pmtiles:
   config:
     bucket_name: aodnportal-edge-data
