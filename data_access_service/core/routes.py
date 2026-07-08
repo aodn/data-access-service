@@ -9,7 +9,10 @@ from fastapi.responses import Response
 from xarray import Dataset
 
 from data_access_service import init_log
-from data_access_service.batch.pmtiles.generator import generate_pmtiles_for_parquets
+from data_access_service.batch.pmtiles.generator import (
+    PmtilesGenerationInProgressError,
+    generate_pmtiles_for_parquets,
+)
 from data_access_service.config.config import Config
 from data_access_service.core.api import API
 from data_access_service.core.constants import (
@@ -465,4 +468,12 @@ def create_pmtiles(request: Request, uuid: str, key: str):
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
             detail="API is not ready. Metadata initialization is still in progress.",
         )
-    return generate_pmtiles_for_parquets(api_instance, uuid, key)
+    try:
+        return generate_pmtiles_for_parquets(api_instance, uuid, key)
+    except PmtilesGenerationInProgressError as e:
+        # Note: sse_it has already started a 200 stream, so this surfaces as an
+        # SSE "error" event (same as the 503 above)
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,  # 409
+            detail=str(e),
+        )

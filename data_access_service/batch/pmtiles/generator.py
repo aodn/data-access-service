@@ -1,4 +1,5 @@
 import tempfile
+import threading
 
 from data_access_service import Config, init_log
 from data_access_service.core.AWSHelper import AWSHelper
@@ -11,6 +12,15 @@ from ...models.pmtiles_types import (
 config = Config.get_config()
 logger = init_log(config)
 aws = AWSHelper()
+
+# PMTiles generation must not run concurrently within one process: each run
+# uses the process-global PmTileDuckDBClient connection and tears it down via
+# shutdown() when finished, which would kill any other run still mid-query
+_generation_lock = threading.Lock()
+
+
+class PmtilesGenerationInProgressError(RuntimeError):
+    """Raised when a PMTiles generation is requested while another is running."""
 
 
 def generate_pmtiles_for_all_parquets(api: BaseAPI):
@@ -25,6 +35,20 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI):
 
 
 def generate_pmtiles_for_parquets(api: BaseAPI, uuid: str, dname: str) -> bool:
+    # Fail fast instead of queueing: a queued run would hold a worker (and its
+    # SSE connection) for potentially an hour, and callers can simply retry.
+    if not _generation_lock.acquire(blocking=False):
+        raise PmtilesGenerationInProgressError(
+            f"Another PMTiles generation is already running in this process; "
+            f"rejected request for uuid {uuid}, dataset {dname}. Retry later."
+        )
+    try:
+        return _generate_pmtiles_for_parquets(api, uuid, dname)
+    finally:
+        _generation_lock.release()
+
+
+def _generate_pmtiles_for_parquets(api: BaseAPI, uuid: str, dname: str) -> bool:
 
     try:
         logger.info(f"Start generating PMTiles for uuid: {uuid}, dataset: {dname}")
