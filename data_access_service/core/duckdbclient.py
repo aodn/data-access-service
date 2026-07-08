@@ -117,6 +117,31 @@ class PmTileDuckDBClient(DuckDBClient):
                 self._duckdb_client.close()
         self._duckdb_client = None
 
+    @classmethod
+    def shutdown(cls) -> None:
+        """Close the process-global connection and remove its temp directory.
+
+        The batch loop processes datasets sequentially in one long-lived
+        process; without this, the global connection's buffer pool (up to
+        ``memory_limit``) and HTTP metadata cache accumulate across datasets
+        and never return to the OS. Any cursors from :meth:`get_instance`
+        become invalid, so only call this once a dataset is fully processed.
+        The next ``get_instance`` call lazily rebuilds a fresh connection.
+        """
+        with cls._lock:
+            connection = cls._global_db_connection
+            temp_dir = cls._temp_dir_object
+            # Drop the references first so a failure below can never leave
+            # later datasets reusing a half-closed connection.
+            cls._global_db_connection = None
+            cls._temp_dir_object = None
+            try:
+                if connection is not None:
+                    connection.close()
+            finally:
+                if temp_dir is not None:
+                    temp_dir.cleanup()
+
     def execute(
         self, sql: str, params: Sequence[Any] | None = None
     ) -> duckdb.DuckDBPyConnection:

@@ -71,7 +71,12 @@ class AbstractProcessor(ABC):
 
         finally:
             self.pm_client.close()
+            # Tear down the process-global connection too, so its buffer pool
+            # and caches are released between datasets instead of ratcheting
+            # up the process RSS over a multi-dataset batch run.
+            PmTileDuckDBClient.shutdown()
             self.logger.debug("DuckDB connection closed")
+            log_memory_usage(self.logger, "after duckdb shutdown")
 
     # The s3 uri of the source parquet. It is not http URL of s3 objects.
     def get_s3_uri(self):

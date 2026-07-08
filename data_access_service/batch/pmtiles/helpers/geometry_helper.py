@@ -5,6 +5,16 @@ from shapely.ops import unary_union
 
 _WORLD_BOUNDS = Polygon([(-180, -90), (180, -90), (180, 90), (-180, 90), (-180, -90)])
 
+# Full-precision floats are ~18 characters each in JSON
+# Hexagon coordinates are now rounded to 6 decimal places,
+_COORD_DECIMALS = 6
+
+
+def _round_coordinates(value):
+    if isinstance(value, (list, tuple)):
+        return [_round_coordinates(item) for item in value]
+    return round(float(value), _COORD_DECIMALS)
+
 
 def h3_boundary_lnglat(cell: str) -> List[List[float]]:
     try:
@@ -25,7 +35,10 @@ def h3_boundary_lnglat(cell: str) -> List[List[float]]:
 
     boundary = boundary_getter(cell)
 
-    ring = [[float(lng), float(lat)] for lat, lng in boundary]
+    ring = [
+        [round(float(lng), _COORD_DECIMALS), round(float(lat), _COORD_DECIMALS)]
+        for lat, lng in boundary
+    ]
     if ring and ring[0] != ring[-1]:
         ring.append(ring[0])
     return ring
@@ -76,4 +89,4 @@ def build_hex_geometry(cell: str) -> Dict:
         merged = MultiPolygon([merged])
 
     geo = mapping(merged)
-    return {"type": geo["type"], "coordinates": geo["coordinates"]}
+    return {"type": geo["type"], "coordinates": _round_coordinates(geo["coordinates"])}
