@@ -446,11 +446,14 @@ class API(BaseAPI):
 
         # Metadata_catalog_uncached() is not working for external data resources right now.
         # So we use the cached catalog which is working for all data sources, and merge with the uncached one
+        log.info("111before merge catalog: " + str(catalog))
         catalog = cached_catalog | catalog
+        log.info("111after merge catalog: " + str(catalog))
         for key in catalog:
             uuid = None
             try:
                 data = catalog.get(key)
+                log.info("111 data: " + str(data))
                 uuid = API.get_metadata_uuid(data)
 
                 if uuid is not None and uuid != "":

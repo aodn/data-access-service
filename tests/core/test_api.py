@@ -174,6 +174,7 @@ class TestApi(unittest.TestCase):
     def test_refresh_uuid_dataset_map_logs_dataset_failure_and_continues(self):
         api = API()
         api._metadata = MagicMock()
+        api._metadata.catalog = {}
         api._metadata.metadata_catalog_uncached.return_value = {
             "bad_dataset.parquet": {},
             "good_dataset.parquet": {
