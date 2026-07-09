@@ -233,7 +233,11 @@ def resample_variables_to_grid(
             arr = ds[v].values.astype(np.float32, copy=False).squeeze()
             if flip:
                 arr = np.ascontiguousarray(arr[::-1, :])
-            kernel = _numba_nearest if is_categorical_variable(ds[v].attrs) else _numba_bilinear
+            kernel = (
+                _numba_nearest
+                if is_categorical_variable(ds[v].attrs)
+                else _numba_bilinear
+            )
             with _PARALLEL_KERNEL_LOCK:
                 out.append(kernel(arr, total_h, total_w))
         return out
@@ -253,7 +257,9 @@ def resample_variables_to_grid(
     return out
 
 
-def normalize_fallback(arr: np.ndarray, lo: float, hi: float, out_max: int) -> np.ndarray:
+def normalize_fallback(
+    arr: np.ndarray, lo: float, hi: float, out_max: int
+) -> np.ndarray:
     """Normalize arr to [0, out_max], replacing NaN with 0. Returns uint8 or uint32.
 
     Used only when numba is unavailable; the numba kernels above are 5× faster on Intel.
@@ -263,7 +269,9 @@ def normalize_fallback(arr: np.ndarray, lo: float, hi: float, out_max: int) -> n
     return result.astype(np.uint32 if out_max > 255 else np.uint8)
 
 
-def normalize(arr: np.ndarray, lo: float, hi: float, out_max: int) -> tuple[np.ndarray, np.ndarray]:
+def normalize(
+    arr: np.ndarray, lo: float, hi: float, out_max: int
+) -> tuple[np.ndarray, np.ndarray]:
     """Normalize float32 → uint (uint32 if out_max > 255 else uint8) + per-pixel valid mask.
 
     Single dispatch point so the caller (rendering/data_tiles.py) doesn't repeat

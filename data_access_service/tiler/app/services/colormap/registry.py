@@ -76,7 +76,9 @@ def list_colormaps() -> dict[str, list]:
     rio_names = sorted(n for n in _rio_cmap.list() if n not in custom_set)
     rio_set = set(rio_names)
 
-    mpl_names = sorted(n for n in matplotlib.colormaps if n not in custom_set and n not in rio_set)
+    mpl_names = sorted(
+        n for n in matplotlib.colormaps if n not in custom_set and n not in rio_set
+    )
 
     return {"custom": custom, "rio_tiler": rio_names, "matplotlib": mpl_names}
 

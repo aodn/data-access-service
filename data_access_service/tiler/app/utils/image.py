@@ -63,7 +63,9 @@ def animated_media_type(fmt: AnimatedFormat) -> str:
     return "image/apng"
 
 
-def encode_rgba_animation(frames: list[np.ndarray], fmt: AnimatedFormat, duration_ms: int) -> bytes:
+def encode_rgba_animation(
+    frames: list[np.ndarray], fmt: AnimatedFormat, duration_ms: int
+) -> bytes:
     """Encode a sequence of (H, W, 4) uint8 RGBA frames as an animated image.
 
     GIF quantises the colormap to a 256-colour palette — fine for smooth ramps,

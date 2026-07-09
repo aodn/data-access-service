@@ -135,7 +135,9 @@ def get_products_availability(
                 "end": all_dates[-1] if all_dates else None,
             },
         }
-        fingerprint_parts.append(f"{product_id}:{len(dates)}:{dates[-1] if dates else ''}")
+        fingerprint_parts.append(
+            f"{product_id}:{len(dates)}:{dates[-1] if dates else ''}"
+        )
 
     etag = _etag("|".join(fingerprint_parts))
     return _etag_response(
@@ -185,7 +187,9 @@ def get_point(
     product = get_product_or_404(product_id)
     validate_date(date)
     variables = product.variables
-    ds = load_slice_or_404(product.source_path, date, variables, ocean_masked=product.ocean_masked)
+    ds = load_slice_or_404(
+        product.source_path, date, variables, ocean_masked=product.ocean_masked
+    )
 
     _require_point_in_bounds(ds, lat, lon)
     point = ds.sel(lat=lat, lon=lon, method="nearest")

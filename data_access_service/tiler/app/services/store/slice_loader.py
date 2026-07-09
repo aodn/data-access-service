@@ -39,13 +39,19 @@ def _compute_slice_from_store(
     return result
 
 
-def _fetch_slice_from_store(store_url: str, date: str, variables: list[str]) -> xr.Dataset:
+def _fetch_slice_from_store(
+    store_url: str, date: str, variables: list[str]
+) -> xr.Dataset:
     store = get_store(store_url)
     index = store_registry.date_index(store_url)
     matching = list(index.get(date, ()))
     if not matching:
         latest = max(index) if index else None
-        hint = f" Latest available date is {latest!r}." if latest else " No dates are available."
+        hint = (
+            f" Latest available date is {latest!r}."
+            if latest
+            else " No dates are available."
+        )
         raise FileNotFoundError(f"No data for date {date!r}.{hint}")
     try:
         return store[variables].sel(time=pd.Timestamp(matching[0])).compute()
@@ -70,7 +76,8 @@ def load_slice(
 
     def compute() -> xr.Dataset:
         return slice_memo.get_or_compute(
-            cache_key, lambda: _compute_slice_from_store(store_url, date, variables, ocean_masked)
+            cache_key,
+            lambda: _compute_slice_from_store(store_url, date, variables, ocean_masked),
         )
 
     return _slice_dedup.dedupe(cache_key, compute)

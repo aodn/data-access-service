@@ -21,7 +21,9 @@ def parse_color(v: Any, label: str) -> list[int]:
         return hex_to_rgba(v)
     if isinstance(v, list | tuple):
         rgba = list(v)
-        if len(rgba) != 4 or not all(isinstance(c, int) and 0 <= c <= 255 for c in rgba):
+        if len(rgba) != 4 or not all(
+            isinstance(c, int) and 0 <= c <= 255 for c in rgba
+        ):
             raise ValueError(f"{label} must be [r, g, b, a] with values 0–255")
         return rgba
     raise ValueError(f"{label} must be a hex string or [r, g, b, a] list")
@@ -34,7 +36,9 @@ def interpolate_colormap(stops: list[list[int]]) -> list[list[int]]:
     arr = np.array(stops, dtype=float)
     x_stops = np.linspace(0, 1, len(stops))
     x_out = np.linspace(0, 1, 256)
-    interpolated = np.stack([np.interp(x_out, x_stops, arr[:, c]) for c in range(4)], axis=1)
+    interpolated = np.stack(
+        [np.interp(x_out, x_stops, arr[:, c]) for c in range(4)], axis=1
+    )
     return np.clip(interpolated, 0, 255).round().astype(int).tolist()  # type: ignore[no-any-return]
 
 

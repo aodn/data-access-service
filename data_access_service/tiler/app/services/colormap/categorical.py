@@ -87,7 +87,9 @@ def parse_flag_values_and_meanings(
     return values, labels
 
 
-def resolve_scheme(attrs: Mapping[str, Any], colormap_name: str | None) -> CategoricalScheme:
+def resolve_scheme(
+    attrs: Mapping[str, Any], colormap_name: str | None
+) -> CategoricalScheme:
     """Build a scheme for a categorical variable's attrs.
 
     Assumes the variable is categorical — callers must gate on

@@ -41,12 +41,15 @@ def get_tile(
     lod_grids = get_lod_grids(product)
 
     if z not in lod_grids:
-        raise HTTPException(status_code=404, detail=f"LOD {z} not available for {product_id}")
+        raise HTTPException(
+            status_code=404, detail=f"LOD {z} not available for {product_id}"
+        )
 
     grid_cols, grid_rows = lod_grids[z]
     if x < 0 or x >= grid_cols or y < 0 or y >= grid_rows:
         raise HTTPException(
-            status_code=404, detail=f"Tile {z}/{x}/{y} out of bounds (grid {grid_cols}×{grid_rows})"
+            status_code=404,
+            detail=f"Tile {z}/{x}/{y} out of bounds (grid {grid_cols}×{grid_rows})",
         )
 
     variables = product.variables
@@ -60,7 +63,9 @@ def get_tile(
         y,
         date,
     )
-    return Response(content=png_bytes, media_type="image/png", headers=IMMUTABLE_CACHE_HEADERS)
+    return Response(
+        content=png_bytes, media_type="image/png", headers=IMMUTABLE_CACHE_HEADERS
+    )
 
 
 # TODO: investigate why response of satellite_austemp_sst_8day_sst is so slow, taking 5 seconds for cold hit after deployed in ec2.
@@ -93,6 +98,8 @@ def get_manifest(
     validate_date(date)
     get_lod_grids(product)
     variables = product.variables
-    ds = load_slice_or_404(product.source_path, date, variables, ocean_masked=product.ocean_masked)
+    ds = load_slice_or_404(
+        product.source_path, date, variables, ocean_masked=product.ocean_masked
+    )
     response.headers.update(IMMUTABLE_CACHE_HEADERS)
     return DataTileManifestResponse(**render_manifest(product, ds))

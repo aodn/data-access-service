@@ -53,7 +53,11 @@ _tile_dedup = Deduper()
 _bbox_dedup = Deduper()
 
 
-@router.get("/colormaps", summary="List available colormaps", response_model=ColormapListResponse)
+@router.get(
+    "/colormaps",
+    summary="List available colormaps",
+    response_model=ColormapListResponse,
+)
 async def get_colormaps():
     return ColormapListResponse(**list_colormaps())
 
@@ -92,7 +96,9 @@ def get_legend(
         png = render_legend(name, rescale_range, width, height, orientation)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return Response(content=png, media_type="image/png", headers=IMMUTABLE_CACHE_HEADERS)
+    return Response(
+        content=png, media_type="image/png", headers=IMMUTABLE_CACHE_HEADERS
+    )
 
 
 @router.get(
@@ -148,7 +154,17 @@ def get_tile(
 
     rescale_range = parse_rescale(rescale)
 
-    key = (product.source_path, date, variable, z, x, y, colormap_name, rescale_range, ext)
+    key = (
+        product.source_path,
+        date,
+        variable,
+        z,
+        x,
+        y,
+        colormap_name,
+        rescale_range,
+        ext,
+    )
 
     def _do_render() -> bytes:
         ds = load_slice_or_404(
@@ -161,7 +177,9 @@ def get_tile(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    return Response(content=body, media_type=media_type(ext), headers=IMMUTABLE_CACHE_HEADERS)
+    return Response(
+        content=body, media_type=media_type(ext), headers=IMMUTABLE_CACHE_HEADERS
+    )
 
 
 def _resolve_resolution(
@@ -211,13 +229,17 @@ def _parse_bbox_and_crs(
     """
     crs = crs.upper()
     if crs not in ("EPSG:4326", "EPSG:3857"):
-        raise HTTPException(status_code=400, detail="crs must be 'EPSG:4326' or 'EPSG:3857'")
+        raise HTTPException(
+            status_code=400, detail="crs must be 'EPSG:4326' or 'EPSG:3857'"
+        )
     if bbox is None:
         return default_bbox_from_store(source_path), "EPSG:4326"
     try:
         minx, miny, maxx, maxy = (float(v) for v in bbox.split(","))
     except ValueError as e:
-        raise HTTPException(status_code=400, detail="bbox must be 'minx,miny,maxx,maxy'") from e
+        raise HTTPException(
+            status_code=400, detail="bbox must be 'minx,miny,maxx,maxy'"
+        ) from e
     return (minx, miny, maxx, maxy), crs
 
 
@@ -309,7 +331,9 @@ def get_bbox(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    return Response(content=body, media_type=media_type(ext), headers=IMMUTABLE_CACHE_HEADERS)
+    return Response(
+        content=body, media_type=media_type(ext), headers=IMMUTABLE_CACHE_HEADERS
+    )
 
 
 @router.get(
@@ -389,7 +413,8 @@ async def get_animation(
     validate_date(to_date)
     if from_date > to_date:
         raise HTTPException(
-            status_code=400, detail=f"from_date {from_date!r} is after to_date {to_date!r}."
+            status_code=400,
+            detail=f"from_date {from_date!r} is after to_date {to_date!r}.",
         )
 
     if colormap_name is not None:

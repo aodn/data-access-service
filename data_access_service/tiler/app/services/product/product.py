@@ -61,7 +61,10 @@ class Product:
         for k in range(max_depth + 1):
             scale = 2**k
             levels.append(
-                (max(1, math.ceil(finest_cols / scale)), max(1, math.ceil(finest_rows / scale)))
+                (
+                    max(1, math.ceil(finest_cols / scale)),
+                    max(1, math.ceil(finest_rows / scale)),
+                )
             )
         levels.reverse()
         min_cols, min_rows = min_coarsest
@@ -78,7 +81,9 @@ class Product:
         """Compute and cache lod_grids from native data dimensions. No-op if already set."""
         if self.lod_grids:
             return
-        self.lod_grids.update(self._compute_lod_grids(data_width, data_height, self.chunk_px))
+        self.lod_grids.update(
+            self._compute_lod_grids(data_width, data_height, self.chunk_px)
+        )
 
 
 def get_lod_grids(product: Product) -> dict[int, tuple[int, int]]:

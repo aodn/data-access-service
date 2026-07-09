@@ -49,7 +49,9 @@ def native_resolution_in_bbox(
     return w, h
 
 
-def default_bbox_from_store(product_source_path: str) -> tuple[float, float, float, float]:
+def default_bbox_from_store(
+    product_source_path: str,
+) -> tuple[float, float, float, float]:
     """Return EPSG:4326 bounds for the dataset, clamped to ±180 lon.
 
     Antimeridian-straddling datasets (e.g. GSLA at 57–185°E) lose the sliver past

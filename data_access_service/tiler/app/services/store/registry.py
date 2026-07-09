@@ -164,7 +164,9 @@ class StoreRegistry:
 
         async def _one(url: str) -> None:
             try:
-                await anyio.to_thread.run_sync(self.get, url, limiter=_STORE_PREWARM_LIMITER)
+                await anyio.to_thread.run_sync(
+                    self.get, url, limiter=_STORE_PREWARM_LIMITER
+                )
             except Exception:
                 print(f"Store prewarm failed: {url}")
                 traceback.print_exc()

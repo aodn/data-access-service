@@ -36,7 +36,9 @@ def validate_date(date: str) -> None:
         raise HTTPException(status_code=422, detail=f"Invalid date: {date!r}") from e
 
 
-def load_slice_or_404(store_url: str, date: str, variables: list[str], ocean_masked: bool = False):
+def load_slice_or_404(
+    store_url: str, date: str, variables: list[str], ocean_masked: bool = False
+):
     try:
         return load_slice(store_url, date, variables, ocean_masked)
     except FileNotFoundError as e:

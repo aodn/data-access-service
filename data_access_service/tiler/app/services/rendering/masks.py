@@ -72,7 +72,12 @@ def load_land_mask() -> tuple[np.ndarray, dict[str, float]]:
 
 @lru_cache(maxsize=64)
 def land_mask_for_grid(
-    lon_min: float, lon_max: float, lat_min: float, lat_max: float, total_w: int, total_h: int
+    lon_min: float,
+    lon_max: float,
+    lat_min: float,
+    lat_max: float,
+    total_w: int,
+    total_h: int,
 ) -> np.ndarray:
     """Boolean land mask (True = land) on a (total_h, total_w) render grid.
 
@@ -170,7 +175,9 @@ def apply_ocean_mask(ds: xr.Dataset, variables: list[str]) -> xr.Dataset:
     — before resampling/point selection — rather than cutting per render grid.
     """
     valid = ocean_valid_for_coords(ds.lon.values, ds.lat.values)  # (lat, lon)
-    valid_da = xr.DataArray(valid, dims=("lat", "lon"), coords={"lat": ds.lat, "lon": ds.lon})
+    valid_da = xr.DataArray(
+        valid, dims=("lat", "lon"), coords={"lat": ds.lat, "lon": ds.lon}
+    )
     out = ds.copy()
     for v in variables:
         out[v] = ds[v].where(valid_da)

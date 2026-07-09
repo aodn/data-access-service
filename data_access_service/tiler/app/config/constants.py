@@ -29,7 +29,9 @@ class LODConfig:
     # LOD level → minimum map zoom to show that level. Applied universally to all products.
     # LOD1 is the coarsest level, so under zoom level 4 only LOD1 tiles are shown; at zoom 4 LOD2
     # tiles are shown, etc.
-    zoom_thresholds: dict[LODIndex, ZoomLevel] = field(default_factory=lambda: {2: 4, 3: 5, 4: 6})
+    zoom_thresholds: dict[LODIndex, ZoomLevel] = field(
+        default_factory=lambda: {2: 4, 3: 5, 4: 6}
+    )
 
 
 LOD = LODConfig()

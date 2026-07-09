@@ -20,7 +20,11 @@ from rio_tiler.io.xarray import XarrayReader
 from rio_tiler.models import ImageData
 from rioxarray.exceptions import NoDataInBounds
 
-from app.services.colormap.categorical import RGBA, is_categorical_variable, resolve_scheme
+from app.services.colormap.categorical import (
+    RGBA,
+    is_categorical_variable,
+    resolve_scheme,
+)
 from app.services.colormap.registry import get_category_values, is_categorical
 from app.services.colormap.resolver import resolve_colormap
 from app.services.store.spatial import bbox_to_wgs84
@@ -56,7 +60,9 @@ def warmup_visual() -> None:
         traceback.print_exc()
 
 
-def _img_to_rgba(img: ImageData, cm: dict[int, tuple[int, int, int, int]]) -> np.ndarray:
+def _img_to_rgba(
+    img: ImageData, cm: dict[int, tuple[int, int, int, int]]
+) -> np.ndarray:
     """Apply colormap + data mask to a rescaled ImageData, returning an (H, W, 4) RGBA array.
 
     Mirrors what ImageData.render() does internally but stops before the PNG encode.
@@ -386,7 +392,10 @@ def render_bbox(
             parts,
             scheme.lut(),
             lambda r: r.part(
-                (lo, la_min, hi, la_max), width=width, height=height, reproject_method="nearest"
+                (lo, la_min, hi, la_max),
+                width=width,
+                height=height,
+                reproject_method="nearest",
             ),
         )
         return encode_rgba(result, fmt) if result is not None else empty_tile(fmt)
@@ -440,7 +449,10 @@ def render_bbox_animation(
 
         def _read_part(r: XarrayReader) -> ImageData:
             return r.part(
-                (lo, la_min, hi, la_max), width=width, height=height, reproject_method="nearest"
+                (lo, la_min, hi, la_max),
+                width=width,
+                height=height,
+                reproject_method="nearest",
             )
 
         cat_frames: list[np.ndarray] = []

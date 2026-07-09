@@ -151,13 +151,20 @@ def _extract_chunk(
     pad_right = padding if col_s + cw == total_w else 0
 
     if pad_top or pad_bottom or pad_left or pad_right:
-        chunk = np.pad(chunk, ((pad_top, pad_bottom), (pad_left, pad_right)), mode="edge")
+        chunk = np.pad(
+            chunk, ((pad_top, pad_bottom), (pad_left, pad_right)), mode="edge"
+        )
 
     return chunk
 
 
 def render_tile(
-    product: Product, load_ds: Callable[[], xr.Dataset], lod: int, cx: int, cy: int, date: str
+    product: Product,
+    load_ds: Callable[[], xr.Dataset],
+    lod: int,
+    cx: int,
+    cy: int,
+    date: str,
 ) -> bytes:
     normalised, ocean = _get_processed(product, load_ds, lod, date)
 
@@ -166,7 +173,9 @@ def render_tile(
     total_h = grid_rows * product.chunk_px[1]
 
     def chunk_of(arr: np.ndarray) -> np.ndarray:
-        return _extract_chunk(arr, cx, cy, total_w, total_h, product.chunk_px, product.padding)
+        return _extract_chunk(
+            arr, cx, cy, total_w, total_h, product.chunk_px, product.padding
+        )
 
     chunks = [chunk_of(arr) for arr in normalised]
     chunk_m = chunk_of(ocean)
