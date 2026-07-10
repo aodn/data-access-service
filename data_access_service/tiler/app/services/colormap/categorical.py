@@ -27,8 +27,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from app.services.colormap.registry import get_colormap, is_categorical
-from app.utils.colors import categorical_slot, parse_color
+from data_access_service.tiler.app.services.colormap.registry import get_colormap, is_categorical
+from data_access_service.tiler.app.utils.colors import categorical_slot, parse_color
 
 RGBA = tuple[int, int, int, int]
 

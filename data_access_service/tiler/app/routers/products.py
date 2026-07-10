@@ -6,18 +6,18 @@ from fastapi import APIRouter, Header, HTTPException, Path, Query, Response
 from fastapi.openapi.models import Example
 from fastapi.responses import JSONResponse
 
-from app.config.constants import CACHE_VERSION
-from app.schemas.products import (
+from data_access_service.tiler.app.config.constants import CACHE_VERSION
+from data_access_service.tiler.app.schemas.products import (
     ManifestResponse,
     PointResponse,
     ProductConfig,
     ProductInspection,
     VariableValue,
 )
-from app.services.product.inspect import inspect_product
-from app.services.product.registry import iter_product_items, list_products
-from app.services.store.registry import get_available_dates, get_store
-from app.utils.geo import dataset_bounds
+from data_access_service.tiler.app.services.product.inspect import inspect_product
+from data_access_service.tiler.app.services.product.registry import iter_product_items, list_products
+from data_access_service.tiler.app.services.store.registry import get_available_dates, get_store
+from data_access_service.tiler.app.utils.geo import dataset_bounds
 
 from .shared import (
     DATE_EX,

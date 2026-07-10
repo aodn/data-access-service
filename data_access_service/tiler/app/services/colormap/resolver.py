@@ -14,7 +14,7 @@ from functools import lru_cache
 
 import numpy as np
 
-from app.services.colormap.registry import get_colormap, on_invalidate
+from data_access_service.tiler.app.services.colormap.registry import get_colormap, on_invalidate
 
 
 # LRU because resolve_colormap is called on every visual-tile render; render_legend

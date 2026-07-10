@@ -12,6 +12,7 @@ from data_access_service.core.routes import router as api_router
 from data_access_service.core.scheduler import TaskScheduler
 from data_access_service.sites.sites_repository import build_repositories
 from data_access_service.core.duckdbclient import ParquetDuckDBClient
+from data_access_service.tiler.app.main import app as tiler_app
 
 
 def api_setup(application: FastAPI) -> API:
@@ -47,20 +48,21 @@ def api_setup(application: FastAPI) -> API:
 async def lifespan(application: FastAPI):
     # Initialize API
     api = api_setup(application)
+    # Mount tiler app
+    application.mount(Config.BASE_URL, tiler_app)
 
-    # Build the DuckDB session + repositories and start the scheduler (skip in
-    # test environment, which has no AWS credentials for the S3 secrets).
     session = None
     scheduler = None
-    if not isinstance(Config.get_config(), IntTestConfig):
+    if isinstance(Config.get_config(), IntTestConfig):
+        yield
+    else:
         session = ParquetDuckDBClient()
         application.state.duckdb_session = session
         application.state.repositories = build_repositories(session)
         scheduler = TaskScheduler(api, application.state.repositories)
-        # Check for running event loop first to avoid creating an unawaited coroutine
         asyncio.create_task(scheduler.start_with_initial_run(), name="repository_cache")
-
-    yield
+        async with tiler_app.router.lifespan_context(tiler_app):
+            yield
 
     # Cleanup
     if scheduler:
@@ -80,7 +82,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "data_access_service.server:app",
         host="0.0.0.0",
-        port=5000,
+        port=8000,
         reload=reload_mode,
         workers=1,
         log_config=log_config_path,

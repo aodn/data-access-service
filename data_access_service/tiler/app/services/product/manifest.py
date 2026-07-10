@@ -11,13 +11,13 @@ from typing import Any
 
 import xarray as xr
 
-from app.config.constants import LOD
-from app.services.colormap.categorical import (
+from data_access_service.tiler.app.config.constants import LOD
+from data_access_service.tiler.app.services.colormap.categorical import (
     is_categorical_variable,
     parse_flag_values_and_meanings,
 )
-from app.services.product.product import Product
-from app.utils.geo import json_safe_float
+from data_access_service.tiler.app.services.product.product import Product
+from data_access_service.tiler.app.utils.geo import json_safe_float
 
 
 def render_manifest(product: Product, ds: xr.Dataset) -> dict[str, Any]:

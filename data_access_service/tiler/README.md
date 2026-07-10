@@ -8,17 +8,15 @@ On-demand tile server for IMOS ocean data products, living inside `data_access_s
 
 Dependencies are managed by this repo's root `pyproject.toml`/Poetry, not a separate environment — `poetry install` from the repo root covers the tiler too.
 
-Because the tiler's code imports itself as a top-level `app` package (`from app.config import settings`, etc.), run it with uvicorn's `--app-dir` flag from the **repo root** so those imports resolve without any source changes:
+The tiler is mounted onto the main `data_access_service` app under its API prefix (see [`data_access_service/server.py`](../server.py)); the tiler's own routers additionally prefix themselves with `/tiler` (see [`app/main.py`](app/main.py)), so starting the server the normal way also starts the tiler on the same port, at `{BASE_URL}/tiler/data_tiles/...` and `{BASE_URL}/tiler/visual_tiles/...` (`BASE_URL` is `/api/v1/das` — see [`Config.BASE_URL`](../config/config.py)):
 
 ```bash
-poetry run uvicorn app.main:app --app-dir data_access_service/tiler --port 8000 --reload
+poetry run python -m data_access_service.server
 ```
-
-Drop `--reload` for a normal run; pick a free port if the main `data_access_service` app is also running.
 
 All server configuration (timezone, cache backend, S3 timeouts, log level, etc.) lives in [`app/config/settings.py`](app/config/settings.py) as plain constants — no env vars, no `.env` file. To change a value, edit the file and restart the server.
 
-Server available at `http://localhost:8000`. Interactive API docs at `http://localhost:8000/docs`.
+Server available at `http://localhost:5000`. `/docs` shows the main app's schema, not the tiler's, since it's a separate ASGI app under the hood mounted at `{BASE_URL}`.
 
 ## Important: date timezone convention
 
@@ -29,6 +27,8 @@ Server available at `http://localhost:8000`. Interactive API docs at `http://loc
 > **Always use dates from the manifest — never construct them from a local clock.** Dates are opaque keys: a client constructing a date string from their own clock may produce a value that does not exist in the manifest. Passing a UTC date directly will also 404, because satellite passes typically cross midnight UTC (e.g. a Sydney daytime pass at `2022-06-01 01:20 AEST` is `2022-05-31 15:20 UTC`).
 
 ## Endpoints
+
+Paths below are relative to the tiler's own root. When mounted via the main server (the normal way this runs), prefix each with `{BASE_URL}/tiler` (`/api/v1/das/tiler`) — e.g. `/data_tiles/products` becomes `/api/v1/das/tiler/data_tiles/products`.
 
 ### Data tiles (`/data_tiles`)
 

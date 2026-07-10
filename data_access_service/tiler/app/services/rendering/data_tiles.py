@@ -17,15 +17,15 @@ from collections.abc import Callable
 import numpy as np
 import xarray as xr
 
-from app.services.caching.deduper import Deduper
-from app.services.caching.processed_cache import processed_memo
-from app.services.product.product import Product
-from app.services.rendering.kernels import normalize, resample_variables_to_grid
-from app.services.rendering.masks import (
+from data_access_service.tiler.app.services.caching.deduper import Deduper
+from data_access_service.tiler.app.services.caching.processed_cache import processed_memo
+from data_access_service.tiler.app.services.product.product import Product
+from data_access_service.tiler.app.services.rendering.kernels import normalize, resample_variables_to_grid
+from data_access_service.tiler.app.services.rendering.masks import (
     inpaint_nearest,
     land_mask_for_grid,
 )
-from app.utils.image import encode_rgba
+from data_access_service.tiler.app.utils.image import encode_rgba
 
 # Always in-process, independent of CACHE_BACKEND — see Deduper's docstring
 # for why this matters even (especially) under CACHE_BACKEND=none.

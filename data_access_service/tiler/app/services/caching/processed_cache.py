@@ -10,8 +10,8 @@ directly. In-process dedup (independent of ``CACHE_BACKEND``) is a separate
 concern that lives with its one consumer — see ``rendering/data_tiles.py``.
 """
 
-from app.config import settings
-from app.services.caching.memoizer import CacheBackend, create_memoizer
+from data_access_service.tiler.app.config import settings
+from data_access_service.tiler.app.services.caching.memoizer import CacheBackend, create_memoizer
 
 
 # Backend is selectable via CACHE_BACKEND (see memoizer.create_memoizer) so

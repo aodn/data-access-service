@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
-from app.services.product.product import Product
+from data_access_service.tiler.app.services.product.product import Product
 
 
 def _json_safe(value: Any) -> Any:

@@ -3,7 +3,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
-from app.config.paths import COLORMAPS_CONFIG_PATH
+from data_access_service.tiler.app.config.paths import COLORMAPS_CONFIG_PATH
 
 ColormapMode = Literal["ramp", "categorical"]
 

@@ -17,9 +17,9 @@ Single front door for everything product-related at runtime:
 import json
 from pathlib import Path
 
-from app.config.constants import TILE
-from app.config.paths import PRODUCTS_CONFIG_PATH
-from app.services.product.product import CoastalFill, Product
+from data_access_service.tiler.app.config.constants import TILE
+from data_access_service.tiler.app.config.paths import PRODUCTS_CONFIG_PATH
+from data_access_service.tiler.app.services.product.product import CoastalFill, Product
 
 _config_path = Path(PRODUCTS_CONFIG_PATH)
 

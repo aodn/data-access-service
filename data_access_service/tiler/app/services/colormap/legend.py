@@ -16,8 +16,8 @@ from functools import lru_cache
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from app.services.colormap.registry import is_categorical, on_invalidate
-from app.services.colormap.resolver import resolve_colormap
+from data_access_service.tiler.app.services.colormap.registry import is_categorical, on_invalidate
+from data_access_service.tiler.app.services.colormap.resolver import resolve_colormap
 
 _LABEL_PX = 20  # pixels reserved alongside the bar for tick labels
 

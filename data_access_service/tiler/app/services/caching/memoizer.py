@@ -21,7 +21,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Hashable
 from typing import TypeVar
 
-from app.config import settings
+from data_access_service.tiler.app.config import settings
 
 T = TypeVar("T")
 

@@ -10,7 +10,7 @@ internals.
 
 from pyproj import Transformer
 
-from app.services.store.registry import get_store
+from data_access_service.tiler.app.services.store.registry import get_store
 
 _mercator_to_wgs84 = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
 

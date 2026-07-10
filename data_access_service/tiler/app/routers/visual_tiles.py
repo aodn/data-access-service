@@ -6,24 +6,24 @@ from fastapi import APIRouter, HTTPException, Path, Query
 from fastapi.openapi.models import Example
 from fastapi.responses import Response
 
-from app.config.settings import ANIMATION_WORKERS
-from app.schemas.visual_tiles import ColormapListResponse
-from app.services.caching.deduper import Deduper
-from app.services.colormap.legend import render_legend
-from app.services.colormap.registry import list_colormaps
-from app.services.rendering.visual_tiles import (
+from data_access_service.tiler.app.config.settings import ANIMATION_WORKERS
+from data_access_service.tiler.app.schemas.visual_tiles import ColormapListResponse
+from data_access_service.tiler.app.services.caching.deduper import Deduper
+from data_access_service.tiler.app.services.colormap.legend import render_legend
+from data_access_service.tiler.app.services.colormap.registry import list_colormaps
+from data_access_service.tiler.app.services.rendering.visual_tiles import (
     render_bbox,
     render_bbox_animation,
     render_tile,
 )
-from app.services.store.registry import get_available_dates
-from app.services.store.slice_loader import load_slice_uncached
-from app.services.store.spatial import (
+from data_access_service.tiler.app.services.store.registry import get_available_dates
+from data_access_service.tiler.app.services.store.slice_loader import load_slice_uncached
+from data_access_service.tiler.app.services.store.spatial import (
     bbox_to_wgs84,
     default_bbox_from_store,
     native_resolution_in_bbox,
 )
-from app.utils.image import AnimatedFormat, ImageFormat, animated_media_type, media_type
+from data_access_service.tiler.app.utils.image import AnimatedFormat, ImageFormat, animated_media_type, media_type
 
 from .products import router as products_router
 from .shared import (

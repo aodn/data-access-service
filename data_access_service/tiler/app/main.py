@@ -6,17 +6,16 @@ import anyio
 import starlette.middleware.gzip as _gzip_mw
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 
-from app.config import settings
-from app.routers.data_tiles import router as data_tiles_router
-from app.routers.visual_tiles import router as visual_tiles_router
-from app.services.colormap.registry import load_colormaps
-from app.services.product.registry import iter_products, load_products
-from app.services.rendering.kernels import warmup_resample
-from app.services.rendering.visual_tiles import warmup_visual
-from app.services.store.registry import prewarm_stores
+from data_access_service.tiler.app.config import settings
+from data_access_service.tiler.app.routers.data_tiles import router as data_tiles_router
+from data_access_service.tiler.app.routers.visual_tiles import router as visual_tiles_router
+from data_access_service.tiler.app.services.colormap.registry import load_colormaps
+from data_access_service.tiler.app.services.product.registry import iter_products, load_products
+from data_access_service.tiler.app.services.rendering.kernels import warmup_resample
+from data_access_service.tiler.app.services.rendering.visual_tiles import warmup_visual
+from data_access_service.tiler.app.services.store.registry import prewarm_stores
 
 
 @asynccontextmanager
@@ -26,15 +25,6 @@ async def lifespan(app: FastAPI):
     print(f"Thread pool size set: {limiter.total_tokens}")
     load_products()
     load_colormaps()
-    print(
-        "Cache configured:",
-        {
-            "cache_backend": settings.CACHE_BACKEND,
-            "slice_cache_ttl_seconds": settings.SLICE_CACHE_TTL_SECONDS,
-            "processed_cache_ttl_seconds": settings.PROCESSED_CACHE_TTL_SECONDS,
-            "store_ttl_seconds": settings.STORE_TTL_SECONDS,
-        },
-    )
 
     await anyio.to_thread.run_sync(warmup_resample)
     await anyio.to_thread.run_sync(warmup_visual)
@@ -59,12 +49,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
 
 # GZipMiddleware's only content-type control is this module-level deny-list, which by
 # default excludes just text/event-stream. Extend it to skip image/* so already-compressed
@@ -77,8 +62,8 @@ if "image/" not in _gzip_mw.DEFAULT_EXCLUDED_CONTENT_TYPES:
     _gzip_mw.DEFAULT_EXCLUDED_CONTENT_TYPES += ("image/",)  # type: ignore[assignment]
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 
-app.include_router(data_tiles_router, prefix="/data_tiles", tags=["data_tiles"])
-app.include_router(visual_tiles_router, prefix="/visual_tiles", tags=["visual_tiles"])
+app.include_router(data_tiles_router, prefix="/tiler/data_tiles", tags=["data_tiles"])
+app.include_router(visual_tiles_router, prefix="/tiler/visual_tiles", tags=["visual_tiles"])
 
 
 @app.exception_handler(Exception)
@@ -86,8 +71,3 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     print(f"Unhandled error: method={request.method} path={request.url.path}")
     traceback.print_exc()
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}

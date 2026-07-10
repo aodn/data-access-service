@@ -19,9 +19,9 @@ import traceback
 import anyio
 import xarray as xr
 
-from app.config import settings
-from app.config.constants import COORD_NAMES
-from app.utils.dates import ts_to_local_date
+from data_access_service.tiler.app.config import settings
+from data_access_service.tiler.app.config.constants import COORD_NAMES
+from data_access_service.tiler.app.utils.dates import ts_to_local_date
 
 _STORE_TTL = float(settings.STORE_TTL_SECONDS)
 

@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from app.config.settings import TILE_TIMEZONE
+from data_access_service.tiler.app.config.settings import TILE_TIMEZONE
 
 # All date strings exposed by the API are local dates in this timezone.
 # Requests must send them back unchanged.

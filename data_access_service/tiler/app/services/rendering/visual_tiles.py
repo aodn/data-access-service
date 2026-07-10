@@ -20,15 +20,15 @@ from rio_tiler.io.xarray import XarrayReader
 from rio_tiler.models import ImageData
 from rioxarray.exceptions import NoDataInBounds
 
-from app.services.colormap.categorical import (
+from data_access_service.tiler.app.services.colormap.categorical import (
     RGBA,
     is_categorical_variable,
     resolve_scheme,
 )
-from app.services.colormap.registry import get_category_values, is_categorical
-from app.services.colormap.resolver import resolve_colormap
-from app.services.store.spatial import bbox_to_wgs84
-from app.utils.image import (
+from data_access_service.tiler.app.services.colormap.registry import get_category_values, is_categorical
+from data_access_service.tiler.app.services.colormap.resolver import resolve_colormap
+from data_access_service.tiler.app.services.store.spatial import bbox_to_wgs84
+from data_access_service.tiler.app.utils.image import (
     AnimatedFormat,
     ImageFormat,
     empty_tile,
