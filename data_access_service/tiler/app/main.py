@@ -4,8 +4,7 @@ from contextlib import asynccontextmanager
 
 import anyio
 import starlette.middleware.gzip as _gzip_mw
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI
 from starlette.middleware.gzip import GZipMiddleware
 
 from data_access_service.tiler.app.config import settings
@@ -43,22 +42,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="IMOS Tile Server",
-    description="On-demand RGBA PNG tiles for IMOS ocean data products, served from Zarr stores on S3.",
-    version="0.1.0",
+    title="IMOS Tile Server",   
     lifespan=lifespan,
 )
 
 
 
-# GZipMiddleware's only content-type control is this module-level deny-list, which by
-# default excludes just text/event-stream. Extend it to skip image/* so already-compressed
-# PNG/GIF/WebP/APNG tiles aren't re-gzipped (pure CPU waste on the hot tile path) — JSON
-# responses (manifest, listings) still compress. The deny-list is read by name
-# at request time, so a Starlette upgrade that renames/inlines it would silently disable
-# this exclusion; test_main.py::test_gzip_skips_image_tiles fails loudly if that happens.
 if "image/" not in _gzip_mw.DEFAULT_EXCLUDED_CONTENT_TYPES:
-    # Starlette types the constant as a 1-tuple; widening it trips mypy's assignment check.
     _gzip_mw.DEFAULT_EXCLUDED_CONTENT_TYPES += ("image/",)  # type: ignore[assignment]
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 
@@ -66,8 +56,4 @@ app.include_router(data_tiles_router, prefix="/tiler/data_tiles", tags=["data_ti
 app.include_router(visual_tiles_router, prefix="/tiler/visual_tiles", tags=["visual_tiles"])
 
 
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    print(f"Unhandled error: method={request.method} path={request.url.path}")
-    traceback.print_exc()
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
