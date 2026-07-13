@@ -15,8 +15,14 @@ from data_access_service.tiler.app.schemas.products import (
     VariableValue,
 )
 from data_access_service.tiler.app.services.product.inspect import inspect_product
-from data_access_service.tiler.app.services.product.registry import iter_product_items, list_products
-from data_access_service.tiler.app.services.store.registry import get_available_dates, get_store
+from data_access_service.tiler.app.services.product.registry import (
+    iter_product_items,
+    list_products,
+)
+from data_access_service.tiler.app.services.store.registry import (
+    get_available_dates,
+    get_store,
+)
 from data_access_service.tiler.app.utils.geo import dataset_bounds
 
 from .shared import (

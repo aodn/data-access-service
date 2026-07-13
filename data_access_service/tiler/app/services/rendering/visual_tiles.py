@@ -25,7 +25,10 @@ from data_access_service.tiler.app.services.colormap.categorical import (
     is_categorical_variable,
     resolve_scheme,
 )
-from data_access_service.tiler.app.services.colormap.registry import get_category_values, is_categorical
+from data_access_service.tiler.app.services.colormap.registry import (
+    get_category_values,
+    is_categorical,
+)
 from data_access_service.tiler.app.services.colormap.resolver import resolve_colormap
 from data_access_service.tiler.app.services.store.spatial import bbox_to_wgs84
 from data_access_service.tiler.app.utils.image import (

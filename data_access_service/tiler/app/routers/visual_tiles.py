@@ -17,13 +17,20 @@ from data_access_service.tiler.app.services.rendering.visual_tiles import (
     render_tile,
 )
 from data_access_service.tiler.app.services.store.registry import get_available_dates
-from data_access_service.tiler.app.services.store.slice_loader import load_slice_uncached
+from data_access_service.tiler.app.services.store.slice_loader import (
+    load_slice_uncached,
+)
 from data_access_service.tiler.app.services.store.spatial import (
     bbox_to_wgs84,
     default_bbox_from_store,
     native_resolution_in_bbox,
 )
-from data_access_service.tiler.app.utils.image import AnimatedFormat, ImageFormat, animated_media_type, media_type
+from data_access_service.tiler.app.utils.image import (
+    AnimatedFormat,
+    ImageFormat,
+    animated_media_type,
+    media_type,
+)
 
 from .products import router as products_router
 from .shared import (

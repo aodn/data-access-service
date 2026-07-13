@@ -17,7 +17,9 @@ import threading
 import numpy as np
 import xarray as xr
 
-from data_access_service.tiler.app.services.colormap.categorical import is_categorical_variable
+from data_access_service.tiler.app.services.colormap.categorical import (
+    is_categorical_variable,
+)
 
 logger = logging.getLogger(__name__)
 

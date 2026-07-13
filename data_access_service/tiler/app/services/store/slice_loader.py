@@ -15,7 +15,10 @@ import xarray as xr
 from data_access_service.tiler.app.services.caching.deduper import Deduper
 from data_access_service.tiler.app.services.caching.slice_cache import slice_memo
 from data_access_service.tiler.app.services.rendering.masks import apply_ocean_mask
-from data_access_service.tiler.app.services.store.registry import get_store, store_registry
+from data_access_service.tiler.app.services.store.registry import (
+    get_store,
+    store_registry,
+)
 
 # Always in-process, independent of CACHE_BACKEND — see Deduper's docstring
 # for why this matters even (especially) under CACHE_BACKEND=none.

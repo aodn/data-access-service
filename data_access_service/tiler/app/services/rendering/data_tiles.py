@@ -18,9 +18,14 @@ import numpy as np
 import xarray as xr
 
 from data_access_service.tiler.app.services.caching.deduper import Deduper
-from data_access_service.tiler.app.services.caching.processed_cache import processed_memo
+from data_access_service.tiler.app.services.caching.processed_cache import (
+    processed_memo,
+)
 from data_access_service.tiler.app.services.product.product import Product
-from data_access_service.tiler.app.services.rendering.kernels import normalize, resample_variables_to_grid
+from data_access_service.tiler.app.services.rendering.kernels import (
+    normalize,
+    resample_variables_to_grid,
+)
 from data_access_service.tiler.app.services.rendering.masks import (
     inpaint_nearest,
     land_mask_for_grid,

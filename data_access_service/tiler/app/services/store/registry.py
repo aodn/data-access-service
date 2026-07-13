@@ -121,7 +121,9 @@ class StoreRegistry:
                 # TTL expired — return stale store and trigger a background refresh.
                 if store_url not in self._refreshing:
                     self._refreshing.add(store_url)
-                    logger.info(f"Store TTL expired, refreshing in background: {store_url}")
+                    logger.info(
+                        f"Store TTL expired, refreshing in background: {store_url}"
+                    )
                     threading.Thread(
                         target=self._refresh_background, args=(store_url,), daemon=True
                     ).start()
