@@ -16,7 +16,10 @@ from data_access_service.tiler.app.services.colormap.categorical import (
     is_categorical_variable,
     resolve_scheme,
 )
-from data_access_service.tiler.app.services.rendering.visual_tiles import render_bbox, render_tile
+from data_access_service.tiler.app.services.rendering.visual_tiles import (
+    render_bbox,
+    render_tile,
+)
 from data_access_service.tiler.app.utils.colors import build_categorical_lut
 
 _MCS_COLORS = DEFAULT_CATEGORICAL_PALETTE
@@ -39,7 +42,9 @@ def _make_continuous_ds() -> xr.Dataset:
     return xr.Dataset(
         {
             "GSLA": xr.DataArray(
-                np.random.rand(8, 8), dims=["lat", "lon"], coords={"lat": lat, "lon": lon}
+                np.random.rand(8, 8),
+                dims=["lat", "lon"],
+                coords={"lat": lat, "lon": lon},
             )
         }
     )
@@ -80,7 +85,12 @@ def test_flag_colors_attr_beats_default_palette():
     ds = _make_categorical_ds()
     ds["MCS_category"].attrs["flag_colors"] = "#000000 #ffffff #ff0000 #00ff00 #0000ff"
     scheme = resolve_scheme(ds["MCS_category"].attrs, "viridis")
-    assert scheme.colors[2] == (255, 0, 0, 255)  # from flag_colors, not the blue default
+    assert scheme.colors[2] == (
+        255,
+        0,
+        0,
+        255,
+    )  # from flag_colors, not the blue default
 
 
 def test_explicit_categorical_colormap_beats_flag_colors(monkeypatch):
@@ -130,7 +140,9 @@ def test_categorical_tile_uses_only_palette_colors():
     not in the palette; this asserts every opaque pixel is an exact palette colour.
     """
     ds = _make_categorical_ds()
-    png = render_tile(ds, "MCS_category", 0, 0, 0, fmt="png")  # no colormap → default palette
+    png = render_tile(
+        ds, "MCS_category", 0, 0, 0, fmt="png"
+    )  # no colormap → default palette
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
     palette_rgb = {c[:3] for c in _MCS_COLORS if c[3] > 0}
     assert _opaque_colors(png).issubset(palette_rgb)
@@ -149,14 +161,17 @@ def test_categorical_tile_rejects_continuous_colormap():
     ds = _make_categorical_ds()
     try:
         render_tile(ds, "MCS_category", 0, 0, 0, colormap_name="plasma", fmt="png")
-        raise AssertionError("expected ValueError for continuous colormap on categorical")
+        raise AssertionError(
+            "expected ValueError for continuous colormap on categorical"
+        )
     except ValueError as e:
         assert "categorical" in str(e).lower() and "plasma" in str(e)
 
 
 def test_categorical_tile_rejects_rescale():
     """rescale is a continuous-scale concept; the discrete path ignores it, so a
-    client that sets it has a misconception — surface it rather than silently drop it."""
+    client that sets it has a misconception — surface it rather than silently drop it.
+    """
     ds = _make_categorical_ds()
     try:
         render_tile(ds, "MCS_category", 0, 0, 0, rescale=(0.0, 4.0), fmt="png")
@@ -168,7 +183,15 @@ def test_categorical_tile_rejects_rescale():
 def test_categorical_bbox_rejects_rescale():
     ds = _make_categorical_ds()
     try:
-        render_bbox(ds, "MCS_category", (140, -40, 150, -30), 64, 64, rescale=(0.0, 4.0), fmt="png")
+        render_bbox(
+            ds,
+            "MCS_category",
+            (140, -40, 150, -30),
+            64,
+            64,
+            rescale=(0.0, 4.0),
+            fmt="png",
+        )
         raise AssertionError("expected ValueError for rescale on categorical bbox")
     except ValueError as e:
         assert "rescale" in str(e).lower() and "categorical" in str(e).lower()

@@ -29,7 +29,11 @@ def _scalar_ds(
     else:
         data = np.zeros((size, size))
     return xr.Dataset(
-        {var: xr.DataArray(data, dims=["lat", "lon"], coords={"lat": lat_arr, "lon": lon_arr})}
+        {
+            var: xr.DataArray(
+                data, dims=["lat", "lon"], coords={"lat": lat_arr, "lon": lon_arr}
+            )
+        }
     )
 
 

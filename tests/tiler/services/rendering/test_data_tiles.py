@@ -8,7 +8,9 @@ import data_access_service.tiler.app.services.rendering.data_tiles as data_tiles
 from data_access_service.tiler.app.services.product.manifest import render_manifest
 from data_access_service.tiler.app.services.product.product import Product
 from data_access_service.tiler.app.services.rendering.data_tiles import render_tile
-from data_access_service.tiler.app.services.rendering.kernels import resample_variables_to_grid
+from data_access_service.tiler.app.services.rendering.kernels import (
+    resample_variables_to_grid,
+)
 
 
 def _make_ds(variables: list[str]) -> xr.Dataset:
@@ -84,7 +86,9 @@ def test_render_manifest_uv_shape():
     assert "valueRange" not in manifest
 
 
-def _make_categorical_ds(flag_meanings: str | None = "none moderate strong severe extreme"):
+def _make_categorical_ds(
+    flag_meanings: str | None = "none moderate strong severe extreme",
+):
     ds = _make_ds(["cat"])
     ds["cat"].attrs["flag_values"] = [0, 1, 2, 3, 4]
     if flag_meanings is not None:
@@ -105,7 +109,13 @@ CATEGORICAL_PRODUCT = Product(
 def test_render_manifest_categorical_includes_flag_values_and_meanings():
     manifest = render_manifest(CATEGORICAL_PRODUCT, _make_categorical_ds())
     assert manifest["flagValues"] == [0, 1, 2, 3, 4]
-    assert manifest["flagMeanings"] == ["none", "moderate", "strong", "severe", "extreme"]
+    assert manifest["flagMeanings"] == [
+        "none",
+        "moderate",
+        "strong",
+        "severe",
+        "extreme",
+    ]
     # The scalar value range is still emitted alongside the categorical fields.
     assert len(manifest["valueRange"]) == 2
 
@@ -130,7 +140,9 @@ def test_render_manifest_categorical_omits_misaligned_meanings():
 def _two_by_two_ds(variable: str, flag_values: list[int] | None) -> xr.Dataset:
     # Sharp 0/4 checkerboard so blended values (1/2/3) are unmistakable if they appear.
     arr = np.array([[0.0, 4.0], [4.0, 0.0]], dtype="float32")
-    da = xr.DataArray(arr, dims=["lat", "lon"], coords={"lat": [1.0, 0.0], "lon": [0.0, 1.0]})
+    da = xr.DataArray(
+        arr, dims=["lat", "lon"], coords={"lat": [1.0, 0.0], "lon": [0.0, 1.0]}
+    )
     if flag_values is not None:
         da.attrs["flag_values"] = flag_values
     return xr.Dataset({variable: da})
@@ -182,7 +194,9 @@ def test_concurrent_tiles_at_same_lod_share_one_processed_compute(monkeypatch):
     results: list[bytes] = []
 
     def render(cx, cy):
-        results.append(render_tile(MULTI_TILE_PRODUCT, lambda: ds, 1, cx, cy, "2024-01-01"))
+        results.append(
+            render_tile(MULTI_TILE_PRODUCT, lambda: ds, 1, cx, cy, "2024-01-01")
+        )
 
     threads = [
         threading.Thread(target=render, args=(0, 0)),
@@ -195,6 +209,8 @@ def test_concurrent_tiles_at_same_lod_share_one_processed_compute(monkeypatch):
     for t in threads:
         t.join(timeout=2)
 
-    assert calls == 1, "expected exactly one compute; the rest should share it via _processed_dedup"
+    assert (
+        calls == 1
+    ), "expected exactly one compute; the rest should share it via _processed_dedup"
     assert len(results) == 2
     assert all(body[:8] == b"\x89PNG\r\n\x1a\n" for body in results)

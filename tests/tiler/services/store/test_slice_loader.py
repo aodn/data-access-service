@@ -57,7 +57,9 @@ def test_load_slice_unknown_date_raises_file_not_found(monkeypatch):
     ds = _ds_with_time(["2024-01-15T13:00:00"])
     monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: ds)
 
-    with pytest.raises(FileNotFoundError, match="Latest available date is '2024-01-16'"):
+    with pytest.raises(
+        FileNotFoundError, match="Latest available date is '2024-01-16'"
+    ):
         loader.load_slice("s3://b/x.zarr", "1999-01-01", ["v"])
 
 
@@ -85,7 +87,9 @@ def _ds_ocean(times: list[str], lats: list[float], lons: list[float]) -> xr.Data
     return xr.Dataset(
         {
             "v": xr.DataArray(
-                data, dims=["time", "lat", "lon"], coords={"time": t, "lat": lats, "lon": lons}
+                data,
+                dims=["time", "lat", "lon"],
+                coords={"time": t, "lat": lats, "lon": lons},
             )
         }
     )
@@ -105,7 +109,9 @@ def test_load_slice_without_ocean_masked_keeps_all_cells(monkeypatch):
     ds = _ds_ocean(["2024-01-15T13:00:00"], [-40.0, -6.4], [150.0, 137.0])
     monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: ds)
 
-    result = loader.load_slice("s3://b/x.zarr", "2024-01-16", ["v"])  # flag defaults off
+    result = loader.load_slice(
+        "s3://b/x.zarr", "2024-01-16", ["v"]
+    )  # flag defaults off
     assert not np.isnan(result["v"]).any()
 
 
@@ -145,5 +151,7 @@ def test_concurrent_identical_loads_share_one_compute(monkeypatch):
     for t in threads:
         t.join(timeout=2)
 
-    assert calls == 1, "expected exactly one compute; the rest should share it via _slice_dedup"
+    assert (
+        calls == 1
+    ), "expected exactly one compute; the rest should share it via _slice_dedup"
     assert len(results) == 4

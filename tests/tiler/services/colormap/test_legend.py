@@ -32,14 +32,18 @@ def test_horizontal_no_rescale_returns_correct_size():
 
 
 def test_vertical_no_rescale_returns_correct_size():
-    png = legend_renderer.render_legend("viridis", width=40, height=256, orientation="vertical")
+    png = legend_renderer.render_legend(
+        "viridis", width=40, height=256, orientation="vertical"
+    )
     img = _decode(png)
     assert img.shape == (256, 40, 4)
 
 
 def test_horizontal_with_rescale_reserves_label_strip():
     """With labels, the bottom 20px must contain text (dark pixels on white bg)."""
-    png = legend_renderer.render_legend("viridis", rescale=(0.0, 1.0), width=256, height=60)
+    png = legend_renderer.render_legend(
+        "viridis", rescale=(0.0, 1.0), width=256, height=60
+    )
     img = _decode(png)
     assert img.shape == (60, 256, 4)
     label_strip = img[-20:, :, :3]
@@ -78,9 +82,15 @@ def test_legend_caches_results():
 
 
 def test_different_rescale_produces_different_legend():
-    a = legend_renderer.render_legend("viridis", rescale=(0.0, 1.0), width=128, height=40)
-    b = legend_renderer.render_legend("viridis", rescale=(0.0, 100.0), width=128, height=40)
-    assert a != b, "different rescale should change tick labels — PNG bytes should differ"
+    a = legend_renderer.render_legend(
+        "viridis", rescale=(0.0, 1.0), width=128, height=40
+    )
+    b = legend_renderer.render_legend(
+        "viridis", rescale=(0.0, 100.0), width=128, height=40
+    )
+    assert (
+        a != b
+    ), "different rescale should change tick labels — PNG bytes should differ"
 
 
 def test_categorical_renders_discrete_blocks(monkeypatch):
@@ -94,7 +104,9 @@ def test_categorical_renders_discrete_blocks(monkeypatch):
     lut[200] = [0, 0, 255, 255]
 
     monkeypatch.setitem(colormap_config._custom_colormaps, "_test_cats", lut)
-    monkeypatch.setitem(colormap_config._custom_colormap_modes, "_test_cats", "categorical")
+    monkeypatch.setitem(
+        colormap_config._custom_colormap_modes, "_test_cats", "categorical"
+    )
 
     # Force LRU caches to refresh against the just-registered colormap.
     import data_access_service.tiler.app.services.colormap.resolver as colormap_lookup
@@ -110,7 +122,8 @@ def test_categorical_renders_discrete_blocks(monkeypatch):
 
 def test_categorical_legend_rejects_rescale(monkeypatch):
     """Tick labels at lo/mid/hi are meaningless for discrete categories — a categorical
-    colormap with rescale is a contradiction, so reject it instead of drawing bogus ticks."""
+    colormap with rescale is a contradiction, so reject it instead of drawing bogus ticks.
+    """
     import data_access_service.tiler.app.services.colormap.registry as colormap_config
 
     lut = [[0, 0, 0, 0] for _ in range(256)]
@@ -118,19 +131,25 @@ def test_categorical_legend_rejects_rescale(monkeypatch):
     lut[100] = [0, 255, 0, 255]
     lut[200] = [0, 0, 255, 255]
     monkeypatch.setitem(colormap_config._custom_colormaps, "_test_cats", lut)
-    monkeypatch.setitem(colormap_config._custom_colormap_modes, "_test_cats", "categorical")
+    monkeypatch.setitem(
+        colormap_config._custom_colormap_modes, "_test_cats", "categorical"
+    )
 
     import data_access_service.tiler.app.services.colormap.resolver as colormap_lookup
 
     colormap_lookup.resolve_colormap.cache_clear()
 
     with pytest.raises(ValueError, match="(?i)rescale"):
-        legend_renderer.render_legend("_test_cats", rescale=(0.0, 1.0), width=300, height=40)
+        legend_renderer.render_legend(
+            "_test_cats", rescale=(0.0, 1.0), width=300, height=40
+        )
 
 
 def test_horizontal_height_too_small_for_labels_does_not_crash():
     """Edge case: height < _LABEL_PX (20) leaves bar_h=1 — should still render."""
-    png = legend_renderer.render_legend("viridis", rescale=(0.0, 1.0), width=100, height=10)
+    png = legend_renderer.render_legend(
+        "viridis", rescale=(0.0, 1.0), width=100, height=10
+    )
     img = _decode(png)
     assert img.shape == (10, 100, 4)
 

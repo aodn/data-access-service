@@ -30,7 +30,10 @@ def test_gzip_skips_image_tiles():
     # client advertises gzip. This guards the Starlette-global monkeypatch in main.py.
     with (
         patch("data_access_service.tiler.app.routers.shared.load_slice"),
-        patch("data_access_service.tiler.app.routers.visual_tiles.render_tile", return_value=_BIG_PNG),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.render_tile",
+            return_value=_BIG_PNG,
+        ),
     ):
         response = client.get(
             "/tiler/visual_tiles/sea_level_anomaly/2024-01-01/5/0/0.png",

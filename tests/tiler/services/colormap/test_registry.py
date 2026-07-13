@@ -59,7 +59,15 @@ def test_load_ramp_from_disk(isolated_config):
 
 def test_load_categorical_persists_mode_and_values(isolated_config):
     isolated_config.write_text(
-        json.dumps({"cats": {"entries": _entries(), "mode": "categorical", "values": [1, 2, 3]}})
+        json.dumps(
+            {
+                "cats": {
+                    "entries": _entries(),
+                    "mode": "categorical",
+                    "values": [1, 2, 3],
+                }
+            }
+        )
     )
     colormap_config.load_colormaps()
     assert colormap_config.is_categorical("cats")

@@ -38,7 +38,9 @@ def test_list_products_includes_coastal_fill_only_when_present(tmp_path, monkeyp
 
 
 _FAKE_PRODUCTS = {
-    "product_a": Product(id="product_a", source_path="s3://bucket/a.zarr", variable="VAR"),
+    "product_a": Product(
+        id="product_a", source_path="s3://bucket/a.zarr", variable="VAR"
+    ),
 }
 
 _LOD_GRIDS = {1: (1, 1)}
@@ -50,7 +52,9 @@ def _make_ds() -> xr.Dataset:
     return xr.Dataset(
         {
             "GSLA": xr.DataArray(
-                np.random.rand(8, 8), dims=["lat", "lon"], coords={"lat": lat, "lon": lon}
+                np.random.rand(8, 8),
+                dims=["lat", "lon"],
+                coords={"lat": lat, "lon": lon},
             )
         }
     )
@@ -66,19 +70,35 @@ def test_tile_unknown_product():
 
 def test_tile_bad_lod():
     with (
-        patch("data_access_service.tiler.app.routers.data_tiles.get_lod_grids", return_value=_LOD_GRIDS),
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()),
+        patch(
+            "data_access_service.tiler.app.routers.data_tiles.get_lod_grids",
+            return_value=_LOD_GRIDS,
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_ds(),
+        ),
     ):
-        response = client.get("/tiler/data_tiles/sea_level_anomaly/2024-01-01/99/0/0.png")
+        response = client.get(
+            "/tiler/data_tiles/sea_level_anomaly/2024-01-01/99/0/0.png"
+        )
     assert response.status_code == 404
 
 
 def test_tile_out_of_bounds():
     with (
-        patch("data_access_service.tiler.app.routers.data_tiles.get_lod_grids", return_value=_LOD_GRIDS),
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()),
+        patch(
+            "data_access_service.tiler.app.routers.data_tiles.get_lod_grids",
+            return_value=_LOD_GRIDS,
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_ds(),
+        ),
     ):
-        response = client.get("/tiler/data_tiles/sea_level_anomaly/2024-01-01/1/5/5.png")
+        response = client.get(
+            "/tiler/data_tiles/sea_level_anomaly/2024-01-01/1/5/5.png"
+        )
     assert response.status_code == 404
 
 
@@ -88,20 +108,39 @@ def test_tile_missing_date():
         return _LOD_GRIDS
 
     with (
-        patch("data_access_service.tiler.app.routers.data_tiles.get_lod_grids", side_effect=_lod_grids_with_update),
-        patch("data_access_service.tiler.app.routers.shared.load_slice", side_effect=FileNotFoundError("No data")),
+        patch(
+            "data_access_service.tiler.app.routers.data_tiles.get_lod_grids",
+            side_effect=_lod_grids_with_update,
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            side_effect=FileNotFoundError("No data"),
+        ),
     ):
-        response = client.get("/tiler/data_tiles/sea_level_anomaly/9999-01-01/1/0/0.png")
+        response = client.get(
+            "/tiler/data_tiles/sea_level_anomaly/9999-01-01/1/0/0.png"
+        )
     assert response.status_code == 404
 
 
 def test_tile_ok():
     with (
-        patch("data_access_service.tiler.app.routers.data_tiles.get_lod_grids", return_value=_LOD_GRIDS),
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()),
-        patch("data_access_service.tiler.app.routers.data_tiles.render_tile", return_value=b"\x89PNG\r\n\x1a\n"),
+        patch(
+            "data_access_service.tiler.app.routers.data_tiles.get_lod_grids",
+            return_value=_LOD_GRIDS,
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.data_tiles.render_tile",
+            return_value=b"\x89PNG\r\n\x1a\n",
+        ),
     ):
-        response = client.get("/tiler/data_tiles/sea_level_anomaly/2024-01-01/1/0/0.png")
+        response = client.get(
+            "/tiler/data_tiles/sea_level_anomaly/2024-01-01/1/0/0.png"
+        )
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
 
@@ -116,10 +155,18 @@ def test_manifest_unknown_product():
 
 def test_manifest_missing_date():
     with (
-        patch("data_access_service.tiler.app.routers.data_tiles.get_lod_grids", return_value=_LOD_GRIDS),
-        patch("data_access_service.tiler.app.routers.shared.load_slice", side_effect=FileNotFoundError("No data")),
+        patch(
+            "data_access_service.tiler.app.routers.data_tiles.get_lod_grids",
+            return_value=_LOD_GRIDS,
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            side_effect=FileNotFoundError("No data"),
+        ),
     ):
-        response = client.get("/tiler/data_tiles/sea_level_anomaly/9999-01-01/manifest.json")
+        response = client.get(
+            "/tiler/data_tiles/sea_level_anomaly/9999-01-01/manifest.json"
+        )
     assert response.status_code == 404
 
 
@@ -128,15 +175,31 @@ def test_manifest_ok():
         "bounds": {"lonMin": 110.0, "lonMax": 160.0, "latMin": -50.0, "latMax": -10.0},
         "valueRange": [0.0, 1.0],
         "lods": {
-            "1": {"grid": [2, 2], "chunkPx": [256, 256], "storedPx": [258, 258], "padding": 1}
+            "1": {
+                "grid": [2, 2],
+                "chunkPx": [256, 256],
+                "storedPx": [258, 258],
+                "padding": 1,
+            }
         },
     }
     with (
-        patch("data_access_service.tiler.app.routers.data_tiles.get_lod_grids", return_value=_LOD_GRIDS),
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()),
-        patch("data_access_service.tiler.app.routers.data_tiles.render_manifest", return_value=payload),
+        patch(
+            "data_access_service.tiler.app.routers.data_tiles.get_lod_grids",
+            return_value=_LOD_GRIDS,
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.data_tiles.render_manifest",
+            return_value=payload,
+        ),
     ):
-        response = client.get("/tiler/data_tiles/sea_level_anomaly/2024-01-01/manifest.json")
+        response = client.get(
+            "/tiler/data_tiles/sea_level_anomaly/2024-01-01/manifest.json"
+        )
     assert response.status_code == 200
     assert response.json() == payload
 
@@ -150,15 +213,31 @@ def test_manifest_categorical_flag_fields_pass_through():
         "flagValues": [0, 1, 2, 3, 4],
         "flagMeanings": ["none", "moderate", "strong", "severe", "extreme"],
         "lods": {
-            "1": {"grid": [2, 2], "chunkPx": [256, 256], "storedPx": [258, 258], "padding": 1}
+            "1": {
+                "grid": [2, 2],
+                "chunkPx": [256, 256],
+                "storedPx": [258, 258],
+                "padding": 1,
+            }
         },
     }
     with (
-        patch("data_access_service.tiler.app.routers.data_tiles.get_lod_grids", return_value=_LOD_GRIDS),
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()),
-        patch("data_access_service.tiler.app.routers.data_tiles.render_manifest", return_value=payload),
+        patch(
+            "data_access_service.tiler.app.routers.data_tiles.get_lod_grids",
+            return_value=_LOD_GRIDS,
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.data_tiles.render_manifest",
+            return_value=payload,
+        ),
     ):
-        response = client.get("/tiler/data_tiles/sea_level_anomaly/2024-01-01/manifest.json")
+        response = client.get(
+            "/tiler/data_tiles/sea_level_anomaly/2024-01-01/manifest.json"
+        )
     assert response.status_code == 200
     body = response.json()
     assert body["flagValues"] == [0, 1, 2, 3, 4]
@@ -169,19 +248,31 @@ def test_manifest_categorical_flag_fields_pass_through():
 
 
 def test_point_unknown_product():
-    response = client.get("/tiler/data_tiles/nonexistent/2024-01-01/point?lat=-35&lon=145")
+    response = client.get(
+        "/tiler/data_tiles/nonexistent/2024-01-01/point?lat=-35&lon=145"
+    )
     assert response.status_code == 404
 
 
 def test_point_missing_date():
-    with patch("data_access_service.tiler.app.routers.shared.load_slice", side_effect=FileNotFoundError("No data")):
-        response = client.get("/tiler/data_tiles/sea_level_anomaly/9999-01-01/point?lat=-35&lon=145")
+    with patch(
+        "data_access_service.tiler.app.routers.shared.load_slice",
+        side_effect=FileNotFoundError("No data"),
+    ):
+        response = client.get(
+            "/tiler/data_tiles/sea_level_anomaly/9999-01-01/point?lat=-35&lon=145"
+        )
     assert response.status_code == 404
 
 
 def test_point_ok():
-    with patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()):
-        response = client.get("/tiler/data_tiles/sea_level_anomaly/2024-01-01/point?lat=-35&lon=145")
+    with patch(
+        "data_access_service.tiler.app.routers.shared.load_slice",
+        return_value=_make_ds(),
+    ):
+        response = client.get(
+            "/tiler/data_tiles/sea_level_anomaly/2024-01-01/point?lat=-35&lon=145"
+        )
     assert response.status_code == 200
     body = response.json()
     assert "lat" in body and "lon" in body and "variables" in body
@@ -191,8 +282,13 @@ def test_point_ok():
 def test_point_out_of_bounds():
     # Fixture grid covers lat -40..-30, lon 140..150. A point well south of that
     # must 404 rather than silently snapping to the edge cell (method="nearest").
-    with patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()):
-        response = client.get("/tiler/data_tiles/sea_level_anomaly/2024-01-01/point?lat=-55.46&lon=145")
+    with patch(
+        "data_access_service.tiler.app.routers.shared.load_slice",
+        return_value=_make_ds(),
+    ):
+        response = client.get(
+            "/tiler/data_tiles/sea_level_anomaly/2024-01-01/point?lat=-55.46&lon=145"
+        )
     assert response.status_code == 404
 
 
@@ -208,9 +304,15 @@ def _make_store_ds() -> xr.Dataset:
         np.random.rand(2, 4, 4).astype("float32"),
         dims=["time", "lat", "lon"],
         coords={"time": time, "lat": lat, "lon": lon},
-        attrs={"units": "m", "long_name": "Sea Level Anomaly", "_scale": np.float32(0.5)},
+        attrs={
+            "units": "m",
+            "long_name": "Sea Level Anomaly",
+            "_scale": np.float32(0.5),
+        },
     )
-    ds = xr.Dataset({"GSLA": da}, attrs={"title": "IMOS SLA", "ranges": np.array([0.0, 1.0])})
+    ds = xr.Dataset(
+        {"GSLA": da}, attrs={"title": "IMOS SLA", "ranges": np.array([0.0, 1.0])}
+    )
     ds["GSLA"].encoding["chunks"] = (1, 4, 4)
     return ds
 
@@ -221,7 +323,10 @@ def test_inspect_unknown_product():
 
 
 def test_inspect_ok():
-    with patch("data_access_service.tiler.app.routers.products.get_store", return_value=_make_store_ds()):
+    with patch(
+        "data_access_service.tiler.app.routers.products.get_store",
+        return_value=_make_store_ds(),
+    ):
         response = client.get("/tiler/data_tiles/sea_level_anomaly/inspect")
     assert response.status_code == 200
     body = response.json()
@@ -257,11 +362,17 @@ def test_inspect_multi_variable():
     coords = {"lat": lat, "lon": lon}
     ds = xr.Dataset(
         {
-            "UCUR": xr.DataArray(np.random.rand(4, 4), dims=["lat", "lon"], coords=coords),
-            "VCUR": xr.DataArray(np.random.rand(4, 4), dims=["lat", "lon"], coords=coords),
+            "UCUR": xr.DataArray(
+                np.random.rand(4, 4), dims=["lat", "lon"], coords=coords
+            ),
+            "VCUR": xr.DataArray(
+                np.random.rand(4, 4), dims=["lat", "lon"], coords=coords
+            ),
         }
     )
-    with patch("data_access_service.tiler.app.routers.products.get_store", return_value=ds):
+    with patch(
+        "data_access_service.tiler.app.routers.products.get_store", return_value=ds
+    ):
         response = client.get("/tiler/data_tiles/ocean_current/inspect")
     assert response.status_code == 200
     assert set(response.json()["variables"]) == {"UCUR", "VCUR"}
@@ -300,9 +411,14 @@ def test_availability_date_filters():
             "data_access_service.tiler.app.routers.products.iter_product_items",
             return_value=list(_FAKE_PRODUCTS.items()),
         ),
-        patch("data_access_service.tiler.app.routers.products.get_available_dates", return_value=all_dates),
+        patch(
+            "data_access_service.tiler.app.routers.products.get_available_dates",
+            return_value=all_dates,
+        ),
     ):
-        response = client.get("/tiler/data_tiles/manifest?from=2024-06-01&to=2024-09-01")
+        response = client.get(
+            "/tiler/data_tiles/manifest?from=2024-06-01&to=2024-09-01"
+        )
     assert response.status_code == 200
     product = response.json()["products"]["product_a"]
     assert product["available_dates"] == ["2024-06-01", "2024-09-01"]
@@ -318,7 +434,10 @@ def test_availability_default_from_is_dataset_start():
             "data_access_service.tiler.app.routers.products.iter_product_items",
             return_value=list(_FAKE_PRODUCTS.items()),
         ),
-        patch("data_access_service.tiler.app.routers.products.get_available_dates", return_value=["2020-01-01"]),
+        patch(
+            "data_access_service.tiler.app.routers.products.get_available_dates",
+            return_value=["2020-01-01"],
+        ),
     ):
         response = client.get("/tiler/data_tiles/manifest")
     assert response.status_code == 200
@@ -333,7 +452,10 @@ def test_availability_no_dates_in_range():
             "data_access_service.tiler.app.routers.products.iter_product_items",
             return_value=list(_FAKE_PRODUCTS.items()),
         ),
-        patch("data_access_service.tiler.app.routers.products.get_available_dates", return_value=["2020-01-01"]),
+        patch(
+            "data_access_service.tiler.app.routers.products.get_available_dates",
+            return_value=["2020-01-01"],
+        ),
     ):
         response = client.get("/tiler/data_tiles/manifest?to=2019-01-01")
     assert response.status_code == 200

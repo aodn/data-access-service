@@ -39,6 +39,10 @@ def test_ts_to_local_date_dst_boundary():
     """Sydney AEDT→AEST transition (first Sunday of April) — UTC midnight either side
     must still produce the correct local date."""
     # 2024-04-06 (Saturday) 23:00Z is 2024-04-07 10:00 AEDT — before the 03:00 fallback.
-    assert dates_mod.ts_to_local_date(pd.Timestamp("2024-04-06T23:00:00")) == "2024-04-07"
+    assert (
+        dates_mod.ts_to_local_date(pd.Timestamp("2024-04-06T23:00:00")) == "2024-04-07"
+    )
     # 2024-04-07 (Sunday) — after fallback Sydney is AEST (UTC+10).
-    assert dates_mod.ts_to_local_date(pd.Timestamp("2024-04-07T20:00:00")) == "2024-04-08"
+    assert (
+        dates_mod.ts_to_local_date(pd.Timestamp("2024-04-07T20:00:00")) == "2024-04-08"
+    )

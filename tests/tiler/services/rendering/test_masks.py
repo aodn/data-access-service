@@ -10,7 +10,9 @@ import numpy as np
 import xarray as xr
 
 from data_access_service.tiler.app.services.product.product import CoastalFill, Product
-from data_access_service.tiler.app.services.rendering.data_tiles import _compute_processed
+from data_access_service.tiler.app.services.rendering.data_tiles import (
+    _compute_processed,
+)
 from data_access_service.tiler.app.services.rendering.masks import (
     apply_ocean_mask,
     inpaint_nearest,
@@ -104,7 +106,11 @@ def test_apply_ocean_mask_nulls_invalid_cells_only():
     lons = [150.0, 137.0]
     data = np.ones((2, 2), dtype=np.float32)
     ds = xr.Dataset(
-        {"UCUR": xr.DataArray(data, dims=["lat", "lon"], coords={"lat": lats, "lon": lons})}
+        {
+            "UCUR": xr.DataArray(
+                data, dims=["lat", "lon"], coords={"lat": lats, "lon": lons}
+            )
+        }
     )
 
     masked = apply_ocean_mask(ds, ["UCUR"])
@@ -125,7 +131,11 @@ def _ds_over(lon_min, lon_max, lat_max, lat_min, n=20, fill=0.5):
     lon = np.linspace(lon_min, lon_max, n)
     data = np.full((n, n), fill, dtype=np.float32)
     return xr.Dataset(
-        {"GSLA": xr.DataArray(data, dims=["lat", "lon"], coords={"lat": lat, "lon": lon})}
+        {
+            "GSLA": xr.DataArray(
+                data, dims=["lat", "lon"], coords={"lat": lat, "lon": lon}
+            )
+        }
     )
 
 
@@ -175,7 +185,9 @@ def test_compute_no_longer_applies_ocean_mask_by_product_id():
     ds = _ds_over(105, 140, 0, -12)
 
     _, ocean_currents = _compute_processed(
-        _product(None, product_id="model_sea_level_anomaly_gridded_realtime_vcur_ucur"), ds, 1
+        _product(None, product_id="model_sea_level_anomaly_gridded_realtime_vcur_ucur"),
+        ds,
+        1,
     )
     _, ocean_other = _compute_processed(_product(None, product_id="other"), ds, 1)
 

@@ -113,7 +113,9 @@ def test_ocean_masked_defaults_true_for_listed_product(isolated_products):
 
 def test_ocean_masked_explicit_false_overrides_default(isolated_products):
     pid = "model_sea_level_anomaly_gridded_realtime_vcur_ucur"
-    _write(isolated_products, [_entry(pid, variable=["UCUR", "VCUR"], ocean_masked=False)])
+    _write(
+        isolated_products, [_entry(pid, variable=["UCUR", "VCUR"], ocean_masked=False)]
+    )
     registry.load_products()
     assert PRODUCTS[pid].ocean_masked is False
 

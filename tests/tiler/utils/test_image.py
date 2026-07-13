@@ -11,7 +11,10 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from data_access_service.tiler.app.utils.image import animated_media_type, encode_rgba_animation
+from data_access_service.tiler.app.utils.image import (
+    animated_media_type,
+    encode_rgba_animation,
+)
 
 
 def _frame(value: int, size: int = 32) -> np.ndarray:

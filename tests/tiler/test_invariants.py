@@ -66,7 +66,9 @@ def _make_ds() -> xr.Dataset:
     return xr.Dataset(
         {
             "GSLA": xr.DataArray(
-                np.random.rand(8, 8), dims=["lat", "lon"], coords={"lat": lat, "lon": lon}
+                np.random.rand(8, 8),
+                dims=["lat", "lon"],
+                coords={"lat": lat, "lon": lon},
             )
         }
     )
@@ -79,7 +81,10 @@ def test_date_from_manifest_is_accepted_by_tile_endpoint():
             "data_access_service.tiler.app.routers.products.iter_product_items",
             return_value=list(_FAKE_PRODUCTS.items()),
         ),
-        patch("data_access_service.tiler.app.routers.products.get_available_dates", return_value=available),
+        patch(
+            "data_access_service.tiler.app.routers.products.get_available_dates",
+            return_value=available,
+        ),
     ):
         manifest = client.get("/tiler/data_tiles/manifest")
     assert manifest.status_code == 200
@@ -90,12 +95,23 @@ def test_date_from_manifest_is_accepted_by_tile_endpoint():
     # Send that date back unchanged. If the server's local-vs-UTC handling
     # silently drifts, this round-trip will start returning 404.
     with (
-        patch("data_access_service.tiler.app.routers.data_tiles.get_lod_grids", return_value=_LOD_GRIDS),
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()),
-        patch("data_access_service.tiler.app.routers.data_tiles.render_tile", return_value=b"\x89PNG\r\n\x1a\n"),
+        patch(
+            "data_access_service.tiler.app.routers.data_tiles.get_lod_grids",
+            return_value=_LOD_GRIDS,
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.data_tiles.render_tile",
+            return_value=b"\x89PNG\r\n\x1a\n",
+        ),
     ):
         tile = client.get(f"/tiler/data_tiles/sea_level_anomaly/{date_str}/1/0/0.png")
-    assert tile.status_code == 200, f"date {date_str!r} from /manifest was rejected by /data_tiles"
+    assert (
+        tile.status_code == 200
+    ), f"date {date_str!r} from /manifest was rejected by /data_tiles"
 
 
 # --- Two tile coordinate systems must not alias -------------------------
@@ -114,13 +130,29 @@ def test_data_and_visual_tiles_route_to_different_renderers():
     visual_bytes = b"\x89PNG\r\n\x1a\nVISUAL"
 
     with (
-        patch("data_access_service.tiler.app.routers.data_tiles.get_lod_grids", return_value=_LOD_GRIDS),
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()),
-        patch("data_access_service.tiler.app.routers.data_tiles.render_tile", return_value=data_bytes),
-        patch("data_access_service.tiler.app.routers.visual_tiles.render_tile", return_value=visual_bytes),
+        patch(
+            "data_access_service.tiler.app.routers.data_tiles.get_lod_grids",
+            return_value=_LOD_GRIDS,
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.data_tiles.render_tile",
+            return_value=data_bytes,
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.render_tile",
+            return_value=visual_bytes,
+        ),
     ):
-        data_resp = client.get(f"/tiler/data_tiles/sea_level_anomaly/2024-01-01/{z}/{x}/{y}.png")
-        visual_resp = client.get(f"/tiler/visual_tiles/sea_level_anomaly/2024-01-01/{z}/{x}/{y}.png")
+        data_resp = client.get(
+            f"/tiler/data_tiles/sea_level_anomaly/2024-01-01/{z}/{x}/{y}.png"
+        )
+        visual_resp = client.get(
+            f"/tiler/visual_tiles/sea_level_anomaly/2024-01-01/{z}/{x}/{y}.png"
+        )
 
     assert data_resp.status_code == 200, data_resp.text
     assert visual_resp.status_code == 200, visual_resp.text

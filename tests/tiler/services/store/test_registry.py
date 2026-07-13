@@ -3,14 +3,23 @@ import pytest
 import xarray as xr
 
 from data_access_service.tiler.app.config import settings
-from data_access_service.tiler.app.services.product.product import Product, get_lod_grids
-from data_access_service.tiler.app.services.store.registry import _storage_options, get_store, store_registry
+from data_access_service.tiler.app.services.product.product import (
+    Product,
+    get_lod_grids,
+)
+from data_access_service.tiler.app.services.store.registry import (
+    _storage_options,
+    get_store,
+    store_registry,
+)
 
 
 def _make_ds(**dims: int) -> xr.Dataset:
     shape = list(dims.values())
     coords = {k: np.arange(v, dtype=float) for k, v in dims.items()}
-    return xr.Dataset({"var": xr.DataArray(np.zeros(shape), dims=list(dims.keys()), coords=coords)})
+    return xr.Dataset(
+        {"var": xr.DataArray(np.zeros(shape), dims=list(dims.keys()), coords=coords)}
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +42,9 @@ def test_get_store_raises_when_lon_missing(monkeypatch):
 
 
 def test_get_store_normalises_coord_names(monkeypatch):
-    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: _make_ds(TIME=2, LATITUDE=5, LONGITUDE=8))
+    monkeypatch.setattr(
+        xr, "open_zarr", lambda *_, **__: _make_ds(TIME=2, LATITUDE=5, LONGITUDE=8)
+    )
     result = get_store("s3://test/uppercase.zarr")
     assert "lat" in result.dims
     assert "lon" in result.dims
@@ -50,7 +61,9 @@ def test_get_store_sortby_time(monkeypatch):
 
 
 def test_get_lod_grids_populates_product(monkeypatch):
-    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: _make_ds(time=1, lat=74, lon=102))
+    monkeypatch.setattr(
+        xr, "open_zarr", lambda *_, **__: _make_ds(time=1, lat=74, lon=102)
+    )
     product = Product(id="t1", source_path="s3://test/grids.zarr", variable="var")
     assert product.lod_grids == {}
     grids = get_lod_grids(product)
@@ -64,7 +77,10 @@ def test_get_lod_grids_fast_path_skips_store(monkeypatch):
         xr, "open_zarr", lambda *_, **__: opened.append(1) or _make_ds(lat=5, lon=5)
     )
     product = Product(
-        id="t2", source_path="s3://test/preset.zarr", variable="var", lod_grids={1: (2, 2)}
+        id="t2",
+        source_path="s3://test/preset.zarr",
+        variable="var",
+        lod_grids={1: (2, 2)},
     )
     grids = get_lod_grids(product)
     assert grids == {1: (2, 2)}

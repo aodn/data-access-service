@@ -18,11 +18,23 @@ _PNG = b"\x89PNG\r\n\x1a\n"
 def _registered_categorical(name: str, values: list[int]):
     """Patch a categorical colormap with the given category values into the registry."""
     cats = {v: [v, v, v, 0 if v == 0 else 255] for v in values}
-    lut = [tuple(c) for c in build_categorical_lut(cats, (float(min(values)), float(max(values))))]
+    lut = [
+        tuple(c)
+        for c in build_categorical_lut(cats, (float(min(values)), float(max(values))))
+    ]
     with (
-        patch("data_access_service.tiler.app.services.colormap.registry._custom_colormaps", {name: lut}),
-        patch("data_access_service.tiler.app.services.colormap.registry._custom_colormap_modes", {name: "categorical"}),
-        patch("data_access_service.tiler.app.services.colormap.registry._custom_colormap_values", {name: sorted(values)}),
+        patch(
+            "data_access_service.tiler.app.services.colormap.registry._custom_colormaps",
+            {name: lut},
+        ),
+        patch(
+            "data_access_service.tiler.app.services.colormap.registry._custom_colormap_modes",
+            {name: "categorical"},
+        ),
+        patch(
+            "data_access_service.tiler.app.services.colormap.registry._custom_colormap_values",
+            {name: sorted(values)},
+        ),
     ):
         yield
 
@@ -33,7 +45,9 @@ def _make_ds() -> xr.Dataset:
     return xr.Dataset(
         {
             "GSLA": xr.DataArray(
-                np.random.rand(8, 8), dims=["lat", "lon"], coords={"lat": lat, "lon": lon}
+                np.random.rand(8, 8),
+                dims=["lat", "lon"],
+                coords={"lat": lat, "lon": lon},
             )
         }
     )
@@ -50,19 +64,32 @@ def test_tile_multi_variable_product_rejected():
 
 
 def test_tile_missing_date():
-    with patch("data_access_service.tiler.app.routers.shared.load_slice", side_effect=FileNotFoundError("No data")):
-        response = client.get("/tiler/visual_tiles/sea_level_anomaly/9999-01-01/5/0/0.png")
+    with patch(
+        "data_access_service.tiler.app.routers.shared.load_slice",
+        side_effect=FileNotFoundError("No data"),
+    ):
+        response = client.get(
+            "/tiler/visual_tiles/sea_level_anomaly/9999-01-01/5/0/0.png"
+        )
     assert response.status_code == 404
 
 
 def test_tile_bad_rescale():
-    with patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()):
-        response = client.get("/tiler/visual_tiles/sea_level_anomaly/2024-01-01/5/0/0.png?rescale=bad")
+    with patch(
+        "data_access_service.tiler.app.routers.shared.load_slice",
+        return_value=_make_ds(),
+    ):
+        response = client.get(
+            "/tiler/visual_tiles/sea_level_anomaly/2024-01-01/5/0/0.png?rescale=bad"
+        )
     assert response.status_code == 400
 
 
 def test_tile_unknown_colormap():
-    with patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()):
+    with patch(
+        "data_access_service.tiler.app.routers.shared.load_slice",
+        return_value=_make_ds(),
+    ):
         response = client.get(
             "/tiler/visual_tiles/sea_level_anomaly/2024-01-01/5/0/0.png?colormap=not_a_real_colormap"
         )
@@ -71,18 +98,32 @@ def test_tile_unknown_colormap():
 
 def test_tile_ok():
     with (
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()),
-        patch("data_access_service.tiler.app.routers.visual_tiles.render_tile", return_value=_PNG),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.render_tile",
+            return_value=_PNG,
+        ),
     ):
-        response = client.get("/tiler/visual_tiles/sea_level_anomaly/2024-01-01/5/0/0.png")
+        response = client.get(
+            "/tiler/visual_tiles/sea_level_anomaly/2024-01-01/5/0/0.png"
+        )
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
 
 
 def test_tile_ok_with_rescale():
     with (
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()),
-        patch("data_access_service.tiler.app.routers.visual_tiles.render_tile", return_value=_PNG),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.render_tile",
+            return_value=_PNG,
+        ),
     ):
         response = client.get(
             "/tiler/visual_tiles/sea_level_anomaly/2024-01-01/5/0/0.png?rescale=-0.5,0.5"
@@ -93,9 +134,18 @@ def test_tile_ok_with_rescale():
 def test_tile_ok_with_custom_colormap():
     custom = [(i, 0, 255 - i, 255) for i in range(256)]
     with (
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()),
-        patch("data_access_service.tiler.app.routers.visual_tiles.render_tile", return_value=_PNG),
-        patch("data_access_service.tiler.app.services.colormap.registry._custom_colormaps", {"test_ramp": custom}),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.render_tile",
+            return_value=_PNG,
+        ),
+        patch(
+            "data_access_service.tiler.app.services.colormap.registry._custom_colormaps",
+            {"test_ramp": custom},
+        ),
     ):
         response = client.get(
             "/tiler/visual_tiles/sea_level_anomaly/2024-01-01/5/0/0.png?colormap=test_ramp"
@@ -108,10 +158,18 @@ _WEBP = b"RIFF\x00\x00\x00\x00WEBP"
 
 def test_tile_webp_ok():
     with (
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()),
-        patch("data_access_service.tiler.app.routers.visual_tiles.render_tile", return_value=_WEBP),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.render_tile",
+            return_value=_WEBP,
+        ),
     ):
-        response = client.get("/tiler/visual_tiles/sea_level_anomaly/2024-01-01/5/0/0.webp")
+        response = client.get(
+            "/tiler/visual_tiles/sea_level_anomaly/2024-01-01/5/0/0.webp"
+        )
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/webp"
 
@@ -124,9 +182,18 @@ def test_tile_unknown_extension_rejected():
 def test_tile_webp_rejected_for_categorical_colormap():
     categorical = [(0, 0, 0, 0)] * 256
     with (
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()),
-        patch("data_access_service.tiler.app.services.colormap.registry._custom_colormaps", {"cat_map": categorical}),
-        patch("data_access_service.tiler.app.services.colormap.registry._custom_colormap_modes", {"cat_map": "categorical"}),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.tiler.app.services.colormap.registry._custom_colormaps",
+            {"cat_map": categorical},
+        ),
+        patch(
+            "data_access_service.tiler.app.services.colormap.registry._custom_colormap_modes",
+            {"cat_map": "categorical"},
+        ),
     ):
         response = client.get(
             "/tiler/visual_tiles/sea_level_anomaly/2024-01-01/5/0/0.webp?colormap=cat_map"
@@ -137,20 +204,36 @@ def test_tile_webp_rejected_for_categorical_colormap():
 
 def test_bbox_png_ok():
     with (
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()),
-        patch("data_access_service.tiler.app.routers.visual_tiles.render_bbox", return_value=_PNG),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.render_bbox",
+            return_value=_PNG,
+        ),
     ):
-        response = client.get("/tiler/visual_tiles/sea_level_anomaly/2024-01-01/bbox.png")
+        response = client.get(
+            "/tiler/visual_tiles/sea_level_anomaly/2024-01-01/bbox.png"
+        )
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
 
 
 def test_bbox_webp_ok():
     with (
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()),
-        patch("data_access_service.tiler.app.routers.visual_tiles.render_bbox", return_value=_WEBP),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.render_bbox",
+            return_value=_WEBP,
+        ),
     ):
-        response = client.get("/tiler/visual_tiles/sea_level_anomaly/2024-01-01/bbox.webp")
+        response = client.get(
+            "/tiler/visual_tiles/sea_level_anomaly/2024-01-01/bbox.webp"
+        )
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/webp"
 
@@ -194,22 +277,33 @@ def mcs_product():
 
 def test_categorical_tile_ok(mcs_product):
     # render_tile is NOT mocked here — exercise the real discrete-lookup path.
-    with patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_categorical_ds()):
+    with patch(
+        "data_access_service.tiler.app.routers.shared.load_slice",
+        return_value=_make_categorical_ds(),
+    ):
         response = client.get("/tiler/visual_tiles/mcs/2024-01-01/0/0/0.png")
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
 
 
 def test_categorical_tile_rejects_webp(mcs_product):
-    with patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_categorical_ds()):
+    with patch(
+        "data_access_service.tiler.app.routers.shared.load_slice",
+        return_value=_make_categorical_ds(),
+    ):
         response = client.get("/tiler/visual_tiles/mcs/2024-01-01/0/0/0.webp")
     assert response.status_code == 400
     assert "webp" in response.json()["detail"].lower()
 
 
 def test_categorical_tile_rejects_continuous_colormap(mcs_product):
-    with patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_categorical_ds()):
-        response = client.get("/tiler/visual_tiles/mcs/2024-01-01/0/0/0.png?colormap=plasma")
+    with patch(
+        "data_access_service.tiler.app.routers.shared.load_slice",
+        return_value=_make_categorical_ds(),
+    ):
+        response = client.get(
+            "/tiler/visual_tiles/mcs/2024-01-01/0/0/0.png?colormap=plasma"
+        )
     assert response.status_code == 400
     assert "categorical" in response.json()["detail"].lower()
 
@@ -220,9 +314,14 @@ def test_categorical_tile_matching_colormap_ok(mcs_product):
     # render_tile is NOT mocked, so the real validate-then-render path runs.
     with (
         _registered_categorical("mcs_match", [0, 1, 2, 3, 4]),
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_categorical_ds()),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_categorical_ds(),
+        ),
     ):
-        response = client.get("/tiler/visual_tiles/mcs/2024-01-01/0/0/0.png?colormap=mcs_match")
+        response = client.get(
+            "/tiler/visual_tiles/mcs/2024-01-01/0/0/0.png?colormap=mcs_match"
+        )
     assert response.status_code == 200
 
 
@@ -230,9 +329,14 @@ def test_categorical_tile_mismatched_colormap_rejected(mcs_product):
     # Colormap covers {1,2,3} but the product's flag_values are {0,1,2,3,4}.
     with (
         _registered_categorical("mcs_tile_bad", [1, 2, 3]),
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_categorical_ds()),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_categorical_ds(),
+        ),
     ):
-        response = client.get("/tiler/visual_tiles/mcs/2024-01-01/0/0/0.png?colormap=mcs_tile_bad")
+        response = client.get(
+            "/tiler/visual_tiles/mcs/2024-01-01/0/0/0.png?colormap=mcs_tile_bad"
+        )
     assert response.status_code == 400
     assert "flag_values" in response.json()["detail"]
 
@@ -240,14 +344,22 @@ def test_categorical_tile_mismatched_colormap_rejected(mcs_product):
 def test_categorical_tile_rejects_rescale(mcs_product):
     # rescale has no effect on the discrete-lookup path; sending it is a client
     # error, so reject with 400 rather than silently ignoring it.
-    with patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_categorical_ds()):
-        response = client.get("/tiler/visual_tiles/mcs/2024-01-01/0/0/0.png?rescale=0,4")
+    with patch(
+        "data_access_service.tiler.app.routers.shared.load_slice",
+        return_value=_make_categorical_ds(),
+    ):
+        response = client.get(
+            "/tiler/visual_tiles/mcs/2024-01-01/0/0/0.png?rescale=0,4"
+        )
     assert response.status_code == 400
     assert "rescale" in response.json()["detail"].lower()
 
 
 def test_categorical_bbox_rejects_rescale(mcs_product):
-    with patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_categorical_ds()):
+    with patch(
+        "data_access_service.tiler.app.routers.shared.load_slice",
+        return_value=_make_categorical_ds(),
+    ):
         response = client.get("/tiler/visual_tiles/mcs/2024-01-01/bbox.png?rescale=0,4")
     assert response.status_code == 400
     assert "rescale" in response.json()["detail"].lower()
@@ -257,7 +369,9 @@ def test_categorical_legend_rejects_rescale():
     # A categorical colormap has no continuous scale, so rescale tick labels are
     # meaningless — the legend endpoint rejects the combination with 400.
     with _registered_categorical("legend_cat", [0, 1, 2, 3, 4]):
-        response = client.get("/tiler/visual_tiles/colormaps/legend_cat/legend?rescale=0,4")
+        response = client.get(
+            "/tiler/visual_tiles/colormaps/legend_cat/legend?rescale=0,4"
+        )
     assert response.status_code == 400
     assert "rescale" in response.json()["detail"].lower()
 
@@ -267,7 +381,10 @@ def test_categorical_colormap_on_continuous_variable_rejected():
     # sea_level_anomaly (GSLA) is continuous.
     with (
         _registered_categorical("cont_bad", [1, 2, 3, 4]),
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_ds()),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_ds(),
+        ),
     ):
         response = client.get(
             "/tiler/visual_tiles/sea_level_anomaly/2024-01-01/0/0/0.png?colormap=cont_bad"
@@ -279,9 +396,14 @@ def test_categorical_colormap_on_continuous_variable_rejected():
 def test_categorical_bbox_mismatched_colormap_rejected(mcs_product):
     with (
         _registered_categorical("mcs_bbox_bad", [1, 2, 3]),
-        patch("data_access_service.tiler.app.routers.shared.load_slice", return_value=_make_categorical_ds()),
+        patch(
+            "data_access_service.tiler.app.routers.shared.load_slice",
+            return_value=_make_categorical_ds(),
+        ),
     ):
-        response = client.get("/tiler/visual_tiles/mcs/2024-01-01/bbox.png?colormap=mcs_bbox_bad")
+        response = client.get(
+            "/tiler/visual_tiles/mcs/2024-01-01/bbox.png?colormap=mcs_bbox_bad"
+        )
     assert response.status_code == 400
     assert "flag_values" in response.json()["detail"]
 
@@ -315,8 +437,14 @@ def test_animation_ok_with_default_bbox():
             "data_access_service.tiler.app.routers.visual_tiles.get_available_dates",
             return_value=["2024-01-01", "2024-01-02", "2024-01-03"],
         ),
-        patch("data_access_service.tiler.app.routers.visual_tiles.load_slice_uncached", return_value=_make_ds()),
-        patch("data_access_service.tiler.app.routers.visual_tiles.render_bbox_animation", return_value=_APNG),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.load_slice_uncached",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.render_bbox_animation",
+            return_value=_APNG,
+        ),
         patch(
             "data_access_service.tiler.app.routers.visual_tiles.default_bbox_from_store",
             return_value=(140.0, -40.0, 150.0, -30.0),
@@ -336,19 +464,26 @@ def test_animation_ok_with_default_bbox():
 
 
 def test_animation_swapped_dates_rejected():
-    response = client.get("/tiler/visual_tiles/sea_level_anomaly/2024-02-01/2024-01-01/animation.gif")
+    response = client.get(
+        "/tiler/visual_tiles/sea_level_anomaly/2024-02-01/2024-01-01/animation.gif"
+    )
     assert response.status_code == 400
 
 
 def test_animation_no_data_in_range_returns_404():
     with (
-        patch("data_access_service.tiler.app.routers.visual_tiles.get_available_dates", return_value=["2025-01-01"]),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.get_available_dates",
+            return_value=["2025-01-01"],
+        ),
         patch(
             "data_access_service.tiler.app.routers.visual_tiles.default_bbox_from_store",
             return_value=(140.0, -40.0, 150.0, -30.0),
         ),
     ):
-        response = client.get("/tiler/visual_tiles/sea_level_anomaly/2024-01-01/2024-01-31/animation.gif")
+        response = client.get(
+            "/tiler/visual_tiles/sea_level_anomaly/2024-01-01/2024-01-31/animation.gif"
+        )
     assert response.status_code == 404
 
 
@@ -357,24 +492,33 @@ def test_animation_frame_cap_rejected():
     too_many = [f"2024-01-{d:02d}" for d in range(1, 32)]
     assert len(too_many) == 31
     with (
-        patch("data_access_service.tiler.app.routers.visual_tiles.get_available_dates", return_value=too_many),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.get_available_dates",
+            return_value=too_many,
+        ),
         patch(
             "data_access_service.tiler.app.routers.visual_tiles.default_bbox_from_store",
             return_value=(140.0, -40.0, 150.0, -30.0),
         ),
     ):
-        response = client.get("/tiler/visual_tiles/sea_level_anomaly/2024-01-01/2024-01-31/animation.gif")
+        response = client.get(
+            "/tiler/visual_tiles/sea_level_anomaly/2024-01-01/2024-01-31/animation.gif"
+        )
     assert response.status_code == 400
     assert "max is 30" in response.json()["detail"]
 
 
 def test_animation_multi_variable_product_rejected():
-    response = client.get("/tiler/visual_tiles/ocean_current/2024-01-01/2024-01-02/animation.gif")
+    response = client.get(
+        "/tiler/visual_tiles/ocean_current/2024-01-01/2024-01-02/animation.gif"
+    )
     assert response.status_code == 400
 
 
 def test_animation_unknown_format_rejected():
-    response = client.get("/tiler/visual_tiles/sea_level_anomaly/2024-01-01/2024-01-02/animation.jpg")
+    response = client.get(
+        "/tiler/visual_tiles/sea_level_anomaly/2024-01-01/2024-01-02/animation.jpg"
+    )
     assert response.status_code == 422
 
 
@@ -382,13 +526,24 @@ def test_animation_explicit_bbox_passed_through():
     captured = {}
 
     def fake_render(*args, **_kwargs):
-        captured["bbox"] = args[2]  # render_bbox_animation(datasets, variable, bbox, ...)
+        captured["bbox"] = args[
+            2
+        ]  # render_bbox_animation(datasets, variable, bbox, ...)
         return _APNG
 
     with (
-        patch("data_access_service.tiler.app.routers.visual_tiles.get_available_dates", return_value=["2024-01-01"]),
-        patch("data_access_service.tiler.app.routers.visual_tiles.load_slice_uncached", return_value=_make_ds()),
-        patch("data_access_service.tiler.app.routers.visual_tiles.render_bbox_animation", side_effect=fake_render),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.get_available_dates",
+            return_value=["2024-01-01"],
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.load_slice_uncached",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.render_bbox_animation",
+            side_effect=fake_render,
+        ),
     ):
         # width+height pinned so the test doesn't trip the native-resolution code path
         # (which would try to open the real store to read lat/lon spacing).
@@ -412,17 +567,30 @@ def _capture_render_dims():
         captured["wh"] = (args[3], args[4])
         return _APNG
 
-    return patch(
-        "data_access_service.tiler.app.routers.visual_tiles.render_bbox_animation", side_effect=fake_render
-    ), captured
+    return (
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.render_bbox_animation",
+            side_effect=fake_render,
+        ),
+        captured,
+    )
 
 
 def test_animation_native_resolution_used_when_both_dims_omitted():
     patch_render, captured = _capture_render_dims()
     with (
-        patch("data_access_service.tiler.app.routers.visual_tiles.get_available_dates", return_value=["2024-01-01"]),
-        patch("data_access_service.tiler.app.routers.visual_tiles.load_slice_uncached", return_value=_make_ds()),
-        patch("data_access_service.tiler.app.routers.visual_tiles.native_resolution_in_bbox", return_value=(640, 350)),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.get_available_dates",
+            return_value=["2024-01-01"],
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.load_slice_uncached",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.native_resolution_in_bbox",
+            return_value=(640, 350),
+        ),
         patch_render,
     ):
         response = client.get(
@@ -437,8 +605,14 @@ def test_animation_height_derived_from_bbox_aspect_when_only_width_given():
     # width=500 → derived height = round(500 / 1.25) = 400
     patch_render, captured = _capture_render_dims()
     with (
-        patch("data_access_service.tiler.app.routers.visual_tiles.get_available_dates", return_value=["2024-01-01"]),
-        patch("data_access_service.tiler.app.routers.visual_tiles.load_slice_uncached", return_value=_make_ds()),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.get_available_dates",
+            return_value=["2024-01-01"],
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.load_slice_uncached",
+            return_value=_make_ds(),
+        ),
         patch_render,
     ):
         response = client.get(
@@ -453,8 +627,14 @@ def test_animation_width_derived_from_bbox_aspect_when_only_height_given():
     # Bbox aspect: 50 / 40 = 1.25. height=400 → derived width = round(400 * 1.25) = 500.
     patch_render, captured = _capture_render_dims()
     with (
-        patch("data_access_service.tiler.app.routers.visual_tiles.get_available_dates", return_value=["2024-01-01"]),
-        patch("data_access_service.tiler.app.routers.visual_tiles.load_slice_uncached", return_value=_make_ds()),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.get_available_dates",
+            return_value=["2024-01-01"],
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.load_slice_uncached",
+            return_value=_make_ds(),
+        ),
         patch_render,
     ):
         response = client.get(
@@ -471,8 +651,14 @@ def test_animation_derived_dimension_clamped_to_max():
     # height=2000 → derived width = round(2000 * 200) = 400000 → clamped to 2048.
     patch_render, captured = _capture_render_dims()
     with (
-        patch("data_access_service.tiler.app.routers.visual_tiles.get_available_dates", return_value=["2024-01-01"]),
-        patch("data_access_service.tiler.app.routers.visual_tiles.load_slice_uncached", return_value=_make_ds()),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.get_available_dates",
+            return_value=["2024-01-01"],
+        ),
+        patch(
+            "data_access_service.tiler.app.routers.visual_tiles.load_slice_uncached",
+            return_value=_make_ds(),
+        ),
         patch_render,
     ):
         response = client.get(
