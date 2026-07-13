@@ -15,11 +15,14 @@ Single front door for everything product-related at runtime:
 """
 
 import json
+import logging
 from pathlib import Path
 
 from data_access_service.tiler.app.config.constants import TILE
 from data_access_service.tiler.app.config.paths import PRODUCTS_CONFIG_PATH
 from data_access_service.tiler.app.services.product.product import CoastalFill, Product
+
+logger = logging.getLogger(__name__)
 
 _config_path = Path(PRODUCTS_CONFIG_PATH)
 
@@ -68,7 +71,7 @@ def load_products() -> None:
     present — never an empty dict.
     """
     if not _config_path.exists():
-        print("No products.json found — starting with empty product list")
+        logger.warning("No products.json found — starting with empty product list")
         return
     entries: list[dict] = json.loads(_config_path.read_text())
     new = {entry["id"]: _from_dict(entry) for entry in entries}
@@ -76,7 +79,7 @@ def load_products() -> None:
         PRODUCTS[product_id] = product
     for stale_id in [k for k in PRODUCTS if k not in new]:
         del PRODUCTS[stale_id]
-    print(f"Loaded {len(PRODUCTS)} products from {_config_path}")
+    logger.info(f"Loaded {len(PRODUCTS)} products from {_config_path}")
 
 
 def list_products() -> list[dict]:

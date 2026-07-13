@@ -1,5 +1,5 @@
 import asyncio
-import traceback
+import logging
 from contextlib import asynccontextmanager
 
 import anyio
@@ -16,12 +16,14 @@ from data_access_service.tiler.app.services.rendering.kernels import warmup_resa
 from data_access_service.tiler.app.services.rendering.visual_tiles import warmup_visual
 from data_access_service.tiler.app.services.store.registry import prewarm_stores
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     limiter = anyio.to_thread.current_default_thread_limiter()
     limiter.total_tokens = settings.THREAD_POOL_SIZE
-    print(f"Thread pool size set: {limiter.total_tokens}")
+    logger.info(f"Thread pool size set: {limiter.total_tokens}")
     load_products()
     load_colormaps()
 
@@ -30,15 +32,14 @@ async def lifespan(app: FastAPI):
     store_urls = list({p.source_path for p in iter_products()})
     store_prewarm_task = asyncio.create_task(prewarm_stores(store_urls))
     yield
-    print("Shutting down")
+    logger.info("Shutting down")
     store_prewarm_task.cancel()
     try:
         await store_prewarm_task
     except asyncio.CancelledError:
         pass
     except Exception:
-        print("Background task exited with error")
-        traceback.print_exc()
+        logger.exception("Background task exited with error")
 
 
 app = FastAPI(

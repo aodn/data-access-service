@@ -12,9 +12,9 @@ instead of converting every timestamp on the hot path.
 
 import asyncio
 import concurrent.futures
+import logging
 import threading
 import time
-import traceback
 
 import anyio
 import xarray as xr
@@ -22,6 +22,8 @@ import xarray as xr
 from data_access_service.tiler.app.config import settings
 from data_access_service.tiler.app.config.constants import COORD_NAMES
 from data_access_service.tiler.app.utils.dates import ts_to_local_date
+
+logger = logging.getLogger(__name__)
 
 _STORE_TTL = float(settings.STORE_TTL_SECONDS)
 
@@ -119,7 +121,7 @@ class StoreRegistry:
                 # TTL expired — return stale store and trigger a background refresh.
                 if store_url not in self._refreshing:
                     self._refreshing.add(store_url)
-                    print(f"Store TTL expired, refreshing in background: {store_url}")
+                    logger.info(f"Store TTL expired, refreshing in background: {store_url}")
                     threading.Thread(
                         target=self._refresh_background, args=(store_url,), daemon=True
                     ).start()
@@ -138,7 +140,7 @@ class StoreRegistry:
             ds = _open_store(store_url)
             index = _build_date_index(ds)
             self._publish(store_url, ds, index)
-            print(f"Store opened: {store_url} (date_count={len(index)})")
+            logger.info(f"Store opened: {store_url} (date_count={len(index)})")
             future.set_result(ds)
         except Exception as e:
             future.set_exception(e)
@@ -168,8 +170,7 @@ class StoreRegistry:
                     self.get, url, limiter=_STORE_PREWARM_LIMITER
                 )
             except Exception:
-                print(f"Store prewarm failed: {url}")
-                traceback.print_exc()
+                logger.exception(f"Store prewarm failed: {url}")
 
         await asyncio.gather(*(_one(url) for url in store_urls))
 
@@ -194,10 +195,9 @@ class StoreRegistry:
             ds = _open_store(store_url)
             index = _build_date_index(ds)
             self._publish(store_url, ds, index)
-            print(f"Store refreshed: {store_url}")
+            logger.info(f"Store refreshed: {store_url}")
         except Exception:
-            print(f"Background refresh failed: {store_url}")
-            traceback.print_exc()
+            logger.exception(f"Background refresh failed: {store_url}")
         finally:
             with self._lock:
                 self._refreshing.discard(store_url)

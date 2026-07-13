@@ -1,9 +1,12 @@
 import json
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
 from data_access_service.tiler.app.config.paths import COLORMAPS_CONFIG_PATH
+
+logger = logging.getLogger(__name__)
 
 ColormapMode = Literal["ramp", "categorical"]
 
@@ -51,11 +54,11 @@ def get_category_values(name: str) -> list[int] | None:
 def load_colormaps() -> None:
     """Read colormaps.json from disk into the in-memory registry. Called once on startup."""
     if not _config_path.exists():
-        print("No colormaps.json found — starting with in-memory defaults only")
+        logger.warning("No colormaps.json found — starting with in-memory defaults only")
         return
     data: dict[str, list | dict] = json.loads(_config_path.read_text())
     _reload(data)
-    print(f"Loaded {len(_custom_colormaps)} colormaps from {_config_path}")
+    logger.info(f"Loaded {len(_custom_colormaps)} colormaps from {_config_path}")
 
 
 def list_colormaps() -> dict[str, list]:

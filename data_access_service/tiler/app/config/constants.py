@@ -61,4 +61,4 @@ TILE = TileConfig()
 # ?cv=...; bumping it invalidates browser and CDN caches together (new URLs miss everywhere).
 # Do NOT bump on every build — only on changes that affect rendered output.
 # See docs/http_caching.md for the full design.
-CACHE_VERSION = "cv2"
+CACHE_VERSION = "cv1"

@@ -61,6 +61,7 @@ async def lifespan(application: FastAPI):
         application.state.repositories = build_repositories(session)
         scheduler = TaskScheduler(api, application.state.repositories)
         asyncio.create_task(scheduler.start_with_initial_run(), name="repository_cache")
+        # Inject tiler app lifespan
         async with tiler_app.router.lifespan_context(tiler_app):
             yield
 
