@@ -1,4 +1,7 @@
 from data_access_service.models.bounding_box import BoundingBox
+from data_access_service.utils.email_templates.coordinate_format import (
+    format_coordinate,
+)
 from data_access_service.utils.email_templates.email_images import (
     BBOX_IMG,
 )
@@ -78,7 +81,7 @@ def __form_bbox_div(bbox: BoundingBox):
                                                     <tr>
                                                         <td align="left" width="100%">
                                                             <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 14px; font-weight: 400; line-height: 157%; text-align: left; color: #3c3c3c">
-                                                                <p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">N: {bbox.max_lat} </p>
+                                                                <p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">N: {format_coordinate(bbox.max_lat)} </p>
                                                             </div>
                                                         </td>
                                                     </tr>
@@ -96,7 +99,7 @@ def __form_bbox_div(bbox: BoundingBox):
                                                     <tr>
                                                         <td align="left" width="100%">
                                                             <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 14px; font-weight: 400; line-height: 157%; text-align: left; color: #3c3c3c">
-                                                                <p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">S: {bbox.min_lat}</p>
+                                                                <p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">S: {format_coordinate(bbox.min_lat)}</p>
                                                             </div>
                                                         </td>
                                                     </tr>
@@ -114,7 +117,7 @@ def __form_bbox_div(bbox: BoundingBox):
                                                     <tr>
                                                         <td align="left" width="100%">
                                                             <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 14px; font-weight: 400; line-height: 157%; text-align: left; color: #3c3c3c">
-                                                                <p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">W: {bbox.min_lon}</p>
+                                                                <p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">W: {format_coordinate(bbox.min_lon)}</p>
                                                             </div>
                                                         </td>
                                                     </tr>
@@ -132,7 +135,7 @@ def __form_bbox_div(bbox: BoundingBox):
                                                     <tr>
                                                         <td align="left" width="100%">
                                                             <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 14px; font-weight: 400; line-height: 157%; text-align: left; color: #3c3c3c">
-                                                                <p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">E: {bbox.max_lon}</p>
+                                                                <p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">E: {format_coordinate(bbox.max_lon)}</p>
                                                             </div>
                                                         </td>
                                                     </tr>
