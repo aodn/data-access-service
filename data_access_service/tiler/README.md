@@ -14,9 +14,9 @@ The tiler is mounted onto the main `data_access_service` app under its API prefi
 poetry run python -m data_access_service.server
 ```
 
-All server configuration (timezone, cache backend, S3 timeouts, log level, etc.) lives in [`app/config/settings.py`](app/config/settings.py) as plain constants — no env vars, no `.env` file. To change a value, edit the file and restart the server.
+All server configuration (timezone, cache backend, S3 timeouts, log level, etc.) lives in [`app/config/settings.py`](app/config/settings.py) as plain constants.
 
-Server available at `http://localhost:5000`. `/docs` shows the main app's schema, not the tiler's, since it's a separate ASGI app under the hood mounted at `{BASE_URL}`.
+Server available at `http://localhost:5000`. The tiler runs as a separate ASGI app under the hood, mounted at `{BASE_URL}`, but the main app's `/docs` merges in the tiler's OpenAPI schema (see [`custom_openapi`](../server.py)) so both show up together in one Swagger UI.
 
 ## Important: date timezone convention
 
@@ -34,34 +34,34 @@ Paths below are relative to the tiler's own root. When mounted via the main serv
 
 Raw RGBA tiles for WebGL shader consumption — pixel bytes encode scientific values, not colours.
 
-| Method | Path                                                    | Description                                                  |
-| ------ | ------------------------------------------------------- | ------------------------------------------------------------ |
-| GET    | `/data_tiles/products`                                  | List all registered products                                 |
-| GET    | `/data_tiles/manifest?from=&to=`                        | Available dates + full date range per product (`from` defaults to each product's earliest date) |
-| GET    | `/data_tiles/{product_id}/{date}/{z}/{x}/{y}.png`       | Raw value-encoded tile                                       |
-| GET    | `/data_tiles/{product_id}/{date}/manifest.json`         | Tile config (bounds, value ranges, LOD grid)                 |
-| GET    | `/data_tiles/{product_id}/{date}/point?lat=&lon=`       | Point value lookup (single date)                             |
+| Method | Path                                              | Description                                                                                     |
+| ------ | ------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| GET    | `/data_tiles/products`                            | List all registered products                                                                    |
+| GET    | `/data_tiles/manifest?from=&to=`                  | Available dates + full date range per product (`from` defaults to each product's earliest date) |
+| GET    | `/data_tiles/{product_id}/{date}/{z}/{x}/{y}.png` | Raw value-encoded tile                                                                          |
+| GET    | `/data_tiles/{product_id}/{date}/manifest.json`   | Tile config (bounds, value ranges, LOD grid)                                                    |
+| GET    | `/data_tiles/{product_id}/{date}/point?lat=&lon=` | Point value lookup (single date)                                                                |
 
 ### Visual tiles (`/visual_tiles`)
 
 Colourised Web Mercator (XYZ) tiles — compatible with MapboxGL `raster` sources and any slippy-map library. Single-variable products only.
 
-| Method | Path                                                              | Description                                                                                                       |
-| ------ | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| GET    | `/visual_tiles/{product_id}/{date}/{z}/{x}/{y}.{ext}`               | Colourised tile (Web Mercator XYZ). `ext` is `png` (lossless) or `webp` (lossy, ~50% smaller). Categorical colormaps must use `.png`. |
-| GET    | `/visual_tiles/{product_id}/{date}/bbox.{ext}?bbox=minx,miny,maxx,maxy` | Colourised image for an arbitrary bbox (EPSG:4326 degrees by default; pass `crs=EPSG:3857` for Web Mercator meters). `ext` is `png` or `webp`. |
-| GET    | `/visual_tiles/{product_id}/{from_date}/{to_date}/animation.{ext}` | Animated bbox over a date range. `ext` is `gif`, `apng`, or `webp`. Bbox defaults to dataset extent; width/height default to native cell count or are derived from bbox aspect ratio. 30-frame cap. Intended for demos. |
-| GET    | `/visual_tiles/colormaps`                                           | All supported colormap names grouped by source (custom, rio-tiler, matplotlib)                                    |
-| GET    | `/visual_tiles/colormaps/{name}/legend`                             | Color legend PNG for a colormap (gradient bar ± tick labels)                                                      |
+| Method | Path                                                                    | Description                                                                                                                                                                                                             |
+| ------ | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/visual_tiles/{product_id}/{date}/{z}/{x}/{y}.{ext}`                   | Colourised tile (Web Mercator XYZ). `ext` is `png` (lossless) or `webp` (lossy, ~50% smaller). Categorical colormaps must use `.png`.                                                                                   |
+| GET    | `/visual_tiles/{product_id}/{date}/bbox.{ext}?bbox=minx,miny,maxx,maxy` | Colourised image for an arbitrary bbox (EPSG:4326 degrees by default; pass `crs=EPSG:3857` for Web Mercator meters). `ext` is `png` or `webp`.                                                                          |
+| GET    | `/visual_tiles/{product_id}/{from_date}/{to_date}/animation.{ext}`      | Animated bbox over a date range. `ext` is `gif`, `apng`, or `webp`. Bbox defaults to dataset extent; width/height default to native cell count or are derived from bbox aspect ratio. 30-frame cap. Intended for demos. |
+| GET    | `/visual_tiles/colormaps`                                               | All supported colormap names grouped by source (custom, rio-tiler, matplotlib)                                                                                                                                          |
+| GET    | `/visual_tiles/colormaps/{name}/legend`                                 | Color legend PNG for a colormap (gradient bar ± tick labels)                                                                                                                                                            |
 
 > The product-metadata endpoints `/products`, `/manifest`, and `/{product_id}/{date}/point` listed under **Data tiles** above are also served under `/visual_tiles/…` with identical behaviour — the same router backs both prefixes — so a visual-only client never needs to call `/data_tiles`.
 
 Query parameters for tile requests:
 
-| Parameter  | Default                          | Description                                                                                         |
-| ---------- | -------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Parameter  | Default                          | Description                                                                                               |
+| ---------- | -------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `colormap` | `viridis`                        | Colormap name — any matplotlib or rio-tiler built-in, or a custom name defined in `config/colormaps.json` |
-| `rescale`  | auto (data min/max for the date) | Value range as `min,max`, e.g. `-0.5,0.5`                                                           |
+| `rescale`  | auto (data min/max for the date) | Value range as `min,max`, e.g. `-0.5,0.5`                                                                 |
 
 ## Managing products
 
@@ -111,7 +111,7 @@ Two modes are supported. Entries in the file are already expanded to a 256-entry
 {
   "name": "land_cover",
   "mode": "categorical",
-  "entries": {"1": "#ffff00", "2": "#0000ff", "3": "#ff0000", "4": "#000000"}
+  "entries": { "1": "#ffff00", "2": "#0000ff", "3": "#ff0000", "4": "#000000" }
 }
 ```
 
@@ -128,12 +128,3 @@ GET /visual_tiles/colormaps/imos_sst/legend?width=40&height=256&orientation=vert
 ```
 
 **Remove a colormap** — delete its entry from the file and redeploy.
-
-## Development
-
-This package follows the root repo's conventions (Poetry for dependencies, `black` for formatting, pre-commit hooks installed once for the whole monorepo — see the [top-level README](../../README.md)). No `ruff`/`mypy` config or automated tests have been ported over yet; a test suite existed in the original standalone tiler project but wasn't carried across in this move.
-
-```bash
-poetry run pytest data_access_service/tiler       # once tests exist here
-poetry run black data_access_service/tiler        # format
-```

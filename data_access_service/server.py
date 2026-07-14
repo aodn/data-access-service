@@ -3,6 +3,7 @@ import os
 import uvicorn
 
 from fastapi import FastAPI
+from fastapi.openapi.utils import get_openapi
 from contextlib import asynccontextmanager
 from pathlib import Path
 from data_access_service import Config
@@ -74,6 +75,34 @@ async def lifespan(application: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan, title="Data Access Service")
+
+
+def custom_openapi():
+    """
+    The tiler is mounted as its own FastAPI app via `application.mount(...)`, so its
+    routes live in a separate ASGI app and are invisible to this app's generated
+    OpenAPI schema by default. Merge the tiler's schema in (path-prefixed by
+    Config.BASE_URL, matching where the mount actually serves them) so `/docs` shows
+    every endpoint in one place.
+    """
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
+    tiler_schema = tiler_app.openapi()
+
+    schema.setdefault("paths", {})
+    for path, path_item in tiler_schema.get("paths", {}).items():
+        schema["paths"][f"{Config.BASE_URL}{path}"] = path_item
+
+    for section, entries in tiler_schema.get("components", {}).items():
+        schema.setdefault("components", {}).setdefault(section, {}).update(entries)
+
+    app.openapi_schema = schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 
 if __name__ == "__main__":
