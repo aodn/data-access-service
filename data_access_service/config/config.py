@@ -206,6 +206,10 @@ class Config:
             else None
         )
 
+    def get_csiro_datasets(self) -> list:
+        """Returns list of dicts, each with 'dataset_name' and 'key_request_url'."""
+        return self.config["csiro"]["datasets"] if self.config is not None else []
+
     def get_api_key(self):
         return os.getenv("API_KEY")
 

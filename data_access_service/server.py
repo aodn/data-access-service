@@ -1,5 +1,9 @@
 import asyncio
+from asyncio import AbstractEventLoop
+from contextlib import asynccontextmanager
+from pathlib import Path
 import os
+
 import uvicorn
 
 from fastapi import FastAPI
@@ -18,7 +22,7 @@ def api_setup(application: FastAPI) -> API:
     """
     This function is not async which can be use in test, the lifespan however
     expect async function which is not good for testing
-    :param asynchronize:
+
     :param application:
     :return:
     """
@@ -45,6 +49,16 @@ def api_setup(application: FastAPI) -> API:
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    # Write a health file immediately so an external healthcheck (nginx/ELB)
+    # can detect the process is starting before heavy initialization completes.
+    try:
+        os.makedirs("/tmp/status", exist_ok=True)
+        with open("/tmp/status/health.json", "w") as f:
+            f.write('{"status":"STARTING","status_code":200}')
+    except Exception:
+        # Ignore any errors writing the health file; do not block startup.
+        pass
+
     # Initialize API
     api = api_setup(application)
 
