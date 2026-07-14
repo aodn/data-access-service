@@ -219,4 +219,7 @@ def get_available_dates(store_url: str) -> list[str]:
 
 
 async def prewarm_stores(store_urls: list[str]) -> None:
-    await store_registry.prewarm(store_urls)
+    try:
+        await store_registry.prewarm(store_urls)
+    except Exception:
+        logger.exception("Store prewarm task exited with error")

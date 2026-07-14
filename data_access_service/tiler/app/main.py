@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -35,16 +34,14 @@ async def lifespan(app: FastAPI):
     await anyio.to_thread.run_sync(warmup_resample)
     await anyio.to_thread.run_sync(warmup_visual)
     store_urls = list({p.source_path for p in iter_products()})
-    store_prewarm_task = asyncio.create_task(prewarm_stores(store_urls))
-    yield
-    logger.info("Shutting down")
-    store_prewarm_task.cancel()
-    try:
-        await store_prewarm_task
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        logger.exception("Background task exited with error")
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(prewarm_stores, store_urls)
+        try:
+            yield
+        finally:
+            logger.info("Shutting down")
+            tg.cancel_scope.cancel()
 
 
 app = FastAPI(

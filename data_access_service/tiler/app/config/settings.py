@@ -12,14 +12,21 @@ TILE_TIMEZONE = "Australia/Sydney"
 # Seconds before a Zarr store is re-opened to pick up newly appended time steps.
 STORE_TTL_SECONDS = 600
 
+# NOTE: STORE_PREWARM_WORKERS, THREAD_POOL_SIZE, and ANIMATION_WORKERS each
+# bound a separate anyio.CapacityLimiter used only inside the tiler app
+# (data_access_service/tiler/app/...). They do not govern thread/concurrency
+# usage elsewhere in data_access_service — core/api.py, core/scheduler.py, and
+# utils/sse_utils.py offload blocking work via asyncio.to_thread /
+# loop.run_in_executor with their own, independent pools.
+
 # Capacity gate for concurrent store opens during startup prewarm. Bounded to
 # the S3 connection ceiling, not CPU.
-STORE_PREWARM_WORKERS = 8
+STORE_PREWARM_WORKERS = 6
 
 # Max concurrent sync route handlers (each cold slice needs one thread).
 # Practical ceiling is S3 bandwidth — beyond ~150 concurrent .compute() calls
 # you are likely to hit network saturation before gaining further throughput.
-THREAD_POOL_SIZE = 100
+THREAD_POOL_SIZE = 20
 
 # Capacity gate for /animation per-frame S3 fan-out. Sized to the aiobotocore
 # S3 connection-pool ceiling (~10/host) — going higher just queues on the pool.
