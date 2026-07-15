@@ -15,6 +15,7 @@ from data_access_service.core.api import API
 from data_access_service.core.routes import router as api_router
 from data_access_service.core.scheduler import TaskScheduler
 from data_access_service.core.tiler_routes import router as tiler_router
+from data_access_service.core.tiler_routes.shared import mark_tiler_ready
 from data_access_service.sites.sites_repository import build_repositories
 from data_access_service.core.duckdbclient import ParquetDuckDBClient
 from data_access_service.tiler.services.colormap.registry import load_colormaps
@@ -25,6 +26,7 @@ from data_access_service.tiler.services.product.registry import (
 from data_access_service.tiler.services.rendering.kernels import warmup_resample
 from data_access_service.tiler.services.rendering.visual_tiles import warmup_visual
 from data_access_service.tiler.services.store.registry import prewarm_stores
+from data_access_service.utils.api_utils import wait_until_api_ready
 
 logger = logging.getLogger(__name__)
 
@@ -73,18 +75,29 @@ async def lifespan(application: FastAPI):
         application.state.duckdb_session = session
         application.state.repositories = build_repositories(session)
         scheduler = TaskScheduler(api, application.state.repositories)
-        asyncio.create_task(scheduler.start_with_initial_run(), name="repository_cache")
 
-        # Tiler startup
         limiter = anyio.to_thread.current_default_thread_limiter()
         limiter.total_tokens = Config.get_config().get_tiler_config().thread_pool_size
-        load_products()
-        load_colormaps()
-        await anyio.to_thread.run_sync(warmup_resample)
-        await anyio.to_thread.run_sync(warmup_visual)
-        store_urls = list({p.source_path for p in iter_products()})
+
+        async def _tiler_startup_after_metadata_init() -> None:
+            logger.info("Waiting for API metadata init before starting other tasks")
+            await wait_until_api_ready(api)
+
+            asyncio.create_task(
+                scheduler.start_with_initial_run(), name="repository_cache"
+            )
+
+            load_products()
+            load_colormaps()
+            await anyio.to_thread.run_sync(warmup_resample)
+            await anyio.to_thread.run_sync(warmup_visual)
+            mark_tiler_ready()
+
+            store_urls = list({p.source_path for p in iter_products()})
+            await prewarm_stores(store_urls)
+
         async with anyio.create_task_group() as tg:
-            tg.start_soon(prewarm_stores, store_urls)
+            tg.start_soon(_tiler_startup_after_metadata_init)
             try:
                 yield
             finally:

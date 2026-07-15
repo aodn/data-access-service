@@ -9,6 +9,7 @@ from data_access_service import API
 from data_access_service import Config
 from data_access_service.config.config import EnvType
 from data_access_service.sites.sites_repository import ParquetRepository
+from data_access_service.utils.api_utils import wait_until_api_ready
 
 logger = logging.getLogger(__name__)
 
@@ -42,19 +43,6 @@ class TaskScheduler:
         self.api = api
         self.repositories = repositories
         self.scheduler = AsyncIOScheduler()
-
-    async def _wait_until_api_ready(self, timeout: float = 300):
-        """Wait until main API metadata initialization has finished."""
-        waited = 0
-        while not self.api.get_api_status():
-            if waited >= timeout:
-                logger.warning("Timed out waiting for API to become ready")
-                break
-            await asyncio.sleep(0.5)
-            waited += 0.5
-        logger.info(
-            f"API ready status = {self.api.get_api_status()} (waited {waited}s)"
-        )
 
     def _refresh_repository(self, name: str, repo: ParquetRepository):
         """Reload one repository from its primary dataset, then refresh its backup.
@@ -140,7 +128,7 @@ class TaskScheduler:
 
     async def start_with_initial_run(self):
         # API init is memory intensive, so do not refresh until the init is done
-        await self._wait_until_api_ready()
+        await wait_until_api_ready(self.api)
 
         """Start the scheduler and run the refresh task immediately."""
         loop = asyncio.get_running_loop()

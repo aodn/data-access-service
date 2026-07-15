@@ -1,6 +1,7 @@
 """Helpers shared across the three routers (products, data_tiles, visual_tiles)."""
 
 from datetime import date as _Date
+from http import HTTPStatus
 
 from fastapi import HTTPException
 from fastapi.openapi.models import Example
@@ -12,6 +13,29 @@ from data_access_service.tiler.services.store.slice_loader import load_slice
 
 PRODUCT_EX: dict[str, Example] = {"default": Example(value="sea_level_anomaly")}
 DATE_EX: dict[str, Example] = {"default": Example(value="2024-02-24")}
+
+
+_tiler_ready = False
+
+
+def mark_tiler_ready() -> None:
+    global _tiler_ready
+    _tiler_ready = True
+
+
+def require_tiler_ready() -> None:
+    """FastAPI dependency: 503 until tiler startup has finished.
+
+    Mirrors api_instance.get_api_status() on the main data routes — without
+    it, a request arriving before startup completes would just see an empty
+    product/colormap registry instead of a clear "not ready" response.
+    """
+    if not _tiler_ready:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail="Tiler is not ready. Product/store initialization is still in progress.",
+        )
+
 
 # Cache headers for content-addressed endpoints (tiles, legends, per-date manifest,
 # point lookups). The URL fully determines the response bytes, so caches can hold the
