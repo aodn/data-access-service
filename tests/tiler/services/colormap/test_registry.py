@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-import data_access_service.tiler.app.services.colormap.registry as colormap_config
+import data_access_service.tiler.services.colormap.registry as colormap_config
 
 
 @pytest.fixture

@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from data_access_service.tiler.app.utils import dates as dates_mod
+from data_access_service.tiler.utils import dates as dates_mod
 
 
 def test_ts_to_local_date_converts_utc_to_sydney():

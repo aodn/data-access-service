@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from data_access_service.tiler.app.services.caching.deduper import Deduper
+from data_access_service.tiler.services.caching.deduper import Deduper
 
 
 def test_sequential_calls_each_recompute():

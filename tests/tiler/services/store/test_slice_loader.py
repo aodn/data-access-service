@@ -12,8 +12,8 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-import data_access_service.tiler.app.services.store.slice_loader as loader
-from data_access_service.tiler.app.services.store.registry import store_registry
+import data_access_service.tiler.services.store.slice_loader as loader
+from data_access_service.tiler.services.store.registry import store_registry
 
 
 @pytest.fixture(autouse=True)

@@ -1,9 +1,12 @@
 import asyncio
+import logging
 import os
 import uvicorn
 
+import anyio
+import starlette.middleware.gzip as _gzip_mw
 from fastapi import FastAPI
-from fastapi.openapi.utils import get_openapi
+from starlette.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
 from pathlib import Path
 from data_access_service import Config
@@ -11,9 +14,19 @@ from data_access_service.config.config import IntTestConfig
 from data_access_service.core.api import API
 from data_access_service.core.routes import router as api_router
 from data_access_service.core.scheduler import TaskScheduler
+from data_access_service.core.tiler_routes import router as tiler_router
 from data_access_service.sites.sites_repository import build_repositories
 from data_access_service.core.duckdbclient import ParquetDuckDBClient
-from data_access_service.tiler.app.main import app as tiler_app
+from data_access_service.tiler.services.colormap.registry import load_colormaps
+from data_access_service.tiler.services.product.registry import (
+    iter_products,
+    load_products,
+)
+from data_access_service.tiler.services.rendering.kernels import warmup_resample
+from data_access_service.tiler.services.rendering.visual_tiles import warmup_visual
+from data_access_service.tiler.services.store.registry import prewarm_stores
+
+logger = logging.getLogger(__name__)
 
 
 def api_setup(application: FastAPI) -> API:
@@ -42,6 +55,7 @@ def api_setup(application: FastAPI) -> API:
         api.initialize_metadata()
 
     application.include_router(api_router)
+    application.include_router(tiler_router)
     return api
 
 
@@ -49,8 +63,6 @@ def api_setup(application: FastAPI) -> API:
 async def lifespan(application: FastAPI):
     # Initialize API
     api = api_setup(application)
-    # Mount tiler app
-    application.mount(Config.BASE_URL, tiler_app)
 
     session = None
     scheduler = None
@@ -62,9 +74,22 @@ async def lifespan(application: FastAPI):
         application.state.repositories = build_repositories(session)
         scheduler = TaskScheduler(api, application.state.repositories)
         asyncio.create_task(scheduler.start_with_initial_run(), name="repository_cache")
-        # Inject tiler app lifespan
-        async with tiler_app.router.lifespan_context(tiler_app):
-            yield
+
+        # Tiler startup
+        limiter = anyio.to_thread.current_default_thread_limiter()
+        limiter.total_tokens = Config.get_config().get_tiler_config().thread_pool_size
+        load_products()
+        load_colormaps()
+        await anyio.to_thread.run_sync(warmup_resample)
+        await anyio.to_thread.run_sync(warmup_visual)
+        store_urls = list({p.source_path for p in iter_products()})
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(prewarm_stores, store_urls)
+            try:
+                yield
+            finally:
+                logger.info("Shutting down tiler prewarm")
+                tg.cancel_scope.cancel()
 
     # Cleanup
     if scheduler:
@@ -76,33 +101,13 @@ async def lifespan(application: FastAPI):
 
 app = FastAPI(lifespan=lifespan, title="Data Access Service")
 
-
-def custom_openapi():
-    """
-    The tiler is mounted as its own FastAPI app via `application.mount(...)`, so its
-    routes live in a separate ASGI app and are invisible to this app's generated
-    OpenAPI schema by default. Merge the tiler's schema in (path-prefixed by
-    Config.BASE_URL, matching where the mount actually serves them) so `/docs` shows
-    every endpoint in one place.
-    """
-    if app.openapi_schema:
-        return app.openapi_schema
-
-    schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
-    tiler_schema = tiler_app.openapi()
-
-    schema.setdefault("paths", {})
-    for path, path_item in tiler_schema.get("paths", {}).items():
-        schema["paths"][f"{Config.BASE_URL}{path}"] = path_item
-
-    for section, entries in tiler_schema.get("components", {}).items():
-        schema.setdefault("components", {}).setdefault(section, {}).update(entries)
-
-    app.openapi_schema = schema
-    return app.openapi_schema
-
-
-app.openapi = custom_openapi
+# PNG/WebP tiles are already compressed; gzipping them wastes CPU. Core JSON
+# responses that already set their own Content-Encoding (see
+# utils/routes_helper.py's gzip_compress) are left untouched by this
+# middleware — it skips compression when content-encoding is already set.
+if "image/" not in _gzip_mw.DEFAULT_EXCLUDED_CONTENT_TYPES:
+    _gzip_mw.DEFAULT_EXCLUDED_CONTENT_TYPES += ("image/",)  # type: ignore[assignment]
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 
 
 if __name__ == "__main__":

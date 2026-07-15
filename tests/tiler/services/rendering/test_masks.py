@@ -9,11 +9,11 @@ assets are present and sane.
 import numpy as np
 import xarray as xr
 
-from data_access_service.tiler.app.services.product.product import CoastalFill, Product
-from data_access_service.tiler.app.services.rendering.data_tiles import (
+from data_access_service.tiler.services.product.product import CoastalFill, Product
+from data_access_service.tiler.services.rendering.data_tiles import (
     _compute_processed,
 )
-from data_access_service.tiler.app.services.rendering.masks import (
+from data_access_service.tiler.services.rendering.masks import (
     apply_ocean_mask,
     inpaint_nearest,
     land_mask_for_grid,

@@ -13,14 +13,14 @@ from pathlib import Path
 PRODUCTS_CONFIG_PATH = str(Path(__file__).resolve().parent / "products.json")
 COLORMAPS_CONFIG_PATH = str(Path(__file__).resolve().parent / "colormaps.json")
 
-# Mask assets stay with the tiler app package (not config) since they're binary
+# Mask assets stay with the tiler package (not config) since they're binary
 # data, not something a dev edits — resolved relative to the repo's
 # data_access_service package root so this keeps working regardless of where
 # this config module itself lives.
-_TILER_APP_ASSETS = Path(__file__).resolve().parents[2] / "tiler" / "app" / "assets"
+_TILER_ASSETS = Path(__file__).resolve().parents[2] / "tiler" / "assets"
 # Committed global land-mask asset for coastal fill (see services/rendering/masks.py).
 # Regenerate with scripts/build_land_mask.py.
-LAND_MASK_PATH = str(_TILER_APP_ASSETS / "land_mask.npz")
+LAND_MASK_PATH = str(_TILER_ASSETS / "land_mask.npz")
 # Committed regional ocean-validity mask (see services/rendering/masks.py).
 # Regenerate with scripts/build_ocean_mask.py from src/app/assets/OCmask.nc.
-OCEAN_MASK_PATH = str(_TILER_APP_ASSETS / "ocean_mask.npz")
+OCEAN_MASK_PATH = str(_TILER_ASSETS / "ocean_mask.npz")

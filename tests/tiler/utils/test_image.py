@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from data_access_service.tiler.app.utils.image import (
+from data_access_service.tiler.utils.image import (
     animated_media_type,
     encode_rgba_animation,
 )

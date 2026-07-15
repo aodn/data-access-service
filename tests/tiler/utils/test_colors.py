@@ -2,7 +2,7 @@
 
 import pytest
 
-from data_access_service.tiler.app.utils.colors import (
+from data_access_service.tiler.utils.colors import (
     build_categorical_lut,
     hex_to_rgba,
     interpolate_colormap,

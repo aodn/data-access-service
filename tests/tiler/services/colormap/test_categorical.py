@@ -11,16 +11,16 @@ import numpy as np
 import xarray as xr
 from PIL import Image
 
-from data_access_service.tiler.app.services.colormap.categorical import (
+from data_access_service.tiler.services.colormap.categorical import (
     DEFAULT_CATEGORICAL_PALETTE,
     is_categorical_variable,
     resolve_scheme,
 )
-from data_access_service.tiler.app.services.rendering.visual_tiles import (
+from data_access_service.tiler.services.rendering.visual_tiles import (
     render_bbox,
     render_tile,
 )
-from data_access_service.tiler.app.utils.colors import build_categorical_lut
+from data_access_service.tiler.utils.colors import build_categorical_lut
 
 _MCS_COLORS = DEFAULT_CATEGORICAL_PALETTE
 
@@ -94,7 +94,7 @@ def test_flag_colors_attr_beats_default_palette():
 
 
 def test_explicit_categorical_colormap_beats_flag_colors(monkeypatch):
-    import data_access_service.tiler.app.services.colormap.registry as reg
+    import data_access_service.tiler.services.colormap.registry as reg
 
     # A real categorical LUT keyed on the same values 0..4 (as registration enforces).
     categories = {

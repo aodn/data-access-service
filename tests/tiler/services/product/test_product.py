@@ -1,4 +1,4 @@
-from data_access_service.tiler.app.services.product.product import Product
+from data_access_service.tiler.services.product.product import Product
 
 
 def test_compute_lod_grids_returns_nonempty():

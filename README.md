@@ -201,9 +201,9 @@ PROFILE=edge
 
 ### Tiler
 
-This repo also includes an on-demand tile server for gridded IMOS ocean data (Zarr on S3 only), living in `data_access_service/tiler/`. It's a separate FastAPI app mounted onto the main app at `{BASE_URL}/tiler`, sharing this repo's Poetry environment and starting automatically with `python -m data_access_service.server` — no separate setup needed. The data-tile and visual-tile product-metadata endpoints (`products`, `manifest`, `{product_id}/{date}/point`) behave identically under either prefix — the same router backs both.
+This repo also includes an on-demand tile server for gridded IMOS ocean data (Zarr on S3 only). Business logic lives in `data_access_service/tiler/`; its routes are included directly into the main app under `{BASE_URL}/tiler` (see `data_access_service/core/tiler_routes/`), sharing this repo's Poetry environment and starting automatically with `python -m data_access_service.server` — no separate setup needed. The data-tile and visual-tile product-metadata endpoints (`products`, `manifest`, `{product_id}/{date}/point`) behave identically under either prefix — the same router backs both.
 
-See the [tiler README](data_access_service/tiler/README.md) for date/timezone conventions and product/colormap management.
+All dates in the tiler API (`{date}` path params, `from`/`to` query params, `available_dates` responses) are in the server's configured local timezone (`tiler.tile_timezone` in `data_access_service/config/config.yaml`, default `Australia/Sydney`) — always use dates from a manifest response rather than constructing them locally. Products and colormaps are static config in `data_access_service/config/tiler/{products,colormaps}.json`; add, remove, or change one by editing the file and redeploying.
 
 ### Running Tests
 

@@ -4,11 +4,11 @@ import time
 import numpy as np
 import xarray as xr
 
-import data_access_service.tiler.app.services.rendering.data_tiles as data_tiles_module
-from data_access_service.tiler.app.services.product.manifest import render_manifest
-from data_access_service.tiler.app.services.product.product import Product
-from data_access_service.tiler.app.services.rendering.data_tiles import render_tile
-from data_access_service.tiler.app.services.rendering.kernels import (
+import data_access_service.tiler.services.rendering.data_tiles as data_tiles_module
+from data_access_service.tiler.services.product.manifest import render_manifest
+from data_access_service.tiler.services.product.product import Product
+from data_access_service.tiler.services.rendering.data_tiles import render_tile
+from data_access_service.tiler.services.rendering.kernels import (
     resample_variables_to_grid,
 )
 

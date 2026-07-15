@@ -11,9 +11,9 @@ import json
 
 import pytest
 
-import data_access_service.tiler.app.services.product.registry as registry
-from data_access_service.tiler.app.services.product.product import Product
-from data_access_service.tiler.app.services.product.registry import PRODUCTS
+import data_access_service.tiler.services.product.registry as registry
+from data_access_service.tiler.services.product.product import Product
+from data_access_service.tiler.services.product.registry import PRODUCTS
 
 
 @pytest.fixture

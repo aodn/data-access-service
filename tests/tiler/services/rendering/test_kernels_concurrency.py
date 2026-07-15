@@ -37,7 +37,7 @@ import numpy as np
 import xarray as xr
 from concurrent.futures import ThreadPoolExecutor
 
-from data_access_service.tiler.app.services.rendering.kernels import (
+from data_access_service.tiler.services.rendering.kernels import (
     normalize,
     resample_variables_to_grid,
     warmup_resample,

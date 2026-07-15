@@ -12,8 +12,8 @@ import pytest
 import xarray as xr
 from PIL import Image
 
-import data_access_service.tiler.app.services.rendering.visual_tiles as visual_renderer
-from data_access_service.tiler.app.utils.image import TILE_SIZE
+import data_access_service.tiler.services.rendering.visual_tiles as visual_renderer
+from data_access_service.tiler.utils.image import TILE_SIZE
 
 
 def _scalar_ds(

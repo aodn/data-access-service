@@ -3,7 +3,7 @@ import dataclasses
 import pytest
 
 from data_access_service.config.config import Config
-from data_access_service.tiler.app.services.caching.memoizer import (
+from data_access_service.tiler.services.caching.memoizer import (
     CacheBackend,
     NullMemoizer,
     create_memoizer,

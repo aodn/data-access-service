@@ -4,12 +4,12 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from data_access_service.tiler.app.services.product.product import (
+from data_access_service.tiler.services.product.product import (
     Product,
     get_lod_grids,
 )
-from data_access_service.tiler.app.services.store import registry
-from data_access_service.tiler.app.services.store.registry import (
+from data_access_service.tiler.services.store import registry
+from data_access_service.tiler.services.store.registry import (
     _storage_options,
     get_store,
     store_registry,
