@@ -4,7 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
-from data_access_service.tiler.app.config.paths import COLORMAPS_CONFIG_PATH
+from data_access_service.config.tiler.paths import COLORMAPS_CONFIG_PATH
 
 logger = logging.getLogger(__name__)
 

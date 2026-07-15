@@ -2,7 +2,7 @@ import math
 import threading
 from dataclasses import dataclass, field
 
-from data_access_service.tiler.app.config.constants import LOD, TILE
+from data_access_service.config.tiler.constants import LOD, TILE
 from data_access_service.tiler.app.services.store.registry import get_store
 
 _lod_grids_lock = threading.Lock()

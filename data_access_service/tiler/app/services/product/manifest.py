@@ -11,7 +11,7 @@ from typing import Any
 
 import xarray as xr
 
-from data_access_service.tiler.app.config.constants import LOD
+from data_access_service.config.tiler.constants import LOD
 from data_access_service.tiler.app.services.colormap.categorical import (
     is_categorical_variable,
     parse_flag_values_and_meanings,

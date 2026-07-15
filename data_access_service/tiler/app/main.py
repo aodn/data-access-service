@@ -6,7 +6,7 @@ import starlette.middleware.gzip as _gzip_mw
 from fastapi import FastAPI
 from starlette.middleware.gzip import GZipMiddleware
 
-from data_access_service.tiler.app.config import settings
+from data_access_service.config.config import Config
 from data_access_service.tiler.app.routers.data_tiles import router as data_tiles_router
 from data_access_service.tiler.app.routers.visual_tiles import (
     router as visual_tiles_router,
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     limiter = anyio.to_thread.current_default_thread_limiter()
-    limiter.total_tokens = settings.THREAD_POOL_SIZE
+    limiter.total_tokens = Config.get_config().get_tiler_config().thread_pool_size
     logger.info(f"Thread pool size set: {limiter.total_tokens}")
     load_products()
     load_colormaps()

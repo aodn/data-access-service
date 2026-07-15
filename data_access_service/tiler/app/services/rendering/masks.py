@@ -32,7 +32,7 @@ import numpy as np
 import xarray as xr
 from scipy.ndimage import distance_transform_edt
 
-from data_access_service.tiler.app.config.paths import LAND_MASK_PATH, OCEAN_MASK_PATH
+from data_access_service.config.tiler.paths import LAND_MASK_PATH, OCEAN_MASK_PATH
 
 # Loaded lazily so import (and tests that never touch land) don't pay the unpack,
 # and so a missing asset only fails the products that actually opt in.

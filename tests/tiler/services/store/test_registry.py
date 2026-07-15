@@ -1,12 +1,14 @@
+import dataclasses
+
 import numpy as np
 import pytest
 import xarray as xr
 
-from data_access_service.tiler.app.config import settings
 from data_access_service.tiler.app.services.product.product import (
     Product,
     get_lod_grids,
 )
+from data_access_service.tiler.app.services.store import registry
 from data_access_service.tiler.app.services.store.registry import (
     _storage_options,
     get_store,
@@ -94,7 +96,11 @@ def test_storage_options_s3_defaults_anon():
 
 
 def test_storage_options_s3_anon_disabled(monkeypatch):
-    monkeypatch.setattr(settings, "S3_ANON", False)
+    monkeypatch.setattr(
+        registry,
+        "_tiler_config",
+        dataclasses.replace(registry._tiler_config, s3_anon=False),
+    )
     opts = _storage_options("s3://bucket/path.zarr")
     assert opts["anon"] is False
     assert "connect_timeout" in opts["config_kwargs"]

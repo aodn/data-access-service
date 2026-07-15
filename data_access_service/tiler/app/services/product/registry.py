@@ -18,8 +18,8 @@ import json
 import logging
 from pathlib import Path
 
-from data_access_service.tiler.app.config.constants import TILE
-from data_access_service.tiler.app.config.paths import PRODUCTS_CONFIG_PATH
+from data_access_service.config.tiler.constants import TILE
+from data_access_service.config.tiler.paths import PRODUCTS_CONFIG_PATH
 from data_access_service.tiler.app.services.product.product import CoastalFill, Product
 
 logger = logging.getLogger(__name__)

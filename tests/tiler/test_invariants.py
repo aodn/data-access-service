@@ -12,7 +12,7 @@ import numpy as np
 import xarray as xr
 from starlette.testclient import TestClient
 
-from data_access_service.tiler.app.config.constants import CACHE_VERSION, LOD, TILE
+from data_access_service.config.tiler.constants import CACHE_VERSION, LOD, TILE
 from data_access_service.tiler.app.main import app
 from data_access_service.tiler.app.services.product.product import Product
 

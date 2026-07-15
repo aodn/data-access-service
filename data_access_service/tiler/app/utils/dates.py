@@ -4,11 +4,11 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from data_access_service.tiler.app.config.settings import TILE_TIMEZONE
+from data_access_service.config.config import Config
 
 # All date strings exposed by the API are local dates in this timezone.
 # Requests must send them back unchanged.
-LOCAL_TZ = ZoneInfo(TILE_TIMEZONE)
+LOCAL_TZ = ZoneInfo(Config.get_config().get_tiler_config().tile_timezone)
 
 
 def ts_to_local_date(ts) -> str:

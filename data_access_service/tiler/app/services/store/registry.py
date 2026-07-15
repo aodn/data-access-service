@@ -19,18 +19,20 @@ import time
 import anyio
 import xarray as xr
 
-from data_access_service.tiler.app.config import settings
-from data_access_service.tiler.app.config.constants import COORD_NAMES
+from data_access_service.config.config import Config
+from data_access_service.config.tiler.constants import COORD_NAMES
 from data_access_service.tiler.app.utils.dates import ts_to_local_date
 
 logger = logging.getLogger(__name__)
 
-_STORE_TTL = float(settings.STORE_TTL_SECONDS)
+_tiler_config = Config.get_config().get_tiler_config()
+
+_STORE_TTL = float(_tiler_config.store_ttl_seconds)
 
 # Capacity gate for concurrent store opens during prewarm. Bounded to the S3
 # connection ceiling, not CPU. Runs on the shared anyio pool but a separate
 # budget so a many-product startup can't transiently consume tile-handler slots.
-_STORE_PREWARM_LIMITER = anyio.CapacityLimiter(settings.STORE_PREWARM_WORKERS)
+_STORE_PREWARM_LIMITER = anyio.CapacityLimiter(_tiler_config.store_prewarm_workers)
 
 # Per-syscall timeouts on every S3 connection. Without these, a stuck socket can
 # pin a worker thread indefinitely (Python threads can't be cancelled, so a
@@ -40,9 +42,9 @@ _STORE_PREWARM_LIMITER = anyio.CapacityLimiter(settings.STORE_PREWARM_WORKERS)
 # and passes it as `config=` to create_client, so a `config` key in client_kwargs
 # collides with that positional and raises TypeError.
 _S3_CONFIG_KWARGS = {
-    "connect_timeout": settings.S3_CONNECT_TIMEOUT,
-    "read_timeout": settings.S3_READ_TIMEOUT,
-    "retries": {"max_attempts": settings.S3_MAX_ATTEMPTS, "mode": "standard"},
+    "connect_timeout": _tiler_config.s3_connect_timeout,
+    "read_timeout": _tiler_config.s3_read_timeout,
+    "retries": {"max_attempts": _tiler_config.s3_max_attempts, "mode": "standard"},
 }
 
 
@@ -50,14 +52,14 @@ def _storage_options(store_url: str) -> dict:
     """Storage-backend options for fsspec/zarr, derived from the URL scheme.
 
     - ``s3://`` defaults to anonymous access (IMOS's AODN buckets are public). Set
-      ``settings.S3_ANON = False`` to let fsspec discover AWS credentials via the
-      standard chain (env vars → ``~/.aws/credentials`` → IAM role) — needed for
-      private buckets.
+      ``tiler.s3_anon: false`` in config.yaml to let fsspec discover AWS credentials
+      via the standard chain (env vars → ``~/.aws/credentials`` → IAM role) — needed
+      for private buckets.
     - Other schemes (``file://``, ``https://``, ``gs://``, plain paths …) pass no
       options; fsspec / its backend picks sensible defaults.
     """
     if store_url.startswith("s3://"):
-        return {"anon": settings.S3_ANON, "config_kwargs": _S3_CONFIG_KWARGS}
+        return {"anon": _tiler_config.s3_anon, "config_kwargs": _S3_CONFIG_KWARGS}
     return {}
 
 

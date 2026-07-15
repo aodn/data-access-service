@@ -21,7 +21,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Hashable
 from typing import TypeVar
 
-from data_access_service.tiler.app.config import settings
+from data_access_service.config.config import Config
 
 T = TypeVar("T")
 
@@ -58,7 +58,7 @@ def create_memoizer(*, namespace: str, ttl_seconds: int) -> CacheBackend:
       one instance) needs a class implementing ``CacheBackend`` wired in here;
       none is currently implemented.
     """
-    backend = settings.CACHE_BACKEND
+    backend = Config.get_config().get_tiler_config().cache_backend
     if backend == "none":
         return NullMemoizer()
     # if backend == "redis":

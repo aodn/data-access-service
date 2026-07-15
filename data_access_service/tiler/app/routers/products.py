@@ -6,7 +6,7 @@ from fastapi import APIRouter, Header, HTTPException, Path, Query, Response
 from fastapi.openapi.models import Example
 from fastapi.responses import JSONResponse
 
-from data_access_service.tiler.app.config.constants import CACHE_VERSION
+from data_access_service.config.tiler.constants import CACHE_VERSION
 from data_access_service.tiler.app.schemas.products import (
     ManifestResponse,
     PointResponse,
