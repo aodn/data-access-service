@@ -10,9 +10,16 @@ from data_access_service.utils.email_templates.subsetting_geometry import (
 from data_access_service.utils.email_templates.form_polygon_divs import (
     form_polygon_divs,
 )
+from data_access_service.utils.email_templates.form_bbox_divs import (
+    form_bbox_divs,
+)
 from data_access_service.utils.email_templates.form_subsetting_divs import (
     form_subsetting_divs,
 )
+from data_access_service.utils.email_templates.coordinate_format import (
+    format_coordinate,
+)
+from data_access_service.models.bounding_box import BoundingBox
 
 
 # ---------------------------------------------------------------------------
@@ -76,8 +83,8 @@ class TestSubsettingPolygon(unittest.TestCase):
         html = form_polygon_divs(polygons)
 
         self.assertIn("Polygon Selection", html)
-        self.assertIn("Point 1: (-40.0, 145.0)", html)  # latitude-first display
-        self.assertIn("Point 5: (-41.0, 144.5)", html)
+        self.assertIn("Point 1: (-40.00000, 145.00000)", html)  # latitude-first display
+        self.assertIn("Point 5: (-41.00000, 144.50000)", html)
         self.assertIn("data:image/png;base64,", html)  # polygon icon embedded
 
     def test_freeform_polygon_shows_polygon_section(self):
@@ -134,6 +141,26 @@ class TestSubsettingPolygon(unittest.TestCase):
         self.assertIn("05/01/2024 - 31/12/2024", html)
         self.assertNotIn("Bounding Box", html)
         self.assertNotIn("Polygon Selection", html)
+
+    def test_format_coordinate_rounds_to_five_decimals(self):
+        self.assertEqual(format_coordinate(-35.123456789), "-35.12346")
+        self.assertEqual(format_coordinate(145.0), "145.00000")
+
+    def test_format_coordinate_avoids_scientific_notation(self):
+        self.assertEqual(format_coordinate(4.9e-324), "0.00000")
+        self.assertEqual(format_coordinate(-11.919807423710694), "-11.91981")
+
+    def test_bbox_divs_round_coordinates(self):
+        bbox = BoundingBox(
+            min_lon=145.123456789,
+            min_lat=-41.0,
+            max_lon=146.0,
+            max_lat=-40.987654321,
+        )
+        html = form_bbox_divs([bbox])
+
+        self.assertIn("W: 145.12346", html)
+        self.assertIn("N: -40.98765", html)
 
 
 if __name__ == "__main__":
