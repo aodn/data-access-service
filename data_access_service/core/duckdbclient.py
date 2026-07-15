@@ -122,6 +122,8 @@ class PmTileDuckDBClient(DuckDBClient):
 
                     db.execute("INSTALL httpfs; LOAD httpfs;")
                     db.execute("INSTALL h3 FROM community; LOAD h3;")
+                    db.execute("SET enable_progress_bar = true;")
+                    db.execute("SET enable_progress_bar_print = true;")
 
                     PmTileDuckDBClient._global_db_connection = db
 
