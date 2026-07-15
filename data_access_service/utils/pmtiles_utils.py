@@ -57,7 +57,7 @@ def is_local_pmtiles_valid(remote_url: str, file_path: str) -> bool:
     remote_counts = get_layer_counts(remote_metadata)
     local_counts = get_layer_counts(local_metadata)
 
-    if local_counts is None:
+    if local_counts is None or remote_counts is None:
         return False
 
     if set(remote_counts.keys()) != set(local_counts.keys()):
