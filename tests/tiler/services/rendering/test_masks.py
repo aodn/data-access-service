@@ -185,7 +185,7 @@ def test_compute_no_longer_applies_ocean_mask_by_product_id():
     ds = _ds_over(105, 140, 0, -12)
 
     _, ocean_currents = _compute_processed(
-        _product(None, product_id="model_sea_level_anomaly_gridded_realtime_vcur_ucur"),
+        _product(None, product_id="model_sea_level_anomaly_gridded_realtime:ucur+vcur"),
         ds,
         1,
     )

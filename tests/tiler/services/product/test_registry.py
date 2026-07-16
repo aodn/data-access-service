@@ -105,14 +105,14 @@ def test_ocean_masked_absent_defaults_to_false(isolated_products):
 
 def test_ocean_masked_defaults_true_for_listed_product(isolated_products):
     # The currents product is masked by default even without the config flag.
-    pid = "model_sea_level_anomaly_gridded_realtime_vcur_ucur"
+    pid = "model_sea_level_anomaly_gridded_realtime:ucur+vcur"
     _write(isolated_products, [_entry(pid, variable=["UCUR", "VCUR"])])
     registry.load_products()
     assert PRODUCTS[pid].ocean_masked is True
 
 
 def test_ocean_masked_explicit_false_overrides_default(isolated_products):
-    pid = "model_sea_level_anomaly_gridded_realtime_vcur_ucur"
+    pid = "model_sea_level_anomaly_gridded_realtime:ucur+vcur"
     _write(
         isolated_products, [_entry(pid, variable=["UCUR", "VCUR"], ocean_masked=False)]
     )

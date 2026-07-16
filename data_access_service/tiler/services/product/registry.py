@@ -9,6 +9,14 @@ Single front door for everything product-related at runtime:
   * ``load_products`` reads the on-disk ``products.json`` into the in-memory
     dict. Products are static config (``config/products.json``) — add or
     remove one by editing the file and redeploying.
+  * ``id`` convention: ``{zarr_name}:{variable}``, e.g.
+    ``satellite_austemp_heatwave_8day:sst_mosaic`` — the colon separates the
+    Zarr store name (from ``source_path``) from the variable it exposes,
+    since both may themselves contain underscores. Multi-variable products
+    join variables with ``+`` in ``variable`` array order, e.g.
+    ``model_sea_level_anomaly_gridded_realtime:ucur+vcur``. This is a
+    readability convention only — ``id`` is never parsed, just used as an
+    opaque lookup key — so it isn't enforced in code.
   * ``list_products`` returns the raw JSON entries (used by ``GET /products``);
     this is intentionally different from ``iter_products()`` which returns live
     ``Product`` instances.
@@ -32,7 +40,7 @@ _config_path = Path(PRODUCTS_CONFIG_PATH)
 # "ocean_masked": false in products.json still wins.
 _OCEAN_MASKED_BY_DEFAULT = frozenset(
     {
-        "model_sea_level_anomaly_gridded_realtime_vcur_ucur",
+        "model_sea_level_anomaly_gridded_realtime:ucur+vcur",
     }
 )
 

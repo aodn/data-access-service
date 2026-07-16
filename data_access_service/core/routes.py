@@ -29,7 +29,6 @@ from data_access_service.sites.sites import (
     SiteDetailsFeature,
     SiteFeatureCollection,
 )
-from data_access_service.utils import sse_utils
 from data_access_service.utils.api_utils import api_key_auth
 from data_access_service.utils.date_time_utils import (
     ensure_timezone,
