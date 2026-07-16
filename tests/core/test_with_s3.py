@@ -57,17 +57,6 @@ WORLD_POLYGON = """{
 
 
 class TestWithS3:
-    # ParquetDataSource.dataset (in aodn_cloud_optimised) lazily builds a PyArrow
-    # dataset on first access via a recursive S3 listing of the hive-partitioned
-    # prefix. Under CI's tighter resource limits, LocalStack occasionally returns
-    # a truncated/incomplete listing rather than an error, so PyArrow silently
-    # builds a dataset with fewer (or zero) fragments. get_data() then filters
-    # against whatever fragments it found and returns a valid 200 with fewer
-    # rows than expected -- no exception is raised anywhere, since as far as
-    # the library is concerned the query legitimately succeeded.
-    # This is transient S3-listing flakiness in the third-party library, not a
-    # bug in our query logic, so rerun on failure instead of failing the build.
-    pytestmark = pytest.mark.flaky(reruns=2, reruns_delay=3)
 
     @pytest.fixture(autouse=True, scope="session")
     def setup(self):

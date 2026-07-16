@@ -53,7 +53,6 @@ pytest = "8.4.1"
 pytest-mock = "*"
 pytest-xdist = "^3.8.0"
 pytest-asyncio = "1.2.0"
-pytest-rerunfailures = "^16.4"
 testcontainers = "4.8.0"
 
 [tool.pytest.ini_options]
@@ -62,9 +61,6 @@ asyncio_debug = true
 log_cli = true
 log_cli_level = "DEBUG"
 testpaths = ["tests"]
-markers = [
-    "flaky: rerun on failure (used for LocalStack-backed S3 integration tests, see TestWithS3)",
-]
 
 [build-system]
 requires = ["poetry-core"]
