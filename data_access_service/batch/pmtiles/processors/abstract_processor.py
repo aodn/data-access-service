@@ -108,11 +108,16 @@ class AbstractProcessor(ABC):
             )
 
     def _remove_geojsonseq_files(self, geojsonseq_paths: List[str]) -> None:
+        removed = 0
         for path in geojsonseq_paths:
-            if os.path.exists(path):
-                os.remove(path)
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+                    removed += 1
+            except Exception as e:
+                self.logger.warning(f"Failed to remove {path}: {e}")
         self.logger.info(
-            f"Removed {len(geojsonseq_paths)} GeoJSONSeq file(s) after PMTiles generation"
+            f"Removed {removed}/{len(geojsonseq_paths)} GeoJSONSeq file(s)"
         )
 
     def get_lat_col_name(self) -> str:

@@ -1,3 +1,4 @@
+import gzip
 import json
 import os
 from typing import Sequence, List, Optional, Dict
@@ -140,10 +141,10 @@ class HexbinProcessor(AbstractProcessor):
             raise ValueError("dir must be a relative path")
 
         geojsonseq_file_path = os.path.join(
-            self.get_geojsonseq_dir(), layer.layer_geojsonseq_file_name
+            self.get_geojsonseq_dir(), layer.layer_geojsonseq_file_name + ".gz"
         )
         os.makedirs(os.path.dirname(geojsonseq_file_path) or ".", exist_ok=True)
-        with open(geojsonseq_file_path, "w", encoding="utf-8") as output_file:
+        with gzip.open(geojsonseq_file_path, "wt", encoding="utf-8") as output_file:
             while True:
                 rows = cursor.fetchmany(self.pmtiles_config.fetch_size)
                 if not rows:
@@ -192,4 +193,9 @@ class HexbinProcessor(AbstractProcessor):
                     )
 
         log_memory_usage(self.logger, f"after {layer.name} geojsonseq written")
+
+        # After writing (before return)
+        size_mb = os.path.getsize(geojsonseq_file_path) / (1024 * 1024)
+        self.logger.info(f"Generated {geojsonseq_file_path}: {size_mb:.2f} MB")
+
         return geojsonseq_file_path
