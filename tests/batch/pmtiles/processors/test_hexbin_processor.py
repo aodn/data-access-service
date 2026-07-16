@@ -3,6 +3,7 @@ import shutil
 import tempfile
 import pandas
 import pytest
+import gzip
 
 from aodn_cloud_optimised.lib import DataQuery
 from pathlib import Path
@@ -91,7 +92,7 @@ class TestHexbinProcessor(TestWithS3):
                             if file.endswith(".geojsonseq.gz"):
                                 path = os.path.join(root, file)
 
-                                with open(path, "r", encoding="utf-8") as f:
+                                with gzip.open(path, "r") as f:
                                     total_features += sum(1 for _ in f)
 
                     assert (
