@@ -88,7 +88,7 @@ class TestHexbinProcessor(TestWithS3):
 
                     for root, _, files in os.walk(geojsonseq_dir):
                         for file in files:
-                            if file.endswith(".geojsonseq"):
+                            if file.endswith(".geojsonseq.gz"):
                                 path = os.path.join(root, file)
 
                                 with open(path, "r", encoding="utf-8") as f:
