@@ -16,6 +16,12 @@ from data_access_service.models.pmtiles_types import (
     PmtilesGenerationConfig,
 )
 from data_access_service import Config
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 
 
 class DuckDBClient(ABC):
@@ -50,6 +56,23 @@ class PmTileDuckDBClient(DuckDBClient):
     _global_db_connection = None
     _temp_dir_object = None
     _lock = Lock()
+
+    MAX_READ_ATTEMPTS = 3
+    MIN_WAIT_SECONDS = 120  # 2 minutes
+    MAX_WAIT_SECONDS = 300  # 5 minutes
+
+    def log_retry_attempt(self, retry_state):
+        # Extract metadata from tenacity's internal state
+        attempt_num = retry_state.attempt_number
+        exception_thrown = retry_state.outcome.exception()
+        next_wait_seconds = retry_state.next_action.sleep
+        next_wait_minutes = round(next_wait_seconds / 60, 1)
+
+        self.logger.warning(
+            f"[Retry Alert] DuckDB S3 read failed on attempt #{attempt_num}.\n"
+            f"Error details: {exception_thrown}\n"
+            f"Waiting {next_wait_minutes} minute(s) before attempt #{attempt_num + 1}..."
+        )
 
     def __init__(self):
         self._config: PmtilesGenerationConfig = Config.get_config().get_pmtiles_config()
@@ -99,6 +122,8 @@ class PmTileDuckDBClient(DuckDBClient):
 
                     db.execute("INSTALL httpfs; LOAD httpfs;")
                     db.execute("INSTALL h3 FROM community; LOAD h3;")
+                    db.execute("SET enable_progress_bar = true;")
+                    db.execute("SET enable_progress_bar_print = true;")
 
                     PmTileDuckDBClient._global_db_connection = db
 
@@ -142,6 +167,15 @@ class PmTileDuckDBClient(DuckDBClient):
                 if temp_dir is not None:
                     temp_dir.cleanup()
 
+    @retry(
+        stop=stop_after_attempt(MAX_READ_ATTEMPTS),
+        wait=wait_exponential(multiplier=1, min=MIN_WAIT_SECONDS, max=MAX_WAIT_SECONDS),
+        retry=retry_if_exception_type(duckdb.IOException),
+        before_sleep=lambda retry_state: retry_state.fn.__self__.log_retry_attempt(
+            retry_state
+        ),
+        reraise=True,
+    )
     def execute(
         self, sql: str, params: Sequence[Any] | None = None
     ) -> duckdb.DuckDBPyConnection:
