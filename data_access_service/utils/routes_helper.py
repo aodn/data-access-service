@@ -459,9 +459,6 @@ def get_api_instance(request: Request) -> API:
 def require_api_ready(request: Request) -> API:
     """FastAPI dependency: 503 while API metadata init hasn't finished, else
     returns the API instance so handlers can use it directly.
-
-    Mirrors get_repo's is_loaded() 503 below — same "not ready yet" contract,
-    for the api_instance metadata map instead of the site repositories.
     """
     api_instance = get_api_instance(request)
     if not api_instance.get_api_status():
