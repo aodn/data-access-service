@@ -108,14 +108,14 @@ class TestWithS3:
         using with scope cause the call to localstack.stop() happen
         automatically
         """
+        # Context manager already starts the container; do not call start() again.
         with LocalStackContainer(image="localstack/localstack:4.3.0") as localstack:
-            localstack.start()
-            time = wait_for_logs(localstack, "Ready.")
+            ready_time = wait_for_logs(localstack, "Ready.")
             log.info(
-                f"Create localstack S3 at port {localstack.get_url()}, time = {time}"
+                f"Create localstack S3 at port {localstack.get_url()}, time = {ready_time}"
             )
 
-            # Tier down automatically
+            # Teardown happens automatically when exiting the context
             yield localstack
 
             log.info(f"Close localstack S3 at port {localstack.get_url()}")
@@ -269,7 +269,6 @@ class TestWithS3:
                 s3_client.upload_file(str(local_path), bucket_name, s3_key)
                 try:
                     s3_client.head_object(Bucket=bucket_name, Key=s3_key)
-                    # print(f"Uploaded {local_path} to s3://{bucket_name}/{s3_key}")
                 except Exception as e:
                     print(
                         f"Failed to upload {local_path} to s3://{bucket_name}/{s3_key}: {e}"
