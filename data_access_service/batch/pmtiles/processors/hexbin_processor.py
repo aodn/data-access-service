@@ -29,7 +29,7 @@ class HexbinProcessor(AbstractProcessor):
         time_type = self.pm_client.detect_time_type(
             input_path=self.get_s3_uri(), time_col=time_col_name
         )
-        ym = PmTileDuckDBClient.build_ym_expression(
+        date_key = PmTileDuckDBClient.build_date_key_expression(
             time_col=time_col_name, time_type=time_type
         )
 
@@ -44,7 +44,7 @@ class HexbinProcessor(AbstractProcessor):
                             CAST({quoted_lon} AS DOUBLE),
                             {int(self.__get_max_res())}
                         )) AS h_high,
-                        {ym} AS ym,
+                        {date_key} AS d,
                         COUNT(*)::UBIGINT AS c
                     FROM read_parquet('{self.get_s3_uri()}', hive_partitioning=true, union_by_name=true)
                     WHERE
@@ -53,7 +53,7 @@ class HexbinProcessor(AbstractProcessor):
                         AND {quoted_time} IS NOT NULL
                         AND CAST({quoted_lon} AS DOUBLE) BETWEEN -180 AND 180
                         AND CAST({quoted_lat} AS DOUBLE) BETWEEN -90 AND 90
-                    GROUP BY h_high, ym
+                    GROUP BY h_high, d
                     HAVING h_high IS NOT NULL
                 ) TO '{self.get_staged_path()}' (FORMAT PARQUET)
             """
@@ -89,44 +89,44 @@ class HexbinProcessor(AbstractProcessor):
         return max(layer.h3_resolution for layer in self.get_layers())
 
     def __generate_hex_geojsonseq_file(self, layer: HexLayerSpec, max_res: int) -> str:
-        self.pm_client.execute("DROP TABLE IF EXISTS monthly_counts")
+        self.pm_client.execute("DROP TABLE IF EXISTS daily_counts")
 
         if layer.h3_resolution == max_res:
             sql = f"""
-                        CREATE TEMP TABLE monthly_counts AS
-                        SELECT h_high AS h, ym, c
+                        CREATE TEMP TABLE daily_counts AS
+                        SELECT h_high AS h, d, c
                         FROM read_parquet('{self.get_staged_path()}')
                         WHERE h_high IS NOT NULL
-                        ORDER BY h, ym
+                        ORDER BY h, d
                     """
         else:
             sql = f"""
-                        CREATE TEMP TABLE monthly_counts AS
+                        CREATE TEMP TABLE daily_counts AS
                         SELECT
                             printf('%x', h3_cell_to_parent(('0x' || h_high)::UBIGINT, {int(layer.h3_resolution)})) AS h,
-                            ym,
+                            d,
                             SUM(c)::UBIGINT AS c
                         FROM read_parquet('{self.get_staged_path()}')
                         WHERE h_high IS NOT NULL
-                        GROUP BY h, ym
+                        GROUP BY h, d
                         HAVING h IS NOT NULL
-                        ORDER BY h, ym
+                        ORDER BY h, d
                     """
 
         self.pm_client.execute(sql)
 
-        monthly_rows = self.pm_client.execute(
-            "SELECT COUNT(*) FROM monthly_counts"
+        daily_rows = self.pm_client.execute(
+            "SELECT COUNT(*) FROM daily_counts"
         ).fetchone()[0]
         distinct_hexes = self.pm_client.execute(
-            "SELECT COUNT(DISTINCT h) FROM monthly_counts"
+            "SELECT COUNT(DISTINCT h) FROM daily_counts"
         ).fetchone()[0]
         self.logger.info(
-            f"{layer.name} Aggregation result: {distinct_hexes:,} unique H3 cells, {monthly_rows:,} (cell, month) rows"
+            f"{layer.name} Aggregation result: {distinct_hexes:,} unique H3 cells, {daily_rows:,} (cell, day) rows"
         )
 
         cursor = self.pm_client.execute(
-            "SELECT h, ym, c FROM monthly_counts ORDER BY h, ym"
+            "SELECT h, d, c FROM daily_counts ORDER BY h, d"
         )
 
         os.makedirs(
@@ -150,7 +150,7 @@ class HexbinProcessor(AbstractProcessor):
                 if not rows:
                     break
 
-                for h_cell, ym_value, count_value in rows:
+                for h_cell, date_value, count_value in rows:
                     if current_h is None:
                         current_h = h_cell
 
@@ -158,7 +158,7 @@ class HexbinProcessor(AbstractProcessor):
                         try:
                             feature = build_hex_feature(
                                 cell=current_h,
-                                month_counts=current_counts,
+                                date_counts=current_counts,
                                 layer_name=layer.name,
                                 minzoom=layer.minzoom,
                                 maxzoom=layer.maxzoom,
@@ -174,13 +174,13 @@ class HexbinProcessor(AbstractProcessor):
                         current_h = h_cell
                         current_counts = {}
 
-                    current_counts[int(ym_value)] = int(count_value)
+                    current_counts[int(date_value)] = int(count_value)
 
             if current_h is not None:
                 try:
                     feature = build_hex_feature(
                         cell=current_h,
-                        month_counts=current_counts,
+                        date_counts=current_counts,
                         layer_name=layer.name,
                         minzoom=layer.minzoom,
                         maxzoom=layer.maxzoom,

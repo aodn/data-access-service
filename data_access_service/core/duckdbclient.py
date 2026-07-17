@@ -232,7 +232,7 @@ class PmTileDuckDBClient(DuckDBClient):
         return '"' + name.replace('"', '""') + '"'
 
     @staticmethod
-    def build_ym_expression(time_col: str, time_type: str) -> str:
+    def build_date_key_expression(time_col: str, time_type: str) -> str:
         col = PmTileDuckDBClient.quote_identifier(time_col)
 
         if time_type == "timestamp":
@@ -246,7 +246,7 @@ class PmTileDuckDBClient(DuckDBClient):
                 f"Unsupported time_type={time_type!r}. Expected one of: 'timestamp', 'epoch_ms', 'epoch_s'."
             )
 
-        return f"CAST(strftime({ts}, '%Y%m') AS INTEGER)"
+        return f"CAST(strftime({ts}, '%Y%m%d') AS INTEGER)"
 
 
 class ParquetDuckDBClient(DuckDBClient):

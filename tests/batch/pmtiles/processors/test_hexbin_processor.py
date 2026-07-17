@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import tempfile
@@ -15,6 +16,16 @@ from data_access_service.batch.pmtiles.processors.hexbin_processor import (
 from data_access_service.utils.pmtiles_utils import open_pmtiles
 from tests.core.test_with_s3 import TestWithS3, REGION
 
+ANIMAL_ACOUSTIC_UUID = "541d4f15-122a-443d-ab4e-2b5feb08d6a0"
+ANIMAL_ACOUSTIC_DNAME = "animal_acoustic_tracking_delayed_qc.parquet"
+
+# Expected (h_high, YYYYMMDD) -> count for animal_acoustic in s3_sample2
+# (max H3 res 8). Source: 22 detections — 20 on 2012-11-07, 2 on 2014-07-01.
+EXPECTED_STAGED_AGGREGATES = {
+    ("88be8d9819fffff", 20121107): 20,
+    ("88be0e373dfffff", 20140701): 2,
+}
+
 
 class TestHexbinProcessor(TestWithS3):
 
@@ -27,6 +38,25 @@ class TestHexbinProcessor(TestWithS3):
             Path(__file__).parent.parent.parent.parent / "canned/s3_sample2",
         )
 
+    def _configure_hex_processor(self, tempdirname, api, localstack):
+        hex_processor = HexbinProcessor(
+            uuid=ANIMAL_ACOUSTIC_UUID,
+            dataset_name=ANIMAL_ACOUSTIC_DNAME,
+            work_dir=tempdirname,
+            api=api,
+        )
+        hex_processor.pm_client.execute(
+            f"""
+                    SET s3_endpoint='{localstack.get_url().replace("http://", "")}';
+                    SET s3_region='{REGION}';
+                    SET s3_access_key_id='test';
+                    SET s3_secret_access_key='test';
+                    SET s3_url_style='path';
+                    SET s3_use_ssl=false;
+                """
+        )
+        return hex_processor
+
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_hexbin_processor(
         self,
@@ -36,33 +66,18 @@ class TestHexbinProcessor(TestWithS3):
         subset_request_factory,
         localstack,
     ):
-        s3_client, _, _ = aws_clients
         config = Config.get_config()
 
         api = API()
         api.initialize_metadata()
-
-        uuid = "541d4f15-122a-443d-ab4e-2b5feb08d6a0"
-        dname = "animal_acoustic_tracking_delayed_qc.parquet"
 
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
 
             with tempfile.TemporaryDirectory() as tempdirname:
 
                 try:
-                    hex_processor = HexbinProcessor(
-                        uuid=uuid, dataset_name=dname, work_dir=tempdirname, api=api
-                    )
-
-                    hex_processor.pm_client.execute(
-                        f"""
-                                SET s3_endpoint='{localstack.get_url().replace("http://", "")}';
-                                SET s3_region='{REGION}';
-                                SET s3_access_key_id='test';
-                                SET s3_secret_access_key='test';
-                                SET s3_url_style='path';
-                                SET s3_use_ssl=false;
-                            """
+                    hex_processor = self._configure_hex_processor(
+                        tempdirname, api, localstack
                     )
 
                     # Run the pipeline steps individually, in the same order as
@@ -76,10 +91,13 @@ class TestHexbinProcessor(TestWithS3):
                     assert not df.empty, "df is empty"
                     assert list(df.columns) == [
                         "h_high",
-                        "ym",
+                        "d",
                         "c",
                     ], "df columns are not correct"
-                    assert df[["h_high", "ym"]].duplicated().sum() == 0
+                    assert df[["h_high", "d"]].duplicated().sum() == 0
+                    assert (
+                        (df["d"] >= 10000101) & (df["d"] <= 99991231)
+                    ).all(), "d values should be YYYYMMDD integers"
 
                     geojsonseq_paths = hex_processor.generate_geojsonseq_files()
 
@@ -141,4 +159,70 @@ class TestHexbinProcessor(TestWithS3):
                     assert False, f"{ex}"
                 finally:
                     # Delete temp output folder as the name always same for testing
+                    shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_animal_acoustic_aggregates_by_date(
+        self,
+        aws_clients,
+        upload_test_case_to_s3,
+        mock_get_fs_token_paths,
+        localstack,
+    ):
+        """
+        Verify day-level (YYYYMMDD) count aggregation for
+        animal_acoustic_tracking_delayed_qc.parquet from s3_sample2.
+        """
+        config = Config.get_config()
+        api = API()
+        api.initialize_metadata()
+
+        with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
+            with tempfile.TemporaryDirectory() as tempdirname:
+                try:
+                    hex_processor = self._configure_hex_processor(
+                        tempdirname, api, localstack
+                    )
+                    hex_processor.build_staging_parquet()
+
+                    df = pandas.read_parquet(hex_processor.get_staged_path())
+                    actual = {
+                        (str(row.h_high), int(row.d)): int(row.c)
+                        for row in df.itertuples(index=False)
+                    }
+                    assert actual == EXPECTED_STAGED_AGGREGATES, (
+                        f"staged (h_high, d) counts mismatch.\n"
+                        f"expected={EXPECTED_STAGED_AGGREGATES}\n"
+                        f"actual={actual}"
+                    )
+                    assert sum(actual.values()) == 22
+
+                    geojsonseq_paths = hex_processor.generate_geojsonseq_files()
+                    high_res_path = next(
+                        p
+                        for p in geojsonseq_paths
+                        if p.endswith("hex_z10.geojsonseq.gz")
+                    )
+                    date_counts_by_cell = {}
+                    with gzip.open(high_res_path, "rt", encoding="utf-8") as f:
+                        for line in f:
+                            feature = json.loads(line)
+                            props = feature["properties"]
+                            cell = props["h"]
+                            date_counts_by_cell[cell] = {
+                                int(k[1:]): int(v)
+                                for k, v in props.items()
+                                if k.startswith("m") and k[1:].isdigit()
+                            }
+
+                    expected_by_cell = {}
+                    for (h_high, d), c in EXPECTED_STAGED_AGGREGATES.items():
+                        expected_by_cell.setdefault(h_high, {})[d] = c
+
+                    assert date_counts_by_cell == expected_by_cell, (
+                        f"geojsonseq date properties mismatch.\n"
+                        f"expected={expected_by_cell}\n"
+                        f"actual={date_counts_by_cell}"
+                    )
+                finally:
                     shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)

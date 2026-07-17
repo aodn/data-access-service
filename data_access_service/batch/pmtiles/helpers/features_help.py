@@ -4,7 +4,7 @@ from .geometry_helper import build_hex_geometry
 
 def build_hex_feature(
     cell: str | None,
-    month_counts: Dict[int, int],
+    date_counts: Dict[int, int],
     layer_name: str,
     minzoom: int,
     maxzoom: int,
@@ -12,10 +12,10 @@ def build_hex_feature(
 ) -> Dict:
     properties: Dict = {"h": cell}
 
-    for ym in sorted(month_counts):
-        count = int(month_counts[ym])
+    for date_key in sorted(date_counts):
+        count = int(date_counts[date_key])
         if count != 0:
-            properties[f"m{ym}"] = count
+            properties[f"m{date_key}"] = count
 
     # No feature "id": Tippecanoe only accepts numeric IDs and H3 cell values
     # exceed the safe integer range anyway; the cell is in properties["h"].
