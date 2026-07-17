@@ -1,4 +1,5 @@
 import logging
+import time
 from pathlib import Path
 from typing import Any, Generator
 
@@ -107,14 +108,14 @@ class TestWithS3:
         using with scope cause the call to localstack.stop() happen
         automatically
         """
+        # Context manager already starts the container; do not call start() again.
         with LocalStackContainer(image="localstack/localstack:4.3.0") as localstack:
-            localstack.start()
-            time = wait_for_logs(localstack, "Ready.")
+            ready_time = wait_for_logs(localstack, "Ready.")
             log.info(
-                f"Create localstack S3 at port {localstack.get_url()}, time = {time}"
+                f"Create localstack S3 at port {localstack.get_url()}, time = {ready_time}"
             )
 
-            # Tier down automatically
+            # Teardown happens automatically when exiting the context
             yield localstack
 
             log.info(f"Close localstack S3 at port {localstack.get_url()}")
@@ -256,8 +257,7 @@ class TestWithS3:
 
     # Util function to upload canned test data to localstack s3 or any s3
     @staticmethod
-    def upload_to_s3(s3_client, bucket_name, folder):
-
+    def upload_to_s3(s3_client, bucket_name, folder, max_attempts: int = 3):
         folder = Path(folder)  # Convert to Path object for robust path handling
         for root, dirs, files in os.walk(folder):
             for file in files:
@@ -265,18 +265,43 @@ class TestWithS3:
                 # Compute S3 key relative to TEST_DATA_FOLDER
                 relative_path = local_path.relative_to(folder)
                 s3_key = str(relative_path).replace("\\", "/")
-                s3_client.upload_file(str(local_path), bucket_name, s3_key)
-                try:
-                    s3_client.head_object(Bucket=bucket_name, Key=s3_key)
-                    # print(f"Uploaded {local_path} to s3://{bucket_name}/{s3_key}")
-                except Exception as e:
-                    print(
-                        f"Failed to upload {local_path} to s3://{bucket_name}/{s3_key}: {e}"
-                    )
+                last_error: Exception | None = None
+                for attempt in range(1, max_attempts + 1):
+                    try:
+                        s3_client.upload_file(str(local_path), bucket_name, s3_key)
+                        s3_client.head_object(Bucket=bucket_name, Key=s3_key)
+                        last_error = None
+                        break
+                    except Exception as e:
+                        last_error = e
+                        log.warning(
+                            "Upload attempt %s/%s failed for %s -> s3://%s/%s: %s",
+                            attempt,
+                            max_attempts,
+                            local_path,
+                            bucket_name,
+                            s3_key,
+                            e,
+                        )
+                        if attempt < max_attempts:
+                            time.sleep(0.5 * attempt)
+                if last_error is not None:
+                    raise RuntimeError(
+                        f"Failed to upload {local_path} to s3://{bucket_name}/{s3_key} "
+                        f"after {max_attempts} attempts"
+                    ) from last_error
 
     @staticmethod
     def delete_object_in_s3(s3_client, bucket_name):
-        response = s3_client.list_objects_v2(Bucket=bucket_name)
-        if "Contents" in response:
-            objects = [{"Key": obj["Key"]} for obj in response["Contents"]]
-            s3_client.delete_objects(Bucket=bucket_name, Delete={"Objects": objects})
+        """Delete all objects in a bucket, following list pagination."""
+        paginator = s3_client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket_name):
+            contents = page.get("Contents") or []
+            if not contents:
+                continue
+            objects = [{"Key": obj["Key"]} for obj in contents]
+            # delete_objects accepts at most 1000 keys per call
+            for i in range(0, len(objects), 1000):
+                s3_client.delete_objects(
+                    Bucket=bucket_name, Delete={"Objects": objects[i : i + 1000]}
+                )

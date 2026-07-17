@@ -114,8 +114,8 @@ class TestApiWithS3(TestWithS3):
                 params=param,
             )
 
-            # We have not set key so forbidden
-            assert response.status_code == HTTP_403_FORBIDDEN
+            # We have not set key so unauthorized, this is a change to the FastAPI 0.139.0
+            assert response.status_code == HTTP_401_UNAUTHORIZED
 
             response = client.get(
                 target,

@@ -1,5 +1,8 @@
 """Email HTML for freeform polygon selections (the counterpart of form_bbox_divs)."""
 
+from data_access_service.utils.email_templates.coordinate_format import (
+    format_coordinate,
+)
 from data_access_service.utils.email_templates.email_images import (
     POLYGON_IMG,
 )
@@ -51,7 +54,7 @@ def __form_polygon_div(vertices):
     # Index by position so vertices carrying an elevation (a 3rd value) still work.
     coordinate_rows = ""
     for index, point in enumerate(vertices, start=1):
-        lon, lat = point[0], point[1]
+        lon, lat = format_coordinate(point[0]), format_coordinate(point[1])
         coordinate_rows += __form_coordinate_row(f"Point {index}: ({lat}, {lon})")
 
     one_polygon_div = f"""
