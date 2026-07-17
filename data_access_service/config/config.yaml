@@ -44,6 +44,7 @@ pmtiles:
     memory_limit: "4G"
     threads: 8
     fetch_size: 50000
+    show_progress: True
   layers:
     hex_z0:
       h3_resolution: 2

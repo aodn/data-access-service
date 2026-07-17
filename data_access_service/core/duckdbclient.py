@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from tempfile import TemporaryDirectory
@@ -22,6 +24,11 @@ from tenacity import (
     wait_exponential,
     retry_if_exception_type,
 )
+
+logger = logging.getLogger(__name__)
+
+# How often to emit a progress log line while a query is running.
+_PROGRESS_LOG_INTERVAL_SECONDS = 60.0
 
 
 class DuckDBClient(ABC):
@@ -68,7 +75,7 @@ class PmTileDuckDBClient(DuckDBClient):
         next_wait_seconds = retry_state.next_action.sleep
         next_wait_minutes = round(next_wait_seconds / 60, 1)
 
-        self.logger.warning(
+        logger.warning(
             f"[Retry Alert] DuckDB S3 read failed on attempt #{attempt_num}.\n"
             f"Error details: {exception_thrown}\n"
             f"Waiting {next_wait_minutes} minute(s) before attempt #{attempt_num + 1}..."
@@ -122,18 +129,22 @@ class PmTileDuckDBClient(DuckDBClient):
 
                     db.execute("INSTALL httpfs; LOAD httpfs;")
                     db.execute("INSTALL h3 FROM community; LOAD h3;")
-                    db.execute("SET enable_progress_bar = true;")
-                    db.execute("SET enable_progress_bar_print = true;")
 
                     PmTileDuckDBClient._global_db_connection = db
 
-        # CRITICAL: Return a thread-safe, independent cursor from the global connection
+        # CRITICAL: Return a thread-safe, independent cursor from the global connection.
+        # Progress-bar settings are LOCAL scope, so they must be set on this cursor
+        # (not the parent connection). We enable tracking but disable terminal print:
+        # DuckDB prints with \\r to stdout, which does not appear in uvicorn/app logs.
+        # Progress is instead logged from execute() via the Python logger.
         if self._duckdb_client is None:
             with self._lock:
                 if self._duckdb_client is None:
-                    self._duckdb_client = (
-                        PmTileDuckDBClient._global_db_connection.cursor()
-                    )
+                    cursor = PmTileDuckDBClient._global_db_connection.cursor()
+                    show = bool(self._config.show_progress)
+                    cursor.execute(f"SET enable_progress_bar = {show};")
+                    cursor.execute("SET enable_progress_bar_print = false;")
+                    self._duckdb_client = cursor
         return self._duckdb_client
 
     def close(self):
@@ -179,9 +190,60 @@ class PmTileDuckDBClient(DuckDBClient):
     def execute(
         self, sql: str, params: Sequence[Any] | None = None
     ) -> duckdb.DuckDBPyConnection:
-        if params is None:
-            return self._con.execute(sql)
-        return self._con.execute(sql, params)
+        if not self._config.show_progress:
+            if params is None:
+                return self._con.execute(sql)
+            else:
+                return self._con.execute(sql, params)
+        else:
+            return self._execute_with_progress_log(sql, params)
+
+    def _execute_with_progress_log(
+        self, sql: str, params: Sequence[Any] | None = None
+    ) -> duckdb.DuckDBPyConnection:
+        """Run SQL and emit periodic INFO logs (uvicorn sees logger output, not stdout bars)."""
+        stop = threading.Event()
+        started = time.monotonic()
+        sql_preview = " ".join(sql.split())[:120]
+
+        def _poll() -> None:
+            while not stop.wait(_PROGRESS_LOG_INTERVAL_SECONDS):
+                elapsed = time.monotonic() - started
+                try:
+                    pct = self._con.query_progress()
+                except Exception:
+                    pct = -1.0
+                if pct is not None and pct >= 0:
+                    logger.info(
+                        "DuckDB query progress: %.1f%% (%.0fs elapsed) — %s",
+                        pct,
+                        elapsed,
+                        sql_preview,
+                    )
+                else:
+                    logger.info(
+                        "DuckDB query still running (%.0fs elapsed) — %s",
+                        elapsed,
+                        sql_preview,
+                    )
+
+        poller = threading.Thread(target=_poll, name="duckdb-progress", daemon=True)
+        poller.start()
+        logger.info("DuckDB query started — %s", sql_preview)
+        try:
+            if params is None:
+                result = self._con.execute(sql)
+            else:
+                result = self._con.execute(sql, params)
+            return result
+        finally:
+            stop.set()
+            poller.join(timeout=1.0)
+            logger.info(
+                "DuckDB query finished (%.1fs) — %s",
+                time.monotonic() - started,
+                sql_preview,
+            )
 
     def detect_time_type(
         self,

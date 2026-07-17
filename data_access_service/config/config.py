@@ -221,6 +221,7 @@ class Config:
             threads=pmconfig["threads"],
             fetch_size=pmconfig["fetch_size"],
             bucket_name=pmconfig["bucket_name"],
+            show_progress=pmconfig.get("show_progress", True),
         )
 
     def get_parquets_config(self) -> ParquetsGenerationConfig:
