@@ -456,6 +456,19 @@ def get_api_instance(request: Request) -> API:
     return instance
 
 
+def require_api_ready(request: Request) -> API:
+    """FastAPI dependency: 503 while API metadata init hasn't finished, else
+    returns the API instance so handlers can use it directly.
+    """
+    api_instance = get_api_instance(request)
+    if not api_instance.get_api_status():
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail="API is not ready. Metadata initialization is still in progress.",
+        )
+    return api_instance
+
+
 def get_repo(product: str, request: Request) -> ParquetRepository:
     """Resolve the repository for the ``{product}`` path segment.
 

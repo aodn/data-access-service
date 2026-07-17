@@ -1,17 +1,24 @@
 import asyncio
+import logging
 import os
 import uvicorn
 
+import anyio
 from fastapi import FastAPI
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from data_access_service import Config
 from data_access_service.config.config import IntTestConfig
 from data_access_service.core.api import API
+from data_access_service.core.middleware import configure_gzip_middleware
 from data_access_service.core.routes import router as api_router
 from data_access_service.core.scheduler import TaskScheduler
+from data_access_service.core.tiler_routes import router as tiler_router
+from data_access_service.core.tiler_routes.startup import run_tiler_warmup
 from data_access_service.sites.sites_repository import build_repositories
 from data_access_service.core.duckdbclient import ParquetDuckDBClient
+
+logger = logging.getLogger(__name__)
 
 
 def api_setup(application: FastAPI) -> API:
@@ -40,6 +47,7 @@ def api_setup(application: FastAPI) -> API:
         api.initialize_metadata()
 
     application.include_router(api_router)
+    application.include_router(tiler_router)
     return api
 
 
@@ -48,29 +56,49 @@ async def lifespan(application: FastAPI):
     # Initialize API
     api = api_setup(application)
 
-    # Build the DuckDB session + repositories and start the scheduler (skip in
-    # test environment, which has no AWS credentials for the S3 secrets).
     session = None
     scheduler = None
-    if not isinstance(Config.get_config(), IntTestConfig):
-        session = ParquetDuckDBClient()
-        application.state.duckdb_session = session
-        application.state.repositories = build_repositories(session)
-        scheduler = TaskScheduler(api, application.state.repositories)
-        # Check for running event loop first to avoid creating an unawaited coroutine
-        asyncio.create_task(scheduler.start_with_initial_run(), name="repository_cache")
+    background_tasks: tuple[asyncio.Task, ...] = ()
+    try:
+        if isinstance(Config.get_config(), IntTestConfig):
+            yield
+        else:
+            session = ParquetDuckDBClient()
+            application.state.duckdb_session = session
+            application.state.repositories = build_repositories(session)
+            scheduler = TaskScheduler(api, application.state.repositories)
+            repository_cache_task = asyncio.create_task(
+                scheduler.start_with_initial_run(), name="repository_cache"
+            )
+            tiler_warmup_task = asyncio.create_task(
+                run_tiler_warmup(api), name="tiler_warmup"
+            )
+            background_tasks = (repository_cache_task, tiler_warmup_task)
+            # Set the thread pool size for tiler endpoints to the configured value, as only the tiler endpoints use anyio thread pool.
+            limiter = anyio.to_thread.current_default_thread_limiter()
+            limiter.total_tokens = (
+                Config.get_config().get_tiler_config().thread_pool_size
+            )
 
-    yield
+            yield
+    finally:
+        logger.info("Shutting down background startup tasks")
+        for task in background_tasks:
+            task.cancel()
+        for task in background_tasks:
+            with suppress(asyncio.CancelledError):
+                await task
 
-    # Cleanup
-    if scheduler:
-        scheduler.shutdown()
-    if session:
-        session.close()
-    api.destroy()
+        # Cleanup
+        if scheduler:
+            scheduler.shutdown()
+        if session:
+            session.close()
+        api.destroy()
 
 
 app = FastAPI(lifespan=lifespan, title="Data Access Service")
+configure_gzip_middleware(app)
 
 
 if __name__ == "__main__":

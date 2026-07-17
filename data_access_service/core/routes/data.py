@@ -34,6 +34,7 @@ from data_access_service.utils.date_time_utils import (
 from data_access_service.utils.routes_helper import (
     get_api_instance,
     get_site_service,
+    require_api_ready,
     verify_datatime_param,
     fetch_data,
     async_response_json,
@@ -60,17 +61,10 @@ async def has_data(
     uuid: str,
     key: str,
     request: Request,
+    api_instance: API = Depends(require_api_ready),
     start_date: Optional[str] = MIN_DATE,
     end_date: Optional[str] = datetime.now(timezone.utc).strftime(DATE_FORMAT),
 ):
-    api_instance = get_api_instance(request)
-    # Check API initialization status first
-    if not api_instance.get_api_status():
-        raise HTTPException(
-            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
-            detail="API is not ready. Metadata initialization is still in progress.",
-        )
-
     logger.info(
         "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
     )
@@ -81,15 +75,9 @@ async def has_data(
 
 
 @router.get("/data/{uuid}/{key}/temporal_extent", dependencies=[Depends(api_key_auth)])
-async def get_temporal_extent(uuid: str, key: str, request: Request):
-
-    api_instance = get_api_instance(request)
-    # Check API initialization status first
-    if not api_instance.get_api_status():
-        raise HTTPException(
-            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
-            detail="API is not ready. Metadata initialization is still in progress.",
-        )
+async def get_temporal_extent(
+    uuid: str, key: str, api_instance: API = Depends(require_api_ready)
+):
     try:
         start_date, end_date = api_instance.get_temporal_extent(uuid, key)
         result = [
@@ -105,7 +93,11 @@ async def get_temporal_extent(uuid: str, key: str, request: Request):
 
 @router.get("/data/{uuid}/{key}/indexing_values", dependencies=[Depends(api_key_auth)])
 async def get_indexing_values(
-    request: Request, uuid: str, key: str, start_date: str, end_date: str
+    uuid: str,
+    key: str,
+    start_date: str,
+    end_date: str,
+    api: API = Depends(require_api_ready),
 ):
     """
     Get feature collection for a Zarr dataset with the given UUID and key.
@@ -131,13 +123,6 @@ async def get_indexing_values(
             detail="This endpoint only supports zarr data format",
         )
 
-    api = get_api_instance(request)
-    # Check API initialization status first
-    if not api.get_api_status():
-        raise HTTPException(
-            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
-            detail="API is not ready. Metadata initialization is still in progress.",
-        )
     data_source = api.get_dataset(
         uuid=uuid,
         key=key,
@@ -186,7 +171,12 @@ async def get_indexing_values(
 
 @router.get("/data/{uuid}/{key}/zarr_rect", dependencies=[Depends(api_key_auth)])
 async def get_zarr_rectangles(
-    request: Request, uuid: str, key: str, start_date: str, end_date: str
+    request: Request,
+    uuid: str,
+    key: str,
+    start_date: str,
+    end_date: str,
+    api: API = Depends(require_api_ready),
 ):
     logger.info(
         "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
@@ -204,13 +194,6 @@ async def get_zarr_rectangles(
             detail="This endpoint only supports zarr data format",
         )
 
-    api = get_api_instance(request)
-    # Check API initialization status first
-    if not api.get_api_status():
-        raise HTTPException(
-            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
-            detail="API is not ready. Metadata initialization is still in progress.",
-        )
     data_source = api.get_dataset(
         uuid=uuid,
         key=key,
@@ -278,7 +261,10 @@ async def get_zarr_rectangles(
     )
 
 
-@router.get("/data/feature-collection/{product}", dependencies=[Depends(api_key_auth)])
+@router.get(
+    "/data/feature-collection/{product}",
+    dependencies=[Depends(api_key_auth), Depends(require_api_ready)],
+)
 def get_feature_collection_of_items_with_data_between_dates(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -289,7 +275,8 @@ def get_feature_collection_of_items_with_data_between_dates(
 
 
 @router.get(
-    "/data/feature-collection/{product}/latest", dependencies=[Depends(api_key_auth)]
+    "/data/feature-collection/{product}/latest",
+    dependencies=[Depends(api_key_auth), Depends(require_api_ready)],
 )
 def get_feature_collection_of_items_latest_dates(
     service: SiteFeatureService = Depends(get_site_service),
@@ -300,7 +287,7 @@ def get_feature_collection_of_items_latest_dates(
 
 @router.get(
     "/data/feature-collection/{product}/{site}",
-    dependencies=[Depends(api_key_auth)],
+    dependencies=[Depends(api_key_auth), Depends(require_api_ready)],
 )
 def get_feature_collection_of_item_details(
     site: str,
@@ -317,6 +304,7 @@ async def get_data(
     request: Request,
     uuid: str,
     key: str,
+    api_instance: API = Depends(require_api_ready),
     start_date: Optional[str] = Query(default=MIN_DATE),
     end_date: Optional[str] = Query(
         default=datetime.now(timezone.utc).strftime(DATE_FORMAT)
@@ -326,13 +314,6 @@ async def get_data(
     end_depth: Optional[float] = Query(default=-1.0),
     f: Optional[str] = Query(default="json"),
 ):
-    api_instance = get_api_instance(request)
-    # Check API initialization status first
-    if not api_instance.get_api_status():
-        raise HTTPException(
-            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
-            detail="API is not ready. Metadata initialization is still in progress.",
-        )
     # for debug purpose: track request with an assigned id which is ranomly generated
     request_id = str(uuid_module.uuid4())
     logger.debug("Receiving request: %s", request_id)

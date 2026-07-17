@@ -16,6 +16,7 @@ from data_access_service.models.pmtiles_types import (
     PmtilesGenerationConfig,
     HexLayerSpec,
 )
+from data_access_service.models.tiler_types import TilerConfig
 
 
 class EnvType(Enum):
@@ -243,6 +244,23 @@ class Config:
             duckdb_temp_dir=temp_dir,
             region=pqconfig["region"],
             extensions=tuple(pqconfig["extensions"]),
+        )
+
+    def get_tiler_config(self) -> TilerConfig:
+        tconfig = self.config.get("tiler", {})
+        return TilerConfig(
+            tile_timezone=tconfig["tile_timezone"],
+            store_ttl_seconds=tconfig["store_ttl_seconds"],
+            store_prewarm_workers=tconfig["store_prewarm_workers"],
+            thread_pool_size=tconfig["thread_pool_size"],
+            animation_workers=tconfig["animation_workers"],
+            cache_backend=tconfig["cache_backend"],
+            slice_cache_ttl_seconds=tconfig["slice_cache_ttl_seconds"],
+            processed_cache_ttl_seconds=tconfig["processed_cache_ttl_seconds"],
+            s3_anon=tconfig["s3_anon"],
+            s3_connect_timeout=tconfig["s3_connect_timeout"],
+            s3_read_timeout=tconfig["s3_read_timeout"],
+            s3_max_attempts=tconfig["s3_max_attempts"],
         )
 
     def get_hex_layer_specs(self, dname: str) -> List[HexLayerSpec] | None:

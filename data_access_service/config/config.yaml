@@ -69,3 +69,33 @@ pmtiles:
       h3_resolution: 8
       minzoom: 10
       maxzoom: 12
+tiler:
+  # Local dates in the API are computed in this timezone. Zarr store timestamps
+  # are always UTC.
+  tile_timezone: "Australia/Sydney"
+  # Seconds before a Zarr store is re-opened to pick up newly appended time steps.
+  store_ttl_seconds: 600
+  # Capacity gate for concurrent store opens during startup prewarm. Bounded to
+  # the S3 connection ceiling, not CPU.
+  store_prewarm_workers: 6
+  # Max concurrent sync route handlers (each cold slice needs one thread).
+  # Practical ceiling is S3 bandwidth.
+  thread_pool_size: 20
+  # Capacity gate for /animation per-frame S3 fan-out. Sized to the aiobotocore
+  # S3 connection-pool ceiling (~10/host).
+  animation_workers: 10
+  # Cache backend for L1 (processed grid) / L2 (slice): "none" disables caching
+  # entirely. Any other value needs a CacheBackend implementation wired into
+  # memoizer.create_memoizer.
+  cache_backend: "none"
+  # Per-entry TTL in seconds — unused while cache_backend is "none".
+  slice_cache_ttl_seconds: 600
+  processed_cache_ttl_seconds: 600
+  # True uses anonymous access for s3:// URLs — correct for IMOS's public AODN
+  # buckets. False lets fsspec discover AWS credentials for private buckets.
+  s3_anon: true
+  # Per-socket S3 timeouts (botocore). connect_timeout bounds DNS + TCP/TLS
+  # handshake; read_timeout is per-read inactivity, not total request duration.
+  s3_connect_timeout: 5
+  s3_read_timeout: 30
+  s3_max_attempts: 2

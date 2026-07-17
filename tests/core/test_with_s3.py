@@ -58,7 +58,6 @@ WORLD_POLYGON = """{
 
 
 class TestWithS3:
-
     @pytest.fixture(autouse=True, scope="session")
     def setup(self):
         """Set environment variable for testing profile."""

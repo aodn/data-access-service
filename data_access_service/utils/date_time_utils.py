@@ -20,6 +20,7 @@ from aodn_cloud_optimised.lib.DataQuery import (
     create_time_filter,
 )
 from aodn_cloud_optimised.lib.exceptions import DateOutOfRangeError
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from data_access_service import init_log, Config
 from dateutil.relativedelta import relativedelta
@@ -42,6 +43,35 @@ MIN_DATE = "1970-01-01T00:00:00Z"
 
 config: Config = Config.get_config()
 log = init_log(config)
+
+# Bug: count_rows() failures used to be caught and silently skipped, dropping that
+# month's data with no error -- just a smaller row count later. This bug always
+# existed but rarely triggered; the tiler suite added more test load, making
+# transient S3 errors in CI more likely and finally exposing it.
+# Fix: retry transient failures, and raise if still failing after retries instead
+# of silently dropping data.
+COUNT_ROWS_MAX_ATTEMPTS = 3
+COUNT_ROWS_MIN_WAIT_SECONDS = 2
+COUNT_ROWS_MAX_WAIT_SECONDS = 10
+
+
+def _log_count_rows_retry(retry_state):
+    log.warning(
+        f"[Retry] dataset.count_rows() failed on attempt "
+        f"#{retry_state.attempt_number}: {retry_state.outcome.exception()}. Retrying..."
+    )
+
+
+@retry(
+    stop=stop_after_attempt(COUNT_ROWS_MAX_ATTEMPTS),
+    wait=wait_exponential(
+        multiplier=1, min=COUNT_ROWS_MIN_WAIT_SECONDS, max=COUNT_ROWS_MAX_WAIT_SECONDS
+    ),
+    before_sleep=_log_count_rows_retry,
+    reraise=True,
+)
+def _count_rows_with_retry(dataset, time_filter) -> int:
+    return dataset.count_rows(filter=time_filter)
 
 
 # parse all common format of date string into given format, such as "%Y-%m-%d"
@@ -154,11 +184,7 @@ def check_rows_with_date_range(
             time_filter = create_customised_time_filter(
                 dataset=dataset, start=start, end=end, time_varname=time_dim
             )
-        try:
-            num_rows = dataset.count_rows(filter=time_filter)
-        except Exception as e:
-            log.warning(f"Could not count rows for range {start} to {end}: {e}")
-            continue
+        num_rows = _count_rows_with_retry(dataset, time_filter)
 
         if num_rows == 0:
             # skip the date range if no data in this range
