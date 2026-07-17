@@ -9,10 +9,6 @@ from fastapi.responses import Response
 from xarray import Dataset
 
 from data_access_service import init_log
-from data_access_service.batch.pmtiles.generator import (
-    PmtilesGenerationInProgressError,
-    generate_pmtiles_for_parquets,
-)
 from data_access_service.config.config import Config
 from data_access_service.core.api import API
 from data_access_service.core.constants import (
@@ -34,10 +30,8 @@ from data_access_service.utils.date_time_utils import (
     ensure_timezone,
     MIN_DATE,
     DATE_FORMAT,
-    time_it,
 )
 from data_access_service.utils.routes_helper import (
-    HealthCheckResponse,
     get_api_instance,
     get_site_service,
     require_api_ready,
@@ -47,51 +41,11 @@ from data_access_service.utils.routes_helper import (
     generate_feature_collection,
     generate_rect_features,
 )
-from data_access_service.utils.sse_utils import sse_it
 from data_access_service.utils.sse_wrapper import sse_wrapper
 
-router = APIRouter(prefix=Config.BASE_URL)
+router = APIRouter()
 config = Config.get_config()
 logger = init_log(config)
-
-
-@router.get("/health", response_model=HealthCheckResponse)
-async def health_check(request: Request):
-    """
-    Health check endpoint. The init now become very slow due to the need to load zarr data on init
-    so we report status code OK, to avoid AWS timeout but the status value is STARTING
-
-    This endpoint will not be call in Docker run due to fact that we install a Ngnix in front to
-    intercept call of health. The reason is during heavy load, the health may not reply on time
-    and cause AWS kill process. The Ngnix will reply health check using a json that is dump by
-    this process.
-    """
-    api_instance = get_api_instance(request)
-    if api_instance.get_api_status():
-        return HealthCheckResponse(status="UP", status_code=HTTPStatus.OK)
-    else:
-        return HealthCheckResponse(status="STARTING", status_code=HTTPStatus.OK)
-
-
-@router.get("/metadata", dependencies=[Depends(api_key_auth)])
-@router.get("/metadata/{uuid}", dependencies=[Depends(api_key_auth)])
-async def get_mapped_metadata(
-    uuid: Optional[str] = None, api_instance: API = Depends(require_api_ready)
-):
-    metadata = api_instance.get_mapped_meta_data(uuid)
-
-    if metadata.get("not_exist") is not None:
-        raise HTTPException(
-            status_code=HTTPStatus.NOT_FOUND,
-            detail="Dataset not found.",
-        )
-
-    return metadata
-
-
-@router.get("/metadata/{uuid}/raw", dependencies=[Depends(api_key_auth)])
-async def get_raw_metadata(uuid: str, api_instance: API = Depends(require_api_ready)):
-    return api_instance.get_raw_meta_data(uuid)
 
 
 @router.get("/data/{uuid}/notebook_url", dependencies=[Depends(api_key_auth)])
@@ -422,18 +376,3 @@ async def get_data(
             return async_response_json(result, compress)
 
         return None
-
-
-@router.put("/pmtiles/{uuid}/{key}", dependencies=[Depends(api_key_auth)])
-@time_it
-@sse_it
-def create_pmtiles(uuid: str, key: str, api_instance: API = Depends(require_api_ready)):
-    try:
-        return generate_pmtiles_for_parquets(api_instance, uuid, key)
-    except PmtilesGenerationInProgressError as e:
-        # Note: sse_it has already started a 200 stream, so this surfaces as an
-        # SSE "error" event (same as the 503 above)
-        raise HTTPException(
-            status_code=HTTPStatus.CONFLICT,  # 409
-            detail=str(e),
-        )
