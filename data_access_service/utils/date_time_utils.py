@@ -20,6 +20,7 @@ from aodn_cloud_optimised.lib.DataQuery import (
     create_time_filter,
 )
 from aodn_cloud_optimised.lib.exceptions import DateOutOfRangeError
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from data_access_service import init_log, Config
 from dateutil.relativedelta import relativedelta
@@ -42,6 +43,36 @@ MIN_DATE = "1970-01-01T00:00:00Z"
 
 config: Config = Config.get_config()
 log = init_log(config)
+
+# dataset.count_rows() previously had its exceptions caught and silently discarded
+# in check_rows_with_date_range(), which then `continue`d to the next date range.
+# A transient S3/network error (more likely under CPU/memory pressure, e.g. in a
+# resource-constrained CI runner) would therefore drop that whole month's data with
+# no test/job failure -- just a quietly smaller row count downstream. Retrying here
+# absorbs a genuine transient blip; if it still fails after retries, the exception
+# is reraised so a persistent failure surfaces loudly instead of corrupting the output.
+COUNT_ROWS_MAX_ATTEMPTS = 3
+COUNT_ROWS_MIN_WAIT_SECONDS = 2
+COUNT_ROWS_MAX_WAIT_SECONDS = 10
+
+
+def _log_count_rows_retry(retry_state):
+    log.warning(
+        f"[Retry] dataset.count_rows() failed on attempt "
+        f"#{retry_state.attempt_number}: {retry_state.outcome.exception()}. Retrying..."
+    )
+
+
+@retry(
+    stop=stop_after_attempt(COUNT_ROWS_MAX_ATTEMPTS),
+    wait=wait_exponential(
+        multiplier=1, min=COUNT_ROWS_MIN_WAIT_SECONDS, max=COUNT_ROWS_MAX_WAIT_SECONDS
+    ),
+    before_sleep=_log_count_rows_retry,
+    reraise=True,
+)
+def _count_rows_with_retry(dataset, time_filter) -> int:
+    return dataset.count_rows(filter=time_filter)
 
 
 # parse all common format of date string into given format, such as "%Y-%m-%d"
@@ -154,11 +185,7 @@ def check_rows_with_date_range(
             time_filter = create_customised_time_filter(
                 dataset=dataset, start=start, end=end, time_varname=time_dim
             )
-        try:
-            num_rows = dataset.count_rows(filter=time_filter)
-        except Exception as e:
-            log.warning(f"Could not count rows for range {start} to {end}: {e}")
-            continue
+        num_rows = _count_rows_with_retry(dataset, time_filter)
 
         if num_rows == 0:
             # skip the date range if no data in this range
