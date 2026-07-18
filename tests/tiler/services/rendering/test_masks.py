@@ -6,9 +6,12 @@ ocean_mask.npz), so the geographic assertions double as a smoke test that the
 assets are present and sane.
 """
 
+import math
+
 import numpy as np
 import xarray as xr
 
+from data_access_service.tiler.services.product.grid_geometry import grid_geometry
 from data_access_service.tiler.services.product.product import CoastalFill, Product
 from data_access_service.tiler.services.rendering.data_tiles import (
     _compute_processed,
@@ -192,7 +195,15 @@ def test_compute_no_longer_applies_ocean_mask_by_product_id():
     _, ocean_other = _compute_processed(_product(None, product_id="other"), ds, 1)
 
     np.testing.assert_array_equal(ocean_currents, ocean_other)
-    assert ocean_other.all()  # all-valid input, no coastal_fill → nothing cut here
+    # All-valid input, no coastal_fill → nothing cut inside the data's coverage.
+    # Under the square-cell grid geometry the wide-but-short region fills only the
+    # top rows of the square grid; rows past the data's south edge are mask-invalid
+    # by design, so assert on the data-covered rows instead of the whole grid.
+    geom = grid_geometry(ds, 16, 16)
+    covered_rows = math.floor(ds.lat.size / geom.sy_ratio + 0.5)
+    assert covered_rows >= 1
+    assert ocean_other[:covered_rows].all()
+    assert not ocean_other[covered_rows:].any()
 
 
 def test_compute_propagates_premasked_nans_to_ocean_validity():

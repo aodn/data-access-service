@@ -182,6 +182,13 @@ def test_manifest_ok(client):
                 "chunkPx": [256, 256],
                 "storedPx": [258, 258],
                 "padding": 1,
+                "cellSize": 0.1,
+                "gridBounds": {
+                    "lonMin": 109.95,
+                    "lonMax": 161.15,
+                    "latMin": -61.15,
+                    "latMax": -9.95,
+                },
             }
         },
     }
@@ -220,6 +227,13 @@ def test_manifest_categorical_flag_fields_pass_through(client):
                 "chunkPx": [256, 256],
                 "storedPx": [258, 258],
                 "padding": 1,
+                "cellSize": 0.1,
+                "gridBounds": {
+                    "lonMin": 109.95,
+                    "lonMax": 161.15,
+                    "latMin": -61.15,
+                    "latMax": -9.95,
+                },
             }
         },
     }

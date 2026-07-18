@@ -34,6 +34,59 @@ class ManifestResponse(BaseModel):
     cache_version: str
 
 
+class CoverageGeoBounds(BaseModel):
+    lonMin: float
+    lonMax: float
+    latMin: float
+    latMax: float
+
+
+class CoverageLodMeta(BaseModel):
+    grid: list[int]
+    # Square-cell NW-anchored geometry (grid_geometry.py): one cell size in
+    # degrees; gridBounds is the LOD grid's own footprint (cell edges), which may
+    # extend past the data on the east/south — those pixels are mask-invalid.
+    cellSize: float
+    gridBounds: CoverageGeoBounds
+    zoomThreshold: int | None = None
+
+
+class CoverageTimeMapping(BaseModel):
+    # RFC 3339 instant (the timestamp DAS selects for the local date) and the
+    # DAS-internal date key it maps to. OGC `datetime` must match `datetime`
+    # exactly; tile URLs use `dateKey`.
+    datetime: str
+    dateKey: str
+
+
+class CoverageProductEntry(BaseModel):
+    id: str
+    title: str
+    datasetKey: str
+    default: bool
+    variables: list[str]
+    encoding: str  # scalar-rgb24 | vector-rg8
+    maskChannel: str  # A (scalar) | B (vector)
+    tileMatrixSetId: str
+    bounds: CoverageGeoBounds  # data extent (cell centres)
+    chunkPx: list[int]
+    storedPx: list[int]
+    padding: int
+    lods: dict[str, CoverageLodMeta]
+    times: list[CoverageTimeMapping]
+    flagValues: list[int] | None = None
+    flagMeanings: list[str] | None = None
+
+
+class CoverageDiscoveryResponse(BaseModel):
+    """Browser-safe coverage discovery for one portal collection — the input to
+    ogcapi-java's coverage catalog. Never contains source paths or store URLs."""
+
+    collectionId: str
+    cacheVersion: str
+    products: list[CoverageProductEntry]
+
+
 class VariableValue(BaseModel):
     value: float | None
     units: str | None

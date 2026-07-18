@@ -8,11 +8,15 @@ from fastapi.responses import JSONResponse
 
 from data_access_service.config.tiler.constants import CACHE_VERSION
 from data_access_service.tiler.schemas.products import (
+    CoverageDiscoveryResponse,
     ManifestResponse,
     PointResponse,
     ProductConfig,
     ProductInspection,
     VariableValue,
+)
+from data_access_service.tiler.services.product.coverage import (
+    build_coverage_discovery,
 )
 from data_access_service.tiler.services.product.inspect import inspect_product
 from data_access_service.tiler.services.product.registry import (
@@ -75,6 +79,35 @@ def _etag_response(body: object, etag: str, if_none_match: str | None) -> Respon
     return JSONResponse(content=body, headers=headers)
 
 
+def _coverage_discovery_response(
+    collection_id: str,
+    from_date: str | None,
+    to_date: str | None,
+    if_none_match: str | None,
+) -> Response:
+    """Coverage discovery for one portal collection, with the same ETag/304
+    revalidation contract as the availability manifest (dates arrive daily, so
+    the document is mutable on the same cadence)."""
+    doc = build_coverage_discovery(collection_id, from_date, to_date)
+    if doc is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No coverage products for collection: {collection_id}",
+        )
+    fingerprint_parts = [
+        f"cv={CACHE_VERSION}",
+        f"collection={collection_id}",
+        f"from={from_date or ''}",
+        f"to={to_date or ''}",
+    ]
+    for product in doc["products"]:
+        times = product["times"]
+        fingerprint_parts.append(
+            f"{product['id']}:{len(times)}:{times[-1]['dateKey'] if times else ''}"
+        )
+    return _etag_response(doc, _etag("|".join(fingerprint_parts)), if_none_match)
+
+
 @router.get(
     "/products",
     summary="List products",
@@ -90,12 +123,18 @@ async def get_products():
     summary="Products availability",
     description=(
         "Returns available dates for every product. "
-        "`from` defaults to each product's earliest available date; `to` is unbounded by default."
+        "`from` defaults to each product's earliest available date; `to` is unbounded by default. "
+        "With `collection_id`, returns the coverage discovery document for that portal "
+        "collection instead: coverage-enabled products with grid geometry, TileMatrixSet id "
+        "and datetime↔dateKey mappings (no source paths), for the OGC coverage-tile facade."
     ),
     # response_model=ManifestResponse,  # can't use this because of the dynamic ETag-based 304 response
     responses={
         200: {"model": ManifestResponse},
         304: {"description": "Not Modified — ETag matched, response body is empty"},
+        404: {
+            "description": "collection_id given but no coverage-enabled product is associated with it"
+        },
     },
 )
 def get_products_availability(
@@ -113,9 +152,21 @@ def get_products_availability(
         description="End date (inclusive), YYYY-MM-DD. Defaults to no upper bound.",
         openapi_examples={"default": Example(value="2024-12-31")},
     ),
+    collection_id: str | None = Query(
+        None,
+        description=(
+            "Portal collection UUID. Switches the response to the coverage discovery "
+            "document (see CoverageDiscoveryResponse) filtered to that collection."
+        ),
+    ),
     if_none_match: str | None = Header(None, alias="if-none-match"),
     # Automatically sent by browser using previous ETag from previous response.
 ):
+    if collection_id is not None:
+        return _coverage_discovery_response(
+            collection_id, from_date, to_date, if_none_match
+        )
+
     products = {}
 
     fingerprint_parts = [

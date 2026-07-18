@@ -180,3 +180,159 @@ def test_from_dict_returns_frozen_product():
     # Frozen dataclass: assignment must raise.
     with pytest.raises(FrozenInstanceError):
         p.id = "changed"  # type: ignore[misc]
+
+
+# --- portal / coverage association validation (build spec §5) ----------------
+
+
+_UUID = "2ffccdad-1197-4e41-b412-a9033517cfb2"
+
+
+def _coverage_entry(
+    product_id="cov1",
+    variable="V",
+    source="s3://bucket/x.zarr",
+    collection_id=_UUID,
+    default=True,
+    tms_id="tms_a",
+    **kwargs,
+):
+    return _entry(
+        product_id,
+        source=source,
+        variable=variable,
+        portal={
+            "collection_id": collection_id,
+            "dataset_key": "ds_key",
+            "default": default,
+        },
+        coverage={"enabled": True, "tile_matrix_set_id": tms_id},
+        **kwargs,
+    )
+
+
+def test_load_coverage_product_parses_association(isolated_products):
+    _write(isolated_products, [_coverage_entry(title="Nice name")])
+    registry.load_products()
+    p = PRODUCTS["cov1"]
+    assert p.title == "Nice name"
+    assert p.portal.collection_id == _UUID
+    assert p.portal.dataset_key == "ds_key"
+    assert p.portal.default is True
+    assert p.coverage.enabled is True
+    assert p.coverage.tile_matrix_set_id == "tms_a"
+
+
+def test_products_without_portal_still_load(isolated_products):
+    _write(isolated_products, [_entry("plain")])
+    registry.load_products()
+    assert PRODUCTS["plain"].portal is None
+    assert PRODUCTS["plain"].coverage is None
+
+
+def test_coverage_requires_portal(isolated_products):
+    entry = _entry("cov1", coverage={"enabled": True, "tile_matrix_set_id": "tms_a"})
+    _write(isolated_products, [entry])
+    with pytest.raises(ValueError, match="requires portal"):
+        registry.load_products()
+
+
+def test_coverage_requires_tms_id(isolated_products):
+    entry = _coverage_entry()
+    entry["coverage"] = {"enabled": True}
+    _write(isolated_products, [entry])
+    with pytest.raises(ValueError, match="tile_matrix_set_id"):
+        registry.load_products()
+
+
+def test_coverage_rejects_invalid_collection_uuid(isolated_products):
+    _write(isolated_products, [_coverage_entry(collection_id="not-a-uuid")])
+    with pytest.raises(ValueError, match="not a valid UUID"):
+        registry.load_products()
+
+
+def test_coverage_rejects_three_variables(isolated_products):
+    _write(isolated_products, [_coverage_entry(variable=["A", "B", "C"])])
+    with pytest.raises(ValueError, match="1 or 2 variables"):
+        registry.load_products()
+
+
+def test_collection_requires_exactly_one_default(isolated_products):
+    _write(
+        isolated_products,
+        [
+            _coverage_entry("cov1", variable="A", default=True),
+            _coverage_entry("cov2", variable="B", default=True),
+        ],
+    )
+    with pytest.raises(ValueError, match="exactly one default"):
+        registry.load_products()
+
+    _write(
+        isolated_products,
+        [
+            _coverage_entry("cov1", variable="A", default=False),
+            _coverage_entry("cov2", variable="B", default=False),
+        ],
+    )
+    with pytest.raises(ValueError, match="exactly one default"):
+        registry.load_products()
+
+
+def test_collection_rejects_duplicate_variable_sets(isolated_products):
+    _write(
+        isolated_products,
+        [
+            _coverage_entry("cov1", variable="V", default=True),
+            _coverage_entry("cov2", variable="V", default=False, tms_id="tms_b"),
+        ],
+    )
+    with pytest.raises(ValueError, match="variable set"):
+        registry.load_products()
+
+
+def test_shared_tms_id_requires_identical_grid_geometry(isolated_products):
+    _write(
+        isolated_products,
+        [
+            _coverage_entry("cov1", variable="A", default=True),
+            _coverage_entry(
+                "cov2", variable="B", default=False, source="s3://bucket/OTHER.zarr"
+            ),
+        ],
+    )
+    with pytest.raises(ValueError, match="different grid geometry"):
+        registry.load_products()
+
+
+def test_valid_multi_product_collection_loads(isolated_products):
+    _write(
+        isolated_products,
+        [
+            _coverage_entry("cov1", variable="A", default=True),
+            _coverage_entry("cov2", variable="B", default=False),
+            _coverage_entry("cov3", variable=["U", "W"], default=False),
+        ],
+    )
+    registry.load_products()
+    assert set(PRODUCTS) == {"cov1", "cov2", "cov3"}
+
+
+def test_validation_failure_leaves_existing_products_untouched(isolated_products):
+    _write(isolated_products, [_entry("keeper")])
+    registry.load_products()
+    _write(isolated_products, [_coverage_entry(collection_id="broken")])
+    with pytest.raises(ValueError):
+        registry.load_products()
+    assert set(PRODUCTS) == {"keeper"}  # validation happens before the swap
+
+
+def test_shipped_products_config_passes_validation():
+    # The real deployed products.json must always satisfy the coverage rules —
+    # a config regression should fail CI, not startup in an environment.
+    from pathlib import Path
+
+    from data_access_service.config.tiler.paths import PRODUCTS_CONFIG_PATH
+
+    entries = json.loads(Path(PRODUCTS_CONFIG_PATH).read_text())
+    registry.validate_coverage_config([registry._from_dict(e) for e in entries])

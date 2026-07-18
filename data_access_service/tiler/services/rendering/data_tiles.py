@@ -21,6 +21,7 @@ from data_access_service.tiler.services.caching.deduper import Deduper
 from data_access_service.tiler.services.caching.processed_cache import (
     processed_memo,
 )
+from data_access_service.tiler.services.product.grid_geometry import grid_geometry
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.rendering.kernels import (
     normalize,
@@ -98,12 +99,20 @@ def _compute_processed(
     # are already nulled on the raw slice (masks.apply_ocean_mask), so they arrive
     # here as NaN and fall out of the per-variable valid masks above — nothing to do.
     if product.coastal_fill is not None:
-        lon_min, lon_max = float(ds.lon.min()), float(ds.lon.max())
-        lat_min, lat_max = float(ds.lat.min()), float(ds.lat.max())
         # Cut the coastal fill (and any data that bled over land) back off using
         # the real Natural Earth coastline, so we never paint fabricated values
-        # onto land.
-        land = land_mask_for_grid(lon_min, lon_max, lat_min, lat_max, total_w, total_h)
+        # onto land. The mask must be rasterised over the LOD grid's own pixel
+        # centres (square-cell NW-anchored geometry), not the data extent — the
+        # grid extends past the data on the east/south edge.
+        geom = grid_geometry(ds, total_w, total_h)
+        land = land_mask_for_grid(
+            geom.west + geom.cell_size / 2,
+            geom.west + (total_w - 0.5) * geom.cell_size,
+            geom.north - (total_h - 0.5) * geom.cell_size,
+            geom.north - geom.cell_size / 2,
+            total_w,
+            total_h,
+        )
         ocean = ocean & ~land
 
     return normalised, ocean

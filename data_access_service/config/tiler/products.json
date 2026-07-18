@@ -1,18 +1,48 @@
 [
   {
     "id": "satellite_austemp_heatwave_8day:sst_mosaic",
+    "title": "AusTemp 8-day SST mosaic",
     "source_path": "s3://aodn-cloud-optimised/satellite_austemp_heatwave_8day.zarr",
-    "variable": "sst_mosaic"
+    "variable": "sst_mosaic",
+    "portal": {
+      "collection_id": "2ffccdad-1197-4e41-b412-a9033517cfb2",
+      "dataset_key": "satellite_austemp_heatwave_8day",
+      "default": true
+    },
+    "coverage": {
+      "enabled": true,
+      "tile_matrix_set_id": "aodn_austemp_heatwave_8day_crs84"
+    }
   },
   {
     "id": "satellite_austemp_heatwave_8day:ssta_mosaic",
+    "title": "AusTemp 8-day SST anomaly mosaic",
     "source_path": "s3://aodn-cloud-optimised/satellite_austemp_heatwave_8day.zarr",
-    "variable": "ssta_mosaic"
+    "variable": "ssta_mosaic",
+    "portal": {
+      "collection_id": "2ffccdad-1197-4e41-b412-a9033517cfb2",
+      "dataset_key": "satellite_austemp_heatwave_8day",
+      "default": false
+    },
+    "coverage": {
+      "enabled": true,
+      "tile_matrix_set_id": "aodn_austemp_heatwave_8day_crs84"
+    }
   },
   {
     "id": "satellite_austemp_heatwave_8day:mcs_category",
+    "title": "AusTemp 8-day marine cold-spell category",
     "source_path": "s3://aodn-cloud-optimised/satellite_austemp_heatwave_8day.zarr",
-    "variable": "MCS_category"
+    "variable": "MCS_category",
+    "portal": {
+      "collection_id": "2ffccdad-1197-4e41-b412-a9033517cfb2",
+      "dataset_key": "satellite_austemp_heatwave_8day",
+      "default": false
+    },
+    "coverage": {
+      "enabled": true,
+      "tile_matrix_set_id": "aodn_austemp_heatwave_8day_crs84"
+    }
   },
   {
     "id": "model_sea_level_anomaly_gridded_realtime:gsla",

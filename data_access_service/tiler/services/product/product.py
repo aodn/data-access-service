@@ -21,6 +21,34 @@ class CoastalFill:
 
 
 @dataclass(frozen=True)
+class PortalAssociation:
+    """Association between a tiler product and an AODN portal collection.
+
+    ``collection_id`` is the portal/STAC collection UUID (GeoNetwork metadata
+    UUID); ``dataset_key`` is the cloud-optimised dataset name backing it.
+    ``default`` marks the collection's default coverage product — the one an
+    OGC coverage-tile request without a ``properties`` selection resolves to.
+    """
+
+    collection_id: str
+    dataset_key: str
+    default: bool = False
+
+
+@dataclass(frozen=True)
+class CoverageConfig:
+    """OGC Coverage Tiles publication switch for a product.
+
+    ``tile_matrix_set_id`` is the stable, grid-keyed custom TileMatrixSet id —
+    products rendered from the same store grid MUST share it (enforced by the
+    registry), products on different grids must not.
+    """
+
+    enabled: bool = False
+    tile_matrix_set_id: str | None = None
+
+
+@dataclass(frozen=True)
 class Product:
     id: str
     source_path: str
@@ -36,6 +64,11 @@ class Product:
     # store should set it. Applied at the source so every consumer — data tiles,
     # visual tiles, and point lookups — inherits the cut.
     ocean_masked: bool = False
+    # Human-readable name surfaced through coverage discovery; optional for
+    # products that are not portal-published.
+    title: str | None = None
+    portal: PortalAssociation | None = None
+    coverage: CoverageConfig | None = None
 
     def __post_init__(self) -> None:
         if not self.variable:

@@ -13,6 +13,12 @@ class LodMeta(BaseModel):
     chunkPx: list[int]
     storedPx: list[int]
     padding: int
+    # Square-cell NW-anchored geometry (cv2+): one cell size in degrees per LOD,
+    # and the LOD grid's own geographic footprint (cell edges). gridBounds can
+    # extend past the data on the east/south edge — those pixels are mask-invalid.
+    # Clients georeference each LOD by gridBounds, not by the top-level bounds.
+    cellSize: float
+    gridBounds: GeoBounds
     zoomThreshold: int | None = None
 
 

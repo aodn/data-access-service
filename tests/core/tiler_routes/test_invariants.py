@@ -38,7 +38,8 @@ def test_tile_geometry_matches_frontend_shader_contract(client):
 def test_cache_version_is_set(client):
     # Bumping is intentional; an unintended change to CACHE_VERSION invalidates
     # every CDN/browser-cached tile across all clients on next deploy.
-    assert CACHE_VERSION == "cv1"
+    # cv2 = square-cell NW-anchored grid geometry (see product/grid_geometry.py).
+    assert CACHE_VERSION == "cv2"
 
 
 # --- Date / timezone round-trip ------------------------------------------

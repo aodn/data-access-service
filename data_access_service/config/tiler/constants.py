@@ -61,4 +61,9 @@ TILE = TileConfig()
 # ?cv=...; bumping it invalidates browser and CDN caches together (new URLs miss everywhere).
 # Do NOT bump on every build — only on changes that affect rendered output.
 # See docs/http_caching.md for the full design.
-CACHE_VERSION = "cv1"
+#
+# cv2: data-tile grid geometry changed from per-axis stretch to square-cell NW-anchored
+# mapping (product/grid_geometry.py) so LOD grids are exactly representable as OGC
+# TileMatrixSets. Tile bytes and per-LOD georeferencing changed; clients must use the
+# per-LOD manifest gridBounds/cellSize instead of stretching the data bounds.
+CACHE_VERSION = "cv2"

@@ -1,9 +1,13 @@
 """Numba JIT kernels and the xarray fallback for resample + normalize.
 
 Hot path for every cold-L1 data tile. Two pieces:
-  * ``_resample_variables_to_grid`` — bilinear-resamples one or more variables
-    to the LOD grid the shader expects (see docs/technical.md §5.6 — output
-    pixel positions match np.linspace(0, src-1, total) on both axes).
+  * ``resample_variables_to_grid`` — resamples one or more variables to the LOD
+    grid on the square-cell, NW-anchored mapping defined by
+    ``product/grid_geometry.py``: output pixel (i, j) has its centre at source
+    fractional index ((i|j) + 0.5) * ratio - 0.5, where ratio is the LOD cell
+    size in source steps. Pixel centres past the source's east/south edge (the
+    partially-filled edge introduced by ceil-based tiling and the isotropic
+    cell) are NaN, which the normalize pass turns into mask=invalid.
   * ``_normalize_uint8`` / ``_normalize_uint32`` (numba) or ``_normalize_fallback``
     (xarray): convert float32 → uint with the per-pixel valid mask folded in.
 
@@ -20,6 +24,7 @@ import xarray as xr
 from data_access_service.tiler.services.colormap.categorical import (
     is_categorical_variable,
 )
+from data_access_service.tiler.services.product.grid_geometry import grid_geometry
 
 logger = logging.getLogger(__name__)
 
@@ -75,28 +80,47 @@ try:
     # xr.interp). The explicit isnan check below is dead code under fastmath but
     # left for readability and as a guard if fastmath is ever disabled.
     @njit(parallel=True, cache=True, fastmath=True)
-    def _numba_bilinear(src: np.ndarray, total_h: int, total_w: int) -> np.ndarray:
-        """JIT-compiled bilinear with NaN propagation. Output positions match
-        np.linspace(0, src-1, total) on both axes — the same mapping xr.interp
-        produces, and the same mapping the WebGL shader assumes (see docs/technical.md §5.6).
+    def _numba_bilinear(
+        src: np.ndarray, total_h: int, total_w: int, sy_ratio: float, sx_ratio: float
+    ) -> np.ndarray:
+        """JIT-compiled bilinear with NaN propagation on the square-cell mapping:
+        output pixel centre (i, j) sits at source fractional index
+        ((i|j) + 0.5) * ratio - 0.5 (see product/grid_geometry.py). Centres past
+        the source's far edge (beyond the last cell's outer half) are NaN; the
+        outermost half-cell holds the edge value, matching physical cell coverage.
 
         Inputs:
           src: float32, shape (src_h, src_w), oriented north→south.
           total_h, total_w: target dims.
+          sy_ratio, sx_ratio: LOD cell size in source steps per axis.
 
-        Output: float32 (total_h, total_w). NaN where any of the 4 source neighbours is NaN.
+        Output: float32 (total_h, total_w). NaN where out of source coverage or
+        where any of the 4 source neighbours is NaN.
         """
         src_h, src_w = src.shape
         out = np.empty((total_h, total_w), dtype=np.float32)
-        sy_scale = (src_h - 1.0) / (total_h - 1.0) if total_h > 1 else 0.0
-        sx_scale = (src_w - 1.0) / (total_w - 1.0) if total_w > 1 else 0.0
         for i in prange(total_h):
-            sy = i * sy_scale
+            sy = (i + 0.5) * sy_ratio - 0.5
+            if sy > src_h - 0.5:
+                for j in range(total_w):
+                    out[i, j] = np.nan
+                continue
+            if sy < 0.0:
+                sy = 0.0
+            elif sy > src_h - 1.0:
+                sy = src_h - 1.0
             y0 = int(sy)
             y1 = y0 + 1 if y0 + 1 < src_h else src_h - 1
             dy = sy - y0
             for j in range(total_w):
-                sx = j * sx_scale
+                sx = (j + 0.5) * sx_ratio - 0.5
+                if sx > src_w - 0.5:
+                    out[i, j] = np.nan
+                    continue
+                if sx < 0.0:
+                    sx = 0.0
+                elif sx > src_w - 1.0:
+                    sx = src_w - 1.0
                 x0 = int(sx)
                 x1 = x0 + 1 if x0 + 1 < src_w else src_w - 1
                 dx = sx - x0
@@ -113,10 +137,12 @@ try:
         return out
 
     @njit(parallel=True, cache=True, fastmath=True)
-    def _numba_nearest(src: np.ndarray, total_h: int, total_w: int) -> np.ndarray:
-        """JIT nearest-neighbour resample on the same linspace(0, src-1, total)
-        mapping as `_numba_bilinear`, but picking the single closest source cell
-        instead of blending four.
+    def _numba_nearest(
+        src: np.ndarray, total_h: int, total_w: int, sy_ratio: float, sx_ratio: float
+    ) -> np.ndarray:
+        """JIT nearest-neighbour resample on the same square-cell mapping as
+        `_numba_bilinear`, but picking the single closest source cell instead of
+        blending four.
 
         Required for categorical (CF flag_values) variables: bilinear would average
         adjacent integer codes into fabricated in-between categories, and coarser
@@ -125,15 +151,26 @@ try:
         """
         src_h, src_w = src.shape
         out = np.empty((total_h, total_w), dtype=np.float32)
-        sy_scale = (src_h - 1.0) / (total_h - 1.0) if total_h > 1 else 0.0
-        sx_scale = (src_w - 1.0) / (total_w - 1.0) if total_w > 1 else 0.0
         for i in prange(total_h):
-            y = int(i * sy_scale + 0.5)
-            if y >= src_h:
+            sy = (i + 0.5) * sy_ratio - 0.5
+            if sy > src_h - 0.5:
+                for j in range(total_w):
+                    out[i, j] = np.nan
+                continue
+            y = int(sy + 0.5)
+            if y < 0:
+                y = 0
+            elif y >= src_h:
                 y = src_h - 1
             for j in range(total_w):
-                x = int(j * sx_scale + 0.5)
-                if x >= src_w:
+                sx = (j + 0.5) * sx_ratio - 0.5
+                if sx > src_w - 0.5:
+                    out[i, j] = np.nan
+                    continue
+                x = int(sx + 0.5)
+                if x < 0:
+                    x = 0
+                elif x >= src_w:
                     x = src_w - 1
                 out[i, j] = src[y, x]
         return out
@@ -221,14 +258,17 @@ def resample_variables_to_grid(
 
     Continuous variables are bilinear-resampled; categorical variables (CF
     flag_values) are nearest-resampled so their discrete integer codes are never
-    blended into fabricated categories. Output pixel positions follow
-    np.linspace(0, src-1, total) on both axes — the same mapping the WebGL shader
-    assumes (see docs/technical.md §5.6). NaN propagates where any contributing
+    blended into fabricated categories. The geographic mapping is the square-cell,
+    NW-anchored geometry from ``product/grid_geometry.py`` — one isotropic cell
+    size per LOD, so the grid is exactly representable as an OGC TileMatrixSet.
+    Output pixels whose centres fall past the source's east/south coverage are
+    NaN (partially-filled edge); NaN also propagates where any contributing
     source neighbour is NaN, matching xr.interp.
 
     Returns a list of float32 ndarrays in the same order as ``variables``, each
     oriented north→south.
     """
+    geom = grid_geometry(ds, total_w, total_h)
     # Orient source north→south so index-based resampling matches the shader's lat mapping.
     flip = float(ds.lat[0]) < float(ds.lat[-1])
 
@@ -244,21 +284,30 @@ def resample_variables_to_grid(
                 else _numba_bilinear
             )
             with _PARALLEL_KERNEL_LOCK:
-                out.append(kernel(arr, total_h, total_w))
+                out.append(kernel(arr, total_h, total_w, geom.sy_ratio, geom.sx_ratio))
         return out
 
-    # Fallback: xarray's interp on the same linspace mapping, per-variable method.
+    # Fallback: xarray's interp at the same pixel-centre positions, per-variable
+    # method. interp is clamped to the source centre span; validity (the outer
+    # half-cell rule the numba kernels apply) is masked explicitly afterwards.
+    src_w = ds.lon.size
+    src_h = ds.lat.size
     lon_min = float(ds.lon.min())
-    lon_max = float(ds.lon.max())
-    lat_min = float(ds.lat.min())
     lat_max = float(ds.lat.max())
-    target_lons = np.linspace(lon_min, lon_max, total_w)
-    target_lats = np.linspace(lat_max, lat_min, total_h)  # north → south
+    kx = (np.arange(total_w) + 0.5) * geom.sx_ratio - 0.5
+    ky = (np.arange(total_h) + 0.5) * geom.sy_ratio - 0.5
+    valid_x = kx <= src_w - 0.5
+    valid_y = ky <= src_h - 0.5
+    target_lons = lon_min + np.clip(kx, 0.0, src_w - 1.0) * geom.dlon
+    target_lats = lat_max - np.clip(ky, 0.0, src_h - 1.0) * geom.dlat  # north → south
     out = []
     for v in variables:
         method = "nearest" if is_categorical_variable(ds[v].attrs) else "linear"
         r = ds[v].interp(lon=target_lons, lat=target_lats, method=method)
-        out.append(r.values.squeeze().astype(np.float32, copy=False))
+        arr = r.values.squeeze().astype(np.float32, copy=False)
+        arr[~valid_y, :] = np.nan
+        arr[:, ~valid_x] = np.nan
+        out.append(arr)
     return out
 
 
@@ -307,6 +356,6 @@ def warmup_resample() -> None:
         # kernel calls don't need _PARALLEL_KERNEL_LOCK — nothing else can be in a
         # parallel region yet.
         sample = np.zeros((32, 32), dtype=np.float32)
-        _numba_nearest(sample, 32, 32)
+        _numba_nearest(sample, 32, 32, 1.0, 1.0)
         _numba_normalize_uint32(sample, 0.0, 1.0, 16777215)
         _numba_normalize_uint8(sample, 0.0, 1.0, 255)
