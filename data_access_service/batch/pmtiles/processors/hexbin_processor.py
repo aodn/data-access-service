@@ -36,26 +36,38 @@ class HexbinProcessor(AbstractProcessor):
         self.logger.info("Staging high-res parquet file...")
         log_memory_usage(self.logger, "before staging scan")
 
+        # UBIGINT H3 + SNAPPY staged write: cheaper GROUP BY and local I/O than hex strings.
+        max_res = int(self.__get_max_res())
         sql = f"""
                 COPY (
-                    SELECT
-                        printf('%x', h3_latlng_to_cell(
-                            CAST({quoted_lat} AS DOUBLE),
-                            CAST({quoted_lon} AS DOUBLE),
-                            {int(self.__get_max_res())}
-                        )) AS h_high,
-                        {ym} AS ym,
-                        COUNT(*)::UBIGINT AS c
-                    FROM read_parquet('{self.get_s3_uri()}', hive_partitioning=true, union_by_name=true)
-                    WHERE
-                        {quoted_lon} IS NOT NULL
-                        AND {quoted_lat} IS NOT NULL
-                        AND {quoted_time} IS NOT NULL
-                        AND CAST({quoted_lon} AS DOUBLE) BETWEEN -180 AND 180
-                        AND CAST({quoted_lat} AS DOUBLE) BETWEEN -90 AND 90
+                    SELECT h_high, ym, COUNT(*)::UBIGINT AS c
+                    FROM (
+                        SELECT
+                            h3_latlng_to_cell(
+                                CAST({quoted_lat} AS DOUBLE),
+                                CAST({quoted_lon} AS DOUBLE),
+                                {max_res}
+                            ) AS h_high,
+                            {ym} AS ym
+                        FROM read_parquet(
+                            '{self.get_s3_uri()}',
+                            hive_partitioning=true,
+                            union_by_name=true
+                        )
+                        WHERE
+                            {quoted_lon} IS NOT NULL
+                            AND {quoted_lat} IS NOT NULL
+                            AND {quoted_time} IS NOT NULL
+                            AND CAST({quoted_lon} AS DOUBLE) BETWEEN -180 AND 180
+                            AND CAST({quoted_lat} AS DOUBLE) BETWEEN -90 AND 90
+                    )
+                    WHERE h_high IS NOT NULL
                     GROUP BY h_high, ym
-                    HAVING h_high IS NOT NULL
-                ) TO '{self.get_staged_path()}' (FORMAT PARQUET)
+                ) TO '{self.get_staged_path()}' (
+                    FORMAT PARQUET,
+                    COMPRESSION SNAPPY,
+                    ROW_GROUP_SIZE 200000
+                )
             """
         self.pm_client.execute(sql)
         self.logger.info("High-res parquet file complete.")
@@ -91,10 +103,11 @@ class HexbinProcessor(AbstractProcessor):
     def __generate_hex_geojsonseq_file(self, layer: HexLayerSpec, max_res: int) -> str:
         self.pm_client.execute("DROP TABLE IF EXISTS monthly_counts")
 
+        # Staged h_high is UBIGINT; convert to hex only here for tippecanoe/H3 geometry.
         if layer.h3_resolution == max_res:
             sql = f"""
                         CREATE TEMP TABLE monthly_counts AS
-                        SELECT h_high AS h, ym, c
+                        SELECT printf('%x', h_high) AS h, ym, c
                         FROM read_parquet('{self.get_staged_path()}')
                         WHERE h_high IS NOT NULL
                         ORDER BY h, ym
@@ -103,7 +116,7 @@ class HexbinProcessor(AbstractProcessor):
             sql = f"""
                         CREATE TEMP TABLE monthly_counts AS
                         SELECT
-                            printf('%x', h3_cell_to_parent(('0x' || h_high)::UBIGINT, {int(layer.h3_resolution)})) AS h,
+                            printf('%x', h3_cell_to_parent(h_high, {int(layer.h3_resolution)})) AS h,
                             ym,
                             SUM(c)::UBIGINT AS c
                         FROM read_parquet('{self.get_staged_path()}')
@@ -114,6 +127,7 @@ class HexbinProcessor(AbstractProcessor):
                     """
 
         self.pm_client.execute(sql)
+        self.pm_client.log_table_snapshot("monthly_counts", label=layer.name)
 
         monthly_rows = self.pm_client.execute(
             "SELECT COUNT(*) FROM monthly_counts"

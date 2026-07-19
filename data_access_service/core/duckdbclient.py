@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 from threading import Lock
-from typing import Any
+from typing import Any, Iterator
 
 import boto3
 import duckdb
@@ -22,6 +25,11 @@ from tenacity import (
     wait_exponential,
     retry_if_exception_type,
 )
+
+logger = logging.getLogger(__name__)
+
+# How often to emit a progress log line while a long query is running.
+_PROGRESS_LOG_INTERVAL_SECONDS = 30.0
 
 
 class DuckDBClient(ABC):
@@ -68,7 +76,7 @@ class PmTileDuckDBClient(DuckDBClient):
         next_wait_seconds = retry_state.next_action.sleep
         next_wait_minutes = round(next_wait_seconds / 60, 1)
 
-        self.logger.warning(
+        logger.warning(
             f"[Retry Alert] DuckDB S3 read failed on attempt #{attempt_num}.\n"
             f"Error details: {exception_thrown}\n"
             f"Waiting {next_wait_minutes} minute(s) before attempt #{attempt_num + 1}..."
@@ -122,18 +130,22 @@ class PmTileDuckDBClient(DuckDBClient):
 
                     db.execute("INSTALL httpfs; LOAD httpfs;")
                     db.execute("INSTALL h3 FROM community; LOAD h3;")
-                    db.execute("SET enable_progress_bar = true;")
-                    db.execute("SET enable_progress_bar_print = true;")
 
                     PmTileDuckDBClient._global_db_connection = db
 
-        # CRITICAL: Return a thread-safe, independent cursor from the global connection
+        # CRITICAL: Return a thread-safe, independent cursor from the global connection.
+        # Progress-bar settings are LOCAL scope, so they must be set on this cursor
+        # (not the parent connection). Terminal print is off: DuckDB writes \\r bars
+        # to stdout, which never reach uvicorn/app logs. Progress is logged from
+        # execute() via the Python logger instead.
         if self._duckdb_client is None:
             with self._lock:
                 if self._duckdb_client is None:
-                    self._duckdb_client = (
-                        PmTileDuckDBClient._global_db_connection.cursor()
-                    )
+                    cursor = PmTileDuckDBClient._global_db_connection.cursor()
+                    show = bool(self._config.show_progress)
+                    cursor.execute(f"SET enable_progress_bar = {show};")
+                    cursor.execute("SET enable_progress_bar_print = false;")
+                    self._duckdb_client = cursor
         return self._duckdb_client
 
     def close(self):
@@ -179,9 +191,97 @@ class PmTileDuckDBClient(DuckDBClient):
     def execute(
         self, sql: str, params: Sequence[Any] | None = None
     ) -> duckdb.DuckDBPyConnection:
-        if params is None:
-            return self._con.execute(sql)
-        return self._con.execute(sql, params)
+        if not self._config.show_progress:
+            if params is None:
+                return self._con.execute(sql)
+            return self._con.execute(sql, params)
+        with self._progress_logger(sql):
+            if params is None:
+                return self._con.execute(sql)
+            return self._con.execute(sql, params)
+
+    @contextmanager
+    def _progress_logger(self, sql: str) -> Iterator[None]:
+        """Periodically log DuckDB query progress while ``sql`` runs.
+
+        Uses :meth:`duckdb.DuckDBPyConnection.query_progress` on a background
+        thread so long ``COPY`` / aggregation queries emit heartbeat lines into
+        the app logger (visible under uvicorn) instead of silent multi-hour waits.
+        """
+        stop = threading.Event()
+        started = time.monotonic()
+        sql_preview = " ".join(sql.split())[:120]
+        connection = self._con
+
+        def _poll() -> None:
+            while not stop.wait(_PROGRESS_LOG_INTERVAL_SECONDS):
+                elapsed = time.monotonic() - started
+                try:
+                    pct = connection.query_progress()
+                except Exception:
+                    pct = -1.0
+                if pct is not None and pct >= 0:
+                    logger.info(
+                        "DuckDB query progress: %.1f%% (%.0fs elapsed) — %s",
+                        pct,
+                        elapsed,
+                        sql_preview,
+                    )
+                else:
+                    logger.info(
+                        "DuckDB query still running (%.0fs elapsed) — %s",
+                        elapsed,
+                        sql_preview,
+                    )
+
+        poller = threading.Thread(target=_poll, name="duckdb-progress", daemon=True)
+        poller.start()
+        logger.info("DuckDB query started — %s", sql_preview)
+        try:
+            yield
+        finally:
+            stop.set()
+            poller.join(timeout=1.0)
+            logger.info(
+                "DuckDB query finished (%.1fs) — %s",
+                time.monotonic() - started,
+                sql_preview,
+            )
+
+    def log_table_snapshot(
+        self,
+        table: str,
+        *,
+        label: str | None = None,
+        sample_rows: int = 5,
+    ) -> None:
+        """Log row count and a small sample of ``table`` (debug/visibility).
+
+        Safe for TEMP/catalog tables after they exist. Does not stream a live
+        ``COPY``; pair with :meth:`_progress_logger` for in-flight queries.
+        """
+        tag = label or table
+        try:
+            quoted = self.quote_identifier(table)
+            count = self._con.execute(f"SELECT COUNT(*) FROM {quoted}").fetchone()[0]
+            sample_cursor = self._con.execute(
+                f"SELECT * FROM {quoted} LIMIT {int(sample_rows)}"
+            )
+            columns = (
+                [d[0] for d in sample_cursor.description]
+                if sample_cursor.description
+                else []
+            )
+            sample = sample_cursor.fetchall()
+            logger.info(
+                "DuckDB table %s: %s rows; columns=%s; sample=%s",
+                tag,
+                f"{count:,}",
+                columns,
+                sample,
+            )
+        except Exception as exc:
+            logger.warning("DuckDB table snapshot failed for %s: %s", tag, exc)
 
     def detect_time_type(
         self,
