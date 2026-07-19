@@ -1,5 +1,10 @@
 import sys
 
+import pandas as pd
+
+# The Unix epoch; earliest timestamp the service works with
+UNIX_EPOCH_UTC: pd.Timestamp = pd.Timestamp("1970-01-01 00:00:00.000000000", tz="UTC")
+
 COORDINATE_INDEX_PRECISION = 1
 DEPTH_INDEX_PRECISION = -1
 RECORD_PER_PARTITION: int = 1000

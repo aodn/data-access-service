@@ -1,7 +1,7 @@
 import logging
 import pandas
 from datetime import datetime
-from data_access_service.models.subset_request import NON_SPECIFIED_DATE
+from data_access_service.models.subset_request import NON_SPECIFIED
 from data_access_service.utils.email_templates.subsetting_geometry import (
     split_bboxes_and_polygons,
 )
@@ -30,16 +30,14 @@ def _to_display_date(value):
 def form_subsetting_divs(start_date, end_date, multi_polygon):
     """Form subsetting section with time range, bounding boxes and polygons"""
 
-    # Hide if dates are NON_SPECIFIED_DATE or match default values (1970-01-01 to today)
+    # Hide if dates are NON_SPECIFIED or match default values (1970-01-01 to today)
     has_dates = False
     if start_date and end_date:
         start_str = str(start_date).lower()
         end_str = str(end_date).lower()
 
-        # Check if not NON_SPECIFIED_DATE and not default values
-        is_non_specified = (
-            start_str == NON_SPECIFIED_DATE or end_str == NON_SPECIFIED_DATE
-        )
+        # Check if not NON_SPECIFIED and not default values
+        is_non_specified = start_str == NON_SPECIFIED or end_str == NON_SPECIFIED
         is_default = (
             start_str == "1970-01-01"
             and end_str == pandas.Timestamp.today().strftime("%Y-%m-%d").lower()

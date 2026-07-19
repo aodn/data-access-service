@@ -5,9 +5,9 @@ import pandas as pd
 
 from data_access_service.models.bounding_box import BoundingBox
 
-
-# Marker value for start_date / end_date when the user did not pick one.
-NON_SPECIFIED_DATE = "non-specified"
+# Marker value for a field the user did not provide (start date,
+# end date, multi_polygon)
+NON_SPECIFIED = "non-specified"
 SUPPORTED_OUTPUT_FORMATS = frozenset({"netcdf", "geotiff", "csv"})
 
 
@@ -24,8 +24,8 @@ class SubsetRequest:
     keys: list[str]  # file names within the dataset; ["*"] means "all files"
 
     # --- time window ---
-    start_date: str  # "YYYY-MM-DD" / "MM-YYYY" / NON_SPECIFIED_DATE to use default
-    end_date: str  # same formats; NON_SPECIFIED_DATE to use default
+    start_date: str  # "YYYY-MM-DD" / "MM-YYYY" / NON_SPECIFIED to use default
+    end_date: str  # same formats; NON_SPECIFIED to use default
 
     # --- where to send the result ---
     recipient: str  # email address
@@ -76,12 +76,12 @@ class SubsetRequest:
     def _parse_date_or_default(
         value: str, *, field_name: str
     ) -> Optional[pd.Timestamp]:
-        if value == NON_SPECIFIED_DATE:
+        if value == NON_SPECIFIED:
             return None
         try:
             return pd.Timestamp(value)
         except (ValueError, TypeError) as exc:
             raise ValueError(
                 f"{field_name} must be a parseable date or "
-                f"{NON_SPECIFIED_DATE!r}, got {value!r}"
+                f"{NON_SPECIFIED!r}, got {value!r}"
             ) from exc
