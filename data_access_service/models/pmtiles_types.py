@@ -14,6 +14,7 @@ class PmtilesGenerationConfig:
     bucket_name: str
     threads: int
     fetch_size: int
+    show_progress: bool
 
 
 @dataclass(frozen=True)
