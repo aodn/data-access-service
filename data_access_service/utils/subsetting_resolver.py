@@ -1,14 +1,8 @@
 """Shared "apply the user's subset" behaviour.
 
-Every consumer of a subset request (batch/subsetting/subsetting_main.py,
-batch/subsetting/tasks/subset_zarr.py) must interpret it the same way: which
+Every consumer of a subset request must interpret it the same way: which
 keys, which date range, which area. This module is the single owner of that
 interpretation, so the consumers cannot drift apart.
-
-The functions take ``api`` as a duck-typed parameter (anything providing
-get_mapped_meta_data / get_temporal_extent / normalize_to_0_360_if_needed)
-instead of importing core.api, so this module sits below core.api in the
-dependency graph and can be imported from anywhere.
 """
 
 import json
@@ -21,10 +15,6 @@ from data_access_service.core.constants import UNIX_EPOCH_UTC
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.models.subset_request import NON_SPECIFIED, SubsetRequest
 from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
-
-
-# Used when a caller needs an explicit bbox but the user gave no spatial filter.
-WHOLE_GLOBE_BBOX = BoundingBox(min_lon=-180, min_lat=-90, max_lon=180, max_lat=90)
 
 
 @dataclass(frozen=True)

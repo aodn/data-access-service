@@ -2,8 +2,12 @@ import sys
 
 import pandas as pd
 
+from data_access_service.models.bounding_box import BoundingBox
+
 # The Unix epoch; earliest timestamp the service works with
 UNIX_EPOCH_UTC: pd.Timestamp = pd.Timestamp("1970-01-01 00:00:00.000000000", tz="UTC")
+
+WHOLE_GLOBE_BBOX = BoundingBox(min_lon=-180, min_lat=-90, max_lon=180, max_lat=90)
 
 COORDINATE_INDEX_PRECISION = 1
 DEPTH_INDEX_PRECISION = -1

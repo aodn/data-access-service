@@ -20,10 +20,10 @@ from data_access_service.core.constants import (
     STR_TIME_UPPER_CASE,
     STR_LATITUDE_UPPER_CASE,
     STR_LONGITUDE_UPPER_CASE,
+    WHOLE_GLOBE_BBOX,
 )
 from data_access_service.utils.subsetting_resolver import (
     ResolvedSubset,
-    WHOLE_GLOBE_BBOX,
     resolve_subset,
 )
 from data_access_service.utils.date_time_utils import to_naive_utc
@@ -448,11 +448,6 @@ class ZarrProcessor:
             uuid=self.uuid, key=key, columns=[STR_LONGITUDE_UPPER_CASE]
         )[0]
 
-        # NOTE: lons are used as requested, with no [0, 360] convention shift.
-        # get_dataset (the web path) shifts via normalize_to_0_360_if_needed,
-        # but that heuristic keys off valid_min/max attrs and breaks datasets
-        # like GHRSST RAMSSA whose attrs claim 0-360 while the data sits in
-        # 60-190.
         return {
             time_dim: [
                 to_naive_utc(self.start_date),

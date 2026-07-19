@@ -5,8 +5,8 @@ import pandas as pd
 import pytest
 from unittest.mock import MagicMock
 
+from data_access_service.core.constants import WHOLE_GLOBE_BBOX
 from data_access_service.utils.subsetting_resolver import (
-    WHOLE_GLOBE_BBOX,
     resolve_bboxes,
     resolve_date_range,
     resolve_subset,
