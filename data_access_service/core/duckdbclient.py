@@ -12,6 +12,7 @@ from typing import Any, Iterator
 
 import boto3
 import duckdb
+import logging
 
 from data_access_service.models.pmtiles_types import (
     ParquetsGenerationConfig,
@@ -81,7 +82,7 @@ class PmTileDuckDBClient(DuckDBClient):
 
     def __init__(self):
         self._config: PmtilesGenerationConfig = Config.get_config().get_pmtiles_config()
-        self._logger = Config.get_config().get_logger()
+        self._logger = logging.getLogger(__name__)
         self._duckdb_client = None
         self._con = self.get_instance()
         self._lock = Lock()
