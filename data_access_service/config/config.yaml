@@ -46,6 +46,8 @@ pmtiles:
     fetch_size: 50000
     # Periodic DuckDB query progress logs (via query_progress + Python logger)
     show_progress: True
+    # Temporal bucket for hexbin counts: "month" (YYYYMM) or "date" (YYYYMMDD).
+    time_group_by: month
   layers:
     hex_z0:
       h3_resolution: 2

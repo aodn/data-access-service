@@ -296,21 +296,28 @@ class PmTileDuckDBClient(DuckDBClient):
         return '"' + name.replace('"', '""') + '"'
 
     @staticmethod
-    def build_ym_expression(time_col: str, time_type: str) -> str:
+    def _timestamp_sql(time_col: str, time_type: str) -> str:
         col = PmTileDuckDBClient.quote_identifier(time_col)
 
         if time_type == "timestamp":
-            ts = f"CAST({col} AS TIMESTAMP)"
-        elif time_type == "epoch_ms":
-            ts = f"to_timestamp(CAST({col} AS DOUBLE) / 1000.0)"
-        elif time_type == "epoch_s":
-            ts = f"to_timestamp(CAST({col} AS DOUBLE))"
-        else:
-            raise ValueError(
-                f"Unsupported time_type={time_type!r}. Expected one of: 'timestamp', 'epoch_ms', 'epoch_s'."
-            )
+            return f"CAST({col} AS TIMESTAMP)"
+        if time_type == "epoch_ms":
+            return f"to_timestamp(CAST({col} AS DOUBLE) / 1000.0)"
+        if time_type == "epoch_s":
+            return f"to_timestamp(CAST({col} AS DOUBLE))"
+        raise ValueError(
+            f"Unsupported time_type={time_type!r}. Expected one of: 'timestamp', 'epoch_ms', 'epoch_s'."
+        )
 
+    @staticmethod
+    def build_ym_expression(time_col: str, time_type: str) -> str:
+        ts = PmTileDuckDBClient._timestamp_sql(time_col, time_type)
         return f"CAST(strftime({ts}, '%Y%m') AS INTEGER)"
+
+    @staticmethod
+    def build_date_key_expression(time_col: str, time_type: str) -> str:
+        ts = PmTileDuckDBClient._timestamp_sql(time_col, time_type)
+        return f"CAST(strftime({ts}, '%Y%m%d') AS INTEGER)"
 
 
 class ParquetDuckDBClient(DuckDBClient):

@@ -12,3 +12,4 @@ aws:
 pmtiles:
   config:
     bucket_name: aodnportal-dev-data
+    threads: 12
