@@ -4,9 +4,11 @@ import shutil
 import tempfile
 from dataclasses import replace
 from pathlib import Path
+from typing import Dict, Tuple
 from unittest.mock import patch
 
 import gzip
+import h3
 import pandas
 import pytest
 from aodn_cloud_optimised.lib import DataQuery
@@ -21,13 +23,44 @@ from tests.core.test_with_s3 import TestWithS3, REGION
 
 ANIMAL_ACOUSTIC_UUID = "541d4f15-122a-443d-ab4e-2b5feb08d6a0"
 ANIMAL_ACOUSTIC_DNAME = "animal_acoustic_tracking_delayed_qc.parquet"
+ANIMAL_ACOUSTIC_CANNED_DIR = (
+    Path(__file__).parent.parent.parent.parent
+    / "canned"
+    / "s3_sample2"
+    / ANIMAL_ACOUSTIC_DNAME
+)
+# Max H3 resolution used by hex layers in config.yaml (hex_z10).
+HEX_MAX_RES = 8
+# Mapped TIME column for animal_acoustic_tracking_delayed_qc.
+TIME_COL = "detection_timestamp"
+LON_COL = "longitude"
+LAT_COL = "latitude"
 
-# Expected (h_high, YYYYMMDD) -> count for animal_acoustic in s3_sample2
-# (max H3 res 8). Source: 22 detections — 20 on 2012-11-07, 2 on 2014-07-01.
-EXPECTED_STAGED_DATE_AGGREGATES = {
-    ("88be8d9819fffff", 20121107): 20,
-    ("88be0e373dfffff", 20140701): 2,
-}
+
+def _expected_staged_aggregates_from_input(
+    period: str,
+) -> Dict[Tuple[str, int], int]:
+    """
+    Independently aggregate the canned input parquet the same way staging does:
+    H3 cell at max res + year-month (YYYYMM) or full date (YYYYMMDD) key.
+    """
+    if period not in ("month", "date"):
+        raise ValueError(f"period must be 'month' or 'date', got {period!r}")
+
+    df = pandas.read_parquet(ANIMAL_ACOUSTIC_CANNED_DIR)
+    ts = pandas.to_datetime(df[TIME_COL], utc=False)
+    fmt = "%Y%m" if period == "month" else "%Y%m%d"
+    period_key = ts.dt.strftime(fmt).astype(int)
+    cells = [
+        h3.latlng_to_cell(float(lat), float(lon), HEX_MAX_RES)
+        for lat, lon in zip(df[LAT_COL], df[LON_COL])
+    ]
+    grouped = (
+        pandas.DataFrame({"h_high": cells, "period": period_key})
+        .groupby(["h_high", "period"], sort=False)
+        .size()
+    )
+    return {(str(h), int(p)): int(c) for (h, p), c in grouped.items()}
 
 
 class TestHexbinProcessor(TestWithS3):
@@ -67,7 +100,7 @@ class TestHexbinProcessor(TestWithS3):
         return hex_processor
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    def test_hexbin_processor(
+    def test_hexbin_processor_by_month(
         self,
         aws_clients,
         upload_test_case_to_s3,
@@ -107,6 +140,25 @@ class TestHexbinProcessor(TestWithS3):
                         "c",
                     ], "df columns are not correct"
                     assert df[["h_high", "ym"]].duplicated().sum() == 0
+                    assert (
+                        (df["ym"] >= 100001) & (df["ym"] <= 999912)
+                    ).all(), "ym values should be YYYYMM integers"
+
+                    # Staging (h_high, ym, c) must match independent aggregation
+                    # of the canned input parquet (detection_timestamp -> YYYYMM).
+                    expected_month = _expected_staged_aggregates_from_input("month")
+                    actual_month = {
+                        (str(row.h_high), int(row.ym)): int(row.c)
+                        for row in df.itertuples(index=False)
+                    }
+                    assert actual_month == expected_month, (
+                        f"staged (h_high, ym) counts do not match input parquet.\n"
+                        f"expected={expected_month}\n"
+                        f"actual={actual_month}"
+                    )
+                    assert sum(actual_month.values()) == len(
+                        pandas.read_parquet(ANIMAL_ACOUSTIC_CANNED_DIR)
+                    )
 
                     geojsonseq_paths = hex_processor.generate_geojsonseq_files()
 
@@ -201,16 +253,21 @@ class TestHexbinProcessor(TestWithS3):
                     assert list(df.columns) == ["h_high", "d", "c"]
                     assert ((df["d"] >= 10000101) & (df["d"] <= 99991231)).all()
 
+                    # Staging (h_high, d, c) must match independent aggregation
+                    # of the canned input parquet (detection_timestamp -> YYYYMMDD).
+                    expected_date = _expected_staged_aggregates_from_input("date")
                     actual = {
                         (str(row.h_high), int(row.d)): int(row.c)
                         for row in df.itertuples(index=False)
                     }
-                    assert actual == EXPECTED_STAGED_DATE_AGGREGATES, (
-                        f"staged (h_high, d) counts mismatch.\n"
-                        f"expected={EXPECTED_STAGED_DATE_AGGREGATES}\n"
+                    assert actual == expected_date, (
+                        f"staged (h_high, d) counts do not match input parquet.\n"
+                        f"expected={expected_date}\n"
                         f"actual={actual}"
                     )
-                    assert sum(actual.values()) == 22
+                    assert sum(actual.values()) == len(
+                        pandas.read_parquet(ANIMAL_ACOUSTIC_CANNED_DIR)
+                    )
 
                     geojsonseq_paths = hex_processor.generate_geojsonseq_files()
                     high_res_path = next(
@@ -231,7 +288,7 @@ class TestHexbinProcessor(TestWithS3):
                             }
 
                     expected_by_cell = {}
-                    for (h_high, d), c in EXPECTED_STAGED_DATE_AGGREGATES.items():
+                    for (h_high, d), c in expected_date.items():
                         expected_by_cell.setdefault(h_high, {})[d] = c
 
                     assert date_counts_by_cell == expected_by_cell, (
