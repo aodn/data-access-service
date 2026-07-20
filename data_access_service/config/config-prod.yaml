@@ -12,3 +12,4 @@ aws:
 pmtiles:
   config:
     bucket_name: aodnportal-production-data
+    show_progress: False
