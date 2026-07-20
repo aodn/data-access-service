@@ -32,12 +32,12 @@ from aodn_cloud_optimised.lib import DataQuery
 
 from data_access_service import Config, API
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.tasks.subset_zarr import ZarrProcessor
+from data_access_service.batch.subsetting.tasks.subset_zarr import ZarrProcessor
 from tests.core.test_with_s3 import TestWithS3, REGION
 
 # A real-valued store from s3_sample2 (SST analysis, lowercase lat/lon/time coords,
 # two days). Clipped to a small open-ocean box so the export is tiny but non-NaN.
-SAMPLES = Path(__file__).parent.parent / "canned/s3_sample2"
+SAMPLES = Path(__file__).parent.parent.parent.parent / "canned/s3_sample2"
 KEY = "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
 UUID = "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
 REQUESTED_DATE = "2011-11-17"

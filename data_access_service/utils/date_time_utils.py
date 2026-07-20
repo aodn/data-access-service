@@ -30,6 +30,7 @@ from data_access_service.core.constants import (
     MAX_PARQUET_SPLIT,
     STR_TIME_UPPER_CASE,
 )
+from data_access_service.models.subset_request import NON_SPECIFIED
 
 YEAR_MONTH_DAY = "%Y-%m-%d"
 YEAR_MONTH_DAY_TIME_NANO = "%Y-%m-%d %H:%M:%S.fffffffff"
@@ -93,19 +94,36 @@ def parse_date(
         return ts.tz_localize(time_zone)
 
 
-def get_final_day_of_month_(date: pd.Timestamp) -> pd.Timestamp:
-    if date.tz is None:
-        date = date.tz_localize(pytz.UTC)
+def start_of_day_nano(ts: pd.Timestamp) -> pd.Timestamp:
+    """Floor a timestamp to the first nanosecond of its day (00:00:00.000000000)."""
+    return ts.replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+        # pyrefly: ignore [unexpected-keyword]
+        nanosecond=0,
+    )
 
-    last_day = date + pd.offsets.MonthEnd(0)
-    # Replace do not set nano sec correctly
-    last_day = last_day.replace(
+
+def end_of_day_nano(ts: pd.Timestamp) -> pd.Timestamp:
+    """Ceil a timestamp to the final nanosecond of its day (23:59:59.999999999)."""
+    # a coarser-resolution timestamp (e.g. "us") silently drops the
+    # nanosecond=999 in replace(), so force nanosecond resolution first
+    return ts.as_unit("ns").replace(
         hour=23,
         minute=59,
         second=59,
         microsecond=999999,
+        # pyrefly: ignore [unexpected-keyword]
+        nanosecond=999,
     )
-    return last_day + pd.offsets.Nano(999)
+
+
+def get_final_day_of_month_(date: pd.Timestamp) -> pd.Timestamp:
+    if date.tz is None:
+        date = date.tz_localize(pytz.UTC)
+    return end_of_day_nano(date + pd.offsets.MonthEnd(0))
 
 
 def get_first_day_of_month(date: pd.Timestamp) -> pd.Timestamp:
@@ -302,6 +320,17 @@ def ensure_timezone(dt: pd.Timestamp) -> pd.Timestamp:
     if dt.tz is None:
         return dt.tz_localize(pytz.UTC)
     return dt
+
+
+def to_naive_utc(ts: pd.Timestamp | None) -> pd.Timestamp | None:
+    """Convert a timestamp to naive UTC for slicing the zarr time coordinate,
+    which cannot be compared against timezone-aware values. None passes
+    through so an open slice stays open."""
+    if ts is None:
+        return None
+    if ts.tz is not None:
+        ts = ts.tz_convert("UTC").tz_localize(None)
+    return ts
 
 
 def split_date_range_binary(
@@ -538,6 +567,18 @@ def split_yearmonths_into_dict(yearmonths, chunk_size: int):
     return result
 
 
+def resolve_non_specified_dates(start_date: str, end_date: str) -> Tuple[str, str]:
+    """
+    Resolve non-specified start and end dates to default values.
+    defaults: 1970-01-01 for an open start and today for an open end.
+    """
+    if start_date == NON_SPECIFIED:
+        start_date = "1970-01-01"
+    if end_date == NON_SPECIFIED:
+        end_date = pd.Timestamp.today().strftime("%Y-%m-%d")
+    return start_date, end_date
+
+
 def supply_day_with_nano_precision(
     start_date_str: str, end_date_str: str
 ) -> Tuple[pd.Timestamp, pd.Timestamp]:
@@ -555,17 +596,13 @@ def supply_day_with_nano_precision(
     if (not re.match(pattern, start_date_str)) or (not re.match(pattern, end_date_str)):
         # currently, if no date ranges selected in frontend, the start_date & end_date will be in this format: "yyyy-MM-dd",
         # so for this case, we don't need to supply the day
-        return parse_date(start_date_str), parse_date(end_date_str).replace(
-            hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
-        )
+        return parse_date(start_date_str), end_of_day_nano(parse_date(end_date_str))
 
     start_date = parse_date(start_date_str, format_to_convert="%m-%Y")
     end_date = parse_date(end_date_str, format_to_convert="%m-%Y")
 
     start_date = get_first_day_of_month(start_date)
-    end_date = get_final_day_of_month_(end_date).replace(
-        hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
-    )
+    end_date = end_of_day_nano(get_final_day_of_month_(end_date))
 
     return start_date, end_date
 

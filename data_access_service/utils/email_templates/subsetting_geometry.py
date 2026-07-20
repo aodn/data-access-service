@@ -11,6 +11,7 @@ from typing import List, Tuple, Union
 from geojson import MultiPolygon
 
 from data_access_service.models.bounding_box import BoundingBox
+from data_access_service.models.subset_request import NON_SPECIFIED
 from data_access_service.utils.multi_polygon_helper import get_bbox_from
 
 # A rectangle bounding box has 4 corners; a ring with more unique vertices
@@ -51,7 +52,7 @@ def split_bboxes_and_polygons(
     polygons: List[list] = []
 
     # No area selected -> nothing spatial to render.
-    if multi_polygon is None or multi_polygon == "non-specified":
+    if multi_polygon is None or multi_polygon == NON_SPECIFIED:
         return bboxes, polygons
 
     if isinstance(multi_polygon, str):

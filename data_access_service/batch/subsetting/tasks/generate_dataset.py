@@ -22,8 +22,8 @@ from data_access_service import API, init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.constants import PARTITION_KEY, STR_TIME_UPPER_CASE
 from data_access_service.core.descriptor import Descriptor
-from data_access_service.models.subset_request import SubsetRequest
-from data_access_service.tasks.data_file_upload import (
+from data_access_service.models.subset_request import NON_SPECIFIED, SubsetRequest
+from data_access_service.batch.subsetting.helpers.data_file_upload import (
     upload_all_files_in_folder_to_temp_s3,
 )
 from data_access_service.utils.date_time_utils import (
@@ -52,7 +52,7 @@ def process_data_files(
     multi_polygon = subset_request.multi_polygon
 
     if multi_polygon is not None:
-        if multi_polygon == "non-specified":
+        if multi_polygon == NON_SPECIFIED:
             #    multi polygon dict is whole earth
             multi_polygon = '{"type":"MultiPolygon","coordinates":[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}'
         multi_polygon_dict = geojson.loads(multi_polygon)
