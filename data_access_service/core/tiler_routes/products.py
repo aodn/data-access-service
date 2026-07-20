@@ -1,33 +1,32 @@
-import hashlib
+import json
 import math
 
 import xarray as xr
-from fastapi import APIRouter, Header, HTTPException, Path, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response
 from fastapi.openapi.models import Example
-from fastapi.responses import JSONResponse
 
-from data_access_service.config.tiler.constants import CACHE_VERSION
+from data_access_service.config.tiler.http_cache import (
+    CACHE_VERSION,
+    IMMUTABLE_CACHE_HEADERS,
+    compute_etag,
+    etag_response,
+    require_cache_version,
+)
 from data_access_service.tiler.schemas.products import (
     ManifestResponse,
     PointResponse,
     ProductConfig,
-    ProductInspection,
     VariableValue,
 )
-from data_access_service.tiler.services.product.inspect import inspect_product
 from data_access_service.tiler.services.product.registry import (
     iter_product_items,
     list_products,
 )
-from data_access_service.tiler.services.store.registry import (
-    get_available_dates,
-    get_store,
-)
+from data_access_service.tiler.services.store.registry import get_available_dates
 from data_access_service.tiler.utils.geo import dataset_bounds
 
 from .shared import (
     DATE_EX,
-    IMMUTABLE_CACHE_HEADERS,
     PRODUCT_EX,
     get_product_or_404,
     load_slice_or_404,
@@ -35,14 +34,6 @@ from .shared import (
 )
 
 router = APIRouter()
-
-# Manifest responses are revalidated via ETag (If-None-Match → 304 when unchanged), with a
-# 5-minute freshness window so CloudFront can absorb concurrent reads from multiple users
-# without each one round-tripping to origin. Therefore, this endpoint need to be cached in CloudFront
-# with "must-revalidate" to ensure clients re-check with the origin at least every 5 minutes.
-# Trade-off: a manifest change can be invisible for up to 5 minutes; acceptable because product/date
-# updates are not real-time-critical.
-_REVALIDATE_HEADERS = {"Cache-Control": "public, max-age=300, must-revalidate"}
 
 
 def _require_point_in_bounds(ds: xr.Dataset, lat: float, lon: float) -> None:
@@ -63,26 +54,19 @@ def _require_point_in_bounds(ds: xr.Dataset, lat: float, lon: float) -> None:
         )
 
 
-def _etag(fingerprint: str) -> str:
-    digest = hashlib.sha1(fingerprint.encode(), usedforsecurity=False).hexdigest()[:16]
-    return f'W/"{digest}"'
-
-
-def _etag_response(body: object, etag: str, if_none_match: str | None) -> Response:
-    headers = {**_REVALIDATE_HEADERS, "ETag": etag}
-    if if_none_match == etag:
-        return Response(status_code=304, headers=headers)
-    return JSONResponse(content=body, headers=headers)
-
-
 @router.get(
     "/products",
     summary="List products",
-    response_model=list[ProductConfig],
-    response_model_exclude_none=True,
+    responses={
+        200: {"model": list[ProductConfig]},
+        304: {"description": "Not Modified — ETag matched, response body is empty"},
+    },
 )
-async def get_products():
-    return [ProductConfig(**p) for p in list_products()]
+async def get_products(if_none_match: str | None = Header(None, alias="if-none-match")):
+    raw = list_products()
+    etag = compute_etag(json.dumps(raw, sort_keys=True, default=str))
+    body = [ProductConfig(**p).model_dump(exclude_none=True) for p in raw]
+    return etag_response(body, etag, if_none_match)
 
 
 @router.get(
@@ -145,36 +129,10 @@ def get_products_availability(
             f"{product_id}:{len(dates)}:{dates[-1] if dates else ''}"
         )
 
-    etag = _etag("|".join(fingerprint_parts))
-    return _etag_response(
+    etag = compute_etag("|".join(fingerprint_parts))
+    return etag_response(
         {"products": products, "cache_version": CACHE_VERSION}, etag, if_none_match
     )
-
-
-@router.get(
-    "/{product_id}/inspect",
-    summary="Inspect product",
-    description=(
-        "Returns the product's underlying Zarr store metadata: dimension sizes, and "
-        "per-variable dtype, shape, native chunk shape, and attributes — plus the "
-        "dataset's global attributes. Useful for debugging and client introspection."
-    ),
-    response_model=ProductInspection,
-)
-def inspect(
-    response: Response,
-    product_id: str = Path(openapi_examples=PRODUCT_EX),
-):
-    product = get_product_or_404(product_id)
-    try:
-        ds = get_store(product.source_path)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    # Revalidate (not immutable): the store grows as new dates land, so dimension
-    # sizes change over time. Mirror /manifest's freshness window — see
-    # _REVALIDATE_HEADERS — rather than freezing the first response forever.
-    response.headers.update(_REVALIDATE_HEADERS)
-    return ProductInspection(**inspect_product(product, ds))
 
 
 @router.get(
@@ -182,6 +140,7 @@ def inspect(
     summary="Point value lookup",
     description="Returns the value(s) of all product variables at the nearest grid cell to the given lat/lon.",
     response_model=PointResponse,
+    dependencies=[Depends(require_cache_version)],
 )
 def get_point(
     response: Response,

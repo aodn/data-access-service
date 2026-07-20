@@ -1,12 +1,19 @@
 import asyncio
 import functools
+import json
 
 import anyio
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 from fastapi.openapi.models import Example
 from fastapi.responses import Response
 
 from data_access_service.config.config import Config
+from data_access_service.config.tiler.http_cache import (
+    IMMUTABLE_CACHE_HEADERS,
+    compute_etag,
+    etag_response,
+    require_cache_version,
+)
 from data_access_service.tiler.schemas.visual_tiles import ColormapListResponse
 from data_access_service.tiler.services.caching.deduper import Deduper
 from data_access_service.tiler.services.colormap.legend import render_legend
@@ -35,7 +42,6 @@ from data_access_service.tiler.utils.image import (
 from .products import router as products_router
 from .shared import (
     DATE_EX,
-    IMMUTABLE_CACHE_HEADERS,
     PRODUCT_EX,
     get_product_or_404,
     load_slice_or_404,
@@ -65,10 +71,15 @@ _bbox_dedup = Deduper()
 @router.get(
     "/colormaps",
     summary="List available colormaps",
-    response_model=ColormapListResponse,
+    responses={
+        200: {"model": ColormapListResponse},
+        304: {"description": "Not Modified — ETag matched, response body is empty"},
+    },
 )
-async def get_colormaps():
-    return ColormapListResponse(**list_colormaps())
+async def get_colormaps(if_none_match: str | None = Header(None, alias="if-none-match")):
+    data = list_colormaps()
+    etag = compute_etag(json.dumps(data, sort_keys=True))
+    return etag_response(data, etag, if_none_match)
 
 
 @router.get(
@@ -81,6 +92,7 @@ async def get_colormaps():
         "Without rescale, only the color bar is rendered (no labels). "
         "Categorical colormaps render discrete equal-width color blocks instead of a smooth gradient."
     ),
+    dependencies=[Depends(require_cache_version)],
 )
 def get_legend(
     name: str,
@@ -119,6 +131,7 @@ def get_legend(
         "Tiles outside the product extent return transparent images. "
         "WebP is rejected for categorical colormaps because lossy compression corrupts the discrete colour boundaries."
     ),
+    dependencies=[Depends(require_cache_version)],
 )
 def get_tile(
     product_id: str = Path(openapi_examples=PRODUCT_EX),
@@ -261,6 +274,7 @@ def _parse_bbox_and_crs(
         "Compatible with Mapbox GL raster sources using the {bbox-epsg-3857} placeholder (pass crs=EPSG:3857). "
         "WebP is rejected for categorical colormaps because lossy compression corrupts the discrete colour boundaries."
     ),
+    dependencies=[Depends(require_cache_version)],
 )
 def get_bbox(
     product_id: str = Path(openapi_examples=PRODUCT_EX),
@@ -357,9 +371,11 @@ def get_bbox(
         f"If width and height are both omitted, the frame matches the dataset's native cell count "
         f"inside the bbox (capped at 2048 px per axis). If only one of width/height is given, "
         f"the other is derived from the bbox aspect ratio so the output is not stretched. "
-        f"This endpoint bypasses the in-memory slice cache so it never evicts hot tiles, "
-        f"and the response is not cached. Expect cold requests to be slow."
+        f"This endpoint bypasses the in-memory slice cache so it never evicts hot tiles, so "
+        f"expect cold requests to be slow. Like other tile endpoints the HTTP response itself "
+        f"is cached for a year (immutable, gated on ?cv=) since it's fully determined by the URL."
     ),
+    dependencies=[Depends(require_cache_version)],
 )
 async def get_animation(
     product_id: str = Path(openapi_examples=PRODUCT_EX),
@@ -515,4 +531,8 @@ async def get_animation(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    return Response(content=body, media_type=animated_media_type(ext))
+    return Response(
+        content=body,
+        media_type=animated_media_type(ext),
+        headers=IMMUTABLE_CACHE_HEADERS,
+    )

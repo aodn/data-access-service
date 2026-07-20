@@ -11,7 +11,8 @@ from unittest.mock import patch
 import numpy as np
 import xarray as xr
 
-from data_access_service.config.tiler.constants import CACHE_VERSION, LOD, TILE
+from data_access_service.config.tiler.constants import LOD, TILE
+from data_access_service.config.tiler.http_cache import CACHE_VERSION
 from data_access_service.tiler.services.product.product import Product
 
 
