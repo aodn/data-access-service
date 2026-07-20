@@ -1,21 +1,25 @@
 import json
-from dataclasses import replace
 
-import pandas
-
-from data_access_service import init_log, Config, API
-from data_access_service.batch.batch_enums import Parameters
-from data_access_service.batch.subsetting_helper import (
-    trim_date_range_for_keys,
+from data_access_service import config, init_log, Config, API
+from data_access_service.batch.subsetting.enums import Parameters
+from data_access_service.batch.subsetting.helpers.request_helper import (
     get_subset_request,
 )
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.models.subset_request import NON_SPECIFIED_DATE, SubsetRequest
-from data_access_service.tasks.data_collection import collect_data_files
-from data_access_service.tasks.generate_dataset import process_data_files
-from data_access_service.tasks.subset_zarr import ZarrProcessor
+from data_access_service.utils.subsetting_resolver import (
+    ResolvedSubset,
+    normalize_request,
+    resolve_subset,
+)
+from data_access_service.models.subset_request import SubsetRequest
+from data_access_service.batch.subsetting.tasks.data_collection import (
+    collect_data_files,
+)
+from data_access_service.batch.subsetting.tasks.generate_dataset import (
+    process_data_files,
+)
+from data_access_service.batch.subsetting.tasks.subset_zarr import ZarrProcessor
 from data_access_service.utils.date_time_utils import (
-    supply_day_with_nano_precision,
     split_date_range,
     parse_date,
 )
@@ -27,59 +31,57 @@ def init(api: API, job_id_of_init, parameters):
     # Must be here, this give change for test to init properly before calling get_config()
     config = Config.get_config()
 
-    month_count_per_job = config.get_month_count_per_job()
-    request = get_subset_request(parameters)
+    # Step 1: Parse the raw parameters to SubsetRequest object
+    parsed_subset_request = get_subset_request(parameters)
 
-    # Users may not specify start date and end date
-    start_date_str = request.start_date
-    end_date_str = request.end_date
-    if start_date_str == NON_SPECIFIED_DATE:
-        start_date_str = "1970-01-01"
-    if end_date_str == NON_SPECIFIED_DATE:
-        end_date_str = pandas.Timestamp.today().strftime("%Y-%m-%d")
-    if start_date_str != request.start_date or end_date_str != request.end_date:
-        request = replace(request, start_date=start_date_str, end_date=end_date_str)
+    # Step 2: Normalize the request which downstream jobs and result emails read these fields:
+    #  1. Expand "*" keys
+    #  2. Resolve "non-specified" dates to defaults
+    subset_request = normalize_request(api, parsed_subset_request)
 
-    requested_start_date, requested_end_date = supply_day_with_nano_precision(
-        start_date_str, end_date_str
-    )
-
-    keys = request.keys
-    if "*" in keys:
-        md = api.get_mapped_meta_data(request.uuid)
-        keys = list(md.keys())
-        request = replace(request, keys=keys)
-
-    # use new zarr sub-setting workflow if all keys are zarr. It it works well, then deprecate old zarr sub-setting workflow
-    if all(key.endswith(".zarr") for key in keys):
-        subset_zarr(api, job_id_of_init, request)
-        return
-
-    requested_start_date, requested_end_date = trim_date_range_for_keys(
+    # Step 3: Resolve the normalized request into what will actually be
+    # executed:
+    #  1. Trim the date range to the dataset's temporal extent
+    #  2. Parse the GeoJSON multi_polygon into bboxes
+    resolved_subset = resolve_subset(
         api=api,
-        uuid=request.uuid,
-        keys=request.keys,
-        requested_start_date=requested_start_date,
-        requested_end_date=requested_end_date,
+        uuid=subset_request.uuid,
+        keys=subset_request.keys,
+        start_date_str=subset_request.start_date,
+        end_date_str=subset_request.end_date,
+        multi_polygon=subset_request.multi_polygon,
     )
-    if requested_start_date is None or requested_end_date is None:
-        # requested date range does not overlap with data available
+
+    # Step 4: If the requested data not available, email the user and stop here.
+    if not resolved_subset.has_data:
         text_body = (
-            f"No data available for your subset request for dataset {request.uuid} "
-            f"with keys {request.keys} "
-            f"and date range from {request.start_date} to {request.end_date}."
-            f"and selected area is {request.multi_polygon}."
+            f"No data available for your subset request for dataset {subset_request.uuid} "
+            f"with keys {subset_request.keys} "
+            f"and date range from {subset_request.start_date} to {subset_request.end_date}."
+            f"and selected area is {subset_request.multi_polygon}."
         )
         AWSHelper().send_email(
-            recipient=request.recipient,
+            recipient=subset_request.recipient,
             subject="No Data Available for Your Subset Request",
             text_body=text_body,
         )
         return
 
+    # Step 5: Process zarr sub-setting workflow
+    # use new zarr sub-setting workflow if all keys are zarr. It it works well, then deprecate old zarr sub-setting workflow
+    if all(key.endswith(".zarr") for key in resolved_subset.keys):
+        subset_zarr(api, job_id_of_init, subset_request, resolved_subset)
+        return
+
+    # Step 6: Process legacy sub-setting workflow, for parquet (or mixed
+    # zarr+parquet)
+    #  1. Split the date range into chunks
+    #  2. Submit the data preparation job
+    #  3. Submit the data collection job
+    month_count_per_job = config.get_month_count_per_job()
     date_ranges = split_date_range(
-        start_date=requested_start_date,
-        end_date=requested_end_date,
+        start_date=resolved_subset.start_date,
+        end_date=resolved_subset.end_date,
         month_count_per_job=month_count_per_job,
     )
 
@@ -167,6 +169,11 @@ def collect_data(parameters):
     collect_data_files(master_job_id=master_job_id, subset_request=request)
 
 
-def subset_zarr(api: API, job_id: str, request: SubsetRequest) -> None:
-    """Run the zarr-only subset pipeline. `request` must have `*` already resolved."""
-    ZarrProcessor(api=api, job_id=job_id, subset_request=request).process()
+def subset_zarr(
+    api: API, job_id: str, request: SubsetRequest, resolved: ResolvedSubset
+) -> None:
+    """Run the zarr-only subset pipeline. `resolved` must have data
+    (the caller sends the "no data" email when it does not)."""
+    ZarrProcessor(
+        api=api, job_id=job_id, subset_request=request, resolved=resolved
+    ).process()

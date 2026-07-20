@@ -7,8 +7,10 @@ from unittest.mock import patch
 from data_access_service.core.AWSHelper import AWSHelper
 from aodn_cloud_optimised.lib import DataQuery
 from data_access_service import Config, API
-from data_access_service.tasks.data_collection import collect_data_files
-from data_access_service.tasks.generate_dataset import (
+from data_access_service.batch.subsetting.tasks.data_collection import (
+    collect_data_files,
+)
+from data_access_service.batch.subsetting.tasks.generate_dataset import (
     process_data_files,
 )
 from tests.batch.batch_test_consts import INIT_JOB_ID
@@ -32,7 +34,7 @@ class TestGenerateZarrFile(TestWithS3):
         TestWithS3.upload_to_s3(
             s3_client,
             DataQuery.BUCKET_OPTIMISED_DEFAULT,
-            Path(__file__).parent.parent / "canned/s3_sample2",
+            Path(__file__).parent.parent.parent.parent / "canned/s3_sample2",
         )
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)

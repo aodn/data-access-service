@@ -13,11 +13,13 @@ from unittest.mock import patch
 from aodn_cloud_optimised.lib import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import Metadata
 from data_access_service import API, init_log
-from data_access_service.batch.batch_enums import Parameters
+from data_access_service.batch.subsetting.enums import Parameters
 from data_access_service.batch.subsetting import prepare_data
 from data_access_service.config.config import Config
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.tasks.data_collection import collect_data_files
+from data_access_service.batch.subsetting.tasks.data_collection import (
+    collect_data_files,
+)
 from data_access_service.utils.date_time_utils import split_date_range
 from tests.batch.batch_test_consts import PREPARATION_PARAMETERS, INIT_JOB_ID
 from tests.core.test_with_s3 import TestWithS3, REGION

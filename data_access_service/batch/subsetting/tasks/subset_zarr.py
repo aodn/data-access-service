@@ -15,16 +15,19 @@ import dask.array as da
 from xarray import DataArray
 
 from data_access_service import init_log, Config, API
-from data_access_service.batch.subsetting_helper import trim_date_range_for_keys
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.constants import (
     STR_TIME_UPPER_CASE,
     STR_LATITUDE_UPPER_CASE,
     STR_LONGITUDE_UPPER_CASE,
+    WHOLE_GLOBE_BBOX,
 )
+from data_access_service.utils.subsetting_resolver import (
+    ResolvedSubset,
+    resolve_subset,
+)
+from data_access_service.utils.date_time_utils import to_naive_utc
 from data_access_service.models.bounding_box import BoundingBox
-from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
-from data_access_service.utils.date_time_utils import supply_day_with_nano_precision
 from data_access_service.utils.email_templates.download_email import (
     get_download_email_html_body,
 )
@@ -39,6 +42,7 @@ class ZarrProcessor:
         api: API,
         job_id: str,
         subset_request: SubsetRequest,
+        resolved: ResolvedSubset | None = None,
     ):
         self.aws = AWSHelper()
         self.api = api
@@ -47,44 +51,28 @@ class ZarrProcessor:
         self.job_id = job_id
         self.subset_request = subset_request
 
-        start_date, end_date = supply_day_with_nano_precision(
-            start_date_str=subset_request.start_date,
-            end_date_str=subset_request.end_date,
-        )
-
-        if "*" in subset_request.keys:
-            md = self.api.get_mapped_meta_data(subset_request.uuid)
-            self.keys = list(md.keys())
-        else:
-            self.keys = subset_request.keys
-
-        trimmed_start_date, trimmed_end_date = trim_date_range_for_keys(
-            api=api,
-            uuid=subset_request.uuid,
-            keys=self.keys,
-            requested_start_date=start_date,
-            requested_end_date=end_date,
-        )
-        if trimmed_start_date is None or trimmed_end_date is None:
-            # requested date range does not overlap with data available
-            text_body = (
-                f"No data available for your subset request for dataset {subset_request.uuid} with keys {self.keys} "
-                f"and date range from {subset_request.start_date} to {subset_request.end_date}."
-                f"and selected area is {subset_request.multi_polygon}."
+        if resolved is None:
+            resolved = resolve_subset(
+                api=api,
+                uuid=subset_request.uuid,
+                keys=subset_request.keys,
+                start_date_str=subset_request.start_date,
+                end_date_str=subset_request.end_date,
+                multi_polygon=subset_request.multi_polygon,
             )
-            AWSHelper().send_email(
-                recipient=subset_request.recipient,
-                subject="No Data Available for Your Subset Request",
-                text_body=text_body,
+        if not resolved.has_data:
+            # The caller (batch init) checks has_data and sends the "no data"
+            # email before constructing a processor; getting here is a bug.
+            raise ValueError(
+                f"Requested date range {subset_request.start_date}..{subset_request.end_date} "
+                f"has no data for dataset {subset_request.uuid}, keys {resolved.keys}"
             )
-            return
 
-        self.start_date = trimmed_start_date
-        self.end_date = trimmed_end_date
-        self.multi_polygon = MultiPolygonHelper(
-            multi_polygon=subset_request.multi_polygon
-        )
-        self.bboxes = self.multi_polygon.bboxes
+        self.keys = resolved.keys
+        self.start_date = resolved.start_date
+        self.end_date = resolved.end_date
+        # empty bboxes means "no spatial filter"; the slicing needs explicit bounds
+        self.bboxes = resolved.bboxes or [WHOLE_GLOBE_BBOX]
 
     # Read-through views onto subset_request — single source of truth, no drift.
     @property
@@ -462,8 +450,8 @@ class ZarrProcessor:
 
         return {
             time_dim: [
-                self.start_date.tz_convert("UTC").tz_localize(None),
-                self.end_date.tz_convert("UTC").tz_localize(None),
+                to_naive_utc(self.start_date),
+                to_naive_utc(self.end_date),
             ],
             lat_dim: [bbox.min_lat, bbox.max_lat],
             lon_dim: [bbox.min_lon, bbox.max_lon],
