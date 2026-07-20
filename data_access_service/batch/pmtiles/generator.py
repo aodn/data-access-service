@@ -66,17 +66,27 @@ def _generate_pmtiles_for_parquets(api: BaseAPI, uuid: str, dname: str) -> bool:
                     work_dir=tempdirname, uuid=uuid, dataset_name=dname, api=api
                 )
                 logger.info("Hexbin Processor has been initialized.")
-                pmtiles_path = hex_processor.process()
+                pmtiles_path, metadata_path = hex_processor.process()
                 # TODO: please use functions like is_local_pmtiles_valid() in pmtiles_util to verify the new generated pmtiles file
                 #  is valid or not before uploading to S3. We don't want to upload an invalid pmtiles file to S3 and cause errors
                 # [Raymond] Is the function is_local_pmtiles_valid() in pmtiles_util.py reliable? Seems not
+                bucket = config.get_pmtiles_config().bucket_name
+                s3_dir = f"portal/visualization/{uuid}"
                 aws.upload_file_to_s3(
                     pmtiles_path,
-                    config.get_pmtiles_config().bucket_name,
-                    f"portal/visualization/{uuid}/{dname}.pmtiles",
+                    bucket,
+                    f"{s3_dir}/{dname}.pmtiles",
                 )
                 logger.info(
                     f"Pmtiles file of dataset {dname}, uuid {uuid} uploaded to S3."
+                )
+                aws.upload_file_to_s3(
+                    metadata_path,
+                    bucket,
+                    f"{s3_dir}/{dname}.metadata",
+                )
+                logger.info(
+                    f"Metadata file of dataset {dname}, uuid {uuid} uploaded to S3."
                 )
     except Exception as e:
         logger.error(f"Pmtiles error processing dataset {uuid}, parquet {dname}: {e}")

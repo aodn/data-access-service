@@ -178,6 +178,26 @@ class TestHexbinProcessor(TestWithS3):
                         total_features == 12
                     ), f"total features should be 12 based on the test data, but got {total_features}"
 
+                    metadata_path = hex_processor.generate_metadata_json()
+                    assert os.path.exists(metadata_path)
+                    assert metadata_path == hex_processor.get_metadata_path()
+                    # Same folder as the pmtiles output, named {dname}.metadata
+                    assert os.path.dirname(metadata_path) == os.path.dirname(
+                        hex_processor.get_output_pmtiles_path()
+                    )
+                    assert (
+                        os.path.basename(metadata_path)
+                        == f"{ANIMAL_ACOUSTIC_DNAME}.metadata"
+                    )
+                    with open(metadata_path, encoding="utf-8") as f:
+                        metadata = json.load(f)
+                    period_keys = [p for (_, p) in expected_month.keys()]
+                    assert metadata == {
+                        "min_date": min(period_keys),
+                        "max_date": max(period_keys),
+                        "time_group_by": "month",
+                    }
+
                     hex_processor._remove_staged_parquet()
                     assert not os.path.exists(
                         staged_parquet_path
@@ -296,6 +316,21 @@ class TestHexbinProcessor(TestWithS3):
                         f"expected={expected_by_cell}\n"
                         f"actual={date_counts_by_cell}"
                     )
+
+                    metadata_path = hex_processor.generate_metadata_json()
+                    assert os.path.exists(metadata_path)
+                    assert (
+                        os.path.basename(metadata_path)
+                        == f"{ANIMAL_ACOUSTIC_DNAME}.metadata"
+                    )
+                    with open(metadata_path, encoding="utf-8") as f:
+                        metadata = json.load(f)
+                    period_keys = [p for (_, p) in expected_date.keys()]
+                    assert metadata == {
+                        "min_date": min(period_keys),
+                        "max_date": max(period_keys),
+                        "time_group_by": "date",
+                    }
                 finally:
                     shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
 
