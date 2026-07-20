@@ -13,5 +13,3 @@ pmtiles:
   config:
     bucket_name: aodnportal-dev-data
     threads: 12
-    # Temporal bucket for hexbin counts: "month" (YYYYMM) or "date" (YYYYMMDD).
-    time_group_by: date
