@@ -1,7 +1,7 @@
 import gzip
 import json
 import os
-from typing import Sequence, List, Optional, Dict
+from typing import Sequence, List, Optional, Dict, Tuple
 
 from data_access_service.batch.pmtiles.helpers.features_help import build_hex_feature
 from data_access_service.batch.pmtiles.processors.abstract_processor import (
@@ -9,11 +9,31 @@ from data_access_service.batch.pmtiles.processors.abstract_processor import (
 )
 from data_access_service.core.duckdbclient import PmTileDuckDBClient
 
-from data_access_service.models.pmtiles_types import HexLayerSpec
+from data_access_service.models.pmtiles_types import HexLayerSpec, TimeGroupBy
 from data_access_service.utils.memory_utils import log_memory_usage
 
 
 class HexbinProcessor(AbstractProcessor):
+
+    def _time_key_sql_and_column(
+        self, time_col_name: str, time_type: str
+    ) -> Tuple[str, str]:
+        """Return (sql_expression, staged_column_alias) for the configured time bucket."""
+        group_by = self.pmtiles_config.time_group_by
+        if group_by == TimeGroupBy.DATE:
+            return (
+                PmTileDuckDBClient.build_date_key_expression(
+                    time_col=time_col_name, time_type=time_type
+                ),
+                "d",
+            )
+        # Default / month
+        return (
+            PmTileDuckDBClient.build_ym_expression(
+                time_col=time_col_name, time_type=time_type
+            ),
+            "ym",
+        )
 
     def build_staging_parquet(self):
         layers = self.get_layers()
@@ -29,11 +49,13 @@ class HexbinProcessor(AbstractProcessor):
         time_type = self.pm_client.detect_time_type(
             input_path=self.get_s3_uri(), time_col=time_col_name
         )
-        ym = PmTileDuckDBClient.build_ym_expression(
-            time_col=time_col_name, time_type=time_type
-        )
+        time_key_sql, time_col = self._time_key_sql_and_column(time_col_name, time_type)
 
-        self.logger.info("Staging high-res parquet file...")
+        self.logger.info(
+            "Staging high-res parquet file (time_group_by=%s, column=%s)...",
+            self.pmtiles_config.time_group_by.value,
+            time_col,
+        )
         log_memory_usage(self.logger, "before staging scan")
 
         sql = f"""
@@ -44,7 +66,7 @@ class HexbinProcessor(AbstractProcessor):
                             CAST({quoted_lon} AS DOUBLE),
                             {int(self.__get_max_res())}
                         )) AS h_high,
-                        {ym} AS ym,
+                        {time_key_sql} AS {time_col},
                         COUNT(*)::UBIGINT AS c
                     FROM read_parquet('{self.get_s3_uri()}', hive_partitioning=true, union_by_name=true)
                     WHERE
@@ -53,7 +75,7 @@ class HexbinProcessor(AbstractProcessor):
                         AND {quoted_time} IS NOT NULL
                         AND CAST({quoted_lon} AS DOUBLE) BETWEEN -180 AND 180
                         AND CAST({quoted_lat} AS DOUBLE) BETWEEN -90 AND 90
-                    GROUP BY h_high, ym
+                    GROUP BY h_high, {time_col}
                     HAVING h_high IS NOT NULL
                 ) TO '{self.get_staged_path()}' (FORMAT PARQUET)
             """
@@ -89,44 +111,52 @@ class HexbinProcessor(AbstractProcessor):
         return max(layer.h3_resolution for layer in self.get_layers())
 
     def __generate_hex_geojsonseq_file(self, layer: HexLayerSpec, max_res: int) -> str:
-        self.pm_client.execute("DROP TABLE IF EXISTS monthly_counts")
+        time_col = (
+            "d" if self.pmtiles_config.time_group_by == TimeGroupBy.DATE else "ym"
+        )
+        period_label = (
+            "day" if self.pmtiles_config.time_group_by == TimeGroupBy.DATE else "month"
+        )
+
+        self.pm_client.execute("DROP TABLE IF EXISTS period_counts")
 
         if layer.h3_resolution == max_res:
             sql = f"""
-                        CREATE TEMP TABLE monthly_counts AS
-                        SELECT h_high AS h, ym, c
+                        CREATE TEMP TABLE period_counts AS
+                        SELECT h_high AS h, {time_col}, c
                         FROM read_parquet('{self.get_staged_path()}')
                         WHERE h_high IS NOT NULL
-                        ORDER BY h, ym
+                        ORDER BY h, {time_col}
                     """
         else:
             sql = f"""
-                        CREATE TEMP TABLE monthly_counts AS
+                        CREATE TEMP TABLE period_counts AS
                         SELECT
                             printf('%x', h3_cell_to_parent(('0x' || h_high)::UBIGINT, {int(layer.h3_resolution)})) AS h,
-                            ym,
+                            {time_col},
                             SUM(c)::UBIGINT AS c
                         FROM read_parquet('{self.get_staged_path()}')
                         WHERE h_high IS NOT NULL
-                        GROUP BY h, ym
+                        GROUP BY h, {time_col}
                         HAVING h IS NOT NULL
-                        ORDER BY h, ym
+                        ORDER BY h, {time_col}
                     """
 
         self.pm_client.execute(sql)
 
-        monthly_rows = self.pm_client.execute(
-            "SELECT COUNT(*) FROM monthly_counts"
+        period_rows = self.pm_client.execute(
+            "SELECT COUNT(*) FROM period_counts"
         ).fetchone()[0]
         distinct_hexes = self.pm_client.execute(
-            "SELECT COUNT(DISTINCT h) FROM monthly_counts"
+            "SELECT COUNT(DISTINCT h) FROM period_counts"
         ).fetchone()[0]
         self.logger.info(
-            f"{layer.name} Aggregation result: {distinct_hexes:,} unique H3 cells, {monthly_rows:,} (cell, month) rows"
+            f"{layer.name} Aggregation result: {distinct_hexes:,} unique H3 cells, "
+            f"{period_rows:,} (cell, {period_label}) rows"
         )
 
         cursor = self.pm_client.execute(
-            "SELECT h, ym, c FROM monthly_counts ORDER BY h, ym"
+            f"SELECT h, {time_col}, c FROM period_counts ORDER BY h, {time_col}"
         )
 
         os.makedirs(
@@ -150,7 +180,7 @@ class HexbinProcessor(AbstractProcessor):
                 if not rows:
                     break
 
-                for h_cell, ym_value, count_value in rows:
+                for h_cell, period_value, count_value in rows:
                     if current_h is None:
                         current_h = h_cell
 
@@ -174,7 +204,7 @@ class HexbinProcessor(AbstractProcessor):
                         current_h = h_cell
                         current_counts = {}
 
-                    current_counts[int(ym_value)] = int(count_value)
+                    current_counts[int(period_value)] = int(count_value)
 
             if current_h is not None:
                 try:
