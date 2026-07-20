@@ -14,6 +14,9 @@ class ProductConfig(BaseModel):
     # Present in the response only when the product enables coastal fill (see
     # §7.6); omitted otherwise via response_model_exclude_none on GET /products.
     coastal_fill: CoastalFillConfig | None = None
+    # Links this product to its GeoNetwork/STAC collection UUID. Omitted when absent
+    # via response_model_exclude_none on GET /products.
+    metadata_uuid: str | None = None
 
 
 class DateRange(BaseModel):

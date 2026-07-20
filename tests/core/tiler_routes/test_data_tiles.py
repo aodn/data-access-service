@@ -35,6 +35,32 @@ def test_list_products_includes_coastal_fill_only_when_present(
     assert "coastal_fill" not in by_id["plain"]  # omitted when not set
 
 
+def test_list_products_includes_metadata_uuid_only_when_present(
+    client, tmp_path, monkeypatch
+):
+    cfg = tmp_path / "products.json"
+    cfg.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "linked",
+                    "source_path": "s3://b/x.zarr",
+                    "variable": "GSLA",
+                    "metadata_uuid": "uuid-123",
+                },
+                {"id": "plain", "source_path": "s3://b/y.zarr", "variable": "V"},
+            ]
+        )
+    )
+    monkeypatch.setattr(registry, "_config_path", cfg)
+
+    r = client.get("/api/v1/das/tiler/data_tiles/products")
+    assert r.status_code == 200
+    by_id = {p["id"]: p for p in r.json()}
+    assert by_id["linked"]["metadata_uuid"] == "uuid-123"
+    assert "metadata_uuid" not in by_id["plain"]  # omitted when not set
+
+
 _FAKE_PRODUCTS = {
     "product_a": Product(
         id="product_a", source_path="s3://bucket/a.zarr", variable="VAR"
