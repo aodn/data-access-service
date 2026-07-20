@@ -56,6 +56,28 @@ def test_tile_unknown_product(client):
     assert response.status_code == 404
 
 
+def test_tile_negative_zoom_rejected(client):
+    response = client.get(
+        "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/-1/0/0.png"
+    )
+    assert response.status_code == 400
+
+
+def test_tile_zoom_above_max_rejected(client):
+    response = client.get(
+        "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/25/0/0.png"
+    )
+    assert response.status_code == 400
+
+
+def test_tile_xy_out_of_range_for_zoom_rejected(client):
+    # At z=2 valid row/col range is 0-3; 4 is one past the edge.
+    response = client.get(
+        "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/2/4/0.png"
+    )
+    assert response.status_code == 400
+
+
 def test_tile_multi_variable_product_rejected(client):
     response = client.get(
         "/api/v1/das/tiler/visual_tiles/ocean_current/2024-01-01/5/0/0.png"
