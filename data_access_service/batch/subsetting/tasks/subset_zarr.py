@@ -20,7 +20,6 @@ from data_access_service.core.constants import (
     STR_TIME_UPPER_CASE,
     STR_LATITUDE_UPPER_CASE,
     STR_LONGITUDE_UPPER_CASE,
-    WHOLE_GLOBE_BBOX,
 )
 from data_access_service.utils.subsetting_resolver import (
     ResolvedSubset,
@@ -71,8 +70,7 @@ class ZarrProcessor:
         self.keys = resolved.keys
         self.start_date = resolved.start_date
         self.end_date = resolved.end_date
-        # empty bboxes means "no spatial filter"; the slicing needs explicit bounds
-        self.bboxes = resolved.bboxes or [WHOLE_GLOBE_BBOX]
+        self.bboxes = resolved.effective_bboxes
 
     # Read-through views onto subset_request — single source of truth, no drift.
     @property

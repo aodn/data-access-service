@@ -5,8 +5,9 @@ import pandas as pd
 
 from data_access_service.models.bounding_box import BoundingBox
 
-# Marker value for a field the user did not provide (start date,
-# end date, multi_polygon)
+# Marker value for an optional field the user did not provide (dates,
+# multi_polygon, ...). AWS Batch job parameters are plain strings and cannot
+# carry None, so absent values travel as this literal instead.
 NON_SPECIFIED = "non-specified"
 SUPPORTED_OUTPUT_FORMATS = frozenset({"netcdf", "geotiff", "csv"})
 

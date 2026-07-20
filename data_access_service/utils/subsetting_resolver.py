@@ -11,7 +11,7 @@ from typing import List, Optional, Tuple, Union
 
 import pandas as pd
 
-from data_access_service.core.constants import UNIX_EPOCH_UTC
+from data_access_service.core.constants import UNIX_EPOCH_UTC, WHOLE_GLOBE_BBOX
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.models.subset_request import NON_SPECIFIED, SubsetRequest
 from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
@@ -37,6 +37,16 @@ class ResolvedSubset:
         """False when the requested date range is entirely outside the
         dataset's temporal extent (the download would produce no data)."""
         return self.start_date is not None and self.end_date is not None
+
+    @property
+    def effective_bboxes(self) -> List[BoundingBox]:
+        """The bboxes to slice with: empty means "no spatial filter", which
+        becomes one whole-globe bbox. Explicit bounds (not open/None slices)
+        because the batch mask path compares values against them
+        (subset_zarr.form_mask). Both the batch download and the size
+        estimate must slice from THIS list so they select the same region.
+        """
+        return self.bboxes or [WHOLE_GLOBE_BBOX]
 
 
 def resolve_subset(

@@ -30,8 +30,13 @@ from data_access_service.core.constants import (
     STR_LONGITUDE_UPPER_CASE,
     STR_TIME_UPPER_CASE,
 )
+from data_access_service.models.subset_request import (
+    NON_SPECIFIED,
+    SUPPORTED_OUTPUT_FORMATS,
+)
+from data_access_service.core.size_estimation import estimate_single_key_size
+from data_access_service.utils.subsetting_resolver import resolve_subset
 from data_access_service.core.descriptor import Depth, Descriptor, Coordinate
-
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +79,18 @@ class BaseAPI:
     ) -> Optional[ddf.DataFrame]:
         pass
 
+    def estimate_datasets_size(
+        self,
+        uuid: str,
+        keys: list[str] = None,
+        start_date: str = NON_SPECIFIED,
+        end_date: str = NON_SPECIFIED,
+        multi_polygon=None,
+        columns: list[str] = None,
+        output_format: str = None,
+    ) -> Optional[dict]:
+        pass
+
     def get_api_status(self) -> bool:
         return False
 
@@ -91,9 +108,6 @@ class BaseAPI:
             if mapped_col is None or len(mapped_col) == 0:
                 return None
             # Translate to the correct column name for dataset
-            mapped_col = self.map_column_names(uuid, key, [column])
-            if not mapped_col:
-                return None
             val = data.get(mapped_col[0])
 
             if val is not None:
@@ -723,6 +737,76 @@ class API(BaseAPI):
                 raise v
         else:
             return None
+
+    def estimate_datasets_size(
+        self,
+        uuid: str,
+        keys: list[str] = None,
+        start_date: str = NON_SPECIFIED,
+        end_date: str = NON_SPECIFIED,
+        multi_polygon=None,
+        columns: list[str] = None,
+        output_format: str = None,
+    ) -> Optional[dict]:
+        """
+        Estimate the total download size across one or more keys of a dataset.
+
+        The request is interpreted by the same resolve_subset the batch
+        download uses (key expansion, date defaults + extent trim, bboxes)
+
+        :return: aggregated estimate dict, or None if no requested key exists
+        :raises ValueError: if output_format is none or not supported, or the
+            dates are unparseable
+        """
+        if output_format is None or output_format not in SUPPORTED_OUTPUT_FORMATS:
+            raise ValueError(
+                f"output_format must be one of {sorted(SUPPORTED_OUTPUT_FORMATS)}, "
+                f"got '{output_format}'"
+            )
+
+        resolved_subset = resolve_subset(
+            api=self,
+            uuid=uuid,
+            keys=keys,
+            start_date_str=start_date,
+            end_date_str=end_date,
+            multi_polygon=multi_polygon,
+            columns=columns,
+        )
+
+        per_key: list[dict] = []
+        missing: list[str] = []
+        for key in resolved_subset.keys:
+            single = estimate_single_key_size(
+                self, key, resolved_subset, output_format=output_format
+            )
+            if single is None:
+                missing.append(key)
+                continue
+            per_key.append(single)
+
+        if not per_key:
+            # No requested key exists in this dataset -> 404 at the route.
+            return None
+
+        notes: list[str] = []
+        if missing:
+            notes.append(f"keys not found and skipped: {missing}")
+        if len(per_key) > 1:
+            notes.append(f"summed {len(per_key)} keys")
+
+        # Todo: we may not need so many fields, but keep it for now for debugging
+        return {
+            "uuid": uuid,
+            "keys": [r["key"] for r in per_key],
+            "format": output_format,
+            "estimated_uncompressed_bytes": sum(
+                r["estimated_uncompressed_bytes"] for r in per_key
+            ),
+            "estimated_output_bytes": sum(r["estimated_output_bytes"] for r in per_key),
+            "notes": "; ".join(notes),
+            "per_key": per_key,
+        }
 
     # TODO potential issue with UUID to dataset not 1 to 1
     @staticmethod
