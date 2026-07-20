@@ -40,6 +40,12 @@ ETag — how REVALIDATE endpoints avoid resending a body that hasn't changed.
        different hash → `200` with the new body and new ETag.
   The server still does the same work either way (there's no server-side
   cache) — the saving is on the wire, not on the backend.
+
+CloudFront settings required to honour the above:
+    1. Cache key includes all query strings.
+    2. Cache policy TTL bounds: MinTTL=0, MaxTTL=31536000 (1 year) — wide
+       enough that CloudFront never clamps below what Cache-Control says.
+       Because max-age origin sends gets forced into [MinTTL, MaxTTL]
 """
 
 import hashlib
