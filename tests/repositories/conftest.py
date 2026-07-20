@@ -1,7 +1,7 @@
 import pytest
 
 from data_access_service.config.config import Config
-from data_access_service.models.pmtiles_types import ParquetsGenerationConfig
+from data_access_service.models.sites_types import ParquetsGenerationConfig
 
 
 @pytest.fixture(autouse=True)

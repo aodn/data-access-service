@@ -74,7 +74,7 @@ def require_cache_version(
             status_code=400,
             detail=(
                 f"Missing or stale cache_version {cv!r}; expected {CACHE_VERSION!r}. "
-                "Fetch GET /manifest for the current value and retry with ?cv=<value>."
+                f"Fetch GET /manifest for the current value and retry with ?cv={CACHE_VERSION}"
             ),
         )
 

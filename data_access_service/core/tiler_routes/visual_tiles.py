@@ -76,7 +76,9 @@ _bbox_dedup = Deduper()
         304: {"description": "Not Modified — ETag matched, response body is empty"},
     },
 )
-async def get_colormaps(if_none_match: str | None = Header(None, alias="if-none-match")):
+async def get_colormaps(
+    if_none_match: str | None = Header(None, alias="if-none-match")
+):
     data = list_colormaps()
     etag = compute_etag(json.dumps(data, sort_keys=True))
     return etag_response(data, etag, if_none_match)
