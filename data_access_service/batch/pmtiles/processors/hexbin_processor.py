@@ -81,7 +81,90 @@ class HexbinProcessor(AbstractProcessor):
             """
         self.pm_client.execute(sql)
         self.logger.info("High-res parquet file complete.")
+        self._log_staged_parquet_preview(time_col=time_col)
         log_memory_usage(self.logger, "after staging scan")
+
+    def _log_staged_parquet_preview(self, time_col: str) -> None:
+        """Log staged table contents so month vs date aggregation can be compared.
+
+        Prints all rows when the table is small; otherwise a summary plus a
+        contiguous window covering at least one calendar month of time keys.
+        """
+        staged_path = self.get_staged_path()
+        try:
+            stats = self.pm_client.execute(
+                f"""
+                SELECT
+                    COUNT(*)::BIGINT AS n_rows,
+                    COUNT(DISTINCT h_high)::BIGINT AS n_hex,
+                    COUNT(DISTINCT {time_col})::BIGINT AS n_periods,
+                    MIN({time_col}) AS min_period,
+                    MAX({time_col}) AS max_period,
+                    SUM(c)::BIGINT AS total_c
+                FROM read_parquet('{staged_path}')
+                """
+            ).fetchone()
+            n_rows, n_hex, n_periods, min_period, max_period, total_c = stats
+            self.logger.info(
+                "Staged parquet summary (time_group_by=%s, column=%s): "
+                "rows=%s unique_hex=%s unique_periods=%s period_range=[%s, %s] total_count=%s",
+                self.pmtiles_config.time_group_by.value,
+                time_col,
+                f"{n_rows:,}",
+                f"{n_hex:,}",
+                f"{n_periods:,}",
+                min_period,
+                max_period,
+                f"{total_c:,}",
+            )
+
+            # Prefer full dump for small staging results (typical in tests).
+            # For larger tables, dump a window of periods that covers at least
+            # one month so daily keys can be compared to monthly buckets.
+            max_preview_rows = 500
+            if n_rows <= max_preview_rows:
+                preview_sql = f"""
+                    SELECT h_high, {time_col}, c
+                    FROM read_parquet('{staged_path}')
+                    ORDER BY {time_col}, h_high
+                """
+            else:
+                # Take the first calendar month present (YYYYMM for month mode;
+                # for date mode YYYYMMDD, filter keys sharing the first YYYYMM).
+                if time_col == "ym":
+                    period_filter = f"{time_col} = {int(min_period)}"
+                else:
+                    first_month = int(min_period) // 100  # YYYYMM from YYYYMMDD
+                    period_filter = f"({time_col} // 100) = {first_month}"
+                preview_sql = f"""
+                    SELECT h_high, {time_col}, c
+                    FROM read_parquet('{staged_path}')
+                    WHERE {period_filter}
+                    ORDER BY {time_col}, h_high
+                    LIMIT {max_preview_rows}
+                """
+
+            rows = self.pm_client.execute(preview_sql).fetchall()
+            if not rows:
+                self.logger.info("Staged parquet preview: (empty)")
+                print("Staged parquet preview: (empty)", flush=True)
+                return
+
+            header = f"{'h_high':<20} {time_col:<12} {'c':>12}"
+            lines = [
+                f"Staged parquet preview ({len(rows)} row(s), ordered by {time_col}, h_high):",
+                header,
+                "-" * len(header),
+            ]
+            for h_high, period, count in rows:
+                lines.append(f"{str(h_high):<20} {period:<12} {int(count):>12}")
+            # Log/print line-by-line so multi-line content is not truncated by
+            # formatters and is easy to copy for month-vs-date comparison.
+            for line in lines:
+                self.logger.info(line)
+            print("\n".join(lines), flush=True)
+        except Exception as e:
+            self.logger.warning("Failed to preview staged parquet: %s", e)
 
     def get_layers(self) -> Sequence[HexLayerSpec]:
         return self.config.get_hex_layer_specs(self.dataset_name)
