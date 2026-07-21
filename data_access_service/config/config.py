@@ -15,6 +15,7 @@ from data_access_service.models.pmtiles_types import (
     ParquetsGenerationConfig,
     PmtilesGenerationConfig,
     HexLayerSpec,
+    TimeGroupBy,
 )
 from data_access_service.models.tiler_types import TilerConfig
 
@@ -212,6 +213,15 @@ class Config:
 
     def get_pmtiles_config(self) -> PmtilesGenerationConfig:
         pmconfig = self.config.get("pmtiles", {}).get("config", {})
+        time_group_by_raw = pmconfig.get("time_group_by", TimeGroupBy.MONTH.value)
+        try:
+            time_group_by = TimeGroupBy(time_group_by_raw)
+        except ValueError as e:
+            allowed = ", ".join(repr(v.value) for v in TimeGroupBy)
+            raise ValueError(
+                f"Invalid pmtiles.config.time_group_by={time_group_by_raw!r}. "
+                f"Expected one of: {allowed}."
+            ) from e
         return PmtilesGenerationConfig(
             output_pmtiles_dir=pmconfig["output_pmtiles_dir"],
             staged_parquet_dir=pmconfig["staged_parquet_dir"],
@@ -223,6 +233,7 @@ class Config:
             fetch_size=pmconfig["fetch_size"],
             bucket_name=pmconfig["bucket_name"],
             show_progress=pmconfig.get("show_progress", True),
+            time_group_by=time_group_by,
         )
 
     def get_parquets_config(self) -> ParquetsGenerationConfig:
