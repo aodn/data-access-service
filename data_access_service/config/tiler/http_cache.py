@@ -1,6 +1,6 @@
 """HTTP caching policy for the tiler endpoints — single source of truth.
 
-IMMUTABLE_CACHE_HEADERS — 1 year at the CDN, no browser caching. 
+IMMUTABLE_CACHE_HEADERS — 1 year at the CDN, no browser caching.
     GET /{product_id}/{date}/{z}/{x}/{y}.png           raw data tile
     GET /{product_id}/{date}/manifest.json             data tile manifest
     GET /{product_id}/{date}/point                     point lookup
