@@ -30,24 +30,13 @@ PARQUET_SUBSET_ROW_NUMBER: int = 200000
 MAX_PARQUET_SPLIT: int = 30
 MAX_CSV_ROW: int = 1048576
 
-# output_bytes = uncompressed_bytes * ratio, per format.
-COMPRESSION_RATIO_NETCDF: float = 0.4
+COMPRESSION_RATIO_NETCDF: float = 0.2
 COMPRESSION_RATIO_CSV_GZIP: float = 0.15
 OUTPUT_FORMAT_COMPRESSION_RATIO: dict[str, float] = {
     "netcdf": COMPRESSION_RATIO_NETCDF,
     "csv": COMPRESSION_RATIO_CSV_GZIP,
 }
 
-# GeoTIFF isn't a flat ratio: it's one .tif per (gridded var * time step), zipped.
-# We sum raw raster bytes then apply GEOTIFF_ZIP_RATIO
 GEOTIFF_ZIP_RATIO: float = 0.5
 GEOTIFF_INT_PIXEL_BYTES: int = 4
-
-# Curvilinear (I/J) grids are warped onto a regular lat/lon grid at export time,
-# so the real raster is larger than the raw I x J cell count. A size estimate
-# can't know the warped dimensions without reprojecting, so it multiplies the
-# I x J estimate by this factor. The inflation depends on the grid's rotation:
-# ~1x when nearly axis-aligned, up to ~2x at 45 degrees. Most grids are only
-# slightly rotated, so 1.5 is a mid-range buffer rather than the worst case.
-# Tune with real exports (warped_tif_pixels / (I x J)).
 GEOTIFF_CURVILINEAR_INFLATION: float = 1.5

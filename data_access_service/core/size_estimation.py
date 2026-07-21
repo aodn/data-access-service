@@ -36,6 +36,12 @@ from data_access_service.utils.subset_request_resolver import (
 log = logging.getLogger(__name__)
 
 
+def _bytes_to_mb(num_bytes: int) -> float:
+    """Bytes -> decimal MB (1 MB = 1,000,000 bytes), matching how browsers and
+    download tools report file sizes. Rounded to 1 decimal place for readability."""
+    return round(num_bytes / 1_000_000, 1)
+
+
 def estimate_single_key_size(
     api,
     key: str,
@@ -154,9 +160,15 @@ def _estimate_zarr_size(
         if output_format == "geotiff":
             uncompressed, output = _measure_geotiff(api, dataset, uuid, key, notes)
         elif output_format == "netcdf":
-            uncompressed, output = _measure_netcdf(dataset, output_format)
+            uncompressed, output = _measure_netcdf(dataset, output_format, notes)
         total_uncompressed += uncompressed
         total_output += output
+
+    # Human-readable size summary (applies to every output format).
+    notes.append(
+        f"estimated download size ~{_bytes_to_mb(total_output)} MB "
+        f"(uncompressed ~{_bytes_to_mb(total_uncompressed)} MB)"
+    )
 
     deduped_notes = list(dict.fromkeys(notes))
 
@@ -176,11 +188,17 @@ def _estimate_zarr_size(
     }
 
 
-def _measure_netcdf(dataset: xarray.Dataset, output_format: str) -> tuple[int, int]:
+def _measure_netcdf(
+    dataset: xarray.Dataset, output_format: str, notes: list[str]
+) -> tuple[int, int]:
     """(uncompressed, output) for netcdf: nbytes, then a flat compression
     ratio"""
     nbytes = int(dataset.nbytes)
     ratio = OUTPUT_FORMAT_COMPRESSION_RATIO[output_format]
+    notes.append(
+        f"netcdf: xarray nbytes x compression ratio {ratio} "
+        "(ratio calibrated on gridded SST; noisier data may compress less)"
+    )
     return nbytes, int(nbytes * ratio)
 
 
