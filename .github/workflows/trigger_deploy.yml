@@ -86,16 +86,6 @@ jobs:
               workflow_id: 'deploy.yml',
               ref: 'main',
               inputs: {
-                app_name: '${{ inputs.environment == 'edge' && 'subsetting/batch' || 'batch' }}',
-                environment: '${{ inputs.environment }}'
-              }
-            })
-            github.rest.actions.createWorkflowDispatch({
-              owner: 'aodn',
-              repo: 'appdeploy',
-              workflow_id: 'deploy.yml',
-              ref: 'main',
-              inputs: {
                 app_name: 'pmtiles/batch-pmtiles',
                 environment: '${{ inputs.environment }}'
               }
