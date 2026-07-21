@@ -10,8 +10,10 @@ a registration call.
 import json
 
 import pytest
+from pydantic import ValidationError
 
 import data_access_service.tiler.services.product.registry as registry
+from data_access_service.config.tiler.constants import LOD
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.product.registry import PRODUCTS
 
@@ -71,6 +73,28 @@ def test_load_with_chunk_px_and_padding(isolated_products):
     p = PRODUCTS["tuned"]
     assert p.chunk_px == (128, 96)
     assert p.padding == 4
+
+
+def test_zoom_thresholds_absent_defaults_to_global(isolated_products):
+    _write(isolated_products, [_entry("plain")])
+    registry.load_products()
+    assert PRODUCTS["plain"].zoom_thresholds == LOD.zoom_thresholds
+
+
+def test_load_with_zoom_thresholds_override(isolated_products):
+    _write(
+        isolated_products,
+        [_entry("tuned", zoom_thresholds={"2": 3, "3": 4})],
+    )
+    registry.load_products()
+    assert PRODUCTS["tuned"].zoom_thresholds == {2: 3, 3: 4}
+
+
+def test_load_rejects_unknown_field(isolated_products):
+    """max_lods/min_coarsest are global-only (see LODConfig) — not a per-product key."""
+    _write(isolated_products, [_entry("bad", max_lods=6)])
+    with pytest.raises(ValidationError):
+        registry.load_products()
 
 
 def test_load_with_coastal_fill(isolated_products):

@@ -26,11 +26,32 @@ import json
 import logging
 from pathlib import Path
 
-from data_access_service.config.tiler.constants import TILE
+from pydantic import BaseModel, ConfigDict
+
 from data_access_service.config.tiler.paths import PRODUCTS_CONFIG_PATH
 from data_access_service.tiler.services.product.product import CoastalFill, Product
 
 logger = logging.getLogger(__name__)
+
+
+class _CoastalFillEntry(BaseModel):
+    max_dist_px: int
+
+
+class _ProductEntry(BaseModel):
+    """The allowlisted shape of one products.json entry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    source_path: str
+    variable: str | list[str]
+    chunk_px: tuple[int, int] | None = None
+    padding: int | None = None
+    coastal_fill: _CoastalFillEntry | None = None
+    zoom_thresholds: dict[int, int] | None = None
+    ocean_masked: bool | None = None
+
 
 _config_path = Path(PRODUCTS_CONFIG_PATH)
 
@@ -103,14 +124,27 @@ def list_products() -> list[dict]:
 
 
 def _from_dict(entry: dict) -> Product:
-    chunk_px = entry.get("chunk_px", list(TILE.chunk_px))
-    coastal_fill = entry.get("coastal_fill")
+    parsed = _ProductEntry(**entry)
+    kwargs: dict = {}
+    if parsed.chunk_px is not None:
+        kwargs["chunk_px"] = parsed.chunk_px
+    if parsed.padding is not None:
+        kwargs["padding"] = parsed.padding
+    if parsed.zoom_thresholds is not None:
+        kwargs["zoom_thresholds"] = parsed.zoom_thresholds
     return Product(
-        id=entry["id"],
-        source_path=entry["source_path"],
-        variable=entry["variable"],
-        chunk_px=tuple(chunk_px),  # type: ignore[arg-type]
-        padding=entry.get("padding", TILE.padding),
-        coastal_fill=CoastalFill(**coastal_fill) if coastal_fill else None,
-        ocean_masked=entry.get("ocean_masked", entry["id"] in _OCEAN_MASKED_BY_DEFAULT),
+        id=parsed.id,
+        source_path=parsed.source_path,
+        variable=parsed.variable,
+        coastal_fill=(
+            CoastalFill(max_dist_px=parsed.coastal_fill.max_dist_px)
+            if parsed.coastal_fill
+            else None
+        ),
+        ocean_masked=(
+            parsed.ocean_masked
+            if parsed.ocean_masked is not None
+            else parsed.id in _OCEAN_MASKED_BY_DEFAULT
+        ),
+        **kwargs,
     )

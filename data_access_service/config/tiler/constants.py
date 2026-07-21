@@ -16,6 +16,8 @@ class LODConfig:
     Bundled here (rather than passed at runtime or read from env) because these
     values are baked into the WebGL shader on the frontend — changing one without
     redeploying the frontend silently corrupts the rendering.
+
+    min_coarsest, max_loads are constants, zoom_thresholds is overridable per product in products.json.
     """
 
     # Cap on LOD levels per product. The frontend packs all LODs into a single WebGL
@@ -25,8 +27,10 @@ class LODConfig:
     # pans/zooms. 4 is the value tuned to fit comfortably under the cap.
     max_lods: int = 4
     # Minimum (cols, rows) for the coarsest level; levels below this are dropped.
+    # But if a product only has fewer than this, it will still be served below this
+    # threshold.
     min_coarsest: tuple[int, int] = (2, 2)
-    # LOD level → minimum map zoom to show that level. Applied universally to all products.
+    # LOD level → minimum map zoom to show that level.
     # LOD1 is the coarsest level, so under zoom level 4 only LOD1 tiles are shown; at zoom 4 LOD2
     # tiles are shown, etc.
     zoom_thresholds: dict[LODIndex, ZoomLevel] = field(
@@ -43,9 +47,7 @@ class TileConfig:
 
     ``chunk_px`` is the visible tile size; ``padding`` is the extra ring of edge
     pixels included on each side so the shader can sample a bilinear filter
-    without seams between tiles. Products may override either value via
-    ``products.json``, but the defaults must stay in lockstep with the frontend
-    atlas layout — see [[LODConfig]] for the same caveat.
+    without seams between tiles. Both are overridable per product in products.json, but the defaults here are.
     """
 
     chunk_px: tuple[int, int] = (240, 192)

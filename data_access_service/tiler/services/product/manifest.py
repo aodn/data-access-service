@@ -11,7 +11,6 @@ from typing import Any
 
 import xarray as xr
 
-from data_access_service.config.tiler.constants import LOD
 from data_access_service.tiler.services.colormap.categorical import (
     is_categorical_variable,
     parse_flag_values_and_meanings,
@@ -42,8 +41,8 @@ def render_manifest(product: Product, ds: xr.Dataset) -> dict[str, Any]:
             ],
             "padding": product.padding,
             **(
-                {"zoomThreshold": LOD.zoom_thresholds[lod]}
-                if lod in LOD.zoom_thresholds
+                {"zoomThreshold": product.zoom_thresholds[lod]}
+                if lod in product.zoom_thresholds
                 else {}
             ),
         }
