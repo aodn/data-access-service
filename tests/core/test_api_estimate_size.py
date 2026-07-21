@@ -2,13 +2,14 @@
 
 Two layers:
 - ``size_estimation.estimate_single_key_size`` — per-key worker; the zarr
-  branch reads xarray.Dataset.nbytes on a lazily-sliced dataset, so we mock
-  get_datasource to return a fake ZarrDataSource whose get_data returns a small
-  in-memory dataset. It takes a ResolvedSubset (dates/keys/bboxes already
-  resolved by utils.subsetting_resolver, the same code path the batch
-  download uses).
+  branch slices ``ds.zarr_store`` with the SAME ``subset_zarr`` verb the batch
+  download uses, then reads xarray.Dataset.nbytes on the lazy selection. We mock
+  get_datasource to return a fake ZarrDataSource whose ``zarr_store`` is a small
+  in-memory dataset, so the real slicing runs against it. It takes a
+  ResolvedSubsetRequest (dates/keys/bboxes already resolved by
+  utils.subset_request_resolver, the same code path the batch download uses).
 - ``API.estimate_datasets_size`` — public multi-key aggregator (resolves the
-  request via resolve_subset, sums per key, owns output_format validation).
+  request via resolve_subset_request, sums per key, owns output_format validation).
 """
 
 import numpy as np
@@ -24,18 +25,22 @@ from data_access_service.core import api as core_api
 from data_access_service.core.size_estimation import estimate_single_key_size
 from data_access_service.core.constants import (
     COMPRESSION_RATIO_NETCDF,
-    COMPRESSION_RATIO_GEOTIFF,
     GEOTIFF_ZIP_RATIO,
     GEOTIFF_INT_PIXEL_BYTES,
+    GEOTIFF_CURVILINEAR_INFLATION,
 )
-from data_access_service.utils.subsetting_resolver import (
-    ResolvedSubset,
+from data_access_service.utils.subset_request_resolver import (
+    ResolvedSubsetRequest,
     resolve_bboxes,
 )
 
 
 def _identity_map(uuid, key, columns):
-    """Stand-in for API.map_column_names: echo the requested names unchanged."""
+    """Stand-in for API.map_column_names: echo the requested names unchanged.
+
+    The test fixtures name their dims TIME/LATITUDE/LONGITUDE, matching the
+    STR_*_UPPER_CASE constants, so an identity map resolves them correctly.
+    """
     return list(columns) if columns else columns
 
 
@@ -68,9 +73,9 @@ def _resolved(
     end=pd.Timestamp("2020-01-05 23:59:59", tz="UTC"),
     bboxes=(),
     columns=None,
-) -> ResolvedSubset:
-    """A ResolvedSubset as resolve_subset would produce for these tests."""
-    return ResolvedSubset(
+) -> ResolvedSubsetRequest:
+    """A ResolvedSubsetRequest as resolve_subset_request would produce for these tests."""
+    return ResolvedSubsetRequest(
         uuid=UUID,
         keys=keys or [KEY],
         start_date=start,
@@ -81,77 +86,82 @@ def _resolved(
 
 
 def _make_dataset() -> xr.Dataset:
-    """A tiny dataset: 5 time steps, two float64 variables."""
+    """A tiny dataset: 5 time steps, two float64 vars on TIME, plus LATITUDE and
+    LONGITUDE dims so the shared subset_zarr can apply the spatial filter (real
+    gridded zarr always carries these axes)."""
     times = pd.date_range("2020-01-01", periods=5)
     return xr.Dataset(
         {
             "TEMP": ("TIME", np.arange(5, dtype="float64")),
             "PSAL": ("TIME", np.arange(5, dtype="float64")),
         },
-        coords={"TIME": times},
+        coords={
+            "TIME": times,
+            "LATITUDE": np.array([25.0, 35.0]),
+            "LONGITUDE": np.array([15.0, 25.0]),
+        },
     )
 
 
 def _api_with_zarr(dataset: xr.Dataset) -> tuple[API, MagicMock]:
-    """Build an API whose get_datasource returns a mocked ZarrDataSource."""
+    """Build an API whose get_datasource returns a mocked ZarrDataSource whose
+    zarr_store is the given in-memory dataset. map_column_names echoes names, so
+    subset_zarr resolves TIME/LATITUDE/LONGITUDE to the dataset's own dims."""
     api = API()
     # spec=ZarrDataSource makes isinstance(mock, ZarrDataSource) return True.
     mock_ds = MagicMock(spec=ZarrDataSource)
-    mock_ds.get_data.return_value = dataset
+    mock_ds.zarr_store = dataset
     api.get_datasource = MagicMock(return_value=mock_ds)
+    api.map_column_names = MagicMock(side_effect=_identity_map)
     return api, mock_ds
 
 
 def test_zarr_estimate_basic():
     dataset = _make_dataset()
-    api, mock_ds = _api_with_zarr(dataset)
+    api, _ = _api_with_zarr(dataset)
 
+    # No bbox -> whole-globe slice covers the whole dataset -> full nbytes.
     result = estimate_single_key_size(api, KEY, _resolved(), output_format="netcdf")
 
     assert result["uuid"] == UUID
     assert result["key"] == KEY
     assert result["format"] == "netcdf"
-    # .nbytes sums across all data vars + coords; no compute needed.
     assert result["estimated_uncompressed_bytes"] == dataset.nbytes
     assert result["estimated_output_bytes"] == int(
         dataset.nbytes * COMPRESSION_RATIO_NETCDF
     )
-    mock_ds.get_data.assert_called_once()
 
 
-def test_geotiff_non_gridded_falls_back_to_flat_ratio():
-    dataset = _make_dataset()
+def test_geotiff_non_gridded_raises():
+    # No variable is gridded on lat+lon, so the export can't produce a GeoTIFF
+    # (build_geotiff_zip raises). The estimate mirrors that and stops instead of
+    # promising a size for a download that would fail.
+    dataset = _make_dataset()  # vars on TIME only -> no var gridded on lat+lon
     api, _ = _api_with_zarr(dataset)
 
-    # _make_dataset has no lat/lon dims -> no gridded vars -> flat-ratio fallback.
-    api.map_column_names = MagicMock(side_effect=_identity_map)
-
-    result = estimate_single_key_size(api, KEY, _resolved(), output_format="geotiff")
-
-    assert result["format"] == "geotiff"
-    assert result["estimated_output_bytes"] == int(
-        dataset.nbytes * COMPRESSION_RATIO_GEOTIFF
-    )
-    assert "fell back to flat ratio" in result["notes"]
+    with pytest.raises(ValueError, match="no gridded numeric variables"):
+        estimate_single_key_size(api, KEY, _resolved(), output_format="geotiff")
 
 
 def test_geotiff_gridded_dimension_based():
     # 3 time x 4 lat x 5 lon, float32 (4 bytes/pixel); quality_level excluded.
     dataset = _make_gridded_dataset(time=3, lat=4, lon=5, var_dtype="float32")
     api, _ = _api_with_zarr(dataset)
-    api.map_column_names = MagicMock(side_effect=_identity_map)
 
     result = estimate_single_key_size(api, KEY, _resolved(), output_format="geotiff")
 
     raw = 3 * 4 * 5 * 4  # n_time x lat x lon x bytes_per_pixel(float32)
+    # geotiff uncompressed is the raster bytes (not xarray nbytes); output = raw x zip
+    assert result["estimated_uncompressed_bytes"] == raw
     assert result["estimated_output_bytes"] == int(raw * GEOTIFF_ZIP_RATIO)
     # only the gridded var counts, not quality_level
     assert "1 gridded var(s)" in result["notes"]
 
 
 def test_geotiff_ij_grid_uses_ij_sizes():
-    # Curvilinear grid: dims are (TIME, I, J)
-    # The estimate should treat I/J as the grid dims (no coord conversion needed).
+    # Curvilinear grid: dims are (TIME, I, J), LAT/LON are 2D variables. The
+    # spatial filter becomes a where() mask (kept lazy) and the estimate should
+    # treat I/J as the grid dims (no coord conversion needed).
     times = pd.date_range("2020-01-01", periods=2)
     ii, jj = 4, 6
     ds = xr.Dataset(
@@ -163,14 +173,17 @@ def test_geotiff_ij_grid_uses_ij_sizes():
         coords={"TIME": times},
     )
     api, _ = _api_with_zarr(ds)
-    api.map_column_names = MagicMock(side_effect=_identity_map)
 
     result = estimate_single_key_size(api, KEY, _resolved(), output_format="geotiff")
 
     raw = 2 * ii * jj * 4  # n_time x I x J x float32
-    assert result["estimated_output_bytes"] == int(raw * GEOTIFF_ZIP_RATIO)
+    # curvilinear (I/J) grid: inflated as an upper bound for the export warp
+    inflated = int(raw * GEOTIFF_CURVILINEAR_INFLATION)
+    assert result["estimated_uncompressed_bytes"] == inflated
+    assert result["estimated_output_bytes"] == int(inflated * GEOTIFF_ZIP_RATIO)
     # temp is gridded on I/J; the 2D LATITUDE/LONGITUDE vars are not counted.
     assert "1 gridded var(s)" in result["notes"]
+    assert "curvilinear grid" in result["notes"]
     assert "fell back" not in result["notes"]
 
 
@@ -178,11 +191,11 @@ def test_geotiff_integer_var_treated_as_float32():
     # int16 gridded var: rasterio casts ints to float32, so 4 bytes/pixel, not 2.
     dataset = _make_gridded_dataset(time=2, lat=3, lon=3, var_dtype="int16")
     api, _ = _api_with_zarr(dataset)
-    api.map_column_names = MagicMock(side_effect=_identity_map)
 
     result = estimate_single_key_size(api, KEY, _resolved(), output_format="geotiff")
 
     raw = 2 * 3 * 3 * GEOTIFF_INT_PIXEL_BYTES
+    assert result["estimated_uncompressed_bytes"] == raw
     assert result["estimated_output_bytes"] == int(raw * GEOTIFF_ZIP_RATIO)
 
 
@@ -201,19 +214,19 @@ def test_dataset_not_found_returns_none():
     )
 
 
-def test_columns_subset_reduces_size():
+def test_columns_not_applied_but_noted():
+    # Column subsetting isn't implemented yet: the estimate ignores the requested
+    # columns (covers the whole dataset) and says so in the notes. Once column
+    # subsetting lands it will be handled in subset_zarr, not here.
     dataset = _make_dataset()
     api, _ = _api_with_zarr(dataset)
-    # Pretend the requested column maps straight through to "TEMP".
-    api.map_column_names = MagicMock(return_value=["TEMP"])
 
     result = estimate_single_key_size(
         api, KEY, _resolved(columns=["TEMP"]), output_format="netcdf"
     )
 
-    # Only TEMP (+ TIME coord) should count, less than the full dataset.
-    assert result["estimated_uncompressed_bytes"] < dataset.nbytes
-    assert result["estimated_uncompressed_bytes"] == dataset[["TEMP"]].nbytes
+    assert result["estimated_uncompressed_bytes"] == dataset.nbytes
+    assert "column subsetting not supported yet" in result["notes"]
 
 
 def _single_polygon_geojson(lon_min, lat_min, lon_max, lat_max) -> str:
@@ -232,46 +245,49 @@ def _single_polygon_geojson(lon_min, lat_min, lon_max, lat_max) -> str:
     )
 
 
-def test_multi_polygon_single_resolves_to_bbox():
+def test_multi_polygon_single_slices_to_bbox():
     # A multi_polygon with one rectangle is resolved to its bbox via the same
-    # resolve_bboxes (MultiPolygonHelper) the batch path uses, then sliced.
+    # resolve_bboxes (MultiPolygonHelper) the batch path uses, then actually
+    # sliced. The bbox keeps only LATITUDE 35 (25 is below 30), so the estimate
+    # is the sliced dataset's nbytes - strictly smaller than the whole dataset.
     dataset = _make_dataset()
-    api, mock_ds = _api_with_zarr(dataset)
+    api, _ = _api_with_zarr(dataset)
 
-    polygon = _single_polygon_geojson(lon_min=10, lat_min=20, lon_max=30, lat_max=40)
+    polygon = _single_polygon_geojson(lon_min=10, lat_min=30, lon_max=30, lat_max=40)
     result = estimate_single_key_size(
         api, KEY, _resolved(bboxes=resolve_bboxes(polygon)), output_format="netcdf"
     )
 
-    assert result["estimated_uncompressed_bytes"] == dataset.nbytes
-    mock_ds.get_data.assert_called_once()
-    # get_data(date_start, date_end, lat_min, lat_max, lon_min, lon_max)
-    _, _, la_min, la_max, lo_min, lo_max = mock_ds.get_data.call_args.args
-    assert (la_min, la_max, lo_min, lo_max) == (20, 40, 10, 30)
+    # Oracle: apply the same time + spatial selection with xarray directly.
+    oracle = dataset.sel(
+        TIME=slice(pd.Timestamp("2020-01-01"), pd.Timestamp("2020-01-05 23:59:59")),
+        LATITUDE=slice(30, 40),
+        LONGITUDE=slice(10, 30),
+    )
+    assert result["estimated_uncompressed_bytes"] == oracle.nbytes
+    assert result["estimated_uncompressed_bytes"] < dataset.nbytes
 
 
 def test_no_spatial_filter_uses_whole_globe_bbox():
-    # When there are no bboxes (no multi_polygon given), get_data is called
-    # once with the whole-globe bbox - the same slice the batch download uses
-    # (ResolvedSubset.effective_bboxes), so the two select the same region.
+    # When there are no bboxes (no multi_polygon given), the whole-globe bbox is
+    # used - the same slice the batch download uses
+    # (ResolvedSubsetRequest.effective_bboxes) - so the whole dataset is counted.
     dataset = _make_dataset()
-    api, mock_ds = _api_with_zarr(dataset)
+    api, _ = _api_with_zarr(dataset)
 
     result = estimate_single_key_size(api, KEY, _resolved(), output_format="netcdf")
 
     assert result["estimated_uncompressed_bytes"] == dataset.nbytes
-    mock_ds.get_data.assert_called_once()
-    _, _, la_min, la_max, lo_min, lo_max = mock_ds.get_data.call_args.args
-    assert (la_min, la_max, lo_min, lo_max) == (-90, 90, -180, 180)
 
 
 def test_multi_polygon_multiple_bboxes_summed():
-    # Two polygons -> get_data is called per bbox and the per-bbox .nbytes are SUMMED
+    # Two polygons (both covering the tiny dataset) -> sliced per bbox and the
+    # per-bbox .nbytes are SUMMED (overlaps counted twice = upper bound).
     dataset = _make_dataset()
-    api, mock_ds = _api_with_zarr(dataset)
+    api, _ = _api_with_zarr(dataset)
 
-    ring_a = [[10, 20], [30, 20], [30, 40], [10, 40], [10, 20]]
-    ring_b = [[50, 60], [70, 60], [70, 80], [50, 80], [50, 60]]
+    ring_a = [[10, 10], [40, 10], [40, 40], [10, 40], [10, 10]]
+    ring_b = [[10, 10], [50, 10], [50, 50], [10, 50], [10, 10]]
     polygon = (
         '{"type": "MultiPolygon", "coordinates": ['
         + "["
@@ -286,15 +302,14 @@ def test_multi_polygon_multiple_bboxes_summed():
         api, KEY, _resolved(bboxes=resolve_bboxes(polygon)), output_format="netcdf"
     )
 
-    assert mock_ds.get_data.call_count == 2
     assert "summed 2 polygon bboxes" in result["notes"]
-    # each bbox returns the same mock dataset -> bytes are summed (2x)
+    # each bbox covers the whole dataset -> bytes are summed (2x)
     assert result["estimated_uncompressed_bytes"] == 2 * dataset.nbytes
 
 
 def test_invalid_multi_polygon_raises():
     # A valid-JSON but non-MultiPolygon geometry -> TypeError from resolve_bboxes
-    # (called by resolve_subset), which the route maps to a 400.
+    # (called by resolve_subset_request), which the route maps to a 400.
     bad = '{"type": "Point", "coordinates": [10, 20]}'
     with pytest.raises(TypeError):
         resolve_bboxes(bad)
@@ -311,9 +326,10 @@ def test_parquet_path_not_implemented_yet():
 
 def test_date_range_clamped_to_extent_then_estimated():
     # With both bounds given, the request is clamped to the dataset's temporal
-    # extent (trim_date_range_for_keys) before slicing
+    # extent (trim_date_range_for_keys) before slicing, so the estimate reflects
+    # the clamped 3-day window (2020-01-02..04), smaller than the full 5 days.
     dataset = _make_dataset()  # TIME = 2020-01-01 .. 2020-01-05
-    api, mock_ds = _api_with_zarr(dataset)
+    api, _ = _api_with_zarr(dataset)
     api.get_temporal_extent = MagicMock(
         return_value=(pd.Timestamp("2020-01-01"), pd.Timestamp("2020-01-05"))
     )
@@ -328,18 +344,19 @@ def test_date_range_clamped_to_extent_then_estimated():
         output_format="netcdf",
     )
 
-    assert result["estimated_uncompressed_bytes"] == dataset.nbytes
-    mock_ds.get_data.assert_called_once()
-    passed_start, passed_end = mock_ds.get_data.call_args.args[:2]
-    assert passed_start == "2020-01-02 00:00:00"
-    assert "+" not in passed_start and "+" not in passed_end
+    # Oracle: the same clamped time window applied directly (whole-globe space).
+    oracle = dataset.sel(
+        TIME=slice(pd.Timestamp("2020-01-02"), pd.Timestamp("2020-01-04 23:59:59"))
+    )
+    assert result["estimated_uncompressed_bytes"] == oracle.nbytes
+    assert result["estimated_uncompressed_bytes"] < dataset.nbytes
 
 
 def test_request_outside_extent_returns_empty_estimate():
     # Request entirely outside the data -> trim returns (None, None) -> zero-size
-    # estimate, and get_data is never called.
+    # estimate, and the data is never sliced.
     dataset = _make_dataset()
-    api, mock_ds = _api_with_zarr(dataset)
+    api, _ = _api_with_zarr(dataset)
     api.get_temporal_extent = MagicMock(
         return_value=(pd.Timestamp("2020-01-01"), pd.Timestamp("2020-01-05"))
     )
@@ -357,14 +374,13 @@ def test_request_outside_extent_returns_empty_estimate():
     assert result["estimated_uncompressed_bytes"] == 0
     assert result["estimated_output_bytes"] == 0
     assert "outside" in result["notes"]
-    mock_ds.get_data.assert_not_called()
 
 
 def test_resolved_without_data_returns_empty_estimate():
-    # resolve_subset marks a no-overlap request with None dates (has_data False);
-    # the worker must report zero size without touching the data.
+    # resolve_subset_request marks a no-overlap request with None dates (has_data
+    # False); the worker must report zero size without touching the data.
     dataset = _make_dataset()
-    api, mock_ds = _api_with_zarr(dataset)
+    api, _ = _api_with_zarr(dataset)
 
     result = estimate_single_key_size(
         api, KEY, _resolved(start=None, end=None), output_format="netcdf"
@@ -372,7 +388,6 @@ def test_resolved_without_data_returns_empty_estimate():
 
     assert result["estimated_uncompressed_bytes"] == 0
     assert result["estimated_output_bytes"] == 0
-    mock_ds.get_data.assert_not_called()
 
 
 def _single_result(key, unc, out):

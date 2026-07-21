@@ -42,6 +42,12 @@ OUTPUT_FORMAT_COMPRESSION_RATIO: dict[str, float] = {
 # We sum raw raster bytes then apply GEOTIFF_ZIP_RATIO
 GEOTIFF_ZIP_RATIO: float = 0.5
 GEOTIFF_INT_PIXEL_BYTES: int = 4
-# COMPRESSION_RATIO_GEOTIFF is only the fallback used
-# when a dataset has no gridded variables.
-COMPRESSION_RATIO_GEOTIFF: float = 0.5
+
+# Curvilinear (I/J) grids are warped onto a regular lat/lon grid at export time,
+# so the real raster is larger than the raw I x J cell count. A size estimate
+# can't know the warped dimensions without reprojecting, so it multiplies the
+# I x J estimate by this factor. The inflation depends on the grid's rotation:
+# ~1x when nearly axis-aligned, up to ~2x at 45 degrees. Most grids are only
+# slightly rotated, so 1.5 is a mid-range buffer rather than the worst case.
+# Tune with real exports (warped_tif_pixels / (I x J)).
+GEOTIFF_CURVILINEAR_INFLATION: float = 1.5

@@ -35,7 +35,7 @@ from data_access_service.models.subset_request import (
     SUPPORTED_OUTPUT_FORMATS,
 )
 from data_access_service.core.size_estimation import estimate_single_key_size
-from data_access_service.utils.subsetting_resolver import resolve_subset
+from data_access_service.utils.subset_request_resolver import resolve_subset_request
 from data_access_service.core.descriptor import Depth, Descriptor, Coordinate
 
 log = logging.getLogger(__name__)
@@ -751,7 +751,7 @@ class API(BaseAPI):
         """
         Estimate the total download size across one or more keys of a dataset.
 
-        The request is interpreted by the same resolve_subset the batch
+        The request is interpreted by the same resolve_subset_request the batch
         download uses (key expansion, date defaults + extent trim, bboxes)
 
         :return: aggregated estimate dict, or None if no requested key exists
@@ -764,7 +764,7 @@ class API(BaseAPI):
                 f"got '{output_format}'"
             )
 
-        resolved_subset = resolve_subset(
+        resolved_subset_request = resolve_subset_request(
             api=self,
             uuid=uuid,
             keys=keys,
@@ -776,9 +776,9 @@ class API(BaseAPI):
 
         per_key: list[dict] = []
         missing: list[str] = []
-        for key in resolved_subset.keys:
+        for key in resolved_subset_request.keys:
             single = estimate_single_key_size(
-                self, key, resolved_subset, output_format=output_format
+                self, key, resolved_subset_request, output_format=output_format
             )
             if single is None:
                 missing.append(key)

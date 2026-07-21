@@ -18,7 +18,7 @@ from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
 
 
 @dataclass(frozen=True)
-class ResolvedSubset:
+class ResolvedSubsetRequest:
     """A user's subset request after every "resolve" step has been applied.
 
     This is the single input every consumer works from, so they can never
@@ -43,28 +43,33 @@ class ResolvedSubset:
         """The bboxes to slice with: empty means "no spatial filter", which
         becomes one whole-globe bbox. Explicit bounds (not open/None slices)
         because the batch mask path compares values against them
-        (subset_zarr.form_mask). Both the batch download and the size
+        (subset_zarr_helper.form_mask). Both the batch download and the size
         estimate must slice from THIS list so they select the same region.
         """
         return self.bboxes or [WHOLE_GLOBE_BBOX]
 
 
-def resolve_subset(
+def resolve_subset_request(
     api,
     uuid: str,
     keys: Optional[List[str]],
     start_date_str: str,
     end_date_str: str,
     multi_polygon: Union[str, dict, None],
+    bboxes: Optional[List[BoundingBox]] = None,
     columns: Optional[List[str]] = None,
-) -> ResolvedSubset:
-    """Interpret a raw subset request into a ResolvedSubset.
+) -> ResolvedSubsetRequest:
+    """Interpret a raw subset request into a ResolvedSubsetRequest.
 
     Steps:
     1. resolve keys: expand "*" / absent keys to all keys of the dataset
     2. resolve dates: defaults, day + nano precision, trim to the union
        temporal extent of the resolved keys
-    3. resolve bboxes: parse the GeoJSON MultiPolygon into bounding boxes
+    3. resolve bboxes: reuse pre-parsed `bboxes` when the caller already has
+       them (the batch path, which parses once in get_subset_request), else
+       parse the GeoJSON MultiPolygon here (the estimation path, which only
+       has the raw string). Passing them through keeps SubsetRequest.bboxes
+       and ResolvedSubsetRequest.bboxes the same list - they cannot drift.
 
     :raises ValueError/TypeError: on unparseable dates or a bad multi_polygon
     """
@@ -72,14 +77,14 @@ def resolve_subset(
     start_date, end_date = resolve_date_range(
         start_date_str, end_date_str, api=api, uuid=uuid, keys=resolved_keys
     )
-    bboxes = resolve_bboxes(multi_polygon)
+    resolved_bboxes = bboxes if bboxes is not None else resolve_bboxes(multi_polygon)
 
-    return ResolvedSubset(
+    return ResolvedSubsetRequest(
         uuid=uuid,
         keys=resolved_keys,
         start_date=start_date,
         end_date=end_date,
-        bboxes=bboxes,
+        bboxes=resolved_bboxes,
         columns=columns,
     )
 

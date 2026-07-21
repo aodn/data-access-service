@@ -1,7 +1,7 @@
 """Download size estimation workers.
 
 API.estimate_datasets_size (core/api.py) resolves the request via
-resolve_subset, then calls estimate_single_key_size here for each key.
+resolve_subset_request, then calls estimate_single_key_size here for each key.
 
 The workers only measure metadata, never load the data:
 
@@ -21,16 +21,15 @@ import xarray
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, ZarrDataSource
 
 from data_access_service.core.constants import (
-    STR_LATITUDE_UPPER_CASE,
-    STR_LONGITUDE_UPPER_CASE,
-    STR_TIME_UPPER_CASE,
     OUTPUT_FORMAT_COMPRESSION_RATIO,
-    COMPRESSION_RATIO_GEOTIFF,
     GEOTIFF_ZIP_RATIO,
     GEOTIFF_INT_PIXEL_BYTES,
+    GEOTIFF_CURVILINEAR_INFLATION,
 )
-from data_access_service.utils.subsetting_resolver import (
-    ResolvedSubset,
+from data_access_service.utils.dim_names_utils import resolve_dim_names
+from data_access_service.utils.geotiff_export import geotiff_eligible_vars, has_ij_dims
+from data_access_service.utils.subset_request_resolver import (
+    ResolvedSubsetRequest,
     trim_date_range_for_keys,
 )
 
@@ -40,52 +39,51 @@ log = logging.getLogger(__name__)
 def estimate_single_key_size(
     api,
     key: str,
-    resolved_subset: ResolvedSubset,
+    resolved_subset_request: ResolvedSubsetRequest,
     output_format: str,
 ) -> Optional[dict]:
     """
     Estimate the download size of ONE key.
 
     :param key: Dataset key
-    :param resolved_subset: The resolved subset request (dates already defaulted
+    :param resolved_subset_request: The resolved subset request (dates already defaulted
         and trimmed to the union extent of all keys, "*" expanded, bboxes
         parsed); this function re-trims the dates to THIS key's own extent
     :param output_format: One of SUPPORTED_OUTPUT_FORMATS (netcdf/geotiff/csv)
     :return: A dict with the estimate, or None if the key is not found
     """
-    uuid = resolved_subset.uuid
+    uuid = resolved_subset_request.uuid
     ds = api.get_datasource(uuid, key)
     if ds is None:
         return None
 
-    if not resolved_subset.has_data:
+    if not resolved_subset_request.has_data:
         return _empty_estimate(uuid, key, output_format)
 
     # Re-trim to THIS key's own extent
     date_start, date_end = trim_date_range_for_keys(
-        api, uuid, [key], resolved_subset.start_date, resolved_subset.end_date
+        api,
+        uuid,
+        [key],
+        resolved_subset_request.start_date,
+        resolved_subset_request.end_date,
     )
     if date_start is None or date_end is None:
         return _empty_estimate(uuid, key, output_format)
 
-    # One slice per bbox. effective_bboxes is shared with the batch download
-    # (subset_zarr), so both select the same region: empty -> whole globe,
-    # and lons are used raw - no [0, 360] shift.
-    spatial_slices = [
-        (b.min_lat, b.max_lat, b.min_lon, b.max_lon)
-        for b in resolved_subset.effective_bboxes
-    ]
-
     if isinstance(ds, ZarrDataSource):
+        # effective_bboxes is shared with the batch download: empty -> whole
+        # globe, lons used raw (no [0, 360] shift). ds.zarr_store is the raw
+        # lazy dataset (opened in ZarrDataSource.__init__)
         return _estimate_zarr_size(
             api,
-            ds,
+            ds.zarr_store,
             uuid,
             key,
             date_start,
             date_end,
-            spatial_slices,
-            resolved_subset.columns,
+            resolved_subset_request.effective_bboxes,
+            resolved_subset_request.columns,
             output_format,
         )
     elif isinstance(ds, ParquetDataSource):
@@ -96,75 +94,69 @@ def estimate_single_key_size(
 
 def _estimate_zarr_size(
     api,
-    ds: ZarrDataSource,
+    zarr_store: xarray.Dataset,
     uuid: str,
     key: str,
     date_start: pd.Timestamp | None,
     date_end: pd.Timestamp | None,
-    spatial_slices: list[tuple],
+    bboxes: list,
     columns: list[str] | None,
     output_format: str,
 ) -> dict:
-    date_start_str = _timestamp_to_zarr_slice_str(date_start)
-    date_end_str = _timestamp_to_zarr_slice_str(date_end)
+    """Estimate the download size of one zarr key, summed over its bboxes.
+
+    Overlapping bboxes are summed (counted once per box), so a multi-polygon
+    estimate is an upper bound.
+
+    :param zarr_store: the raw, unsliced lazy dataset for this key
+    :param bboxes: effective bboxes to slice
+    :param columns: requested columns; currently ignored
+    :param output_format: "netcdf" or "geotiff"
+    :return: dict with uuid, key, format, estimated_uncompressed_bytes,
+        estimated_output_bytes, and human-readable notes
+    """
+    from data_access_service.utils.subset_zarr_helper import subset_zarr
 
     notes: list[str] = []
-    if len(spatial_slices) > 1:
+    if len(bboxes) > 1:
         notes.append(
-            f"summed {len(spatial_slices)} polygon bboxes "
+            f"summed {len(bboxes)} polygon bboxes "
             "(overlapping regions counted once per box -> upper bound)"
         )
+    if columns:
+        # Column subsetting isn't implemented yet; once it is, it will be applied
+        # in subset_zarr (shared with the download).
+        # For now the estimate covers ALL columns
+        log.info("column subsetting not implemented yet; ignoring columns %s", columns)
+        notes.append(f"column subsetting not supported yet; columns skipped: {columns}")
 
     total_uncompressed = 0
     total_output = 0
-    columns_note_done = False
 
     log.debug(
         "_estimate_zarr_size: uuid=%s key=%s slice=[%s..%s] bboxes=%d format=%s",
         uuid,
         key,
-        date_start_str,
-        date_end_str,
-        len(spatial_slices),
+        date_start,
+        date_end,
+        len(bboxes),
         output_format,
     )
 
-    for la_min, la_max, lo_min, lo_max in spatial_slices:
-        # get_data returns a lazily-sliced xarray.Dataset; chunks are NOT
-        # loaded. We measure this one bbox and discard it before the next,
-        # so no union grid is ever materialised.
-        dataset: xarray.Dataset = ds.get_data(
-            date_start_str, date_end_str, la_min, la_max, lo_min, lo_max
+    for bbox in bboxes:
+        # subset_zarr returns a lazily-sliced xarray.Dataset - the
+        # SAME slicing the batch download uses.
+        dataset: xarray.Dataset = subset_zarr(
+            zarr_store, api, uuid, key, date_start, date_end, bbox
         )
 
-        # Restrict to requested data variables, if any (reduces output size).
-        # Columns subsetting not implemented yet but we want to account for it in the estimate
-        if columns:
-            mapped = api.map_column_names(uuid, key, columns) or []
-            present = [c for c in mapped if c in dataset.data_vars]
-            missing = [c for c in columns if c not in present]
-            if present:
-                dataset = dataset[present]
-            if missing and not columns_note_done:
-                notes.append(f"columns not found and ignored: {missing}")
-        columns_note_done = True
-
-        # .nbytes is metadata only (no compute); sum across bboxes.
-        total_uncompressed += int(dataset.nbytes)
-
-        # Output size depends on format - geotiff is NOT a flat multiplier on
-        # nbytes so it has its own dimension-based estimate.
+        # Measure the uncompressed and output sizes for this slice, per format.
         if output_format == "geotiff":
-            total_output += _estimate_geotiff_output_bytes(
-                api, dataset, uuid, key, notes
-            )
-        else:
-            ratio = OUTPUT_FORMAT_COMPRESSION_RATIO[output_format]
-            total_output += int(int(dataset.nbytes) * ratio)
-
-    if output_format != "geotiff":
-        ratio = OUTPUT_FORMAT_COMPRESSION_RATIO[output_format]
-        notes.append(f"compression ratio assumed: {ratio} for {output_format}")
+            uncompressed, output = _measure_geotiff(api, dataset, uuid, key, notes)
+        elif output_format == "netcdf":
+            uncompressed, output = _measure_netcdf(dataset, output_format)
+        total_uncompressed += uncompressed
+        total_output += output
 
     deduped_notes = list(dict.fromkeys(notes))
 
@@ -184,70 +176,58 @@ def _estimate_zarr_size(
     }
 
 
-def _empty_estimate(uuid: str, key: str, output_format: str) -> dict:
-    """Zero-size estimate, returned when the requested range is outside the
-    dataset's temporal extent (the batch download produces no data here)."""
-    return {
-        "uuid": uuid,
-        "key": key,
-        "format": output_format,
-        "estimated_uncompressed_bytes": 0,
-        "estimated_output_bytes": 0,
-        "notes": "requested date range is outside the dataset's temporal extent",
-    }
+def _measure_netcdf(dataset: xarray.Dataset, output_format: str) -> tuple[int, int]:
+    """(uncompressed, output) for netcdf: nbytes, then a flat compression
+    ratio"""
+    nbytes = int(dataset.nbytes)
+    ratio = OUTPUT_FORMAT_COMPRESSION_RATIO[output_format]
+    return nbytes, int(nbytes * ratio)
 
 
-def _estimate_geotiff_output_bytes(
+def _measure_geotiff(
     api,
     dataset: xarray.Dataset,
     uuid: str,
     key: str,
     notes: list[str],
-) -> int:
+) -> tuple[int, int]:
+    """(uncompressed, output) for GeoTIFF.
+
+    GeoTIFF export writes one .tif per eligible gridded variable - only numeric
+    variables that have BOTH the lat and lon dimensions are exported; everything
+    else is dropped.
+    We see dataset with dim I/J as a curvilinear grid, else lat/lon as a regular grid.
+    The exporter warps curvilinear grids to a regular lat/lon grid before writing,
+    so the real raster is larger than the raw I x J cell count. A size estimate can't
+    know the warped dimensions without reprojecting, so it multiplies the I x J
+    estimate by a conservative inflation factor (GEOTIFF_CURVILINEAR_INFLATION).
+
+        uncompressed ~= sum_over_vars(n_time x lat x lon x bytes_per_pixel)
+            if curvilinear, uncompressed *= GEOTIFF_CURVILINEAR_INFLATION
+        output       ~= uncompressed x zip_ratio
+
+    Raises ValueError when no gridded variable is found at all (genuinely
+    non-gridded data, e.g. point/timeseries).
     """
-    Estimate GeoTIFF download size for a zarr selection
+    lat_name, lon_name, time_name = resolve_dim_names(api, uuid, key)
 
-    GeoTIFF is not a flat ratio on nbytes. The real export writes one .tif per (eligible gridded variable x time step), each raster sized lat_size x lon_size, then bundles them into a ZIP. Only numeric variables that have BOTH the lat and
-    lon dimensions are exported; everything else is dropped.
+    # curvilinear grids index by integer I/J instead of lon/lat; the real
+    # exporter warps I/J -> lat/lon before writing (geotiff_export.py). A size
+    # estimate only needs the cell COUNT, so it uses I x J and applies a
+    # conservative inflation factor for the warp below.
+    is_curvilinear = has_ij_dims(dataset)
+    lat_dim, lon_dim = ("I", "J") if is_curvilinear else (lat_name, lon_name)
 
-    estimated_output_bytes ~= sum_over_vars(n_time x lat x lon x bytes_per_pixel) x zip_ratio
-
-    Falls back to the flat COMPRESSION_RATIO_GEOTIFF on nbytes only when no
-    gridded variable is found at all (genuinely non-gridded data, e.g.
-    point/timeseries).
-    """
-    lat_mapped = api.map_column_names(uuid, key, [STR_LATITUDE_UPPER_CASE]) or []
-    lon_mapped = api.map_column_names(uuid, key, [STR_LONGITUDE_UPPER_CASE]) or []
-    time_mapped = api.map_column_names(uuid, key, [STR_TIME_UPPER_CASE]) or []
-    lat_name = lat_mapped[0] if lat_mapped else None
-    lon_name = lon_mapped[0] if lon_mapped else None
-    time_name = time_mapped[0] if time_mapped else None
-
-    # curvilinear grids index by integer I/J instead of lon/lat. The real
-    # exporter remaps I/J -> lat/lon before writing (subset_zarr.py).
-    # But a size estimate only needs the cell COUNT so we don't do
-    # conversion here.
-    if "I" in dataset.dims and "J" in dataset.dims:
-        lat_dim, lon_dim = "I", "J"
-    else:
-        lat_dim, lon_dim = lat_name, lon_name
-
-    # Eligible = numeric variables gridded on both spatial dims, which
-    # aligns with the exporter logic.
-    eligible = [
-        v
-        for v in dataset.data_vars
-        if v not in (lat_name, lon_name)
-        and dataset[v].dtype.kind in ("i", "u", "f")
-        and lat_dim in dataset[v].dims
-        and lon_dim in dataset[v].dims
-    ]
+    # Same var selection the exporter uses, so we count exactly what it writes.
+    eligible = geotiff_eligible_vars(dataset, lat_name, lon_name)
     if not eligible:
-        notes.append(
-            "geotiff: no gridded variables found, "
-            f"fell back to flat ratio {COMPRESSION_RATIO_GEOTIFF}"
+        # The real export (build_geotiff_zip) raises here too and fails the whole
+        # download, so we stop instead of promising a size for a file that can
+        # never be produced.
+        raise ValueError(
+            f"GeoTIFF export not possible for {key}: no gridded numeric variables "
+            "(a variable must be on both the lat and lon axes)."
         )
-        return int(dataset.nbytes * COMPRESSION_RATIO_GEOTIFF)
 
     lat_size = int(dataset.sizes.get(lat_dim, 1))
     lon_size = int(dataset.sizes.get(lon_dim, 1))
@@ -267,20 +247,29 @@ def _estimate_geotiff_output_bytes(
         f"geotiff: {len(eligible)} gridded var(s) x {n_time} time step(s), "
         f"grid {lat_size}x{lon_size}, zip ratio {GEOTIFF_ZIP_RATIO}"
     )
-    return int(raw_raster_bytes * GEOTIFF_ZIP_RATIO)
+
+    if is_curvilinear:
+        # The warped raster is bigger than I x J, so inflate by a mid-range
+        # factor. Note: a REGULAR grid stored as I/J (which the exporter reduces
+        # to an exact I x J) is over-estimated here - telling them apart needs
+        # loading the lat/lon coords, which a metadata-only estimate avoids.
+        raw_raster_bytes = int(raw_raster_bytes * GEOTIFF_CURVILINEAR_INFLATION)
+        notes.append(
+            "curvilinear grid: warped to regular lat/lon at export, "
+            f"size inflated x{GEOTIFF_CURVILINEAR_INFLATION} (approximate)"
+        )
+
+    return raw_raster_bytes, int(raw_raster_bytes * GEOTIFF_ZIP_RATIO)
 
 
-def _timestamp_to_zarr_slice_str(ts: pd.Timestamp | None) -> str | None:
-    """
-    Convert a pandas Timestamp into the plain date string ZarrDataSource expects.
-
-    ZarrDataSource.get_data slices the time coordinate with a string and cannot compare timezone-aware
-    values, so we drop the tz (the values are already UTC by convention). Returns None unchanged
-    so the slice stays open.
-    """
-    # lazy import: date_time_utils imports core.api at module level, which
-    # imports this module - a top-level import here would be circular
-    from data_access_service.utils.date_time_utils import to_naive_utc
-
-    ts = to_naive_utc(ts)
-    return None if ts is None else ts.strftime("%Y-%m-%d %H:%M:%S")
+def _empty_estimate(uuid: str, key: str, output_format: str) -> dict:
+    """Zero-size estimate, returned when the requested range is outside the
+    dataset's temporal extent (the batch download produces no data here)."""
+    return {
+        "uuid": uuid,
+        "key": key,
+        "format": output_format,
+        "estimated_uncompressed_bytes": 0,
+        "estimated_output_bytes": 0,
+        "notes": "requested date range is outside the dataset's temporal extent",
+    }

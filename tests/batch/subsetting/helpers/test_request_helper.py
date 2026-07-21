@@ -7,7 +7,7 @@ import pytest
 from data_access_service.batch.subsetting.helpers.request_helper import (
     get_subset_request,
 )
-from data_access_service.utils.subsetting_resolver import (
+from data_access_service.utils.subset_request_resolver import (
     trim_date_range_for_keys,
 )
 from data_access_service.utils.date_time_utils import supply_day_with_nano_precision
