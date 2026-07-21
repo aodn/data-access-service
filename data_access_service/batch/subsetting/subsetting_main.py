@@ -6,10 +6,10 @@ from data_access_service.batch.subsetting.helpers.request_helper import (
     get_subset_request,
 )
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.utils.subsetting_resolver import (
-    ResolvedSubset,
+from data_access_service.utils.subset_request_resolver import (
+    ResolvedSubsetRequest,
     normalize_request,
-    resolve_subset,
+    resolve_subset_request,
 )
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.batch.subsetting.tasks.data_collection import (
@@ -18,7 +18,7 @@ from data_access_service.batch.subsetting.tasks.data_collection import (
 from data_access_service.batch.subsetting.tasks.generate_dataset import (
     process_data_files,
 )
-from data_access_service.batch.subsetting.tasks.subset_zarr import ZarrProcessor
+from data_access_service.batch.subsetting.tasks.zarr_processor import ZarrProcessor
 from data_access_service.utils.date_time_utils import (
     split_date_range,
     parse_date,
@@ -43,17 +43,18 @@ def init(api: API, job_id_of_init, parameters):
     # executed:
     #  1. Trim the date range to the dataset's temporal extent
     #  2. Parse the GeoJSON multi_polygon into bboxes
-    resolved_subset = resolve_subset(
+    resolved_subset_request = resolve_subset_request(
         api=api,
         uuid=subset_request.uuid,
         keys=subset_request.keys,
         start_date_str=subset_request.start_date,
         end_date_str=subset_request.end_date,
         multi_polygon=subset_request.multi_polygon,
+        bboxes=subset_request.bboxes,  # already parsed in get_subset_request; reuse
     )
 
     # Step 4: If the requested data not available, email the user and stop here.
-    if not resolved_subset.has_data:
+    if not resolved_subset_request.has_data:
         text_body = (
             f"No data available for your subset request for dataset {subset_request.uuid} "
             f"with keys {subset_request.keys} "
@@ -69,8 +70,8 @@ def init(api: API, job_id_of_init, parameters):
 
     # Step 5: Process zarr sub-setting workflow
     # use new zarr sub-setting workflow if all keys are zarr. It it works well, then deprecate old zarr sub-setting workflow
-    if all(key.endswith(".zarr") for key in resolved_subset.keys):
-        subset_zarr(api, job_id_of_init, subset_request, resolved_subset)
+    if all(key.endswith(".zarr") for key in resolved_subset_request.keys):
+        run_zarr_subset(api, job_id_of_init, subset_request, resolved_subset_request)
         return
 
     # Step 6: Process legacy sub-setting workflow, for parquet (or mixed
@@ -80,8 +81,8 @@ def init(api: API, job_id_of_init, parameters):
     #  3. Submit the data collection job
     month_count_per_job = config.get_month_count_per_job()
     date_ranges = split_date_range(
-        start_date=resolved_subset.start_date,
-        end_date=resolved_subset.end_date,
+        start_date=resolved_subset_request.start_date,
+        end_date=resolved_subset_request.end_date,
         month_count_per_job=month_count_per_job,
     )
 
@@ -169,8 +170,8 @@ def collect_data(parameters):
     collect_data_files(master_job_id=master_job_id, subset_request=request)
 
 
-def subset_zarr(
-    api: API, job_id: str, request: SubsetRequest, resolved: ResolvedSubset
+def run_zarr_subset(
+    api: API, job_id: str, request: SubsetRequest, resolved: ResolvedSubsetRequest
 ) -> None:
     """Run the zarr-only subset pipeline. `resolved` must have data
     (the caller sends the "no data" email when it does not)."""

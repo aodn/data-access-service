@@ -1,10 +1,12 @@
 import json
+import time
 from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Optional, List
 import uuid as uuid_module
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from xarray import Dataset
 
@@ -25,6 +27,7 @@ from data_access_service.sites.sites import (
     SiteDetailsFeature,
     SiteFeatureCollection,
 )
+from data_access_service.models.estimate_size_request import EstimateSizeRequest
 from data_access_service.utils.api_utils import api_key_auth
 from data_access_service.utils.date_time_utils import (
     ensure_timezone,
@@ -32,7 +35,6 @@ from data_access_service.utils.date_time_utils import (
     DATE_FORMAT,
 )
 from data_access_service.utils.routes_helper import (
-    get_api_instance,
     get_site_service,
     require_api_ready,
     verify_datatime_param,
@@ -376,3 +378,53 @@ async def get_data(
             return async_response_json(result, compress)
 
         return None
+
+
+@router.post("/data/{uuid}/estimate_size", dependencies=[Depends(api_key_auth)])
+async def estimate_size_multi(
+    uuid: str,
+    body: EstimateSizeRequest,
+    api_instance: API = Depends(require_api_ready),
+):
+    logger.debug(
+        "estimate_size_multi start: uuid=%s keys=%s start=%s end=%s f=%s "
+        "has_polygon=%s columns=%s",
+        uuid,
+        body.keys,
+        body.start_date,
+        body.end_date,
+        body.output_format,
+        body.multi_polygon is not None,
+        body.columns,
+    )
+    t0 = (
+        time.perf_counter()
+    )  # for performance tracking of this endpoint (debug purpose)
+
+    try:
+        # Offload the blocking, CPU/metadata work to a threadpool thread.
+        result = await run_in_threadpool(
+            api_instance.estimate_datasets_size,
+            uuid,
+            keys=body.keys,
+            start_date=body.start_date,
+            end_date=body.end_date,
+            multi_polygon=body.multi_polygon,
+            columns=body.columns,
+            output_format=body.output_format,
+        )
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except NotImplementedError as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_IMPLEMENTED, detail=str(e))
+
+    elapsed = time.perf_counter() - t0
+    logger.info("estimate_size_multi done in %.3fs", elapsed)
+
+    if result is None:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"No matching keys found for uuid={uuid}, keys={body.keys}",
+        )
+
+    return Response(content=json.dumps(result), media_type="application/json")

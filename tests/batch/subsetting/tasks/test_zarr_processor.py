@@ -9,7 +9,7 @@ from aodn_cloud_optimised.lib import DataQuery
 
 from data_access_service import Config, API
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.batch.subsetting.tasks.subset_zarr import ZarrProcessor
+from data_access_service.batch.subsetting.tasks.zarr_processor import ZarrProcessor
 from tests.core.test_with_s3 import TestWithS3, REGION
 
 
