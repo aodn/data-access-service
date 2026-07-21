@@ -131,6 +131,10 @@ class Config:
         return self.batch
 
     def get_csv_bucket_name(self):
+        name_env = os.getenv("AWS_S3_BUCKET_NAME_CSV")
+        if name_env:
+            return name_env
+
         if self.config is None:
             return None
         val = self.config["aws"]["s3"]["bucket_name"]["csv"]
