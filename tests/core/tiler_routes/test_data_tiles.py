@@ -316,7 +316,6 @@ def test_availability_ok(client):
             "full_date_range": {"start": "2024-06-01", "end": "2024-07-01"},
         }
     }
-    assert "cache_version" in body
 
 
 def test_availability_date_filters(client):

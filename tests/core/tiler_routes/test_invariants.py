@@ -12,7 +12,6 @@ import numpy as np
 import xarray as xr
 
 from data_access_service.config.tiler.constants import LOD, TILE
-from data_access_service.config.tiler.http_cache import CACHE_VERSION
 from data_access_service.tiler.services.product.product import Product
 
 
@@ -20,9 +19,7 @@ from data_access_service.tiler.services.product.product import Product
 #
 # LODConfig and TileConfig are baked into the frontend WebGL shader's texture
 # atlas layout. Changing any of these values without a coordinated frontend
-# redeploy silently corrupts rendering — no error, just wrong pixels. CACHE_VERSION
-# is the manifest-level cache-buster the frontend uses to invalidate tile URLs
-# when render output changes; bumping it without intent breaks all caches.
+# redeploy silently corrupts rendering — no error, just wrong pixels.
 
 
 def test_lod_config_matches_frontend_shader_contract(client):
@@ -34,12 +31,6 @@ def test_lod_config_matches_frontend_shader_contract(client):
 def test_tile_geometry_matches_frontend_shader_contract(client):
     assert TILE.chunk_px == (240, 192)
     assert TILE.padding == 1
-
-
-def test_cache_version_is_set(client):
-    # Bumping is intentional; an unintended change to CACHE_VERSION invalidates
-    # every CDN/browser-cached tile across all clients on next deploy.
-    assert CACHE_VERSION == "cv1"
 
 
 # --- Date / timezone round-trip ------------------------------------------

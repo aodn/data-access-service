@@ -3,7 +3,7 @@ import functools
 import json
 
 import anyio
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
+from fastapi import APIRouter, Header, HTTPException, Path, Query
 from fastapi.openapi.models import Example
 from fastapi.responses import Response
 
@@ -12,7 +12,6 @@ from data_access_service.config.tiler.http_cache import (
     IMMUTABLE_CACHE_HEADERS,
     compute_etag,
     etag_response,
-    require_cache_version,
 )
 from data_access_service.tiler.schemas.visual_tiles import ColormapListResponse
 from data_access_service.tiler.services.caching.deduper import Deduper
@@ -94,7 +93,6 @@ async def get_colormaps(
         "Without rescale, only the color bar is rendered (no labels). "
         "Categorical colormaps render discrete equal-width color blocks instead of a smooth gradient."
     ),
-    dependencies=[Depends(require_cache_version)],
 )
 def get_legend(
     name: str,
@@ -133,7 +131,6 @@ def get_legend(
         "Tiles outside the product extent return transparent images. "
         "WebP is rejected for categorical colormaps because lossy compression corrupts the discrete colour boundaries."
     ),
-    dependencies=[Depends(require_cache_version)],
 )
 def get_tile(
     product_id: str = Path(openapi_examples=PRODUCT_EX),
@@ -276,7 +273,6 @@ def _parse_bbox_and_crs(
         "Compatible with Mapbox GL raster sources using the {bbox-epsg-3857} placeholder (pass crs=EPSG:3857). "
         "WebP is rejected for categorical colormaps because lossy compression corrupts the discrete colour boundaries."
     ),
-    dependencies=[Depends(require_cache_version)],
 )
 def get_bbox(
     product_id: str = Path(openapi_examples=PRODUCT_EX),
@@ -375,9 +371,8 @@ def get_bbox(
         f"the other is derived from the bbox aspect ratio so the output is not stretched. "
         f"This endpoint bypasses the in-memory slice cache so it never evicts hot tiles, so "
         f"expect cold requests to be slow. Like other tile endpoints the HTTP response itself "
-        f"is cached for a year (immutable, gated on ?cv=) since it's fully determined by the URL."
+        f"is cached for a year at the CDN since it's fully determined by the URL."
     ),
-    dependencies=[Depends(require_cache_version)],
 )
 async def get_animation(
     product_id: str = Path(openapi_examples=PRODUCT_EX),

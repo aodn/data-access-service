@@ -2,15 +2,13 @@ import json
 import math
 
 import xarray as xr
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response
+from fastapi import APIRouter, Header, HTTPException, Path, Query, Response
 from fastapi.openapi.models import Example
 
 from data_access_service.config.tiler.http_cache import (
-    CACHE_VERSION,
     IMMUTABLE_CACHE_HEADERS,
     compute_etag,
     etag_response,
-    require_cache_version,
 )
 from data_access_service.tiler.schemas.products import (
     ManifestResponse,
@@ -103,7 +101,6 @@ def get_products_availability(
     products = {}
 
     fingerprint_parts = [
-        f"cv={CACHE_VERSION}",
         f"from={from_date or ''}",
         f"to={to_date or ''}",
     ]
@@ -130,9 +127,7 @@ def get_products_availability(
         )
 
     etag = compute_etag("|".join(fingerprint_parts))
-    return etag_response(
-        {"products": products, "cache_version": CACHE_VERSION}, etag, if_none_match
-    )
+    return etag_response({"products": products}, etag, if_none_match)
 
 
 @router.get(
@@ -140,7 +135,6 @@ def get_products_availability(
     summary="Point value lookup",
     description="Returns the value(s) of all product variables at the nearest grid cell to the given lat/lon.",
     response_model=PointResponse,
-    dependencies=[Depends(require_cache_version)],
 )
 def get_point(
     response: Response,

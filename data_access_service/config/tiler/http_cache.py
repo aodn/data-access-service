@@ -1,7 +1,6 @@
 """HTTP caching policy for the tiler endpoints — single source of truth.
 
-IMMUTABLE_CACHE_HEADERS — 1 year, immutable, gated on ?cv=<CACHE_VERSION>
-  (require_cache_version). The URL fully determines the response bytes.
+IMMUTABLE_CACHE_HEADERS — 1 year at the CDN, no browser caching. 
     GET /{product_id}/{date}/{z}/{x}/{y}.png           raw data tile
     GET /{product_id}/{date}/manifest.json             data tile manifest
     GET /{product_id}/{date}/point                     point lookup
@@ -16,24 +15,10 @@ REVALIDATE_CACHE_HEADERS — 5 minutes, must-revalidate, ETag (etag_response).
     GET /products    product list
     GET /colormaps   colormap list
 
-CACHE_VERSION (?cv=) — how we bust the 1-year cache on purpose.
-  A browser holding an "immutable, max-age=1yr" response will never ask the
-  server for a fresher one. So to ship a fix, we don't update the response —
-  we change the URL, which is a guaranteed cache miss.
-    1. CACHE_VERSION = "cv1" is bumped by hand when rendered output actually
-       changes (renderer code, product config, a colormap) — not on every deploy.
-    2. Clients learn the current value from /manifest's `cache_version` field.
-    3. Clients append it as `?cv=cv1` on every immutable-endpoint request.
-    4. require_cache_version (a per-route dependency) 400s the request if
-       `cv` is missing or doesn't match — this stops a client from ever
-       caching an un-versioned URL that a future bump couldn't reach.
-  /manifest itself skips this check: it's how clients find out what `cv`
-  should be, so requiring it there would be a chicken-and-egg deadlock.
-
 ETag — how REVALIDATE endpoints avoid resending a body that hasn't changed.
     1. compute_etag hashes a short fingerprint of "what would make this
-       response different" (for /manifest: cv + query params + each
-       product's dates; for /products and /colormaps: the payload itself).
+       response different" (for /manifest: query params + each product's
+       dates; for /products and /colormaps: the payload itself).
     2. The response carries that hash in an `ETag` header.
     3. On the next request, the client sends back `If-None-Match: <etag>`.
     4. etag_response compares it: same hash → `304 Not Modified`, no body;
@@ -45,44 +30,20 @@ CloudFront settings required to honour the above:
     1. Cache key includes all query strings.
     2. Cache policy TTL bounds: MinTTL=0, MaxTTL=31536000 (1 year) — wide
        enough that CloudFront never clamps below what Cache-Control says.
-       Because max-age origin sends gets forced into [MinTTL, MaxTTL]
+    3. CloudFront must respect `s-maxage` over `max-age` (the default
+       CachingOptimized-style behaviour) so immutable responses get a
+       year at the edge despite telling browsers `max-age=0`.
 """
 
 import hashlib
 from typing import Any
 
-from fastapi import HTTPException, Query
 from starlette.responses import JSONResponse, Response
 
-CACHE_VERSION = "cv1"
-
-IMMUTABLE_CACHE_HEADERS = {"Cache-Control": f"public, max-age={86400 * 365}, immutable"}
+IMMUTABLE_CACHE_HEADERS = {
+    "Cache-Control": f"public, s-maxage={86400 * 365}, max-age=0, must-revalidate"
+}
 REVALIDATE_CACHE_HEADERS = {"Cache-Control": "public, max-age=300, must-revalidate"}
-
-
-def require_cache_version(
-    cv: str | None = Query(
-        None,
-        description=(
-            "Cache-busting version tag. Must match the current value advertised by "
-            "GET /manifest's `cache_version` field."
-        ),
-    ),
-) -> None:
-    """FastAPI dependency: 400s a request to an immutable endpoint with a stale/missing cv.
-
-    Add as `Depends(require_cache_version)` on every route returning
-    IMMUTABLE_CACHE_HEADERS. Deliberately not applied to REVALIDATE endpoints —
-    see the module docstring for why /manifest can't be gated on `cv`.
-    """
-    if cv != CACHE_VERSION:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Missing or stale cache_version {cv!r}; expected {CACHE_VERSION!r}. "
-                f"Fetch GET /manifest for the current value and retry with ?cv={CACHE_VERSION}"
-            ),
-        )
 
 
 def compute_etag(fingerprint: str) -> str:

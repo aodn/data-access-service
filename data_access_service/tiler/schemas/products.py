@@ -29,7 +29,6 @@ class ProductAvailability(BaseModel):
 
 class ManifestResponse(BaseModel):
     products: dict[str, ProductAvailability]
-    cache_version: str
 
 
 class VariableValue(BaseModel):
