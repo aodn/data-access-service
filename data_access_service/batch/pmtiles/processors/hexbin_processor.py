@@ -190,6 +190,52 @@ class HexbinProcessor(AbstractProcessor):
 
         return geojsonseq_file_paths
 
+    def generate_metadata_json(self) -> str:
+        """Write min/max period from staging parquet to {dname}.metadata."""
+        staged_path = self.get_staged_path()
+        if not os.path.exists(staged_path):
+            raise FileNotFoundError(
+                f"Staged parquet not found at {staged_path!r}; "
+                "cannot generate metadata"
+            )
+
+        time_col = (
+            "d" if self.pmtiles_config.time_group_by == TimeGroupBy.DATE else "ym"
+        )
+        row = self.pm_client.execute(
+            f"""
+            SELECT MIN({time_col}), MAX({time_col})
+            FROM read_parquet('{staged_path}')
+            """
+        ).fetchone()
+        if row is None or row[0] is None or row[1] is None:
+            raise ValueError(
+                f"Staged parquet at {staged_path!r} has no period values; "
+                "cannot generate metadata"
+            )
+
+        min_date = int(row[0])
+        max_date = int(row[1])
+        metadata = {
+            "min_date": min_date,
+            "max_date": max_date,
+            "time_group_by": self.pmtiles_config.time_group_by.value,
+        }
+
+        metadata_path = self.get_metadata_path()
+        os.makedirs(os.path.dirname(os.path.abspath(metadata_path)), exist_ok=True)
+        with open(metadata_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, separators=(",", ":"))
+
+        self.logger.info(
+            "Wrote metadata to %s (min_date=%s, max_date=%s, time_group_by=%s)",
+            metadata_path,
+            min_date,
+            max_date,
+            self.pmtiles_config.time_group_by.value,
+        )
+        return metadata_path
+
     def __get_max_res(self) -> int:
         return max(layer.h3_resolution for layer in self.get_layers())
 

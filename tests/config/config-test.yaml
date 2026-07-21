@@ -12,3 +12,5 @@ aws:
 pmtiles:
   config:
     bucket_name: apps-test-data
+    # Temporal bucket for hexbin counts: "month" (YYYYMM) or "date" (YYYYMMDD).
+    time_group_by: month

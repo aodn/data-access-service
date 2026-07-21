@@ -3,7 +3,7 @@ import time
 import os
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 from aodn_cloud_optimised.lib.DataQuery import BUCKET_OPTIMISED_DEFAULT
 from data_access_service import Config, init_log
 from data_access_service.core.api import BaseAPI
@@ -39,7 +39,7 @@ class AbstractProcessor(ABC):
         ) or self.pmtiles_config.duckdb_temp_dir.startswith("/"):
             raise ValueError("dir must be a relative path")
 
-    def process(self) -> str:
+    def process(self) -> Tuple[str, str]:
 
         try:
             self.build_staging_parquet()
@@ -53,9 +53,18 @@ class AbstractProcessor(ABC):
                 f"Finished generating GeoJSONSeq files for dataset {self.dataset_name} with UUID {self.uuid}: {geojsonseq_paths}"
             )
 
-            # The staged parquet is only read while generating GeoJSONSeq files;
-            # remove it now so it does not sit on disk alongside the geojsonseq
-            # files and tippecanoe's temp files during the peak-disk step below.
+            # Capture min/max period from staging before it is removed.
+            # Written beside the eventual pmtiles path as {dname}.metadata.
+            metadata_path = self.generate_metadata_json()
+            self.logger.info(
+                f"Finished generating metadata for dataset {self.dataset_name} "
+                f"with UUID {self.uuid}: {metadata_path}"
+            )
+
+            # The staged parquet is only read while generating GeoJSONSeq files
+            # and metadata; remove it now so it does not sit on disk alongside
+            # the geojsonseq files and tippecanoe's temp files during the
+            # peak-disk step below.
             self._remove_staged_parquet()
 
             # Fourth step, use all GeoJSONSeq files to generate PMTiles file.
@@ -67,7 +76,7 @@ class AbstractProcessor(ABC):
                 f"Finished generating pmtiles file for dataset {self.dataset_name} with UUID {self.uuid}. Output path: {pmtile_path}"
             )
             self._remove_geojsonseq_files(geojsonseq_paths)
-            return pmtile_path
+            return pmtile_path, metadata_path
 
         finally:
             self.pm_client.close()
@@ -94,6 +103,14 @@ class AbstractProcessor(ABC):
             self.work_dir,
             self.pmtiles_config.output_pmtiles_dir,
             f"{self.dataset_name}.pmtiles",
+        )
+
+    def get_metadata_path(self) -> str:
+        """Same folder as the pmtiles output: {dname}.metadata."""
+        return os.path.join(
+            self.work_dir,
+            self.pmtiles_config.output_pmtiles_dir,
+            f"{self.dataset_name}.metadata",
         )
 
     def get_geojsonseq_dir(self) -> str:
@@ -158,7 +175,9 @@ class AbstractProcessor(ABC):
         max_threads: int = 1,
     ) -> str:
         output_pmtiles_path = self.get_output_pmtiles_path()
-        os.makedirs(os.path.dirname(os.path.abspath(output_pmtiles_path)))
+        os.makedirs(
+            os.path.dirname(os.path.abspath(output_pmtiles_path)), exist_ok=True
+        )
 
         # The memory usage increase linearly with the number of threads,
         # By default, Tippecanoe spins up as many parallel worker threads as you have CPU cores. Each concurrent thread
@@ -210,4 +229,10 @@ class AbstractProcessor(ABC):
     # All the GeoJSONSeq files are data source of the PMTiles.
     @abstractmethod
     def generate_geojsonseq_files(self) -> List[str]:
+        pass
+
+    # Write {dname}.metadata beside the pmtiles output from the staged parquet
+    # (min/max date). Must be called while the staged parquet still exists.
+    @abstractmethod
+    def generate_metadata_json(self) -> str:
         pass
