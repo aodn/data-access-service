@@ -42,7 +42,7 @@ pmtiles:
     duckdb_temp_dir: "duckdb_tmp"
     duckdb_database: "disk_db.duckdb"
     memory_limit: "4G"
-    threads: 8
+    threads: 4
     fetch_size: 50000
     # Periodic DuckDB query progress logs (via query_progress + Python logger)
     show_progress: True
