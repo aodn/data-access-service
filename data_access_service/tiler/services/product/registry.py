@@ -113,4 +113,5 @@ def _from_dict(entry: dict) -> Product:
         padding=entry.get("padding", TILE.padding),
         coastal_fill=CoastalFill(**coastal_fill) if coastal_fill else None,
         ocean_masked=entry.get("ocean_masked", entry["id"] in _OCEAN_MASKED_BY_DEFAULT),
+        metadata_uuid=entry.get("metadata_uuid"),
     )

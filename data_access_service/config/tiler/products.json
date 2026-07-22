@@ -2,17 +2,20 @@
   {
     "id": "satellite_austemp_heatwave_8day:sst_mosaic",
     "source_path": "s3://aodn-cloud-optimised/satellite_austemp_heatwave_8day.zarr",
-    "variable": "sst_mosaic"
+    "variable": "sst_mosaic",
+    "metadata_uuid": "2ffccdad-1197-4e41-b412-a9033517cfb2"
   },
   {
     "id": "satellite_austemp_heatwave_8day:ssta_mosaic",
     "source_path": "s3://aodn-cloud-optimised/satellite_austemp_heatwave_8day.zarr",
-    "variable": "ssta_mosaic"
+    "variable": "ssta_mosaic",
+    "metadata_uuid": "2ffccdad-1197-4e41-b412-a9033517cfb2"
   },
   {
     "id": "satellite_austemp_heatwave_8day:mcs_category",
     "source_path": "s3://aodn-cloud-optimised/satellite_austemp_heatwave_8day.zarr",
-    "variable": "MCS_category"
+    "variable": "MCS_category",
+    "metadata_uuid": "2ffccdad-1197-4e41-b412-a9033517cfb2"
   },
   {
     "id": "model_sea_level_anomaly_gridded_realtime:gsla",
@@ -20,7 +23,8 @@
     "variable": "GSLA",
     "coastal_fill": {
       "max_dist_px": 4
-    }
+    },
+    "metadata_uuid": "0c9eb39c-9cbe-4c6a-8a10-5867087e703a"
   },
   {
     "id": "model_sea_level_anomaly_gridded_realtime:ucur+vcur",
@@ -28,6 +32,7 @@
     "variable": [
       "UCUR",
       "VCUR"
-    ]
+    ],
+    "metadata_uuid": "0c9eb39c-9cbe-4c6a-8a10-5867087e703a"
   }
 ]

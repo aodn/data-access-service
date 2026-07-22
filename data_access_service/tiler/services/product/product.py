@@ -25,6 +25,9 @@ class Product:
     id: str
     source_path: str
     variable: str | list[str]
+    # Links this product to the GeoNetwork/STAC collection it belongs to, so ogcapi-java can
+    # group products by collection UUID. Optional and generic for both visual and data tiles.
+    metadata_uuid: str | None = None
     lod_grids: dict[int, tuple[int, int]] = field(default_factory=dict)
     chunk_px: tuple[int, int] = TILE.chunk_px
     padding: int = TILE.padding
