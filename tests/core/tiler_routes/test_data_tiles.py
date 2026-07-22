@@ -427,6 +427,7 @@ def test_availability_ok(client):
         }
     }
     assert "cache_version" in body
+    assert body["max_lods"] == 4
 
 
 def test_availability_date_filters(client):
