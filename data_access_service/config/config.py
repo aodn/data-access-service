@@ -130,14 +130,14 @@ class Config:
     def get_batch_client(self) -> BaseClient:
         return self.batch
 
-    def get_csv_bucket_name(self):
-        name_env = os.getenv("AWS_S3_BUCKET_NAME_CSV")
+    def get_subsetting_bucket_name(self):
+        name_env = os.getenv("AWS_S3_BUCKET_NAME_SUBSETTING")
         if name_env:
             return name_env
 
         if self.config is None:
             return None
-        val = self.config["aws"]["s3"]["bucket_name"]["csv"]
+        val = self.config["aws"]["s3"]["bucket_name"]["subsetting"]
         return val.strip() if isinstance(val, str) else val
 
     def get_wave_buoy_backup_bucket_name(self):
@@ -227,11 +227,11 @@ class Config:
                 f"Expected one of: {allowed}."
             ) from e
 
-        bucket_name_env = os.getenv("PMTILES_CONFIG_BUCKET_NAME")
+        bucket_name_env = os.getenv("AWS_S3_BUCKET_NAME_PORTAL_DATA")
         if bucket_name_env:
             bucket_name = bucket_name_env
         else:
-            bucket_name = pmconfig["bucket_name"]
+            bucket_name = self.config["aws"]["s3"]["bucket_name"]["portal_data"]
 
         return PmtilesGenerationConfig(
             output_pmtiles_dir=pmconfig["output_pmtiles_dir"],
