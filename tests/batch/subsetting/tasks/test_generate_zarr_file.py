@@ -76,7 +76,7 @@ class TestGenerateZarrFile(TestWithS3):
                         end_date=pd.Timestamp("2011-09-01 00:00:00"),
                     )
                     # This is a zarr file, we should be able to read the result from S3
-                    target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name(INIT_JOB_ID)}vessel_satellite_radiance_delayed_qc.zarr/part-*.zarr"
+                    target_path = f"s3://{config.get_subsetting_bucket_name()}/{config.get_s3_temp_folder_name(INIT_JOB_ID)}vessel_satellite_radiance_delayed_qc.zarr/part-*.zarr"
                     data = helper.read_multipart_zarr_from_s3(target_path)
                     assert len(data["TIME"]) == 158902, "file have enough data"
 
@@ -161,7 +161,7 @@ class TestGenerateZarrFile(TestWithS3):
                     )
                     # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
                     names = helper.list_s3_folders(
-                        config.get_csv_bucket_name(),
+                        config.get_subsetting_bucket_name(),
                         f"{config.get_s3_temp_folder_name('888')}vessel_satellite_radiance_delayed_qc.zarr",
                     )
                     assert "part-1.zarr" in names, "part-1.zarr not exit!"
@@ -169,7 +169,7 @@ class TestGenerateZarrFile(TestWithS3):
                     assert "part-3.zarr" in names, "part-3.zarr not exit!"
 
                     # This will aggregate to the same row count as above
-                    target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name('888')}vessel_satellite_radiance_delayed_qc.zarr/part-*.zarr"
+                    target_path = f"s3://{config.get_subsetting_bucket_name()}/{config.get_s3_temp_folder_name('888')}vessel_satellite_radiance_delayed_qc.zarr/part-*.zarr"
                     data = helper.read_multipart_zarr_from_s3(target_path)
                     assert (
                         len(data["TIME"]) == 158902
@@ -216,13 +216,13 @@ class TestGenerateZarrFile(TestWithS3):
                     )
                     # This is a zarr file, we should be able to read the result from S3, and have part-1
                     names = helper.list_s3_folders(
-                        config.get_csv_bucket_name(),
+                        config.get_subsetting_bucket_name(),
                         f"{config.get_s3_temp_folder_name('888')}radar_CoffsHarbour_wind_delayed_qc.zarr",
                     )
                     assert "part-1.zarr" in names, "part-1.zarr not exit!"
 
                     # This will aggregate to the same row count as above
-                    target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name('888')}radar_CoffsHarbour_wind_delayed_qc.zarr/part-*.zarr"
+                    target_path = f"s3://{config.get_subsetting_bucket_name()}/{config.get_s3_temp_folder_name('888')}radar_CoffsHarbour_wind_delayed_qc.zarr/part-*.zarr"
                     data = helper.read_multipart_zarr_from_s3(target_path)
                     assert (
                         len(data["TIME"]) == 1

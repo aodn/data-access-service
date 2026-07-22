@@ -1,7 +1,8 @@
 aws:
   s3:
     bucket_name:
-      csv: aodn-cloud-optimized-subset-edge
+      subsetting: aodn-cloud-optimized-subset-edge
+      portal_data: aodnportal-edge-data
       wave_buoy_backup: datavis-apps-edge-data
       mooring_backup: datavis-apps-edge-data
   ses:
@@ -9,6 +10,3 @@ aws:
   batch:
     job_queue: data-access-service-batch-job-queue
     job_definition: data-access-service-batch-job-definition
-pmtiles:
-  config:
-    bucket_name: aodnportal-edge-data

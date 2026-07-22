@@ -1,7 +1,8 @@
 aws:
   s3:
     bucket_name:
-      csv: aodn-cloud-optimized-subset-prod
+      subsetting: aodn-cloud-optimized-subset-prod
+      portal_data: aodnportal-production-data
       wave_buoy_backup: datavis-apps-prod-data
       mooring_backup: datavis-apps-prod-data
   ses:
@@ -11,5 +12,4 @@ aws:
     job_definition: generate-csv-data-file
 pmtiles:
   config:
-    bucket_name: aodnportal-production-data
     show_progress: False

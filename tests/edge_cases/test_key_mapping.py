@@ -67,12 +67,12 @@ class TestKeyMapping(TestWithS3):
                         end_date=pd.Timestamp("2013-01-01 23:59:59.999999999"),
                     )
                     names = helper.list_s3_folders(
-                        config.get_csv_bucket_name(),
+                        config.get_subsetting_bucket_name(),
                         f"{config.get_s3_temp_folder_name('888')}argo.parquet",
                     )
                     assert "part-1" in names, "part-1 not exit!"
 
-                    target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name('888')}argo.parquet"
+                    target_path = f"s3://{config.get_subsetting_bucket_name()}/{config.get_s3_temp_folder_name('888')}argo.parquet"
                     subset = helper.read_parquet_from_s3(target_path)
                     assert len(subset) == 77555
                 except Exception as ex:
@@ -120,11 +120,11 @@ class TestKeyMapping(TestWithS3):
                         end_date=pd.Timestamp("2015-02-01 23:59:59.999999999"),
                     )
                     names = helper.list_s3_folders(
-                        config.get_csv_bucket_name(),
+                        config.get_subsetting_bucket_name(),
                         f"{config.get_s3_temp_folder_name('888')}{dname}",
                     )
                     assert "part-1.zarr" in names, "part-1 not exit!"
-                    target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name('888')}{dname}/part-*.zarr"
+                    target_path = f"s3://{config.get_subsetting_bucket_name()}/{config.get_s3_temp_folder_name('888')}{dname}/part-*.zarr"
                     subset = helper.read_multipart_zarr_from_s3(target_path)
 
                     assert len(subset["time"]) == 2

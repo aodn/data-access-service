@@ -206,7 +206,7 @@ class ZarrProcessor:
 
         # set the thread count for dask, for the to_netcdf operation later
         dask.config.set(num_workers=thread_count)
-        bucket_name = self.config.get_csv_bucket_name()
+        bucket_name = self.config.get_subsetting_bucket_name()
 
         # Free memory before to_netcdf to prevent allocation errors.
         # Don't skip this step even though most of the situations no memory is freed,
@@ -329,7 +329,7 @@ class ZarrProcessor:
 
     def __upload_zip_to_s3(self, zip_path: Path, zip_name: str) -> str:
         """Upload a ZIP file to S3 and return the download URL."""
-        bucket_name = self.config.get_csv_bucket_name()
+        bucket_name = self.config.get_subsetting_bucket_name()
         s3_key = f"{self.job_id}/{zip_name}"
         self.aws.upload_file_to_s3(str(zip_path), bucket_name, s3_key)
         region = self.aws.s3.meta.region_name
