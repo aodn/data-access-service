@@ -1,7 +1,8 @@
 aws:
   s3:
     bucket_name:
-      csv: aodn-cloud-optimized-subset-staging
+      subsetting: aodn-cloud-optimized-subset-staging
+      portal_data: aodnportal-staging-data
       wave_buoy_backup: datavis-apps-staging-data
       mooring_backup: datavis-apps-staging-data
   ses:
@@ -9,6 +10,3 @@ aws:
   batch:
     job_queue: generate-csv-data-file
     job_definition: generate-csv-data-file
-pmtiles:
-  config:
-    bucket_name: aodnportal-staging-data

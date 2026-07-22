@@ -1,7 +1,8 @@
 aws:
   s3:
     bucket_name:
-      csv: aodn-cloud-optimized-subset-dev
+      subsetting: aodn-cloud-optimized-subset-dev
+      portal_data: aodnportal-dev-data
       wave_buoy_backup: aodn-cloud-optimized-wave-buoy-backup-testing
       mooring_backup: aodn-cloud-optimized-wave-buoy-backup-testing
   ses:
@@ -11,5 +12,4 @@ aws:
     job_definition: generate-csv-data-file-dev
 pmtiles:
   config:
-    bucket_name: aodnportal-dev-data
     threads: 12
