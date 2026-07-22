@@ -1,3 +1,4 @@
+import json
 from unittest.mock import patch
 
 import numpy as np
@@ -58,9 +59,7 @@ def test_get_products_reflects_effective_state(client, monkeypatch):
     assert p["ocean_masked"] is False
 
 
-def test_list_products_includes_metadata_uuid_only_when_present(
-    client, tmp_path, monkeypatch
-):
+def test_list_products_metadata_uuid_null_when_absent(client, tmp_path, monkeypatch):
     cfg = tmp_path / "products.json"
     cfg.write_text(
         json.dumps(
@@ -76,12 +75,13 @@ def test_list_products_includes_metadata_uuid_only_when_present(
         )
     )
     monkeypatch.setattr(registry, "_config_path", cfg)
+    registry.load_products()
 
     r = client.get("/api/v1/das/tiler/data_tiles/products")
     assert r.status_code == 200
     by_id = {p["id"]: p for p in r.json()}
     assert by_id["linked"]["metadata_uuid"] == "uuid-123"
-    assert "metadata_uuid" not in by_id["plain"]  # omitted when not set
+    assert by_id["plain"]["metadata_uuid"] is None
 
 
 _FAKE_PRODUCTS = {
