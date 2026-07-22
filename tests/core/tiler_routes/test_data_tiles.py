@@ -1,4 +1,3 @@
-import json
 from unittest.mock import patch
 
 import numpy as np
@@ -6,33 +5,57 @@ import pandas as pd
 import xarray as xr
 
 import data_access_service.tiler.services.product.registry as registry
-from data_access_service.tiler.services.product.product import Product
+from data_access_service.tiler.services.product.product import CoastalFill, Product
 
 
-def test_list_products_includes_coastal_fill_only_when_present(
-    client, tmp_path, monkeypatch
-):
-    cfg = tmp_path / "products.json"
-    cfg.write_text(
-        json.dumps(
-            [
-                {
-                    "id": "sparse",
-                    "source_path": "s3://b/x.zarr",
-                    "variable": "GSLA",
-                    "coastal_fill": {"max_dist_px": 4},
-                },
-                {"id": "plain", "source_path": "s3://b/y.zarr", "variable": "V"},
-            ]
-        )
+def test_get_products_coastal_fill_null_when_absent(client, monkeypatch):
+    monkeypatch.setitem(
+        registry.PRODUCTS,
+        "sparse",
+        Product(
+            id="sparse",
+            source_path="s3://b/x.zarr",
+            variable="GSLA",
+            coastal_fill=CoastalFill(max_dist_px=4),
+        ),
     )
-    monkeypatch.setattr(registry, "_config_path", cfg)
+    monkeypatch.setitem(
+        registry.PRODUCTS,
+        "plain",
+        Product(id="plain", source_path="s3://b/y.zarr", variable="V"),
+    )
 
     r = client.get("/api/v1/das/tiler/data_tiles/products")
     assert r.status_code == 200
     by_id = {p["id"]: p for p in r.json()}
     assert by_id["sparse"]["coastal_fill"] == {"max_dist_px": 4}
-    assert "coastal_fill" not in by_id["plain"]  # omitted when not set
+    assert by_id["plain"]["coastal_fill"] is None
+
+
+def test_get_products_reflects_effective_state(client, monkeypatch):
+    """GET /products is built from live Product state, not the raw JSON —
+    fields that products.json doesn't set explicitly still show their
+    resolved value (e.g. ocean_masked's default-by-id rule)."""
+    monkeypatch.setitem(
+        registry.PRODUCTS,
+        "currents",
+        Product(
+            id="model_sea_level_anomaly_gridded_realtime:ucur+vcur",
+            source_path="s3://b/z.zarr",
+            variable=["UCUR", "VCUR"],
+        ),
+    )
+
+    r = client.get("/api/v1/das/tiler/data_tiles/products")
+    assert r.status_code == 200
+    by_id = {p["id"]: p for p in r.json()}
+    p = by_id["model_sea_level_anomaly_gridded_realtime:ucur+vcur"]
+    assert p["chunk_px"] == [240, 192]
+    assert p["padding"] == 1
+    # ocean_masked here comes from the Product's own default (False), since this
+    # instance was constructed directly rather than via registry._from_dict —
+    # the default-by-id rule lives in _from_dict, not on Product itself.
+    assert p["ocean_masked"] is False
 
 
 _FAKE_PRODUCTS = {

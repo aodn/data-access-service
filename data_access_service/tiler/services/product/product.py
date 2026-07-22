@@ -28,9 +28,6 @@ class Product:
     chunk_px: tuple[int, int] = TILE.chunk_px
     padding: int = TILE.padding
     coastal_fill: CoastalFill | None = None
-    zoom_thresholds: dict[int, int] = field(
-        default_factory=lambda: dict(LOD.zoom_thresholds)
-    )
     ocean_masked: bool = False
     # Computed, not settable in products.json — populated lazily from the store's
     # native dimensions on first request (see get_lod_grids below). This is the one

@@ -40,11 +40,6 @@ def render_manifest(product: Product, ds: xr.Dataset) -> dict[str, Any]:
                 product.chunk_px[1] + 2 * product.padding,
             ],
             "padding": product.padding,
-            **(
-                {"zoomThreshold": product.zoom_thresholds[lod]}
-                if lod in product.zoom_thresholds
-                else {}
-            ),
         }
         for lod in product.lod_grids
     }

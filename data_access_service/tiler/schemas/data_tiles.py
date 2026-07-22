@@ -13,7 +13,6 @@ class LodMeta(BaseModel):
     chunkPx: list[int]
     storedPx: list[int]
     padding: int
-    zoomThreshold: int | None = None
 
 
 class DataTileManifestResponse(BaseModel):

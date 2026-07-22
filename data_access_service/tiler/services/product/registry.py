@@ -17,9 +17,10 @@ Single front door for everything product-related at runtime:
     ``model_sea_level_anomaly_gridded_realtime:ucur+vcur``. This is a
     readability convention only — ``id`` is never parsed, just used as an
     opaque lookup key — so it isn't enforced in code.
-  * ``list_products`` returns the raw JSON entries (used by ``GET /products``);
-    this is intentionally different from ``iter_products()`` which returns live
-    ``Product`` instances.
+  * ``GET /products`` is built from ``iter_products()`` (live ``Product``
+    instances), not the raw JSON — so it reflects resolved defaults (e.g.
+    ``ocean_masked`` via ``_OCEAN_MASKED_BY_DEFAULT``) rather than only what
+    products.json literally spells out.
 """
 
 import json
@@ -49,7 +50,6 @@ class _ProductEntry(BaseModel):
     chunk_px: tuple[int, int] | None = None
     padding: int | None = None
     coastal_fill: _CoastalFillEntry | None = None
-    zoom_thresholds: dict[int, int] | None = None
     ocean_masked: bool | None = None
 
 
@@ -111,18 +111,6 @@ def load_products() -> None:
     logger.info(f"Loaded {len(PRODUCTS)} products from {_config_path}")
 
 
-def list_products() -> list[dict]:
-    """Return the raw JSON entries from products.json. Used by ``GET /products``.
-
-    Distinct from ``iter_products()`` which returns live ``Product`` instances.
-    This returns whatever the config file says, including fields that may not
-    be on the Product dataclass.
-    """
-    if not _config_path.exists():
-        return []
-    return json.loads(_config_path.read_text())
-
-
 def _from_dict(entry: dict) -> Product:
     parsed = _ProductEntry(**entry)
     kwargs: dict = {}
@@ -130,8 +118,6 @@ def _from_dict(entry: dict) -> Product:
         kwargs["chunk_px"] = parsed.chunk_px
     if parsed.padding is not None:
         kwargs["padding"] = parsed.padding
-    if parsed.zoom_thresholds is not None:
-        kwargs["zoom_thresholds"] = parsed.zoom_thresholds
     return Product(
         id=parsed.id,
         source_path=parsed.source_path,

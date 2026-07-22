@@ -1,7 +1,4 @@
-from dataclasses import dataclass, field
-
-LODIndex = int
-ZoomLevel = int
+from dataclasses import dataclass
 
 # Applied by the store registry to normalise source coordinate names so the rest
 # of the pipeline can assume `time` / `lat` / `lon` regardless of how a product
@@ -16,8 +13,6 @@ class LODConfig:
     Bundled here (rather than passed at runtime or read from env) because these
     values are baked into the WebGL shader on the frontend — changing one without
     redeploying the frontend silently corrupts the rendering.
-
-    min_coarsest, max_loads are constants, zoom_thresholds is overridable per product in products.json.
     """
 
     # Cap on LOD levels per product. The frontend packs all LODs into a single WebGL
@@ -30,12 +25,6 @@ class LODConfig:
     # But if a product only has fewer than this, it will still be served below this
     # threshold.
     min_coarsest: tuple[int, int] = (2, 2)
-    # LOD level → minimum map zoom to show that level.
-    # LOD1 is the coarsest level, so under zoom level 4 only LOD1 tiles are shown; at zoom 4 LOD2
-    # tiles are shown, etc.
-    zoom_thresholds: dict[LODIndex, ZoomLevel] = field(
-        default_factory=lambda: {2: 4, 3: 5, 4: 6}
-    )
 
 
 LOD = LODConfig()

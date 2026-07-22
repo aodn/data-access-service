@@ -1,6 +1,9 @@
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from data_access_service.tiler.services.product.product import Product
 
 
 class CoastalFillConfig(BaseModel):
@@ -8,12 +11,31 @@ class CoastalFillConfig(BaseModel):
 
 
 class ProductConfig(BaseModel):
+    """The fields here must match Product's fields, except for lod_grids."""
+
     id: str
     source_path: str
     variable: str | list[str]
-    # Present in the response only when the product enables coastal fill (see
-    # §7.6); omitted otherwise via response_model_exclude_none on GET /products.
+    chunk_px: tuple[int, int]
+    padding: int
     coastal_fill: CoastalFillConfig | None = None
+    ocean_masked: bool
+
+    @classmethod
+    def from_product(cls, product: "Product") -> "ProductConfig":
+        return cls(
+            id=product.id,
+            source_path=product.source_path,
+            variable=product.variable,
+            chunk_px=product.chunk_px,
+            padding=product.padding,
+            coastal_fill=(
+                CoastalFillConfig(max_dist_px=product.coastal_fill.max_dist_px)
+                if product.coastal_fill
+                else None
+            ),
+            ocean_masked=product.ocean_masked,
+        )
 
 
 class DateRange(BaseModel):
