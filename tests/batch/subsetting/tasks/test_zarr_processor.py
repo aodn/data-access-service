@@ -9,7 +9,7 @@ from aodn_cloud_optimised.lib import DataQuery
 
 from data_access_service import Config, API
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.batch.subsetting.tasks.subset_zarr import ZarrProcessor
+from data_access_service.batch.subsetting.tasks.zarr_processor import ZarrProcessor
 from tests.core.test_with_s3 import TestWithS3, REGION
 
 
@@ -57,7 +57,7 @@ class TestSubsetZarr(TestWithS3):
 
                     # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
                     files = helper.list_all_s3_objects(
-                        config.get_csv_bucket_name(),
+                        config.get_subsetting_bucket_name(),
                         "",
                     )
 
@@ -69,7 +69,7 @@ class TestSubsetZarr(TestWithS3):
                     with tempfile.TemporaryDirectory() as tmpdirname:
                         temp_file_path = Path(tmpdirname) / f"{no_ext_key}.nc"
                         helper.download_file_from_s3(
-                            config.get_csv_bucket_name(),
+                            config.get_subsetting_bucket_name(),
                             f"job_id_888/{no_ext_key}.nc",
                             str(temp_file_path),
                         )
@@ -124,7 +124,7 @@ class TestSubsetZarr(TestWithS3):
 
                     # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
                     files = helper.list_all_s3_objects(
-                        config.get_csv_bucket_name(),
+                        config.get_subsetting_bucket_name(),
                         "",
                     )
 
@@ -136,7 +136,7 @@ class TestSubsetZarr(TestWithS3):
                     with tempfile.TemporaryDirectory() as tmpdirname:
                         temp_file_path = Path(tmpdirname) / f"{no_ext_key}.nc"
                         helper.download_file_from_s3(
-                            config.get_csv_bucket_name(),
+                            config.get_subsetting_bucket_name(),
                             f"job_id_888/{no_ext_key}.nc",
                             str(temp_file_path),
                         )
@@ -186,7 +186,7 @@ class TestSubsetZarr(TestWithS3):
 
                     # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
                     files = helper.list_all_s3_objects(
-                        config.get_csv_bucket_name(),
+                        config.get_subsetting_bucket_name(),
                         "",
                     )
 
@@ -198,7 +198,7 @@ class TestSubsetZarr(TestWithS3):
                     with tempfile.TemporaryDirectory() as tmpdirname:
                         temp_file_path = Path(tmpdirname) / f"{no_ext_key}.nc"
                         helper.download_file_from_s3(
-                            config.get_csv_bucket_name(),
+                            config.get_subsetting_bucket_name(),
                             f"job_id_888/{no_ext_key}.nc",
                             str(temp_file_path),
                         )
@@ -242,7 +242,7 @@ class TestSubsetZarr(TestWithS3):
 
                     # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
                     files = helper.list_all_s3_objects(
-                        config.get_csv_bucket_name(),
+                        config.get_subsetting_bucket_name(),
                         "",
                     )
 
@@ -254,7 +254,7 @@ class TestSubsetZarr(TestWithS3):
                     with tempfile.TemporaryDirectory() as tmpdirname:
                         temp_file_path = Path(tmpdirname) / f"{no_ext_key}.nc"
                         helper.download_file_from_s3(
-                            config.get_csv_bucket_name(),
+                            config.get_subsetting_bucket_name(),
                             f"job_id_888/{no_ext_key}.nc",
                             str(temp_file_path),
                         )
@@ -302,7 +302,7 @@ class TestSubsetZarr(TestWithS3):
 
                     # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
                     files = helper.list_all_s3_objects(
-                        config.get_csv_bucket_name(),
+                        config.get_subsetting_bucket_name(),
                         "",
                     )
 
@@ -314,7 +314,7 @@ class TestSubsetZarr(TestWithS3):
                     with tempfile.TemporaryDirectory() as tmpdirname:
                         temp_file_path = Path(tmpdirname) / f"{no_ext_key}.nc"
                         helper.download_file_from_s3(
-                            config.get_csv_bucket_name(),
+                            config.get_subsetting_bucket_name(),
                             f"job_id_888/{no_ext_key}.nc",
                             str(temp_file_path),
                         )

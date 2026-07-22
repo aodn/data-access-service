@@ -51,6 +51,7 @@ class _ProductEntry(BaseModel):
     padding: int | None = None
     coastal_fill: _CoastalFillEntry | None = None
     ocean_masked: bool | None = None
+    metadata_uuid: str | None = None
 
 
 _config_path = Path(PRODUCTS_CONFIG_PATH)
@@ -132,5 +133,6 @@ def _from_dict(entry: dict) -> Product:
             if parsed.ocean_masked is not None
             else parsed.id in _OCEAN_MASKED_BY_DEFAULT
         ),
+        metadata_uuid=parsed.metadata_uuid,
         **kwargs,
     )

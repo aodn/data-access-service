@@ -1,4 +1,4 @@
-"""Unit tests for utils.subsetting_resolver - the single owner of
+"""Unit tests for utils.subset_request_resolver - the single owner of
 "apply the user's subset" behaviour shared by the batch subsetting paths."""
 
 import pandas as pd
@@ -6,10 +6,10 @@ import pytest
 from unittest.mock import MagicMock
 
 from data_access_service.core.constants import WHOLE_GLOBE_BBOX
-from data_access_service.utils.subsetting_resolver import (
+from data_access_service.utils.subset_request_resolver import (
     resolve_bboxes,
     resolve_date_range,
-    resolve_subset,
+    resolve_subset_request,
 )
 
 UUID = "test-uuid"
@@ -40,7 +40,7 @@ class TestResolveSubset:
             raise KeyError(key)
 
         api.get_temporal_extent.side_effect = extent_or_key_error
-        resolved = resolve_subset(
+        resolved = resolve_subset_request(
             api, UUID, ["a.zarr", "ghost.zarr"], "2024-01-01", "2024-12-31", None
         )
         # unknown keys stay in the list (callers report/skip them downstream)
@@ -49,13 +49,17 @@ class TestResolveSubset:
 
     def test_star_expands_to_all_keys(self):
         api = _mock_api(known_keys=["a.zarr", "b.zarr"])
-        resolved = resolve_subset(api, UUID, ["*"], "2024-01-01", "2024-12-31", None)
+        resolved = resolve_subset_request(
+            api, UUID, ["*"], "2024-01-01", "2024-12-31", None
+        )
         assert resolved.keys == ["a.zarr", "b.zarr"]
         api.get_mapped_meta_data.assert_called_once_with(UUID)
 
     def test_absent_keys_means_all_keys(self):
         api = _mock_api(known_keys=["only.zarr"])
-        resolved = resolve_subset(api, UUID, None, "2024-01-01", "2024-12-31", None)
+        resolved = resolve_subset_request(
+            api, UUID, None, "2024-01-01", "2024-12-31", None
+        )
         assert resolved.keys == ["only.zarr"]
 
     def test_dates_trimmed_to_extent(self):
@@ -67,7 +71,7 @@ class TestResolveSubset:
                 pd.Timestamp("2020-12-31 23:59:59.999999999"),
             ),
         )
-        resolved = resolve_subset(
+        resolved = resolve_subset_request(
             api, UUID, ["a.zarr"], "2020-01-01", "2021-12-31", None
         )
         assert resolved.has_data
@@ -81,7 +85,7 @@ class TestResolveSubset:
             known_keys=["a.zarr"],
             extent=(pd.Timestamp("2020-01-01"), pd.Timestamp("2020-12-31")),
         )
-        resolved = resolve_subset(
+        resolved = resolve_subset_request(
             api, UUID, ["a.zarr"], "1990-01-01", "1990-12-31", None
         )
         assert not resolved.has_data
@@ -90,7 +94,7 @@ class TestResolveSubset:
     def test_unknown_extent_keeps_requested_dates(self):
         # get_temporal_extent returning (None, None) (e.g. in tests) must not trim.
         api = _mock_api(known_keys=["a.zarr"], extent=(None, None))
-        resolved = resolve_subset(
+        resolved = resolve_subset_request(
             api, UUID, ["a.zarr"], "2024-01-01", "2024-12-31", None
         )
         expected_start, expected_end = resolve_date_range("2024-01-01", "2024-12-31")
@@ -100,12 +104,16 @@ class TestResolveSubset:
     def test_start_after_end_raises(self):
         api = _mock_api()
         with pytest.raises(ValueError):
-            resolve_subset(api, UUID, ["a.zarr"], "2024-12-31", "2024-01-01", None)
+            resolve_subset_request(
+                api, UUID, ["a.zarr"], "2024-12-31", "2024-01-01", None
+            )
 
     def test_unparseable_date_raises(self):
         api = _mock_api()
         with pytest.raises((ValueError, TypeError)):
-            resolve_subset(api, UUID, ["a.zarr"], "not-a-date", "2024-01-01", None)
+            resolve_subset_request(
+                api, UUID, ["a.zarr"], "not-a-date", "2024-01-01", None
+            )
 
 
 class TestResolveDateRange:

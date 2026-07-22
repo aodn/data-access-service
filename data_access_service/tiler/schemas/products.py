@@ -19,6 +19,9 @@ class ProductConfig(BaseModel):
     chunk_px: tuple[int, int]
     padding: int
     coastal_fill: CoastalFillConfig | None = None
+    # Links this product to its GeoNetwork/STAC collection UUID. Omitted when absent
+    # via response_model_exclude_none on GET /products.
+    metadata_uuid: str | None = None
     ocean_masked: bool
 
     @classmethod
@@ -35,6 +38,7 @@ class ProductConfig(BaseModel):
                 else None
             ),
             ocean_masked=product.ocean_masked,
+            metadata_uuid=product.metadata_uuid,
         )
 
 

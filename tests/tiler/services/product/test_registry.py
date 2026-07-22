@@ -119,6 +119,18 @@ def test_ocean_masked_defaults_true_for_listed_product(isolated_products):
     assert PRODUCTS[pid].ocean_masked is True
 
 
+def test_metadata_uuid_absent_defaults_to_none(isolated_products):
+    _write(isolated_products, [_entry("plain")])
+    registry.load_products()
+    assert PRODUCTS["plain"].metadata_uuid is None
+
+
+def test_metadata_uuid_set_from_entry(isolated_products):
+    _write(isolated_products, [_entry("linked", metadata_uuid="uuid-123")])
+    registry.load_products()
+    assert PRODUCTS["linked"].metadata_uuid == "uuid-123"
+
+
 def test_ocean_masked_explicit_false_overrides_default(isolated_products):
     pid = "model_sea_level_anomaly_gridded_realtime:ucur+vcur"
     _write(

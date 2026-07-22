@@ -32,7 +32,7 @@ from aodn_cloud_optimised.lib import DataQuery
 
 from data_access_service import Config, API
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.batch.subsetting.tasks.subset_zarr import ZarrProcessor
+from data_access_service.batch.subsetting.tasks.zarr_processor import ZarrProcessor
 from tests.core.test_with_s3 import TestWithS3, REGION
 
 # A real-valued store from s3_sample2 (SST analysis, lowercase lat/lon/time coords,
@@ -112,14 +112,14 @@ class TestGeotiffExportWithS3(TestWithS3):
             ),
         ).process()
 
-        files = helper.list_all_s3_objects(config.get_csv_bucket_name(), "")
+        files = helper.list_all_s3_objects(config.get_subsetting_bucket_name(), "")
         zip_keys = [f for f in files if f.endswith(f"{base}_geotiff.zip")]
         assert len(zip_keys) == 1, f"expected one geotiff ZIP, got {zip_keys}"
 
         with tempfile.TemporaryDirectory() as tmp:
             local_zip = Path(tmp) / "output.zip"
             helper.download_file_from_s3(
-                config.get_csv_bucket_name(), zip_keys[0], str(local_zip)
+                config.get_subsetting_bucket_name(), zip_keys[0], str(local_zip)
             )
             with zipfile.ZipFile(local_zip) as zf:
                 tif_names = zf.namelist()
@@ -168,14 +168,14 @@ class TestGeotiffExportWithS3(TestWithS3):
                 ),
             ).process()
 
-        files = helper.list_all_s3_objects(config.get_csv_bucket_name(), "")
+        files = helper.list_all_s3_objects(config.get_subsetting_bucket_name(), "")
         zip_key = next(f for f in files if f.endswith(f"{base}_geotiff.zip"))
         nc_key = next(f for f in files if f.endswith(f"{base}.nc"))
 
         with tempfile.TemporaryDirectory() as tmp:
             local_zip = Path(tmp) / "output.zip"
             helper.download_file_from_s3(
-                config.get_csv_bucket_name(), zip_key, str(local_zip)
+                config.get_subsetting_bucket_name(), zip_key, str(local_zip)
             )
             with zipfile.ZipFile(local_zip) as zf:
                 zf.extractall(tmp)
@@ -185,7 +185,7 @@ class TestGeotiffExportWithS3(TestWithS3):
 
             local_nc = Path(tmp) / "output.nc"
             helper.download_file_from_s3(
-                config.get_csv_bucket_name(), nc_key, str(local_nc)
+                config.get_subsetting_bucket_name(), nc_key, str(local_nc)
             )
             netcdf_sst = (
                 xarray.open_dataset(local_nc)["analysed_sst"]
@@ -219,14 +219,14 @@ class TestGeotiffExportWithS3(TestWithS3):
             ),
         ).process()
 
-        files = helper.list_all_s3_objects(config.get_csv_bucket_name(), "")
+        files = helper.list_all_s3_objects(config.get_subsetting_bucket_name(), "")
         zip_key = next(f for f in files if f.endswith(f"{base}_geotiff.zip"))
         source = xarray.open_zarr(SAMPLES / KEY)
 
         with tempfile.TemporaryDirectory() as tmp:
             local_zip = Path(tmp) / "output.zip"
             helper.download_file_from_s3(
-                config.get_csv_bucket_name(), zip_key, str(local_zip)
+                config.get_subsetting_bucket_name(), zip_key, str(local_zip)
             )
             with zipfile.ZipFile(local_zip) as zf:
                 tif_names = zf.namelist()
