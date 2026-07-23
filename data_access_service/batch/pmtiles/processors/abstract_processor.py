@@ -67,6 +67,13 @@ class AbstractProcessor(ABC):
             # peak-disk step below.
             self._remove_staged_parquet()
 
+            # Release DuckDB *before* tippecanoe so the buffer pool (up to
+            # memory_limit) is returned to the OS and tippecanoe can use that
+            # headroom. Idempotent: finally will no-op if already shut down.
+            # The next dataset constructs a new PmTileDuckDBClient which lazily
+            # rebuilds a fresh connection via get_instance().
+            self._release_duckdb("before tippecanoe")
+
             # Fourth step, use all GeoJSONSeq files to generate PMTiles file.
             self.logger.info(
                 f"Generating pmtiles file for dataset {self.dataset_name} with UUID {self.uuid}..."
@@ -79,13 +86,9 @@ class AbstractProcessor(ABC):
             return pmtile_path, metadata_path
 
         finally:
-            self.pm_client.close()
-            # Tear down the process-global connection too, so its buffer pool
-            # and caches are released between datasets instead of ratcheting
-            # up the process RSS over a multi-dataset batch run.
-            PmTileDuckDBClient.shutdown()
-            self.logger.debug("DuckDB connection closed")
-            log_memory_usage(self.logger, "after duckdb shutdown")
+            # Safe if already released before tippecanoe; still needed when
+            # process fails during staging/geojsonseq before that point.
+            self._release_duckdb("after process cleanup")
 
     # The s3 uri of the source parquet. It is not http URL of s3 objects.
     def get_s3_uri(self):
@@ -115,6 +118,18 @@ class AbstractProcessor(ABC):
 
     def get_geojsonseq_dir(self) -> str:
         return os.path.join(self.work_dir, self.pmtiles_config.geojsonseq_dir)
+
+    def _release_duckdb(self, checkpoint: str) -> None:
+        """Close the client cursor and tear down the process-global DuckDB connection.
+
+        Idempotent: safe to call more than once (e.g. before tippecanoe and again
+        in ``process``'s ``finally``). After this, a new :class:`PmTileDuckDBClient`
+        (next dataset) rebuilds the connection lazily via ``get_instance``.
+        """
+        self.pm_client.close()
+        PmTileDuckDBClient.shutdown()
+        self.logger.info(f"DuckDB released ({checkpoint})")
+        log_memory_usage(self.logger, f"after duckdb shutdown ({checkpoint})")
 
     def _remove_staged_parquet(self) -> None:
         staged_path = self.get_staged_path()
