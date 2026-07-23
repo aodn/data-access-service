@@ -13,11 +13,13 @@ from unittest.mock import patch
 from aodn_cloud_optimised.lib import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import Metadata
 from data_access_service import API, init_log
-from data_access_service.batch.batch_enums import Parameters
+from data_access_service.batch.subsetting.enums import Parameters
 from data_access_service.batch.subsetting import prepare_data
 from data_access_service.config.config import Config
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.tasks.data_collection import collect_data_files
+from data_access_service.batch.subsetting.tasks.data_collection import (
+    collect_data_files,
+)
 from data_access_service.utils.date_time_utils import split_date_range
 from tests.batch.batch_test_consts import PREPARATION_PARAMETERS, INIT_JOB_ID
 from tests.core.test_with_s3 import TestWithS3, REGION
@@ -91,7 +93,7 @@ class TestDataGeneration(TestWithS3):
                         api, job_index=str(i), parameters=PREPARATION_PARAMETERS
                     )
 
-                bucket_name = config.get_csv_bucket_name()
+                bucket_name = config.get_subsetting_bucket_name()
                 response = s3_client.list_objects_v2(Bucket=bucket_name)
 
                 objects = []
@@ -353,7 +355,7 @@ class TestDataGeneration(TestWithS3):
                 api.initialize_metadata()
 
                 # Clean any old S3 objects with prefix "994/" at the start
-                bucket_name = config.get_csv_bucket_name()
+                bucket_name = config.get_subsetting_bucket_name()
                 try:
                     objs = s3_client.list_objects_v2(Bucket=bucket_name, Prefix="994/")
                     if "Contents" in objs:
@@ -382,7 +384,7 @@ class TestDataGeneration(TestWithS3):
                         parameters=parameters,
                     )
 
-                bucket_name = config.get_csv_bucket_name()
+                bucket_name = config.get_subsetting_bucket_name()
                 response = s3_client.list_objects_v2(Bucket=bucket_name)
 
                 objects = []
@@ -472,7 +474,7 @@ class TestDataGeneration(TestWithS3):
         helper = AWSHelper()
 
         # Clean any old S3 objects with prefix "997/" at the start
-        bucket_name = config.get_csv_bucket_name()
+        bucket_name = config.get_subsetting_bucket_name()
         try:
             objs = s3_client.list_objects_v2(Bucket=bucket_name, Prefix="997/")
             if "Contents" in objs:
@@ -554,7 +556,7 @@ class TestDataGeneration(TestWithS3):
                         parameters=parameters,
                     )
 
-                bucket_name = config.get_csv_bucket_name()
+                bucket_name = config.get_subsetting_bucket_name()
                 response = s3_client.list_objects_v2(Bucket=bucket_name)
 
                 objects = []
@@ -678,7 +680,7 @@ class TestDataGeneration(TestWithS3):
         helper = AWSHelper()
 
         # Clean any old S3 objects with prefix "996/" at the start
-        bucket_name = config.get_csv_bucket_name()
+        bucket_name = config.get_subsetting_bucket_name()
         try:
             objs = s3_client.list_objects_v2(Bucket=bucket_name, Prefix="996/")
             if "Contents" in objs:
@@ -721,7 +723,7 @@ class TestDataGeneration(TestWithS3):
                 for i in range(5):
                     prepare_data(api, job_index=str(i), parameters=parameters)
 
-                bucket_name = config.get_csv_bucket_name()
+                bucket_name = config.get_subsetting_bucket_name()
                 response = s3_client.list_objects_v2(
                     Bucket=bucket_name, Prefix="996/temp/"
                 )

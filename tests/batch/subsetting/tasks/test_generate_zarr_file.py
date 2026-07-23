@@ -7,8 +7,10 @@ from unittest.mock import patch
 from data_access_service.core.AWSHelper import AWSHelper
 from aodn_cloud_optimised.lib import DataQuery
 from data_access_service import Config, API
-from data_access_service.tasks.data_collection import collect_data_files
-from data_access_service.tasks.generate_dataset import (
+from data_access_service.batch.subsetting.tasks.data_collection import (
+    collect_data_files,
+)
+from data_access_service.batch.subsetting.tasks.generate_dataset import (
     process_data_files,
 )
 from tests.batch.batch_test_consts import INIT_JOB_ID
@@ -32,7 +34,7 @@ class TestGenerateZarrFile(TestWithS3):
         TestWithS3.upload_to_s3(
             s3_client,
             DataQuery.BUCKET_OPTIMISED_DEFAULT,
-            Path(__file__).parent.parent / "canned/s3_sample2",
+            Path(__file__).parent.parent.parent.parent / "canned/s3_sample2",
         )
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
@@ -74,7 +76,7 @@ class TestGenerateZarrFile(TestWithS3):
                         end_date=pd.Timestamp("2011-09-01 00:00:00"),
                     )
                     # This is a zarr file, we should be able to read the result from S3
-                    target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name(INIT_JOB_ID)}vessel_satellite_radiance_delayed_qc.zarr/part-*.zarr"
+                    target_path = f"s3://{config.get_subsetting_bucket_name()}/{config.get_s3_temp_folder_name(INIT_JOB_ID)}vessel_satellite_radiance_delayed_qc.zarr/part-*.zarr"
                     data = helper.read_multipart_zarr_from_s3(target_path)
                     assert len(data["TIME"]) == 158902, "file have enough data"
 
@@ -159,7 +161,7 @@ class TestGenerateZarrFile(TestWithS3):
                     )
                     # This is a zarr file, we should be able to read the result from S3, and have part-1, part2 and part-3
                     names = helper.list_s3_folders(
-                        config.get_csv_bucket_name(),
+                        config.get_subsetting_bucket_name(),
                         f"{config.get_s3_temp_folder_name('888')}vessel_satellite_radiance_delayed_qc.zarr",
                     )
                     assert "part-1.zarr" in names, "part-1.zarr not exit!"
@@ -167,7 +169,7 @@ class TestGenerateZarrFile(TestWithS3):
                     assert "part-3.zarr" in names, "part-3.zarr not exit!"
 
                     # This will aggregate to the same row count as above
-                    target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name('888')}vessel_satellite_radiance_delayed_qc.zarr/part-*.zarr"
+                    target_path = f"s3://{config.get_subsetting_bucket_name()}/{config.get_s3_temp_folder_name('888')}vessel_satellite_radiance_delayed_qc.zarr/part-*.zarr"
                     data = helper.read_multipart_zarr_from_s3(target_path)
                     assert (
                         len(data["TIME"]) == 158902
@@ -214,13 +216,13 @@ class TestGenerateZarrFile(TestWithS3):
                     )
                     # This is a zarr file, we should be able to read the result from S3, and have part-1
                     names = helper.list_s3_folders(
-                        config.get_csv_bucket_name(),
+                        config.get_subsetting_bucket_name(),
                         f"{config.get_s3_temp_folder_name('888')}radar_CoffsHarbour_wind_delayed_qc.zarr",
                     )
                     assert "part-1.zarr" in names, "part-1.zarr not exit!"
 
                     # This will aggregate to the same row count as above
-                    target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name('888')}radar_CoffsHarbour_wind_delayed_qc.zarr/part-*.zarr"
+                    target_path = f"s3://{config.get_subsetting_bucket_name()}/{config.get_s3_temp_folder_name('888')}radar_CoffsHarbour_wind_delayed_qc.zarr/part-*.zarr"
                     data = helper.read_multipart_zarr_from_s3(target_path)
                     assert (
                         len(data["TIME"]) == 1

@@ -1,7 +1,8 @@
 aws:
   s3:
     bucket_name:
-      csv: test-bucket
+      subsetting: test-bucket
+      portal_data: apps-test-data
       wave_buoy_backup: test-wave-buoy-backup-bucket
       mooring_backup: test-mooring-backup-bucket
   ses:
@@ -11,4 +12,5 @@ aws:
     job_definition: generate-csv-data-file-test
 pmtiles:
   config:
-    bucket_name: apps-test-data
+    # Temporal bucket for hexbin counts: "month" (YYYYMM) or "date" (YYYYMMDD).
+    time_group_by: month

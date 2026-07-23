@@ -1,10 +1,10 @@
-import json
 import math
 
 import xarray as xr
 from fastapi import APIRouter, Header, HTTPException, Path, Query, Response
 from fastapi.openapi.models import Example
 
+from data_access_service.config.tiler.constants import LOD
 from data_access_service.config.tiler.http_cache import (
     IMMUTABLE_CACHE_HEADERS,
     compute_etag,
@@ -18,7 +18,7 @@ from data_access_service.tiler.schemas.products import (
 )
 from data_access_service.tiler.services.product.registry import (
     iter_product_items,
-    list_products,
+    iter_products,
 )
 from data_access_service.tiler.services.store.registry import get_available_dates
 from data_access_service.tiler.utils.geo import dataset_bounds
@@ -55,16 +55,10 @@ def _require_point_in_bounds(ds: xr.Dataset, lat: float, lon: float) -> None:
 @router.get(
     "/products",
     summary="List products",
-    responses={
-        200: {"model": list[ProductConfig]},
-        304: {"description": "Not Modified — ETag matched, response body is empty"},
-    },
+    response_model=list[ProductConfig],
 )
-async def get_products(if_none_match: str | None = Header(None, alias="if-none-match")):
-    raw = list_products()
-    etag = compute_etag(json.dumps(raw, sort_keys=True, default=str))
-    body = [ProductConfig(**p).model_dump(exclude_none=True) for p in raw]
-    return etag_response(body, etag, if_none_match)
+async def get_products():
+    return [ProductConfig.from_product(p) for p in iter_products()]
 
 
 @router.get(
@@ -101,6 +95,7 @@ def get_products_availability(
     products = {}
 
     fingerprint_parts = [
+        f"max_lods={LOD.max_lods}",
         f"from={from_date or ''}",
         f"to={to_date or ''}",
     ]
@@ -127,7 +122,14 @@ def get_products_availability(
         )
 
     etag = compute_etag("|".join(fingerprint_parts))
-    return etag_response({"products": products}, etag, if_none_match)
+    return etag_response(
+        {
+            "products": products,
+            "max_lods": LOD.max_lods,
+        },
+        etag,
+        if_none_match,
+    )
 
 
 @router.get(

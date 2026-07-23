@@ -16,7 +16,7 @@ def collect_data_files(master_job_id: str, subset_request: SubsetRequest):
     aws = AWSHelper()
     config = Config.get_config()
     log = init_log(config)
-    bucket_name = config.get_csv_bucket_name()
+    bucket_name = config.get_subsetting_bucket_name()
     dataset: list[str] = aws.list_s3_folders(
         bucket_name=bucket_name, prefix=config.get_s3_temp_folder_name(master_job_id)
     )

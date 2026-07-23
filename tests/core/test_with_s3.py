@@ -225,7 +225,7 @@ class TestWithS3:
         config.set_s3_client(s3_client)
 
         # Create S3 buckets
-        s3_client.create_bucket(Bucket=config.get_csv_bucket_name())
+        s3_client.create_bucket(Bucket=config.get_subsetting_bucket_name())
         s3_client.create_bucket(Bucket=DataQuery.BUCKET_OPTIMISED_DEFAULT)
 
         # Create SQS queue
@@ -233,7 +233,7 @@ class TestWithS3:
         queue_url = response["QueueUrl"]
         yield queue_url
         # Make sure it removed
-        TestWithS3.delete_object_in_s3(s3_client, config.get_csv_bucket_name())
+        TestWithS3.delete_object_in_s3(s3_client, config.get_subsetting_bucket_name())
         TestWithS3.delete_object_in_s3(s3_client, DataQuery.BUCKET_OPTIMISED_DEFAULT)
 
     @pytest.fixture(scope="function")

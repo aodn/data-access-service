@@ -86,7 +86,7 @@ jobs:
               workflow_id: 'deploy.yml',
               ref: 'main',
               inputs: {
-                app_name: '${{ inputs.environment == 'edge' && 'subsetting/batch' || 'batch' }}',
+                app_name: 'pmtiles/batch-pmtiles',
                 environment: '${{ inputs.environment }}'
               }
             })

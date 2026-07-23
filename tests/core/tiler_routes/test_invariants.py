@@ -25,7 +25,6 @@ from data_access_service.tiler.services.product.product import Product
 def test_lod_config_matches_frontend_shader_contract(client):
     assert LOD.max_lods == 4
     assert LOD.min_coarsest == (2, 2)
-    assert LOD.zoom_thresholds == {2: 4, 3: 5, 4: 6}
 
 
 def test_tile_geometry_matches_frontend_shader_contract(client):

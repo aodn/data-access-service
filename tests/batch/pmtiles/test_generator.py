@@ -1,10 +1,14 @@
+from unittest.mock import MagicMock
+
 import pytest
 
 from data_access_service.batch.pmtiles import generator
 from data_access_service.batch.pmtiles.generator import (
     PmtilesGenerationInProgressError,
+    _generate_pmtiles_for_parquets,
     generate_pmtiles_for_parquets,
 )
+from data_access_service.models.pmtiles_types import PmtilesVisualizationStyle
 
 
 class TestGenerationLock:
@@ -37,3 +41,43 @@ class TestGenerationLock:
             generate_pmtiles_for_parquets(None, "uuid-a", "a.parquet")
         assert generator._generation_lock.acquire(blocking=False)
         generator._generation_lock.release()
+
+
+class TestUploadMetadata:
+    def test_uploads_pmtiles_and_metadata_sidecar(self, monkeypatch):
+        uuid = "uuid-a"
+        dname = "dataset.parquet"
+        pmtiles_path = f"/tmp/work/{dname}.pmtiles"
+        metadata_path = f"/tmp/work/{dname}.metadata"
+        bucket = "test-bucket"
+
+        mock_processor = MagicMock()
+        mock_processor.process.return_value = (pmtiles_path, metadata_path)
+
+        monkeypatch.setattr(
+            generator,
+            "get_visualization_style",
+            lambda uuid, dname: PmtilesVisualizationStyle.HEXAGONS,
+        )
+        monkeypatch.setattr(
+            generator, "HexbinProcessor", lambda **kwargs: mock_processor
+        )
+
+        uploaded = []
+
+        def capture_upload(file_path, s3_bucket, s3_key):
+            uploaded.append((file_path, s3_bucket, s3_key))
+            return f"https://example.com/{s3_key}"
+
+        monkeypatch.setattr(generator.aws, "upload_file_to_s3", capture_upload)
+        monkeypatch.setattr(
+            generator.config,
+            "get_pmtiles_config",
+            lambda: MagicMock(bucket_name=bucket),
+        )
+
+        assert _generate_pmtiles_for_parquets(api=None, uuid=uuid, dname=dname) is True
+        assert uploaded == [
+            (pmtiles_path, bucket, f"portal/visualization/{uuid}/{dname}.pmtiles"),
+            (metadata_path, bucket, f"portal/visualization/{uuid}/{dname}.metadata"),
+        ]

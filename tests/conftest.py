@@ -2,7 +2,9 @@
 
 import pytest
 
-from data_access_service.batch.subsetting_helper import get_subset_request
+from data_access_service.batch.subsetting.helpers.request_helper import (
+    get_subset_request,
+)
 
 DEFAULT_MULTI_POLYGON = '{"type":"MultiPolygon","coordinates":[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}'
 DEFAULT_CITATION = "Cite data as: Mazor, T., Watermeyer, K., Hobley, T., Grinter, V., Holden, R., MacDonald, K. and Ferns, L. (2023). Statewide Marine Habitat Map."

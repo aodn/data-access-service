@@ -12,19 +12,16 @@ import xarray
 
 import numpy as np
 import dask.array as da
-from xarray import DataArray
 
 from data_access_service import init_log, Config, API
-from data_access_service.batch.subsetting_helper import trim_date_range_for_keys
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.core.constants import (
-    STR_TIME_UPPER_CASE,
-    STR_LATITUDE_UPPER_CASE,
-    STR_LONGITUDE_UPPER_CASE,
+from data_access_service.core.constants import STR_TIME_UPPER_CASE
+from data_access_service.utils.subset_request_resolver import (
+    ResolvedSubsetRequest,
+    resolve_subset_request,
 )
-from data_access_service.models.bounding_box import BoundingBox
-from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
-from data_access_service.utils.date_time_utils import supply_day_with_nano_precision
+from data_access_service.utils.dim_names_utils import resolve_dim_names
+from data_access_service.utils.subset_zarr_helper import subset_zarr
 from data_access_service.utils.email_templates.download_email import (
     get_download_email_html_body,
 )
@@ -39,6 +36,7 @@ class ZarrProcessor:
         api: API,
         job_id: str,
         subset_request: SubsetRequest,
+        resolved: ResolvedSubsetRequest | None = None,
     ):
         self.aws = AWSHelper()
         self.api = api
@@ -47,44 +45,28 @@ class ZarrProcessor:
         self.job_id = job_id
         self.subset_request = subset_request
 
-        start_date, end_date = supply_day_with_nano_precision(
-            start_date_str=subset_request.start_date,
-            end_date_str=subset_request.end_date,
-        )
-
-        if "*" in subset_request.keys:
-            md = self.api.get_mapped_meta_data(subset_request.uuid)
-            self.keys = list(md.keys())
-        else:
-            self.keys = subset_request.keys
-
-        trimmed_start_date, trimmed_end_date = trim_date_range_for_keys(
-            api=api,
-            uuid=subset_request.uuid,
-            keys=self.keys,
-            requested_start_date=start_date,
-            requested_end_date=end_date,
-        )
-        if trimmed_start_date is None or trimmed_end_date is None:
-            # requested date range does not overlap with data available
-            text_body = (
-                f"No data available for your subset request for dataset {subset_request.uuid} with keys {self.keys} "
-                f"and date range from {subset_request.start_date} to {subset_request.end_date}."
-                f"and selected area is {subset_request.multi_polygon}."
+        if resolved is None:
+            resolved = resolve_subset_request(
+                api=api,
+                uuid=subset_request.uuid,
+                keys=subset_request.keys,
+                start_date_str=subset_request.start_date,
+                end_date_str=subset_request.end_date,
+                multi_polygon=subset_request.multi_polygon,
+                bboxes=subset_request.bboxes,  # already parsed; reuse
             )
-            AWSHelper().send_email(
-                recipient=subset_request.recipient,
-                subject="No Data Available for Your Subset Request",
-                text_body=text_body,
+        if not resolved.has_data:
+            # The caller (batch init) checks has_data and sends the "no data"
+            # email before constructing a processor; getting here is a bug.
+            raise ValueError(
+                f"Requested date range {subset_request.start_date}..{subset_request.end_date} "
+                f"has no data for dataset {subset_request.uuid}, keys {resolved.keys}"
             )
-            return
 
-        self.start_date = trimmed_start_date
-        self.end_date = trimmed_end_date
-        self.multi_polygon = MultiPolygonHelper(
-            multi_polygon=subset_request.multi_polygon
-        )
-        self.bboxes = self.multi_polygon.bboxes
+        self.keys = resolved.keys
+        self.start_date = resolved.start_date
+        self.end_date = resolved.end_date
+        self.bboxes = resolved.effective_bboxes
 
     # Read-through views onto subset_request — single source of truth, no drift.
     @property
@@ -160,62 +142,29 @@ class ZarrProcessor:
         zarr_store = self.api._instance.get_dataset(key).zarr_store
         zarr_store = prepare(zarr_store, key)  # format-specific prep, no `if format`
 
-        # apply subsetting conditions for each bbox and merge them
+        # Chunk once by time for memory-safe lazy processing. The store is the
+        # same for every bbox, so re-chunking per bbox would just repeat this.
+        time_dim = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
+        )[0]
+        time_per_chunk = self.__get_time_steps_per_chunk(zarr_store, time_dim)
+        self.log.info("Chunking dataset with %d time steps per chunk", time_per_chunk)
+        zarr_store = zarr_store.chunk({time_dim: time_per_chunk})
+
+        # Apply the subset per bbox and merge. subset_zarr is the single owner
+        # of the slicing, shared with the size estimate so both select the same
+        # region (utils.subset_zarr_helper).
         merged_dataset: xarray.Dataset | None = None
         for bbox in self.bboxes:
-
-            dataset = zarr_store
-
-            conditions = self.get_all_subset_conditions(key, bbox)
-
-            time_dim = self.api.map_column_names(
-                uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
-            )[0]
-            time_per_chunk = self.__get_time_steps_per_chunk(dataset, time_dim)
-            self.log.info(
-                "Chunking dataset with %d time steps per chunk", time_per_chunk
+            subset = subset_zarr(
+                zarr_store,
+                self.api,
+                self.uuid,
+                key,
+                self.start_date,
+                self.end_date,
+                bbox,
             )
-            dataset = dataset.chunk({time_dim: time_per_chunk})
-            dim_conditions = {}  # Conditions for dimensions of zarr
-            mask = None  # Conditions for variables (include coord and data_var) of zarr. Naming "mask" is for zarr convention
-
-            # conditions (time range, lat range, lon range etc.) may be dimensions or variables for different zarr datasets
-            # Below loop forms the conditions accordingly
-            # if it is a dimension, it will be added to dim_conditions for sel()
-            # if it is a variable, it will be used to form a mask for where()
-            for k, val_range in conditions.items():
-                self.log.info(
-                    "forming condition for key %s with range %s", k, val_range
-                )
-                if is_dim(key=k, dataset=dataset):
-                    form_dim_conditions(
-                        existing_conditions=dim_conditions,
-                        key=k,
-                        min_value=val_range[0],
-                        max_value=val_range[1],
-                        dataset=dataset,
-                    )
-                elif is_var(key=k, dataset=dataset):
-                    mask = form_mask(
-                        existing_mask=mask,
-                        key=k,
-                        min_value=val_range[0],
-                        max_value=val_range[1],
-                        ds=dataset,
-                    )
-
-                else:
-                    raise ValueError(
-                        f"Condition key: {k} is neither dim, coord nor data_var in the dataset. Dataset: {key}"
-                    )
-
-            # apply dim conditions and mask (variable conditions)
-            subset = dataset
-            if dim_conditions:
-                subset = subset.sel(**dim_conditions)
-            if mask is not None:
-                # please use drop=False to keep lazy loading
-                subset = subset.where(mask, drop=False)
 
             if not isinstance(subset, xarray.Dataset):
                 raise TypeError(
@@ -257,7 +206,7 @@ class ZarrProcessor:
 
         # set the thread count for dask, for the to_netcdf operation later
         dask.config.set(num_workers=thread_count)
-        bucket_name = self.config.get_csv_bucket_name()
+        bucket_name = self.config.get_subsetting_bucket_name()
 
         # Free memory before to_netcdf to prevent allocation errors.
         # Don't skip this step even though most of the situations no memory is freed,
@@ -376,20 +325,11 @@ class ZarrProcessor:
 
     def __get_dim_names(self, key: str):
         """Resolve the actual lat, lon, and time dimension names for a dataset."""
-        lat_name = self.api.map_column_names(
-            uuid=self.uuid, key=key, columns=[STR_LATITUDE_UPPER_CASE]
-        )[0]
-        lon_name = self.api.map_column_names(
-            uuid=self.uuid, key=key, columns=[STR_LONGITUDE_UPPER_CASE]
-        )[0]
-        time_name = self.api.map_column_names(
-            uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
-        )[0]
-        return lat_name, lon_name, time_name
+        return resolve_dim_names(self.api, self.uuid, key)
 
     def __upload_zip_to_s3(self, zip_path: Path, zip_name: str) -> str:
         """Upload a ZIP file to S3 and return the download URL."""
-        bucket_name = self.config.get_csv_bucket_name()
+        bucket_name = self.config.get_subsetting_bucket_name()
         s3_key = f"{self.job_id}/{zip_name}"
         self.aws.upload_file_to_s3(str(zip_path), bucket_name, s3_key)
         region = self.aws.s3.meta.region_name
@@ -447,27 +387,6 @@ class ZarrProcessor:
         self.log.info("Chunk count: %d", chunk_count)
         total_time_count = dataset.sizes[time_dim]
         return math.ceil(total_time_count / chunk_count)
-
-    def get_all_subset_conditions(self, key: str, bbox: BoundingBox) -> dict[str, list]:
-        # Please add more conditions if they are supported in the future
-        time_dim = self.api.map_column_names(
-            uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
-        )[0]
-        lat_dim = self.api.map_column_names(
-            uuid=self.uuid, key=key, columns=[STR_LATITUDE_UPPER_CASE]
-        )[0]
-        lon_dim = self.api.map_column_names(
-            uuid=self.uuid, key=key, columns=[STR_LONGITUDE_UPPER_CASE]
-        )[0]
-
-        return {
-            time_dim: [
-                self.start_date.tz_convert("UTC").tz_localize(None),
-                self.end_date.tz_convert("UTC").tz_localize(None),
-            ],
-            lat_dim: [bbox.min_lat, bbox.max_lat],
-            lon_dim: [bbox.min_lon, bbox.max_lon],
-        }
 
 
 def convert_object_dtype_variables(dataset: xarray.Dataset, logger) -> xarray.Dataset:
@@ -576,50 +495,3 @@ def ignore_invalid_unicode_in_attrs(dataset: xarray.Dataset) -> xarray.Dataset:
             dataset.attrs[k] = v.encode("utf-8", errors="ignore").decode("utf-8")
 
     return dataset
-
-
-def is_dim(key: str, dataset: xarray.Dataset) -> bool:
-    return key in dataset.dims
-
-
-def is_var(key: str, dataset: xarray.Dataset) -> bool:
-    # both coords and data_vars are in variables
-    return key in dataset.variables
-
-
-def form_mask(
-    existing_mask: DataArray | None,
-    key: str,
-    min_value: any,
-    max_value: any,
-    ds: xarray.Dataset,
-) -> any:
-    var_mask = (ds[key] >= min_value) & (ds[key] <= max_value)
-    if existing_mask is None:
-        return var_mask
-    else:
-        return existing_mask & var_mask
-
-
-def form_dim_conditions(
-    existing_conditions: dict[str, slice] | None,
-    key: str,
-    min_value: any,
-    max_value: any,
-    dataset: xarray.Dataset,
-) -> dict[str, slice]:
-    # try to know the dim is ascending or descending
-    slice_from = min_value
-    slice_to = max_value
-
-    # if descending, swap
-    if dataset[key][0] > dataset[key][-1]:
-        slice_from = max_value
-        slice_to = min_value
-
-    dim_condition = {key: slice(slice_from, slice_to)}
-    if existing_conditions is None:
-        return dim_condition
-    else:
-        existing_conditions.update(dim_condition)
-        return existing_conditions

@@ -1,15 +1,16 @@
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
 
-from data_access_service.batch.subsetting_helper import (
+from data_access_service.batch.subsetting.helpers.request_helper import (
     get_subset_request,
+)
+from data_access_service.utils.subset_request_resolver import (
     trim_date_range_for_keys,
 )
 from data_access_service.utils.date_time_utils import supply_day_with_nano_precision
-
 
 _GLOBAL_POLYGON = (
     '{"type":"MultiPolygon","coordinates":'
@@ -80,8 +81,7 @@ class TestGetSubsetRequest:
 
 
 class TestTrimDateRangeForKeys(unittest.TestCase):
-    @patch("data_access_service.batch.subsetting_helper.api_setup")
-    def test_trim_date_range_for_keys(self, mock_api_setup):
+    def test_trim_date_range_for_keys(self):
         # Mock API and its get_temporal_extent method
         mock_api = MagicMock()
         mock_api.get_temporal_extent.side_effect = [
@@ -94,7 +94,6 @@ class TestTrimDateRangeForKeys(unittest.TestCase):
                 pd.Timestamp("2021-06-30 23:59:59.999999999"),
             ),
         ]
-        mock_api_setup.return_value = mock_api
 
         uuid = "test-uuid"
         keys = ["key1", "key2"]
@@ -146,8 +145,7 @@ class TestTrimDateRangeForKeys(unittest.TestCase):
             ),
         )
 
-    @patch("data_access_service.batch.subsetting_helper.api_setup")
-    def test_trim_date_range_for_keys_range_outside(self, mock_api_setup):
+    def test_trim_date_range_for_keys_range_outside(self):
         # Mock API and its get_temporal_extent method
         mock_api = MagicMock()
         mock_api.get_temporal_extent.side_effect = [
@@ -160,7 +158,6 @@ class TestTrimDateRangeForKeys(unittest.TestCase):
                 pd.Timestamp("2021-06-30 23:59:59.999999999"),
             ),
         ]
-        mock_api_setup.return_value = mock_api
 
         uuid = "test-uuid"
         keys = ["key1", "key2"]

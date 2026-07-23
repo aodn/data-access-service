@@ -3,6 +3,13 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 
+class TimeGroupBy(str, Enum):
+    """Temporal bucket for hexbin count aggregation."""
+
+    MONTH = "month"
+    DATE = "date"
+
+
 @dataclass(frozen=True)
 class PmtilesGenerationConfig:
     output_pmtiles_dir: str
@@ -14,6 +21,9 @@ class PmtilesGenerationConfig:
     bucket_name: str
     threads: int
     fetch_size: int
+    show_progress: bool
+    # "month" (YYYYMM) or "date" (YYYYMMDD); default month preserves existing behavior.
+    time_group_by: TimeGroupBy = TimeGroupBy.MONTH
 
 
 @dataclass

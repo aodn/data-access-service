@@ -52,6 +52,11 @@ from .shared import (
 
 _MAX_ANIMATION_FRAMES = 30
 
+# OGC's WebMercatorQuad well-known TileMatrixSet defines levels 0-24. Also bounds z before
+# 1 << z below: negative z raises an uncaught ValueError (negative shift count), and z without
+# an upper bound lets a caller force construction of an arbitrarily large Python int.
+_MAX_ZOOM = 24
+
 # Capacity gate for /animation per-frame S3 fan-out. Sits on the shared anyio
 # pool as a *separate* concurrency budget from tile handlers — a 30-frame
 # request cannot starve tile-handler slots. Sized to the aiobotocore S3
@@ -165,6 +170,12 @@ def get_tile(
     product = get_product_or_404(product_id)
     validate_date(date)
     variable = single_variable_or_400(product, context="visual tiles")
+
+    if not (0 <= z <= _MAX_ZOOM):
+        raise HTTPException(
+            status_code=400,
+            detail=f"z={z} out of range; valid range is 0-{_MAX_ZOOM}.",
+        )
 
     max_index = (1 << z) - 1
     if not (0 <= x <= max_index and 0 <= y <= max_index):

@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 from threading import Lock
-from typing import Any
+from typing import Any, Iterator
 
 import boto3
 import duckdb
+import logging
 
 from data_access_service.models.pmtiles_types import PmtilesGenerationConfig
 from data_access_service.models.sites_types import ParquetsGenerationConfig
@@ -20,6 +23,9 @@ from tenacity import (
     wait_exponential,
     retry_if_exception_type,
 )
+
+# How often to emit a progress log line while a long query is running.
+_PROGRESS_LOG_INTERVAL_SECONDS = 60
 
 
 class DuckDBClient(ABC):
@@ -66,7 +72,7 @@ class PmTileDuckDBClient(DuckDBClient):
         next_wait_seconds = retry_state.next_action.sleep
         next_wait_minutes = round(next_wait_seconds / 60, 1)
 
-        self.logger.warning(
+        self._logger.warning(
             f"[Retry Alert] DuckDB S3 read failed on attempt #{attempt_num}.\n"
             f"Error details: {exception_thrown}\n"
             f"Waiting {next_wait_minutes} minute(s) before attempt #{attempt_num + 1}..."
@@ -74,6 +80,7 @@ class PmTileDuckDBClient(DuckDBClient):
 
     def __init__(self):
         self._config: PmtilesGenerationConfig = Config.get_config().get_pmtiles_config()
+        self._logger = logging.getLogger(__name__)
         self._duckdb_client = None
         self._con = self.get_instance()
         self._lock = Lock()
@@ -120,18 +127,22 @@ class PmTileDuckDBClient(DuckDBClient):
 
                     db.execute("INSTALL httpfs; LOAD httpfs;")
                     db.execute("INSTALL h3 FROM community; LOAD h3;")
-                    db.execute("SET enable_progress_bar = true;")
-                    db.execute("SET enable_progress_bar_print = true;")
 
                     PmTileDuckDBClient._global_db_connection = db
 
-        # CRITICAL: Return a thread-safe, independent cursor from the global connection
+        # CRITICAL: Return a thread-safe, independent cursor from the global connection.
+        # Progress-bar settings are LOCAL scope, so they must be set on this cursor
+        # (not the parent connection). Terminal print is off: DuckDB writes \r bars
+        # to stdout, which never reach uvicorn/app logs. Progress is logged from
+        # execute() via the Python logger instead.
         if self._duckdb_client is None:
             with self._lock:
                 if self._duckdb_client is None:
-                    self._duckdb_client = (
-                        PmTileDuckDBClient._global_db_connection.cursor()
-                    )
+                    cursor = PmTileDuckDBClient._global_db_connection.cursor()
+                    show = bool(self._config.show_progress)
+                    cursor.execute(f"SET enable_progress_bar = {show};")
+                    cursor.execute(f"SET enable_progress_bar_print = {show};")
+                    self._duckdb_client = cursor
         return self._duckdb_client
 
     def close(self):
@@ -177,9 +188,62 @@ class PmTileDuckDBClient(DuckDBClient):
     def execute(
         self, sql: str, params: Sequence[Any] | None = None
     ) -> duckdb.DuckDBPyConnection:
-        if params is None:
-            return self._con.execute(sql)
-        return self._con.execute(sql, params)
+        if not self._config.show_progress:
+            if params is None:
+                return self._con.execute(sql)
+            return self._con.execute(sql, params)
+        with self._progress_logger(sql):
+            if params is None:
+                return self._con.execute(sql)
+            return self._con.execute(sql, params)
+
+    @contextmanager
+    def _progress_logger(self, sql: str) -> Iterator[None]:
+        """Periodically log DuckDB query progress while ``sql`` runs.
+
+        Uses :meth:`duckdb.DuckDBPyConnection.query_progress` on a background
+        thread so long ``COPY`` / aggregation queries emit heartbeat lines into
+        the app logger (visible under uvicorn) instead of silent multi-hour waits.
+        """
+        stop = threading.Event()
+        started = time.monotonic()
+        sql_preview = " ".join(sql.split())[:120]
+        connection = self._con
+
+        def _poll() -> None:
+            while not stop.wait(_PROGRESS_LOG_INTERVAL_SECONDS):
+                elapsed = time.monotonic() - started
+                try:
+                    pct = connection.query_progress()
+                except Exception:
+                    pct = -1.0
+                if pct is not None and pct >= 0:
+                    self._logger.info(
+                        "DuckDB query progress: %.1f%% (%.0fs elapsed) — %s",
+                        pct,
+                        elapsed,
+                        sql_preview,
+                    )
+                else:
+                    self._logger.info(
+                        "DuckDB query still running (%.0fs elapsed) — %s",
+                        elapsed,
+                        sql_preview,
+                    )
+
+        poller = threading.Thread(target=_poll, name="duckdb-progress", daemon=True)
+        poller.start()
+        self._logger.info("DuckDB query started — %s", sql_preview)
+        try:
+            yield
+        finally:
+            stop.set()
+            poller.join(timeout=1.0)
+            self._logger.info(
+                "DuckDB query finished (%.1fs) — %s",
+                time.monotonic() - started,
+                sql_preview,
+            )
 
     def detect_time_type(
         self,
@@ -230,21 +294,28 @@ class PmTileDuckDBClient(DuckDBClient):
         return '"' + name.replace('"', '""') + '"'
 
     @staticmethod
-    def build_ym_expression(time_col: str, time_type: str) -> str:
+    def _timestamp_sql(time_col: str, time_type: str) -> str:
         col = PmTileDuckDBClient.quote_identifier(time_col)
 
         if time_type == "timestamp":
-            ts = f"CAST({col} AS TIMESTAMP)"
-        elif time_type == "epoch_ms":
-            ts = f"to_timestamp(CAST({col} AS DOUBLE) / 1000.0)"
-        elif time_type == "epoch_s":
-            ts = f"to_timestamp(CAST({col} AS DOUBLE))"
-        else:
-            raise ValueError(
-                f"Unsupported time_type={time_type!r}. Expected one of: 'timestamp', 'epoch_ms', 'epoch_s'."
-            )
+            return f"CAST({col} AS TIMESTAMP)"
+        if time_type == "epoch_ms":
+            return f"to_timestamp(CAST({col} AS DOUBLE) / 1000.0)"
+        if time_type == "epoch_s":
+            return f"to_timestamp(CAST({col} AS DOUBLE))"
+        raise ValueError(
+            f"Unsupported time_type={time_type!r}. Expected one of: 'timestamp', 'epoch_ms', 'epoch_s'."
+        )
 
+    @staticmethod
+    def build_ym_expression(time_col: str, time_type: str) -> str:
+        ts = PmTileDuckDBClient._timestamp_sql(time_col, time_type)
         return f"CAST(strftime({ts}, '%Y%m') AS INTEGER)"
+
+    @staticmethod
+    def build_date_key_expression(time_col: str, time_type: str) -> str:
+        ts = PmTileDuckDBClient._timestamp_sql(time_col, time_type)
+        return f"CAST(strftime({ts}, '%Y%m%d') AS INTEGER)"
 
 
 class ParquetDuckDBClient(DuckDBClient):
