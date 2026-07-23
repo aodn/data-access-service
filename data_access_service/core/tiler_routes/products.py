@@ -1,3 +1,4 @@
+import json
 import math
 
 import xarray as xr
@@ -55,10 +56,15 @@ def _require_point_in_bounds(ds: xr.Dataset, lat: float, lon: float) -> None:
 @router.get(
     "/products",
     summary="List products",
-    response_model=list[ProductConfig],
+    responses={
+        200: {"model": list[ProductConfig]},
+        304: {"description": "Not Modified — ETag matched, response body is empty"},
+    },
 )
-async def get_products():
-    return [ProductConfig.from_product(p) for p in iter_products()]
+async def get_products(if_none_match: str | None = Header(None, alias="if-none-match")):
+    data = [ProductConfig.from_product(p).model_dump() for p in iter_products()]
+    etag = compute_etag(json.dumps(data, sort_keys=True, default=str))
+    return etag_response(data, etag, if_none_match)
 
 
 @router.get(
