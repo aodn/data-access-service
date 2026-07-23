@@ -14,10 +14,8 @@ import boto3
 import duckdb
 import logging
 
-from data_access_service.models.pmtiles_types import (
-    ParquetsGenerationConfig,
-    PmtilesGenerationConfig,
-)
+from data_access_service.models.pmtiles_types import PmtilesGenerationConfig
+from data_access_service.models.sites_types import ParquetsGenerationConfig
 from data_access_service import Config
 from tenacity import (
     retry,

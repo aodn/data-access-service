@@ -37,15 +37,6 @@ def require_tiler_ready() -> None:
         )
 
 
-# Cache headers for content-addressed endpoints (tiles, legends, per-date manifest,
-# point lookups). The URL fully determines the response bytes, so caches can hold the
-# response indefinitely. `immutable` blocks browser revalidation on user-triggered
-# reload. Invariants: product IDs and colormap names are static config, fixed for the
-# life of a deployment; renderer code changes that alter output bytes are propagated by
-# bumping CACHE_VERSION (see docs/http_caching.md).
-IMMUTABLE_CACHE_HEADERS = {"Cache-Control": f"public, max-age={86400 * 365}, immutable"}
-
-
 def get_product_or_404(product_id: str) -> Product:
     product = get_product(product_id)
     if product is None:

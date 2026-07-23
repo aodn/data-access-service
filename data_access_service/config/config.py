@@ -12,11 +12,11 @@ from typing import Dict
 from botocore.client import BaseClient
 from dotenv import load_dotenv
 from data_access_service.models.pmtiles_types import (
-    ParquetsGenerationConfig,
     PmtilesGenerationConfig,
     HexLayerSpec,
     TimeGroupBy,
 )
+from data_access_service.models.sites_types import ParquetsGenerationConfig
 from data_access_service.models.tiler_types import TilerConfig
 
 

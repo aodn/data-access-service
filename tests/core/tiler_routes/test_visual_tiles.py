@@ -489,8 +489,12 @@ def test_animation_ok_with_default_bbox(client):
         )
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/apng"
-    # No cache header: animation is rare and we don't want CDN/browser holding it.
-    assert "cache-control" not in {k.lower() for k in response.headers}
+    # Deterministic given its URL, like other tile endpoints, so it's cached for a
+    # year at the CDN (browsers get max-age=0, must-revalidate).
+    assert (
+        response.headers["cache-control"]
+        == "public, s-maxage=31536000, max-age=0, must-revalidate"
+    )
 
 
 def test_animation_swapped_dates_rejected(client):

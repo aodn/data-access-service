@@ -1,6 +1,6 @@
-from typing import TYPE_CHECKING, Any
+from pydantic import BaseModel
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from data_access_service.tiler.services.product.product import Product
@@ -57,7 +57,6 @@ class ProductAvailability(BaseModel):
 
 class ManifestResponse(BaseModel):
     products: dict[str, ProductAvailability]
-    cache_version: str
     max_lods: int
 
 
@@ -70,22 +69,3 @@ class PointResponse(BaseModel):
     lat: float
     lon: float
     variables: dict[str, VariableValue]
-
-
-class VariableInspection(BaseModel):
-    dimensions: list[str]
-    shape: list[int]
-    dtype: str
-    # Native Zarr (on-disk) chunk shape in `dimensions` order. None when the store
-    # is unchunked (e.g. a contiguous array, or a numpy-backed dataset in tests).
-    chunks: list[int] | None = None
-    units: str | None = None
-    attributes: dict[str, Any] = Field(default_factory=dict)
-
-
-class ProductInspection(BaseModel):
-    id: str
-    source_path: str
-    dimensions: dict[str, int]
-    variables: dict[str, VariableInspection]
-    attributes: dict[str, Any] = Field(default_factory=dict)

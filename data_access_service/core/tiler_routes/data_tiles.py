@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Path, Response
 from fastapi.openapi.models import Example
 
+from data_access_service.config.tiler.http_cache import IMMUTABLE_CACHE_HEADERS
 from data_access_service.tiler.schemas.data_tiles import DataTileManifestResponse
 from data_access_service.tiler.services.product.manifest import render_manifest
 from data_access_service.tiler.services.product.product import get_lod_grids
@@ -9,7 +10,6 @@ from data_access_service.tiler.services.rendering.data_tiles import render_tile
 from .products import router as products_router
 from .shared import (
     DATE_EX,
-    IMMUTABLE_CACHE_HEADERS,
     PRODUCT_EX,
     get_product_or_404,
     load_slice_or_404,

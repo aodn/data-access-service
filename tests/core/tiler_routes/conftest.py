@@ -34,7 +34,8 @@ def seed_products():
 def client():
     """Entering TestClient as a context manager triggers lifespan, which is what
     registers routes via api_setup() — mock API out so that doesn't also trigger
-    a real (slow, network-bound) API.initialize_metadata() call."""
+    a real (slow, network-bound) API.initialize_metadata() call.
+    """
     mock_instance = MagicMock()
     mock_instance.get_api_status.return_value = True
     mark_tiler_ready()
