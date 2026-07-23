@@ -155,12 +155,17 @@ class PmTileDuckDBClient(DuckDBClient):
     def shutdown(cls) -> None:
         """Close the process-global connection and remove its temp directory.
 
-        The batch loop processes datasets sequentially in one long-lived
-        process; without this, the global connection's buffer pool (up to
-        ``memory_limit``) and HTTP metadata cache accumulate across datasets
-        and never return to the OS. Any cursors from :meth:`get_instance`
-        become invalid, so only call this once a dataset is fully processed.
-        The next ``get_instance`` call lazily rebuilds a fresh connection.
+        Idempotent when already shut down. Callers use this:
+
+        * After geojsonseq/metadata and **before tippecanoe**, so the buffer
+          pool (up to ``memory_limit``) is free for the tippecanoe subprocess
+          on memory-constrained Batch hosts.
+        * Between datasets in a multi-dataset batch run, so RSS does not
+          ratchet up via the HTTP metadata cache and buffer pool.
+
+        Any cursors from :meth:`get_instance` become invalid. The next
+        ``get_instance`` call (e.g. a new client for the next dataset) lazily
+        rebuilds a fresh connection.
         """
         with cls._lock:
             connection = cls._global_db_connection
