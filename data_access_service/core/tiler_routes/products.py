@@ -6,7 +6,7 @@ from fastapi import APIRouter, Header, HTTPException, Path, Query, Response
 from fastapi.openapi.models import Example
 from fastapi.responses import JSONResponse
 
-from data_access_service.config.tiler.constants import CACHE_VERSION
+from data_access_service.config.tiler.constants import CACHE_VERSION, LOD
 from data_access_service.tiler.schemas.products import (
     ManifestResponse,
     PointResponse,
@@ -17,7 +17,7 @@ from data_access_service.tiler.schemas.products import (
 from data_access_service.tiler.services.product.inspect import inspect_product
 from data_access_service.tiler.services.product.registry import (
     iter_product_items,
-    list_products,
+    iter_products,
 )
 from data_access_service.tiler.services.store.registry import (
     get_available_dates,
@@ -79,10 +79,9 @@ def _etag_response(body: object, etag: str, if_none_match: str | None) -> Respon
     "/products",
     summary="List products",
     response_model=list[ProductConfig],
-    response_model_exclude_none=True,
 )
 async def get_products():
-    return [ProductConfig(**p) for p in list_products()]
+    return [ProductConfig.from_product(p) for p in iter_products()]
 
 
 @router.get(
@@ -120,6 +119,7 @@ def get_products_availability(
 
     fingerprint_parts = [
         f"cv={CACHE_VERSION}",
+        f"max_lods={LOD.max_lods}",
         f"from={from_date or ''}",
         f"to={to_date or ''}",
     ]
@@ -147,7 +147,13 @@ def get_products_availability(
 
     etag = _etag("|".join(fingerprint_parts))
     return _etag_response(
-        {"products": products, "cache_version": CACHE_VERSION}, etag, if_none_match
+        {
+            "products": products,
+            "cache_version": CACHE_VERSION,
+            "max_lods": LOD.max_lods,
+        },
+        etag,
+        if_none_match,
     )
 
 

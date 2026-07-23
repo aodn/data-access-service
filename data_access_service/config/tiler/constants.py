@@ -1,7 +1,4 @@
-from dataclasses import dataclass, field
-
-LODIndex = int
-ZoomLevel = int
+from dataclasses import dataclass
 
 # Applied by the store registry to normalise source coordinate names so the rest
 # of the pipeline can assume `time` / `lat` / `lon` regardless of how a product
@@ -25,13 +22,9 @@ class LODConfig:
     # pans/zooms. 4 is the value tuned to fit comfortably under the cap.
     max_lods: int = 4
     # Minimum (cols, rows) for the coarsest level; levels below this are dropped.
+    # But if a product only has fewer than this, it will still be served below this
+    # threshold.
     min_coarsest: tuple[int, int] = (2, 2)
-    # LOD level → minimum map zoom to show that level. Applied universally to all products.
-    # LOD1 is the coarsest level, so under zoom level 4 only LOD1 tiles are shown; at zoom 4 LOD2
-    # tiles are shown, etc.
-    zoom_thresholds: dict[LODIndex, ZoomLevel] = field(
-        default_factory=lambda: {2: 4, 3: 5, 4: 6}
-    )
 
 
 LOD = LODConfig()
@@ -43,9 +36,7 @@ class TileConfig:
 
     ``chunk_px`` is the visible tile size; ``padding`` is the extra ring of edge
     pixels included on each side so the shader can sample a bilinear filter
-    without seams between tiles. Products may override either value via
-    ``products.json``, but the defaults must stay in lockstep with the frontend
-    atlas layout — see [[LODConfig]] for the same caveat.
+    without seams between tiles. Both are overridable per product in products.json, but the defaults here are.
     """
 
     chunk_px: tuple[int, int] = (240, 192)

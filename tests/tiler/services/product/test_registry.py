@@ -10,6 +10,7 @@ a registration call.
 import json
 
 import pytest
+from pydantic import ValidationError
 
 import data_access_service.tiler.services.product.registry as registry
 from data_access_service.tiler.services.product.product import Product
@@ -73,6 +74,13 @@ def test_load_with_chunk_px_and_padding(isolated_products):
     assert p.padding == 4
 
 
+def test_load_rejects_unknown_field(isolated_products):
+    """max_lods/min_coarsest are global-only (see LODConfig) — not a per-product key."""
+    _write(isolated_products, [_entry("bad", max_lods=6)])
+    with pytest.raises(ValidationError):
+        registry.load_products()
+
+
 def test_load_with_coastal_fill(isolated_products):
     _write(
         isolated_products,
@@ -130,16 +138,6 @@ def test_ocean_masked_explicit_false_overrides_default(isolated_products):
     )
     registry.load_products()
     assert PRODUCTS[pid].ocean_masked is False
-
-
-def test_list_products_reflects_file_contents(isolated_products):
-    _write(isolated_products, [_entry("a"), _entry("b", source="s3://bucket/y.zarr")])
-    listed = registry.list_products()
-    assert [e["id"] for e in listed] == ["a", "b"]
-
-
-def test_list_products_no_file_returns_empty(isolated_products):
-    assert registry.list_products() == []
 
 
 def test_load_products_never_exposes_empty_state(isolated_products, monkeypatch):

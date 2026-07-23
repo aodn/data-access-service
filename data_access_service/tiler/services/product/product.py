@@ -28,17 +28,14 @@ class Product:
     # Links this product to the GeoNetwork/STAC collection it belongs to, so ogcapi-java can
     # group products by collection UUID. Optional and generic for both visual and data tiles.
     metadata_uuid: str | None = None
-    lod_grids: dict[int, tuple[int, int]] = field(default_factory=dict)
     chunk_px: tuple[int, int] = TILE.chunk_px
     padding: int = TILE.padding
     coastal_fill: CoastalFill | None = None
-    # When True, anomalous values outside the model's valid ocean domain are
-    # nulled at slice-read time via the committed ocean-validity mask (see
-    # services/rendering/masks.apply_ocean_mask). The mask is built from the
-    # model_sea_level_anomaly_gridded_realtime grid, so only products on that
-    # store should set it. Applied at the source so every consumer — data tiles,
-    # visual tiles, and point lookups — inherits the cut.
     ocean_masked: bool = False
+    # Computed, not settable in products.json — populated lazily from the store's
+    # native dimensions on first request (see get_lod_grids below). This is the one
+    # field mutated after construction despite frozen=True; guarded by _lod_grids_lock.
+    lod_grids: dict[int, tuple[int, int]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.variable:
