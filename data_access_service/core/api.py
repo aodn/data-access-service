@@ -3,7 +3,6 @@ import gzip
 import math
 import os
 import gc
-
 import json
 import zlib
 
@@ -20,7 +19,7 @@ from datetime import timedelta, timezone
 from io import BytesIO
 from typing import Optional, Dict, Any, List, Tuple, Hashable
 from aodn_cloud_optimised.lib import DataQuery
-from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, ZarrDataSource
+from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
 from aodn_cloud_optimised.lib.config import get_notebook_url
 from bokeh.server.tornado import psutil
 from xarray.core.utils import Frozen
@@ -610,7 +609,7 @@ class API(BaseAPI):
         lon_max=None,
         scalar_filter=None,
         columns: list[str] = None,
-    ) -> Optional[ddf.DataFrame | xarray.Dataset]:
+    ) -> Optional[ddf.DataFrame]:
         """
         Get the data by calling cloud optimized data library aodn_cloud_optimised
         :param uuid: The UUID of the dataset
@@ -700,17 +699,6 @@ class API(BaseAPI):
 
                     return ddf.from_pandas(
                         result, npartitions=None, chunksize=None, sort=True
-                    )
-                elif isinstance(ds, ZarrDataSource):
-                    # Lib slightly different for Zar file
-                    return ds.get_data(
-                        f"{date_start.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_start.nanosecond:03d}",
-                        f"{date_end.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_end.nanosecond:03d}",
-                        lat_min,
-                        lat_max,
-                        lon_min,
-                        lon_max,
-                        scalar_filter,
                     )
             except (ValueError, TypeError, IndexError, KeyError) as e:
                 err_msg = str(e)
