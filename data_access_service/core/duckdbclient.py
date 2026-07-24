@@ -177,6 +177,7 @@ class PmTileDuckDBClient(DuckDBClient):
             try:
                 if connection is not None:
                     connection.close()
+                    duckdb.close()
             finally:
                 if temp_dir is not None:
                     temp_dir.cleanup()
