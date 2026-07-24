@@ -7,6 +7,7 @@ from data_access_service.batch import subsetting
 from data_access_service.batch.pmtiles.generator import (
     generate_pmtiles_for_all_parquets,
 )
+from data_access_service.config.config import DevConfig
 
 logger = init_log(Config.get_config())
 
@@ -17,21 +18,31 @@ client = boto3.client("batch")
 job_id = os.getenv("AWS_BATCH_JOB_ID")
 logger.info(f"Job ID:{job_id}")
 
-# Get the index of the child job
-job_index = os.getenv("AWS_BATCH_JOB_ARRAY_INDEX")
-if job_index is not None:
-    logger.info(f"Job Index: { job_index }")
+if not isinstance(Config.get_config(), DevConfig):
+    # Get the index of the child job
+    job_index = os.getenv("AWS_BATCH_JOB_ARRAY_INDEX")
+    if job_index is not None:
+        logger.info(f"Job Index: { job_index }")
 
-# Retrieve the job details
-response = client.describe_jobs(jobs=[job_id])
-job = response["jobs"][0]
+    # Retrieve the job details
+    response = client.describe_jobs(jobs=[job_id])
+    jobs = response.get("jobs", [])
+    if not jobs:
+        raise ValueError(f"No job found with ID: {job_id}")
 
-# Extract parameters from the job details
-parameters = job["parameters"]
-logger.info(f"Parameters: {parameters}")
+    job = jobs[0]
 
-# Switch based on parameter call_type
-call_type = parameters["type"]
+    # Extract parameters from the job details
+    parameters = job.get("parameters")
+    logger.info(f"Parameters: {parameters}")
+
+    # Switch based on parameter call_type
+    call_type = parameters.get("type")
+else:
+    # For local debug run only
+    job_index = "1"
+    call_type = os.getenv("AWS_BATCH_CALL_TYPE")
+    parameters = {}
 
 # A global app
 api = API()
