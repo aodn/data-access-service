@@ -1,14 +1,16 @@
+import os
 import tempfile
 import threading
 
 from data_access_service import Config, init_log
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.api import BaseAPI
+from data_access_service.utils.memory_utils import log_memory_usage
+
 from .processors.hexbin_processor import HexbinProcessor
 from ...models.pmtiles_types import (
     PmtilesVisualizationStyle,
 )
-from ...utils import pmtiles_utils
 
 config = Config.get_config()
 logger = init_log(config)
@@ -25,14 +27,86 @@ class PmtilesGenerationInProgressError(RuntimeError):
 
 
 def generate_pmtiles_for_all_parquets(api: BaseAPI):
+    """Generate PMTiles for every parquet dataset in its own short-lived process.
+
+    Each dataset is handled in a forked child so DuckDB / tippecanoe allocations
+    are returned to the OS when the child exits. Fork (not re-exec) reuses the
+    already-initialized ``api`` via copy-on-write — no metadata reload per
+    dataset. Datasets run sequentially so only one heavy worker is live at a
+    time.
+
+    Invariant: the parent must not open ``PmTileDuckDBClient`` before forking;
+    the child creates its own process-global DuckDB connection.
+    """
     metadata_list = api.get_mapped_meta_data(uuid=None)
 
     for k, v in metadata_list.items():
-        dataset_names = v.keys()
-        for dataset_name in dataset_names:
+        for dataset_name in v.keys():
             # only process parquets
-            if dataset_name.endswith(".parquet"):
-                generate_pmtiles_for_parquets(api, k, dataset_name)
+            if not dataset_name.endswith(".parquet"):
+                continue
+            ok = _generate_pmtiles_for_parquets_in_subprocess(api, k, dataset_name)
+            if not ok:
+                logger.error(
+                    "PMTiles worker failed for uuid=%s dataset=%s",
+                    k,
+                    dataset_name,
+                )
+            log_memory_usage(logger, f"after child for {dataset_name}")
+
+
+def _generate_pmtiles_for_parquets_in_subprocess(
+    api: BaseAPI, uuid: str, dname: str
+) -> bool:
+    """Fork a worker for one dataset; wait until it exits.
+
+    The child inherits the parent's initialized ``api`` (no catalog reload).
+    Returns True when the child exits with code 0. Uses ``os._exit`` in the
+    child so parent atexit handlers do not run twice.
+    """
+    logger.info(
+        "Forking PMTiles worker parent_pid=%s uuid=%s dataset=%s",
+        os.getpid(),
+        uuid,
+        dname,
+    )
+    pid = os.fork()
+    if pid == 0:
+        # Child: never return into the parent loop.
+        try:
+            ok = _generate_pmtiles_for_parquets(api, uuid, dname)
+            log_memory_usage(logger, f"worker exit ({dname})")
+            os._exit(0 if ok else 1)
+        except BaseException:
+            logger.exception("PMTiles worker crashed uuid=%s dataset=%s", uuid, dname)
+            os._exit(1)
+
+    # Parent
+    _, status = os.waitpid(pid, 0)
+    if os.WIFEXITED(status):
+        code = os.WEXITSTATUS(status)
+        if code == 0:
+            logger.info(
+                "PMTiles worker finished successfully for uuid=%s dataset=%s",
+                uuid,
+                dname,
+            )
+            return True
+        logger.error(
+            "PMTiles worker exit code=%s for uuid=%s dataset=%s",
+            code,
+            uuid,
+            dname,
+        )
+        return False
+
+    logger.error(
+        "PMTiles worker signaled status=%s for uuid=%s dataset=%s",
+        status,
+        uuid,
+        dname,
+    )
+    return False
 
 
 def generate_pmtiles_for_parquets(api: BaseAPI, uuid: str, dname: str) -> bool:

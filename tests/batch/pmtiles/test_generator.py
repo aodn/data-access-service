@@ -6,9 +6,128 @@ from data_access_service.batch.pmtiles import generator
 from data_access_service.batch.pmtiles.generator import (
     PmtilesGenerationInProgressError,
     _generate_pmtiles_for_parquets,
+    _generate_pmtiles_for_parquets_in_subprocess,
+    generate_pmtiles_for_all_parquets,
     generate_pmtiles_for_parquets,
 )
 from data_access_service.models.pmtiles_types import PmtilesVisualizationStyle
+
+
+class TestBatchProcessIsolation:
+    def test_all_parquets_forks_one_child_per_parquet(self, monkeypatch):
+        api = MagicMock()
+        api.get_mapped_meta_data.return_value = {
+            "uuid-a": {
+                "a.parquet": {},
+                "notes.txt": {},
+            },
+            "uuid-b": {
+                "b.parquet": {},
+            },
+        }
+
+        calls = []
+
+        def fake_run(passed_api, uuid, dname):
+            calls.append((passed_api, uuid, dname))
+            return True
+
+        monkeypatch.setattr(
+            generator, "_generate_pmtiles_for_parquets_in_subprocess", fake_run
+        )
+        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+
+        generate_pmtiles_for_all_parquets(api)
+
+        assert calls == [
+            (api, "uuid-a", "a.parquet"),
+            (api, "uuid-b", "b.parquet"),
+        ]
+
+    def test_fork_helper_success_exit(self, monkeypatch):
+        api = MagicMock()
+        recorded = {}
+
+        def fake_fork():
+            # Simulate parent side only: never enter the real child branch.
+            recorded["forked"] = True
+            return 12345
+
+        def fake_waitpid(pid, options):
+            recorded["waited_pid"] = pid
+            recorded["options"] = options
+            # Encode exit status 0 the way waitpid reports it on Linux.
+            return pid, 0
+
+        monkeypatch.setattr(generator.os, "fork", fake_fork)
+        monkeypatch.setattr(generator.os, "waitpid", fake_waitpid)
+        monkeypatch.setattr(generator.os, "WIFEXITED", lambda status: True)
+        monkeypatch.setattr(generator.os, "WEXITSTATUS", lambda status: 0)
+
+        assert (
+            _generate_pmtiles_for_parquets_in_subprocess(api, "uuid-x", "ds.parquet")
+            is True
+        )
+        assert recorded["forked"] is True
+        assert recorded["waited_pid"] == 12345
+
+    def test_fork_helper_nonzero_exit(self, monkeypatch):
+        api = MagicMock()
+
+        monkeypatch.setattr(generator.os, "fork", lambda: 99)
+        monkeypatch.setattr(generator.os, "waitpid", lambda pid, options: (pid, 1))
+        monkeypatch.setattr(generator.os, "WIFEXITED", lambda status: True)
+        monkeypatch.setattr(generator.os, "WEXITSTATUS", lambda status: 1)
+
+        assert (
+            _generate_pmtiles_for_parquets_in_subprocess(api, "uuid-x", "ds.parquet")
+            is False
+        )
+
+    def test_fork_helper_child_runs_generation_and_exits(self, monkeypatch):
+        """Real fork: child inherits api, runs generation, exits with its return value."""
+        api = MagicMock()
+        monkeypatch.setattr(
+            generator, "_generate_pmtiles_for_parquets", lambda a, u, d: True
+        )
+        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+
+        assert (
+            _generate_pmtiles_for_parquets_in_subprocess(api, "uuid-x", "ds.parquet")
+            is True
+        )
+
+    def test_fork_helper_child_failure_return_code(self, monkeypatch):
+        api = MagicMock()
+        monkeypatch.setattr(
+            generator, "_generate_pmtiles_for_parquets", lambda a, u, d: False
+        )
+        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+
+        assert (
+            _generate_pmtiles_for_parquets_in_subprocess(api, "uuid-x", "ds.parquet")
+            is False
+        )
+
+    def test_batch_continues_after_failed_child(self, monkeypatch):
+        api = MagicMock()
+        api.get_mapped_meta_data.return_value = {
+            "uuid-a": {"a.parquet": {}, "b.parquet": {}},
+        }
+        results = iter([False, True])
+        calls = []
+
+        def fake_run(passed_api, uuid, dname):
+            calls.append(dname)
+            return next(results)
+
+        monkeypatch.setattr(
+            generator, "_generate_pmtiles_for_parquets_in_subprocess", fake_run
+        )
+        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+
+        generate_pmtiles_for_all_parquets(api)
+        assert calls == ["a.parquet", "b.parquet"]
 
 
 class TestGenerationLock:
