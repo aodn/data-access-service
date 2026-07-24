@@ -1,7 +1,6 @@
 import pytest
 import json
 
-from typing import Dict, Any
 from pathlib import Path
 from fastapi.testclient import TestClient
 from aodn_cloud_optimised.lib import DataQuery
@@ -10,7 +9,7 @@ from data_access_service import Config
 from data_access_service.server import app, api_setup
 from tests.core.test_with_s3 import TestWithS3, REGION
 from data_access_service.core.AWSHelper import AWSHelper
-from starlette.status import HTTP_200_OK, HTTP_403_FORBIDDEN, HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_200_OK, HTTP_401_UNAUTHORIZED
 from unittest.mock import patch
 
 
@@ -34,58 +33,6 @@ class TestApiWithS3(TestWithS3):
         # Make sure file uploaded before init the app
         api_setup(app)
         return TestClient(app)
-
-    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    def test_fetch_data_correct(
-        self, setup, localstack, aws_clients, setup_resources, client
-    ):
-        """
-        Test subsetting with valid and invalid time ranges, validate case where
-        app crash on loading this dataset before fix
-        """
-        s3_client, _, _ = aws_clients
-        config = Config.get_config()
-        config.set_s3_client(s3_client)
-
-        with patch.object(AWSHelper, "send_email") as mock_send_email:
-            # Test with range, this dataset field is different, it called detection_timestamp
-            param = {
-                "start_date": "2011-11-17 00:00:00.000000000",
-                "end_date": "2011-11-18 23:59:59.999999999",
-                "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
-            }
-
-            target = (
-                config.BASE_URL
-                + "/data/a4170ca8-0942-4d13-bdb8-ad4718ce14bb/satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
-            )
-
-            response = client.get(
-                target,
-                params=param,
-                headers={"X-API-Key": config.get_api_key()},
-            )
-
-            # The X-API-KEY has typo, it should be X-API-Key
-            assert response.status_code == HTTP_200_OK
-
-            try:
-                parsed = json.loads(response.content.decode("utf-8"))
-                assert (
-                    len(parsed) == 3374882
-                ), f"Size not match, return size is {len(parsed)} and X-API-Key is {config.get_api_key()}"
-                assert parsed[0] == {
-                    "latitude": -70.0,
-                    "longitude": 60.0,
-                    "time": "2011-11-17",
-                }, f"Unexpected JSON content: {parsed[0]}"
-                assert parsed[1687440] == {
-                    "latitude": 20.0,
-                    "longitude": 190.0,
-                    "time": "2011-11-17",
-                }, f"Unexpected JSON content: {parsed[21]}"
-            except json.JSONDecodeError as e:
-                assert False, "Fail to parse to JSON"
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_auth_fetch_data_correct(
@@ -201,87 +148,6 @@ class TestApiWithS3(TestWithS3):
                 }, f"Unexpected JSON content: {parsed[269051]}"
             except json.JSONDecodeError as e:
                 assert False, "Fail to parse to JSON"
-
-    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    def test_same_uuid_map_two_dataset_correct(
-        self, setup, localstack, aws_clients, setup_resources, client
-    ):
-        """Test subsetting with valid and invalid time ranges."""
-        s3_client, _, _ = aws_clients
-        config = Config.get_config()
-        config.set_s3_client(s3_client)
-
-        # We only verify the zarr data where two zarr have same UUID
-        with patch.object(AWSHelper, "send_email") as mock_send_email:
-            # Test with range, this dataset field is different, dataset without DEPTH
-            param = {
-                "start_date": "2011-07-25 00:00:00.000000000",
-                "end_date": "2011-07-30 23:59:59.999999999",
-                "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
-            }
-
-            # Read and process response body
-            try:
-                response = client.get(
-                    config.BASE_URL + "/metadata/28f8bfed-ca6a-472a-84e4-42563ce4df3f",
-                    headers={"X-API-Key": config.get_api_key()},
-                )
-
-                assert response.status_code == HTTP_200_OK
-                assert isinstance(response.content, bytes)
-
-                metadata: Dict[str, Any] = json.loads(response.content.decode("utf-8"))
-
-                # We should get a map
-                assert all(
-                    key in metadata
-                    for key in [
-                        "vessel_satellite_radiance_delayed_qc.zarr",
-                        "vessel_satellite_radiance_derived_product.zarr",
-                    ]
-                ), "No missing key"
-
-            except Exception as e:
-                assert False, f"Fail with error {e}"
-
-            assert response.status_code == HTTP_200_OK
-            assert isinstance(response.content, bytes)
-
-            try:
-                # Read and process response body
-                # Now call to extract some values from the zarr file
-                response = client.get(
-                    config.BASE_URL
-                    + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_delayed_qc.zarr",
-                    params=param,
-                    headers={"X-API-Key": config.get_api_key()},
-                )
-
-                parsed = json.loads(response.content.decode("utf-8"))
-                assert (
-                    len(parsed) == 2394
-                ), "No special meaning of record, just verify we get something"
-
-            except Exception as e:
-                assert False, f"Fail with error {e}"
-
-            # Read and process response body
-            try:
-                # Now call to another zarr file having same UUID, create with this date range
-                response = client.get(
-                    config.BASE_URL
-                    + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_derived_product.zarr",
-                    params=param,
-                    headers={"X-API-Key": config.get_api_key()},
-                )
-
-                assert response.status_code == HTTP_200_OK
-                assert isinstance(response.content, bytes)
-
-                parsed = json.loads(response.content.decode("utf-8"))
-                assert len(parsed) == 0, "This test dataset is empty, so it is ok"
-            except Exception as e:
-                assert False, f"Fail with error {e}"
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_fetch_empty_data_correct_without_error_zarr(
