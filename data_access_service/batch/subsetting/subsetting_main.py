@@ -1,6 +1,6 @@
 import json
 
-from data_access_service import config, init_log, Config, API
+from data_access_service import init_log, Config, API
 from data_access_service.batch.subsetting.enums import Parameters
 from data_access_service.batch.subsetting.helpers.request_helper import (
     get_subset_request,
