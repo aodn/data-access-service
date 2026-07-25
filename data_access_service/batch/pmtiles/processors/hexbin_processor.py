@@ -1,6 +1,7 @@
 import gzip
 import json
 import os
+from datetime import datetime, timezone
 from typing import Sequence, List, Optional, Dict, Tuple
 
 from data_access_service.batch.pmtiles.helpers.features_help import build_hex_feature
@@ -220,6 +221,7 @@ class HexbinProcessor(AbstractProcessor):
             "min_date": min_date,
             "max_date": max_date,
             "time_group_by": self.pmtiles_config.time_group_by.value,
+            "last_updated": datetime.now(timezone.utc).isoformat(),
         }
 
         metadata_path = self.get_metadata_path()
