@@ -63,6 +63,10 @@ def _generate_pmtiles_for_parquets_in_subprocess(
     The child inherits the parent's initialized ``api`` (no catalog reload).
     Returns True when the child exits with code 0. Uses ``os._exit`` in the
     child so parent atexit handlers do not run twice.
+
+    TODO: The reason we need this is some memory is not free correctly and due
+    to short timeline, it is easier to fork a new process and kill it at end
+    which make sure memory reclaim
     """
     logger.info(
         "Forking PMTiles worker parent_pid=%s uuid=%s dataset=%s",
