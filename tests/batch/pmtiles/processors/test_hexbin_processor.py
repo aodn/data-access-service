@@ -192,11 +192,11 @@ class TestHexbinProcessor(TestWithS3):
                     with open(metadata_path, encoding="utf-8") as f:
                         metadata = json.load(f)
                     period_keys = [p for (_, p) in expected_month.keys()]
-                    assert metadata == {
-                        "min_date": min(period_keys),
-                        "max_date": max(period_keys),
-                        "time_group_by": "month",
-                    }
+                    assert metadata["min_date"] == min(period_keys)
+                    assert metadata["max_date"] == max(period_keys)
+                    assert metadata["time_group_by"] == "month"
+                    assert "last_updated" in metadata
+                    assert metadata["last_updated"]  # non-empty ISO timestamp
 
                     hex_processor._remove_staged_parquet()
                     assert not os.path.exists(
@@ -326,11 +326,11 @@ class TestHexbinProcessor(TestWithS3):
                     with open(metadata_path, encoding="utf-8") as f:
                         metadata = json.load(f)
                     period_keys = [p for (_, p) in expected_date.keys()]
-                    assert metadata == {
-                        "min_date": min(period_keys),
-                        "max_date": max(period_keys),
-                        "time_group_by": "date",
-                    }
+                    assert metadata["min_date"] == min(period_keys)
+                    assert metadata["max_date"] == max(period_keys)
+                    assert metadata["time_group_by"] == "date"
+                    assert "last_updated" in metadata
+                    assert metadata["last_updated"]
                 finally:
                     shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
 

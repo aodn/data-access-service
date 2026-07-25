@@ -10,7 +10,11 @@ from data_access_service.batch.pmtiles.processors.abstract_processor import (
 )
 from data_access_service.core.duckdbclient import PmTileDuckDBClient
 
-from data_access_service.models.pmtiles_types import HexLayerSpec, TimeGroupBy
+from data_access_service.models.pmtiles_types import (
+    HexLayerSpec,
+    PmtilesSidecarMetadata,
+    TimeGroupBy,
+)
 from data_access_service.utils.memory_utils import log_memory_usage
 
 
@@ -215,26 +219,24 @@ class HexbinProcessor(AbstractProcessor):
                 "cannot generate metadata"
             )
 
-        min_date = int(row[0])
-        max_date = int(row[1])
-        metadata = {
-            "min_date": min_date,
-            "max_date": max_date,
-            "time_group_by": self.pmtiles_config.time_group_by.value,
-            "last_updated": datetime.now(timezone.utc).isoformat(),
-        }
+        metadata = PmtilesSidecarMetadata(
+            min_date=int(row[0]),
+            max_date=int(row[1]),
+            time_group_by=self.pmtiles_config.time_group_by,
+            last_updated=datetime.now(timezone.utc).isoformat(),
+        )
 
         metadata_path = self.get_metadata_path()
         os.makedirs(os.path.dirname(os.path.abspath(metadata_path)), exist_ok=True)
         with open(metadata_path, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, separators=(",", ":"))
+            json.dump(metadata.to_dict(), f, separators=(",", ":"))
 
         self.logger.info(
             "Wrote metadata to %s (min_date=%s, max_date=%s, time_group_by=%s)",
             metadata_path,
-            min_date,
-            max_date,
-            self.pmtiles_config.time_group_by.value,
+            metadata.min_date,
+            metadata.max_date,
+            metadata.time_group_by.value,
         )
         return metadata_path
 
