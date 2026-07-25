@@ -98,6 +98,13 @@ class BaseAPI:
     ) -> list[str] | None:
         pass
 
+    def release_memory_for_pmtiles_batch(self) -> None:
+        """Optional hook: free memory the PMTiles batch job no longer needs.
+
+        Default is a no-op. Concrete :class:`API` drops raw schemas, non-parquet
+        entries, and the GetAodn handle after the work list is materialised.
+        """
+
     def _extract_coordinate(
         self, data: dict, uuid: str, key: str, column: str
     ) -> Coordinate | None:
@@ -380,6 +387,9 @@ class API(BaseAPI):
 
         self._raw: Dict[str, Dict[str, Any]] = dict()
         self._cached_metadata: Dict[str, Dict[str, Descriptor]] = dict()
+        # Top-level schema field names per dataset — enough for map_column_names
+        # without retaining full compressed schemas in memory.
+        self._schema_keys: Dict[str, Dict[str, frozenset[str]]] = dict()
 
         # UUID to metadata mapper
         self._instance = DataQuery.GetAodn()
@@ -417,9 +427,12 @@ class API(BaseAPI):
         self._metadata = self._instance.get_metadata()
         self.refresh_uuid_dataset_map()
 
-        # Free up catalog metadata memory and trigger garbage collection
-        self._metadata = None
-        gc.collect()
+        # Drop the aodn Metadata object *and* its lru_cached catalog. Setting
+        # ``_metadata = None`` alone is not enough: ``Metadata.metadata_catalog``
+        # is ``@lru_cache(maxsize=None)`` on the class, which pins every
+        # (instance, full catalog dict) for the process lifetime.
+        self._release_library_metadata_cache()
+        self._log_retained_metadata_size("after init")
 
         process = psutil.Process()
         rss_mb = process.memory_info().rss / (1024 * 1024)
@@ -433,6 +446,81 @@ class API(BaseAPI):
         with open(HEALTH_JSON, "w") as f:
             f.write('{"status":"UP","status_code":200}')
 
+    def _release_library_metadata_cache(self) -> None:
+        """Free the cloud-optimised Metadata catalog held after init/refresh."""
+        md = self._metadata
+        if md is None:
+            return
+
+        # Instance attribute populated in Metadata.__init__
+        if isinstance(getattr(md, "catalog", None), dict):
+            md.catalog.clear()
+            md.catalog = None
+
+        # Class-level lru_cache retains Metadata instances + catalogs otherwise.
+        catalog_fn = getattr(type(md), "metadata_catalog", None)
+        cache_clear = getattr(catalog_fn, "cache_clear", None)
+        if callable(cache_clear):
+            cache_clear()
+            log.info("Cleared aodn Metadata.metadata_catalog lru_cache")
+
+        self._metadata = None
+        gc.collect()
+
+    def _log_retained_metadata_size(self, label: str) -> None:
+        raw_bytes = sum(
+            len(blob) for datasets in self._raw.values() for blob in datasets.values()
+        )
+        n_datasets = sum(len(ds) for ds in self._cached_metadata.values())
+        n_schema = sum(len(ds) for ds in self._schema_keys.values())
+        log.info(
+            "[memory] %s: datasets=%s schema_key_sets=%s _raw_compressed=%.1f MB",
+            label,
+            n_datasets,
+            n_schema,
+            raw_bytes / (1024 * 1024),
+        )
+
+    def release_memory_for_pmtiles_batch(self) -> None:
+        """Drop structures the PMTiles batch job does not need after listing work.
+
+        Retains parquet-only descriptors and schema field-name sets (for
+        ``map_column_names``). Drops full compressed raw schemas, non-parquet
+        entries, and the GetAodn handle — fork children inherit this slimmer
+        state via copy-on-write.
+        """
+        parquet_cached: Dict[str, Dict[str, Descriptor]] = {}
+        parquet_schema: Dict[str, Dict[str, frozenset[str]]] = {}
+
+        for uuid, datasets in self._cached_metadata.items():
+            kept = {
+                name: desc
+                for name, desc in datasets.items()
+                if name.endswith(".parquet")
+            }
+            if not kept:
+                continue
+            parquet_cached[uuid] = kept
+            src_keys = self._schema_keys.get(uuid, {})
+            parquet_schema[uuid] = {
+                name: src_keys[name] for name in kept if name in src_keys
+            }
+
+        self._cached_metadata = parquet_cached
+        self._schema_keys = parquet_schema
+        self._raw.clear()
+        # Data loading for PMTiles goes through DuckDB/S3, not GetAodn.
+        self._instance = None
+        self._release_library_metadata_cache()
+        self._log_retained_metadata_size("after pmtiles batch trim")
+
+        process = psutil.Process()
+        rss_mb = process.memory_info().rss / (1024 * 1024)
+        log.info(
+            "PMTiles batch memory trim complete. RSS = %.2f MB",
+            rss_mb,
+        )
+
     def get_api_status(self) -> bool:
         # used for checking if the API instance is ready
         return self._is_ready
@@ -443,8 +531,13 @@ class API(BaseAPI):
     # Do not use cache, so that we can refresh it again
     def refresh_uuid_dataset_map(self):
         # A map contains dataset name and Metadata class, which is not
-        # so useful in our case, we need UUID
-        catalog = self._metadata.metadata_catalog_uncached()
+        # so useful in our case, we need UUID.
+        # Prefer the catalog already built in Metadata.__init__ — calling
+        # metadata_catalog_uncached() again would double peak memory (second
+        # full catalog from S3) for the same data.
+        catalog = getattr(self._metadata, "catalog", None)
+        if not isinstance(catalog, dict):
+            catalog = self._metadata.metadata_catalog_uncached()
         if catalog == {}:
             log.error("Metadata catalog from cloud-optimised lib is empty.")
 
@@ -462,6 +555,10 @@ class API(BaseAPI):
                     self._raw[uuid][key] = zlib.compress(
                         json.dumps(data).encode("utf-8")
                     )
+                    # Field names alone are enough for map_column_names lookups.
+                    if uuid not in self._schema_keys:
+                        self._schema_keys[uuid] = dict()
+                    self._schema_keys[uuid][key] = frozenset(data.keys())
 
                     if uuid not in self._cached_metadata:
                         self._cached_metadata[uuid] = dict()
@@ -563,7 +660,12 @@ class API(BaseAPI):
         if columns is None:
             return columns
 
-        meta: Dict[str, Any] = self.get_raw_meta_data(uuid)[key]
+        # Prefer the slim field-name set (always populated at init). Fall back
+        # to full raw metadata when schema keys are absent (older/partial state).
+        field_names = self._schema_keys.get(uuid, {}).get(key)
+        if field_names is None:
+            field_names = self.get_raw_meta_data(uuid)[key]
+
         columns_map = Config.get_config().get_column_name_mapping()
         output = list()
         for column in columns:
@@ -572,7 +674,7 @@ class API(BaseAPI):
                 candidates = columns_map.get(column.casefold())
                 if candidates is not None:
                     for candidate in candidates:
-                        if candidate in meta:
+                        if candidate in field_names:
                             output.append(candidate)
                             break
                     else:

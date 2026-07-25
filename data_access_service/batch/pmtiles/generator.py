@@ -40,19 +40,27 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI):
     """
     metadata_list = api.get_mapped_meta_data(uuid=None)
 
+    # Materialise the work list before trimming so we do not depend on the
+    # full cached map (zarr entries etc.) remaining in the parent.
+    work: list[tuple[str, str]] = []
     for k, v in metadata_list.items():
         for dataset_name in v.keys():
-            # only process parquets
-            if not dataset_name.endswith(".parquet"):
-                continue
-            ok = _generate_pmtiles_for_parquets_in_subprocess(api, k, dataset_name)
-            if not ok:
-                logger.error(
-                    "PMTiles worker failed for uuid=%s dataset=%s",
-                    k,
-                    dataset_name,
-                )
-            log_memory_usage(logger, f"after child for {dataset_name}")
+            if dataset_name.endswith(".parquet"):
+                work.append((k, dataset_name))
+
+    # Drop full raw schemas / non-parquet metadata so the parent (and COW
+    # fork children) start each dataset with a smaller baseline RSS.
+    api.release_memory_for_pmtiles_batch()
+
+    for k, dataset_name in work:
+        ok = _generate_pmtiles_for_parquets_in_subprocess(api, k, dataset_name)
+        if not ok:
+            logger.error(
+                "PMTiles worker failed for uuid=%s dataset=%s",
+                k,
+                dataset_name,
+            )
+        log_memory_usage(logger, f"after child for {dataset_name}")
 
 
 def _generate_pmtiles_for_parquets_in_subprocess(
