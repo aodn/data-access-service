@@ -25,34 +25,49 @@ def subset_zarr(
     start_date,
     end_date,
     bbox: BoundingBox,
+    apply_mask: bool = True,
 ) -> xarray.Dataset:
     """Apply one time range + one bbox to a zarr dataset.
 
     Returns a lazily-sliced xarray.Dataset (no compute). Raises ValueError if a
     condition targets a name that is neither a dimension nor a variable of the
     dataset.
+
+    apply_mask: when True (batch download) the curvilinear 2D-variable
+    conditions are applied via .where(). When False (size estimation) the
+    .where()is skipped: on a non-dask store it is eager and would load the
+    whole store from S3 (OOM), and it never changes the shape/nbytes anyway
+    (drop=False).
     """
     conditions = subset_conditions(api, uuid, key, start_date, end_date, bbox)
 
     dim_conditions: dict[str, slice] = {}  # for .sel() on indexed dimensions
-    mask: DataArray | None = None  # for .where() on 2D variables (curvilinear)
+    mask: DataArray | None = (
+        None  # for .where() on N-dimensional variables (especially curvilinear lat/lon)
+    )
 
-    for name, (min_value, max_value) in conditions.items():
-        if is_dim(name, dataset):
-            form_dim_conditions(dim_conditions, name, min_value, max_value, dataset)
-        elif is_var(name, dataset):
-            mask = form_mask(mask, name, min_value, max_value, dataset)
+    for dim_name, (min_value, max_value) in conditions.items():
+        if is_dim(dim_name, dataset):
+            form_dim_conditions(dim_conditions, dim_name, min_value, max_value, dataset)
+        elif is_var(dim_name, dataset):
+            mask = form_mask(mask, dim_name, min_value, max_value, dataset)
         else:
             raise ValueError(
-                f"Condition key: {name} is neither dim, coord nor data_var in "
+                f"Condition key: {dim_name} is neither dim, coord nor data_var in "
                 f"the dataset. Dataset: {key}"
             )
 
     subset = dataset
     if dim_conditions:
         subset = subset.sel(**dim_conditions)
-    if mask is not None:
-        # drop=False keeps it lazy (drop=True would force a compute)
+    if mask is not None and apply_mask:
+        # NOTE: KEEP drop=False
+        # The size estimate SKIPS this .where() and relies on the
+        # invariant that .where(drop=False) only promotes dtypes (mirrored via
+        # maybe_promote in size_estimation._nbytes_by_compressibility), never
+        # changes shape. Switching to drop=True would crop the grid and change nbytes,
+        # silently making every estimate wrong. If you must change it, update the
+        # estimation path to match.
         subset = subset.where(mask, drop=False)
     return subset
 
@@ -85,12 +100,12 @@ def is_var(key: str, dataset: xarray.Dataset) -> bool:
 
 def form_mask(
     existing_mask: DataArray | None,
-    key: str,
+    dim_name: str,
     min_value: Any,
     max_value: Any,
     dataset: xarray.Dataset,
 ) -> DataArray:
-    var_mask = (dataset[key] >= min_value) & (dataset[key] <= max_value)
+    var_mask = (dataset[dim_name] >= min_value) & (dataset[dim_name] <= max_value)
     if existing_mask is None:
         return var_mask
     return existing_mask & var_mask
@@ -98,7 +113,7 @@ def form_mask(
 
 def form_dim_conditions(
     existing_conditions: dict[str, slice] | None,
-    key: str,
+    dim_name: str,
     min_value: Any,
     max_value: Any,
     dataset: xarray.Dataset,
@@ -108,11 +123,11 @@ def form_dim_conditions(
     slice_to = max_value
 
     # if descending, swap
-    if dataset[key][0] > dataset[key][-1]:
+    if dataset[dim_name][0] > dataset[dim_name][-1]:
         slice_from = max_value
         slice_to = min_value
 
-    dim_condition = {key: slice(slice_from, slice_to)}
+    dim_condition = {dim_name: slice(slice_from, slice_to)}
     if existing_conditions is None:
         return dim_condition
     existing_conditions.update(dim_condition)
