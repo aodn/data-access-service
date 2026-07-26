@@ -26,9 +26,9 @@ def seed_products():
 
 @pytest.fixture
 def client():
-    """Entering TestClient as a context manager triggers lifespan, which is what
-    registers routes via api_setup() — mock API out so that doesn't also trigger
-    a real (slow, network-bound) API.initialize_metadata() call."""
+    """Entering TestClient as a context manager triggers lifespan / api_setup.
+    Mock API so that does not also trigger a real (slow, network-bound)
+    API.initialize_metadata() call. Routes are registered once at import time."""
     mock_instance = MagicMock()
     mock_instance.get_api_status.return_value = True
     mark_tiler_ready()

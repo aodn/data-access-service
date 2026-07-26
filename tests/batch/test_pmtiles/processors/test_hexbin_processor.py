@@ -17,6 +17,7 @@ from data_access_service import Config, API
 from data_access_service.batch.pmtiles.processors.hexbin_processor import (
     HexbinProcessor,
 )
+from data_access_service.core.duckdbclient import PmTileDuckDBClient
 from data_access_service.models.pmtiles_types import TimeGroupBy
 from data_access_service.utils.pmtiles_utils import open_pmtiles
 from tests.core.test_with_s3 import TestWithS3, REGION
@@ -192,16 +193,28 @@ class TestHexbinProcessor(TestWithS3):
                     with open(metadata_path, encoding="utf-8") as f:
                         metadata = json.load(f)
                     period_keys = [p for (_, p) in expected_month.keys()]
-                    assert metadata == {
-                        "min_date": min(period_keys),
-                        "max_date": max(period_keys),
-                        "time_group_by": "month",
-                    }
+                    assert metadata["min_date"] == min(period_keys)
+                    assert metadata["max_date"] == max(period_keys)
+                    assert metadata["time_group_by"] == "month"
+                    assert "last_updated" in metadata
+                    assert metadata["last_updated"]  # non-empty ISO timestamp
 
                     hex_processor._remove_staged_parquet()
                     assert not os.path.exists(
                         staged_parquet_path
                     ), "staged parquet should be removed before tippecanoe"
+
+                    # Production order: release DuckDB *before* tippecanoe so the
+                    # buffer pool is freed. A prior duckdb.close() double-teardown
+                    # SIGSEGV'd forked workers here (wait status 139) after real
+                    # httpfs/h3 work — so this step must run in integration tests,
+                    # not only unit mocks of shutdown.
+                    assert PmTileDuckDBClient._global_db_connection is not None
+                    hex_processor._release_duckdb("before tippecanoe")
+                    assert PmTileDuckDBClient._global_db_connection is None
+                    assert PmTileDuckDBClient._temp_dir_object is None
+                    # Idempotent: process() finally also calls release.
+                    hex_processor._release_duckdb("after process cleanup")
 
                     hex_processor.generate_pmtiles_file(
                         geojsonseq_paths=geojsonseq_paths
@@ -326,11 +339,11 @@ class TestHexbinProcessor(TestWithS3):
                     with open(metadata_path, encoding="utf-8") as f:
                         metadata = json.load(f)
                     period_keys = [p for (_, p) in expected_date.keys()]
-                    assert metadata == {
-                        "min_date": min(period_keys),
-                        "max_date": max(period_keys),
-                        "time_group_by": "date",
-                    }
+                    assert metadata["min_date"] == min(period_keys)
+                    assert metadata["max_date"] == max(period_keys)
+                    assert metadata["time_group_by"] == "date"
+                    assert "last_updated" in metadata
+                    assert metadata["last_updated"]
                 finally:
                     shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
 

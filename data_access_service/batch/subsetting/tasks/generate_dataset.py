@@ -4,7 +4,6 @@ import geojson
 import dask.dataframe as ddf
 import pandas as pd
 import xarray
-import geopandas as gpd
 
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.ops import unary_union
@@ -148,114 +147,115 @@ def _generate_partition_output(
         )
         datasource = api.get_datasource(uuid, key)
         # extract table schema for parquet dataset
-        if isinstance(datasource, ParquetDataSource):
-            # save to the root_folder/dataschema.json
-            schema_path = f"{root_folder_path}/dataschema.json"
-            if not Path(schema_path).exists():
-                table_schema = datasource.get_metadata()
-                os.makedirs(os.path.dirname(schema_path), exist_ok=True)
-                with open(schema_path, "w") as f:
-                    json.dump(table_schema, f, indent=2)
+        if datasource is not None:
+            if isinstance(datasource, ParquetDataSource):
+                # save to the root_folder/dataschema.json
+                schema_path = f"{root_folder_path}/dataschema.json"
+                if not Path(schema_path).exists():
+                    table_schema = datasource.get_metadata()
+                    os.makedirs(os.path.dirname(schema_path), exist_ok=True)
+                    with open(schema_path, "w") as f:
+                        json.dump(table_schema, f, indent=2)
 
-                log.info(f"Saved table schema to {schema_path}")
+                    log.info(f"Saved table schema to {schema_path}")
 
-        checked_date_ranges = check_rows_with_date_range(
-            api, uuid, key, datasource, date_ranges
-        )
-
-        if polygon is not None:
-            min_lon, min_lat, max_lon, max_lat = polygon.bounds
-        else:
-            min_lat = None
-            max_lat = None
-            min_lon = None
-            max_lon = None
-
-        need_append = False
-        for date_range in checked_date_ranges:
-            result: Optional[ddf.DataFrame | xarray.Dataset] = query_data(
-                api,
-                uuid,
-                key,
-                date_range["start_date"],
-                date_range["end_date"],
-                min_lat,
-                max_lat,
-                min_lon,
-                max_lon,
+            checked_date_ranges = check_rows_with_date_range(
+                api, uuid, key, datasource, date_ranges
             )
-            if result is not None:
-                lat_key, lon_key = api.map_column_names(
-                    uuid=uuid,
-                    key=key,
-                    columns=[STR_LATITUDE_UPPER_CASE, STR_LONGITUDE_UPPER_CASE],
+
+            if polygon is not None:
+                min_lon, min_lat, max_lon, max_lat = polygon.bounds
+            else:
+                min_lat = None
+                max_lat = None
+                min_lon = None
+                max_lon = None
+
+            need_append = False
+            for date_range in checked_date_ranges:
+                result: Optional[ddf.DataFrame | xarray.Dataset] = query_data(
+                    api,
+                    uuid,
+                    key,
+                    date_range["start_date"],
+                    date_range["end_date"],
+                    min_lat,
+                    max_lat,
+                    min_lon,
+                    max_lon,
                 )
-
-                if key.endswith("parquet"):
-                    # If we have polygon to filter, apply map_partitions lazily
-                    if polygon is not None:
-                        result = result.map_partitions(
-                            _filter_partition_by_polygon,
-                            shapely_poly=polygon,
-                            lat_key=lat_key,
-                            lon_key=lon_key,
-                            meta=result._meta,
-                        )
-
-                    # With parquet we can write on each result because of the partition by TIME
-                    # create different directory
-                    output_path = f"{root_folder_path}/{key}/part-{job_index}/"
-
-                    # Derive partition key without time
-                    time_key = api.map_column_names(
-                        uuid=uuid, key=key, columns=[STR_TIME_UPPER_CASE]
-                    )[0]
-
-                    # 'M' stands for Datetime in NumPy/Pandas dtypes, some dataset return
-                    # time field of different type
-                    if result[time_key].dtype.kind != "M":
-                        result[time_key] = ddf.to_datetime(result[time_key])
-
-                    result[PARTITION_KEY] = result[time_key].dt.strftime("%Y-%m")
-
-                    result.to_parquet(
-                        output_path,
-                        partition_on=[PARTITION_KEY],  # Partition by region column
-                        compression="zstd",  # Use Zstd for small file size
-                        engine="pyarrow",  # Use pyarrow for performance
-                        write_index=False,  # Exclude index to save space
+                if result is not None:
+                    lat_key, lon_key = api.map_column_names(
+                        uuid=uuid,
+                        key=key,
+                        columns=[STR_LATITUDE_UPPER_CASE, STR_LONGITUDE_UPPER_CASE],
                     )
-                    log.info(f"Saved partition to {output_path}")
-                else:
-                    # Zarr do not support directory partition hence we need to consolidate
-                    # it before write to disk.
-                    output_path = f"{root_folder_path}/{key}/part-{job_index}.zarr"
-                    if not need_append:
-                        # Get all data variable names
-                        variables = list(result.data_vars)
-                        encoding = {
-                            # Must use Zlib for now as netcdf do not support other compression
-                            var: {"compressor": Zlib(level=9)}
-                            for var in variables
-                        }
-                        result.to_zarr(
-                            output_path, mode="w", encoding=encoding, compute=True
-                        )
-                        need_append = True
-                    else:
-                        time_dim = api.map_column_names(
+
+                    if key.endswith("parquet"):
+                        # If we have polygon to filter, apply map_partitions lazily
+                        if polygon is not None:
+                            result = result.map_partitions(
+                                _filter_partition_by_polygon,
+                                shapely_poly=polygon,
+                                lat_key=lat_key,
+                                lon_key=lon_key,
+                                meta=result._meta,
+                            )
+
+                        # With parquet we can write on each result because of the partition by TIME
+                        # create different directory
+                        output_path = f"{root_folder_path}/{key}/part-{job_index}/"
+
+                        # Derive partition key without time
+                        time_key = api.map_column_names(
                             uuid=uuid, key=key, columns=[STR_TIME_UPPER_CASE]
                         )[0]
-                        result.to_zarr(
-                            output_path, mode="a", append_dim=time_dim, compute=True
-                        )
 
-                # Either parquet or zarr save correct and no exception
-                has_data = True
-            else:
-                log.info(
-                    f"No data found for uuid={uuid}, key={key}, date_range={date_range}"
-                )
+                        # 'M' stands for Datetime in NumPy/Pandas dtypes, some dataset return
+                        # time field of different type
+                        if result[time_key].dtype.kind != "M":
+                            result[time_key] = ddf.to_datetime(result[time_key])
+
+                        result[PARTITION_KEY] = result[time_key].dt.strftime("%Y-%m")
+
+                        result.to_parquet(
+                            output_path,
+                            partition_on=[PARTITION_KEY],  # Partition by region column
+                            compression="zstd",  # Use Zstd for small file size
+                            engine="pyarrow",  # Use pyarrow for performance
+                            write_index=False,  # Exclude index to save space
+                        )
+                        log.info(f"Saved partition to {output_path}")
+                    else:
+                        # Zarr do not support directory partition hence we need to consolidate
+                        # it before write to disk.
+                        output_path = f"{root_folder_path}/{key}/part-{job_index}.zarr"
+                        if not need_append:
+                            # Get all data variable names
+                            variables = list(result.data_vars)
+                            encoding = {
+                                # Must use Zlib for now as netcdf do not support other compression
+                                var: {"compressor": Zlib(level=9)}
+                                for var in variables
+                            }
+                            result.to_zarr(
+                                output_path, mode="w", encoding=encoding, compute=True
+                            )
+                            need_append = True
+                        else:
+                            time_dim = api.map_column_names(
+                                uuid=uuid, key=key, columns=[STR_TIME_UPPER_CASE]
+                            )[0]
+                            result.to_zarr(
+                                output_path, mode="a", append_dim=time_dim, compute=True
+                            )
+
+                    # Either parquet or zarr save correct and no exception
+                    has_data = True
+                else:
+                    log.info(
+                        f"No data found for uuid={uuid}, key={key}, date_range={date_range}"
+                    )
 
     return has_data
 
@@ -337,7 +337,7 @@ def query_data(
     max_lat,
     min_lon,
     max_lon,
-) -> Optional[ddf.DataFrame | xarray.Dataset]:
+) -> Optional[ddf.DataFrame]:
     log.info(
         f"Querying data for uuid={uuid}, key={key}, start_date={start_date}, end_date={end_date}, "
     )
@@ -346,7 +346,7 @@ def query_data(
     )
 
     try:
-        df: Optional[ddf.DataFrame | xarray.Dataset] = api.get_dataset(
+        df: Optional[ddf.DataFrame] = api.get_dataset(
             uuid=uuid,
             key=key,
             date_start=start_date,

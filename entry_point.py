@@ -60,6 +60,11 @@ match call_type:
     case "sub-setting-data-collection":
         subsetting.collect_data(parameters=parameters)
     case "generate-pmtiles-for-parquet":
-        generate_pmtiles_for_all_parquets(api=api)
+        # Optional single-UUID filter for local/debug (or Batch parameters).
+        # Env wins only when parameters omit uuid so Batch jobs stay explicit.
+        target_uuid = parameters.get("uuid") or os.getenv("PMTILES_TARGET_UUID")
+        if target_uuid:
+            logger.info("PMTiles generation restricted to uuid=%s", target_uuid)
+        generate_pmtiles_for_all_parquets(api=api, uuid=target_uuid or None)
     case _:
         logger.error("Unknow call type", call_type)
