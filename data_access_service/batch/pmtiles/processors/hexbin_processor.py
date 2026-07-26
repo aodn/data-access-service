@@ -64,26 +64,31 @@ class HexbinProcessor(AbstractProcessor):
         log_memory_usage(self.logger, "before staging scan")
 
         sql = f"""
-                COPY (
+            COPY (
+                WITH casted_data AS (
                     SELECT
-                        printf('%x', h3_latlng_to_cell(
+                        h3_latlng_to_cell(
                             CAST({quoted_lat} AS DOUBLE),
                             CAST({quoted_lon} AS DOUBLE),
                             {int(self.__get_max_res())}
-                        )) AS h_high,
-                        {time_key_sql} AS {time_col},
-                        COUNT(*)::UBIGINT AS c
+                        ) AS h_cell,
+                        {time_key_sql} AS {time_col}
                     FROM read_parquet('{self.get_s3_uri()}', hive_partitioning=true, union_by_name=true)
-                    WHERE
-                        {quoted_lon} IS NOT NULL
-                        AND {quoted_lat} IS NOT NULL
-                        AND {quoted_time} IS NOT NULL
-                        AND CAST({quoted_lon} AS DOUBLE) BETWEEN -180 AND 180
-                        AND CAST({quoted_lat} AS DOUBLE) BETWEEN -90 AND 90
-                    GROUP BY h_high, {time_col}
-                    HAVING h_high IS NOT NULL
-                ) TO '{self.get_staged_path()}' (FORMAT PARQUET)
-            """
+                    WHERE {quoted_lon} IS NOT NULL
+                      AND {quoted_lat} IS NOT NULL
+                      AND {quoted_time} IS NOT NULL
+                      AND CAST({quoted_lon} AS DOUBLE) BETWEEN -180 AND 180
+                      AND CAST({quoted_lat} AS DOUBLE) BETWEEN -90 AND 90
+                )
+                SELECT
+                    printf('%x', h_cell) AS h_high,
+                    {time_col},
+                    COUNT(*)::UBIGINT AS c
+                FROM casted_data
+                WHERE h_cell IS NOT NULL
+                GROUP BY h_cell, {time_col}
+            ) TO '{self.get_staged_path()}' (FORMAT PARQUET)
+        """
         self.pm_client.execute(sql)
         self.logger.info("High-res parquet file complete.")
         self._log_staged_parquet_preview(time_col=time_col)

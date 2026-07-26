@@ -44,6 +44,45 @@ class TestBatchProcessIsolation:
             (api, "uuid-b", "b.parquet"),
         ]
 
+    def test_all_parquets_can_filter_to_single_uuid(self, monkeypatch):
+        api = MagicMock()
+        api.get_mapped_meta_data.return_value = {
+            "uuid-a": {"a.parquet": {}, "notes.txt": {}},
+            "uuid-b": {"b.parquet": {}},
+        }
+        calls = []
+
+        def fake_run(passed_api, uuid, dname):
+            calls.append((uuid, dname))
+            return True
+
+        monkeypatch.setattr(
+            generator, "_generate_pmtiles_for_parquets_in_subprocess", fake_run
+        )
+        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+
+        generate_pmtiles_for_all_parquets(api, uuid="uuid-b")
+
+        assert calls == [("uuid-b", "b.parquet")]
+        api.release_memory_for_pmtiles_batch.assert_called_once()
+
+    def test_all_parquets_uuid_filter_no_match_skips_workers(self, monkeypatch):
+        api = MagicMock()
+        api.get_mapped_meta_data.return_value = {
+            "uuid-a": {"a.parquet": {}},
+        }
+        fake_run = MagicMock(return_value=True)
+        monkeypatch.setattr(
+            generator, "_generate_pmtiles_for_parquets_in_subprocess", fake_run
+        )
+        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+
+        generate_pmtiles_for_all_parquets(api, uuid="missing-uuid")
+
+        fake_run.assert_not_called()
+        # No work: still avoid trimming? Current code returns before trim when empty.
+        api.release_memory_for_pmtiles_batch.assert_not_called()
+
     def test_fork_helper_success_exit(self, monkeypatch):
         api = MagicMock()
         recorded = {}

@@ -125,10 +125,32 @@ class AbstractProcessor(ABC):
         Idempotent: safe to call more than once (e.g. before tippecanoe and again
         in ``process``'s ``finally``). After this, a new :class:`PmTileDuckDBClient`
         (next dataset) rebuilds the connection lazily via ``get_instance``.
+
+        Step logs are intentional breadcrumbs: a native SIGSEGV during teardown
+        cannot be caught in Python, so the last line shows which close step ran.
         """
-        self.pm_client.close()
-        PmTileDuckDBClient.shutdown()
-        self.logger.info(f"DuckDB released ({checkpoint})")
+        self.logger.info("Releasing DuckDB (%s): closing client cursor", checkpoint)
+        try:
+            self.pm_client.close()
+        except Exception:
+            self.logger.exception(
+                "PmTileDuckDBClient.close() failed (%s); continuing to shutdown",
+                checkpoint,
+            )
+
+        self.logger.info(
+            "Releasing DuckDB (%s): shutting down process-global connection",
+            checkpoint,
+        )
+        try:
+            PmTileDuckDBClient.shutdown()
+        except Exception:
+            self.logger.exception(
+                "PmTileDuckDBClient.shutdown() failed (%s); continuing",
+                checkpoint,
+            )
+
+        self.logger.info("DuckDB released (%s)", checkpoint)
         log_memory_usage(self.logger, f"after duckdb shutdown ({checkpoint})")
 
     def _remove_staged_parquet(self) -> None:

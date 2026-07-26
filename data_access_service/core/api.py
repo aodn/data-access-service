@@ -17,7 +17,7 @@ import xarray
 
 from datetime import timedelta, timezone
 from io import BytesIO
-from typing import Optional, Dict, Any, List, Tuple, Hashable
+from typing import Optional, Dict, Any, List, Tuple, Hashable, overload
 from aodn_cloud_optimised.lib import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
 from aodn_cloud_optimised.lib.config import get_notebook_url
@@ -55,7 +55,23 @@ class BaseAPI:
     ) -> Tuple[pd.Timestamp | None, pd.Timestamp | None]:
         pass
 
-    def get_mapped_meta_data(self, uuid: str | None) -> Dict[str, Descriptor]:
+    @overload
+    def get_mapped_meta_data(self, uuid: None) -> Dict[str, Dict[str, Descriptor]]: ...
+
+    @overload
+    def get_mapped_meta_data(self, uuid: str) -> Dict[str, Descriptor]: ...
+
+    def get_mapped_meta_data(
+        self, uuid: str | None
+    ) -> Dict[str, Descriptor] | Dict[str, Dict[str, Descriptor]]:
+        """Return dataset descriptors.
+
+        When ``uuid`` is a concrete id, returns ``{dataset_name: Descriptor}``
+        for that uuid (or a sentinel ``{"not_exist": ...}`` if missing).
+
+        When ``uuid`` is ``None``, returns the full map
+        ``{uuid: {dataset_name: Descriptor}}``.
+        """
         pass
 
     def has_data(
@@ -584,17 +600,23 @@ class API(BaseAPI):
                     e,
                 )
 
-    def get_mapped_meta_data(self, uuid: str | None):
-        if uuid is not None:
-            value = self._cached_metadata.get(uuid)
-        else:
-            # Return all values
-            value = self._cached_metadata
+    @overload
+    def get_mapped_meta_data(self, uuid: None) -> Dict[str, Dict[str, Descriptor]]: ...
 
+    @overload
+    def get_mapped_meta_data(self, uuid: str) -> Dict[str, Descriptor]: ...
+
+    def get_mapped_meta_data(
+        self, uuid: str | None
+    ) -> Dict[str, Descriptor] | Dict[str, Dict[str, Descriptor]]:
+        if uuid is None:
+            # Full catalog: uuid -> dataset_name -> Descriptor
+            return self._cached_metadata
+
+        value = self._cached_metadata.get(uuid)
         if value is not None:
             return value
-        else:
-            return {"not_exist": Descriptor(uuid=uuid if uuid is not None else "*")}
+        return {"not_exist": Descriptor(uuid=uuid)}
 
     def get_raw_meta_data(self, uuid: str) -> Dict[str, Any]:
         value = self._raw.get(uuid)

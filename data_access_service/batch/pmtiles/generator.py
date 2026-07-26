@@ -26,7 +26,7 @@ class PmtilesGenerationInProgressError(RuntimeError):
     """Raised when a PMTiles generation is requested while another is running."""
 
 
-def generate_pmtiles_for_all_parquets(api: BaseAPI):
+def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
     """Generate PMTiles for every parquet dataset in its own short-lived process.
 
     Each dataset is handled in a forked child so DuckDB / tippecanoe allocations
@@ -37,16 +37,41 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI):
 
     Invariant: the parent must not open ``PmTileDuckDBClient`` before forking;
     the child creates its own process-global DuckDB connection.
+
+    Args:
+        api: Initialized API with metadata loaded.
+        uuid: Optional catalog UUID. When set, only parquet datasets for that
+            UUID are processed (useful for local/debug runs of a single product).
     """
     metadata_list = api.get_mapped_meta_data(uuid=None)
 
     # Materialise the work list before trimming so we do not depend on the
     # full cached map (zarr entries etc.) remaining in the parent.
     work: list[tuple[str, str]] = []
-    for k, v in metadata_list.items():
+    for k, v in sorted(metadata_list.items()):
+        if uuid is not None and k != uuid:
+            continue
         for dataset_name in v.keys():
             if dataset_name.endswith(".parquet"):
                 work.append((k, dataset_name))
+
+    if uuid is not None:
+        logger.info(
+            "PMTiles batch restricted to uuid=%s (%s parquet dataset(s))",
+            uuid,
+            len(work),
+        )
+        if not work:
+            logger.warning(
+                "No parquet datasets found for uuid=%s; nothing to generate",
+                uuid,
+            )
+            return
+    else:
+        logger.info(
+            "PMTiles batch for all UUIDs (%s parquet dataset(s))",
+            len(work),
+        )
 
     # Drop full raw schemas / non-parquet metadata so the parent (and COW
     # fork children) start each dataset with a smaller baseline RSS.
@@ -112,9 +137,16 @@ def _generate_pmtiles_for_parquets_in_subprocess(
         )
         return False
 
+    # Raw wait status (e.g. 139 = SIGSEGV + core): decode for operators.
+    termsig = os.WTERMSIG(status) if os.WIFSIGNALED(status) else None
+    coredump = os.WCOREDUMP(status) if hasattr(os, "WCOREDUMP") else False
     logger.error(
-        "PMTiles worker signaled status=%s for uuid=%s dataset=%s",
+        "PMTiles worker signaled status=%s termsig=%s coredump=%s "
+        "for uuid=%s dataset=%s "
+        "(common: 11=SIGSEGV native crash, 9=SIGKILL often OOM killer)",
         status,
+        termsig,
+        coredump,
         uuid,
         dname,
     )
