@@ -202,7 +202,7 @@ class ZarrProcessor:
             for var, da in dataset.data_vars.items()
             if da.dtype.kind in {"i", "u", "f"}  # integer, unsigned, float
         }
-        thread_count = self.get_available_thread_count()
+        thread_count = self.__get_available_thread_count()
 
         # set the thread count for dask, for the to_netcdf operation later
         dask.config.set(num_workers=thread_count)
@@ -338,7 +338,7 @@ class ZarrProcessor:
         zip_path.unlink(missing_ok=True)
         return url
 
-    def get_available_thread_count(self):
+    def __get_available_thread_count(self):
         if os.getenv("PROFILE") in (None, "dev", "testing"):
             self.log.info("Running in dev or testing mode, using 1 thread")
             return 1
@@ -362,7 +362,7 @@ class ZarrProcessor:
         )
         self.log.info(f"Available memory in MB: {available_memory / (1024 * 1024):.2f}")
         safe_memory_per_thread = int(
-            available_memory * memory_fraction / self.get_available_thread_count()
+            available_memory * memory_fraction / self.__get_available_thread_count()
         )
         self.log.info(
             "Chunk size: %d MB per thread", safe_memory_per_thread / (1024**2)
