@@ -17,11 +17,13 @@ from typing import Optional
 
 import pandas as pd
 import xarray
+from xarray.core import dtypes as xr_dtypes
 
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, ZarrDataSource
 
 from data_access_service.core.constants import (
     OUTPUT_FORMAT_COMPRESSION_RATIO,
+    ASSUMED_STRING_BYTES,
     GEOTIFF_ZIP_RATIO,
     GEOTIFF_INT_PIXEL_BYTES,
     GEOTIFF_CURVILINEAR_INFLATION,
@@ -150,10 +152,11 @@ def _estimate_zarr_size(
     )
 
     for bbox in bboxes:
-        # subset_zarr returns a lazily-sliced xarray.Dataset - the
-        # SAME slicing the batch download uses.
+        # subset_zarr returns a lazily-sliced xarray.Dataset - the SAME dim
+        # slicing the batch download uses. apply_mask=False skips the eager
+        # .where() (OOM on the non-dask store); it never changed nbytes anyway.
         dataset: xarray.Dataset = subset_zarr(
-            zarr_store, api, uuid, key, date_start, date_end, bbox
+            zarr_store, api, uuid, key, date_start, date_end, bbox, apply_mask=False
         )
 
         # Measure the uncompressed and output sizes for this slice, per format.
@@ -191,15 +194,23 @@ def _estimate_zarr_size(
 def _measure_netcdf(
     dataset: xarray.Dataset, output_format: str, notes: list[str]
 ) -> tuple[int, int]:
-    """(uncompressed, output) for netcdf: nbytes, then a flat compression
-    ratio"""
-    nbytes = int(dataset.nbytes)
+    """(uncompressed, output) for netcdf.
+
+    Piecewise compression: the download zlib-compresses only numeric data
+    variables, so the ratio applies to those bytes alone; coords and
+    string/object vars are written uncompressed and pass through at 1.0.
+    Applying one flat ratio to the whole nbytes would over-count compression
+    on the coords (which never shrink)."""
+    compressible, incompressible = _nbytes_by_compressibility(dataset)
+    uncompressed = compressible + incompressible
     ratio = OUTPUT_FORMAT_COMPRESSION_RATIO[output_format]
+    output = int(compressible * ratio) + incompressible
     notes.append(
-        f"netcdf: xarray nbytes x compression ratio {ratio} "
+        f"netcdf: numeric data vars x compression ratio {ratio} + "
+        "coords/string vars uncompressed "
         "(ratio calibrated on gridded SST; noisier data may compress less)"
     )
-    return nbytes, int(nbytes * ratio)
+    return uncompressed, output
 
 
 def _measure_geotiff(
@@ -278,6 +289,42 @@ def _measure_geotiff(
         )
 
     return raw_raster_bytes, int(raw_raster_bytes * GEOTIFF_ZIP_RATIO)
+
+
+def _estimated_string_width(dtype) -> int:
+    """
+    The download writes strings as fixed-width S{N} in convert_object_dtype_variables.
+
+    A fixed-width numpy string ('S'/'U') already carries its real byte width; an
+    object dtype only carries an 8-byte pointer (the string body lives on the heap), so we fall back to a nominal width.
+    """
+    if dtype.kind in {"S", "U"} and dtype.itemsize > 0:
+        return dtype.itemsize
+    return ASSUMED_STRING_BYTES
+
+
+def _nbytes_by_compressibility(dataset: xarray.Dataset) -> tuple[int, int]:
+    """
+    The download zlib-compresses only numeric data vars (dtype.kind in {i, u, f});
+    coords and string/object vars are written uncompressed. dtypes are taken after .where() promotion (via the same maybe_promote), so the split matches the download.
+
+    String-like data vars promote to object (8-byte pointer) under maybe_promote,
+    but the download stores them as fixed-width S{N}, so we size them by
+    _estimated_string_width instead of the 8-byte pointer.
+    """
+    compressible = 0
+    incompressible = 0
+    for name, var in dataset.variables.items():
+        if name in dataset.data_vars:
+            promoted_dtype, _ = xr_dtypes.maybe_promote(var.dtype)
+            if promoted_dtype.kind in {"i", "u", "f"}:
+                compressible += int(var.size) * promoted_dtype.itemsize
+            else:
+                # object/string/bool -> stored as fixed-width S{N}, uncompressed
+                incompressible += int(var.size) * _estimated_string_width(var.dtype)
+        else:
+            incompressible += int(var.nbytes)
+    return compressible, incompressible
 
 
 def _empty_estimate(uuid: str, key: str, output_format: str) -> dict:

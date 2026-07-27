@@ -25,6 +25,7 @@ from data_access_service.core import api as core_api
 from data_access_service.core.size_estimation import estimate_single_key_size
 from data_access_service.core.constants import (
     COMPRESSION_RATIO_NETCDF,
+    ASSUMED_STRING_BYTES,
     GEOTIFF_ZIP_RATIO,
     GEOTIFF_INT_PIXEL_BYTES,
     GEOTIFF_CURVILINEAR_INFLATION,
@@ -127,8 +128,48 @@ def test_zarr_estimate_basic():
     assert result["key"] == KEY
     assert result["format"] == "netcdf"
     assert result["estimated_uncompressed_bytes"] == dataset.nbytes
-    assert result["estimated_output_bytes"] == int(
-        dataset.nbytes * COMPRESSION_RATIO_NETCDF
+    # Piecewise compression: only the numeric data vars (TEMP, PSAL) get the
+    # ratio; coords (TIME/LATITUDE/LONGITUDE) are written uncompressed at 1.0.
+    compressible = dataset["TEMP"].nbytes + dataset["PSAL"].nbytes
+    incompressible = dataset.nbytes - compressible
+    assert result["estimated_output_bytes"] == (
+        int(compressible * COMPRESSION_RATIO_NETCDF) + incompressible
+    )
+
+
+def test_zarr_netcdf_object_string_var_sized_as_fixed_width():
+    # An object-dtype string data var (e.g. a platform code) is stored by the
+    # download as fixed-width S{N}, NOT the 8-byte object pointer.
+    # The estimate sizes it at the nominal ASSUMED_STRING_BYTES so it
+    # doesn't badly under-count. Strings are uncompressed -> pass through at 1.0.
+    times = pd.date_range("2020-01-01", periods=5)
+    ds = xr.Dataset(
+        {
+            "TEMP": ("TIME", np.arange(5, dtype="float64")),
+            "platform": ("TIME", np.array(["a", "bb", "ccc", "d", "e"], dtype=object)),
+        },
+        coords={
+            "TIME": times,
+            "LATITUDE": np.array([25.0, 35.0]),
+            "LONGITUDE": np.array([15.0, 25.0]),
+        },
+    )
+    api, _ = _api_with_zarr(ds)
+
+    result = estimate_single_key_size(api, KEY, _resolved(), output_format="netcdf")
+
+    # platform sized at the nominal fixed width, not the 8-byte object pointer.
+    platform_bytes = ds["platform"].size * ASSUMED_STRING_BYTES
+    assert platform_bytes > ds["platform"].nbytes  # nbytes would count 8 bytes/elem
+    temp_bytes = ds["TEMP"].nbytes  # float64 -> compressible
+    coords_bytes = ds["TIME"].nbytes + ds["LATITUDE"].nbytes + ds["LONGITUDE"].nbytes
+
+    assert result["estimated_uncompressed_bytes"] == (
+        temp_bytes + platform_bytes + coords_bytes
+    )
+    # only TEMP is compressed; platform + coords pass through at 1.0
+    assert result["estimated_output_bytes"] == (
+        int(temp_bytes * COMPRESSION_RATIO_NETCDF) + platform_bytes + coords_bytes
     )
 
 
@@ -197,6 +238,49 @@ def test_geotiff_integer_var_treated_as_float32():
     raw = 2 * 3 * 3 * GEOTIFF_INT_PIXEL_BYTES
     assert result["estimated_uncompressed_bytes"] == raw
     assert result["estimated_output_bytes"] == int(raw * GEOTIFF_ZIP_RATIO)
+
+
+def test_zarr_curvilinear_netcdf_skips_mask_but_matches_download_nbytes():
+    # The estimate skips .where() mask which would load the whole store from
+    # S3 and cause OOM. The download's .where() NaN-fill promotes int/bool
+    # data-vars to float64 -- the estimate mirrors that, so its bytes must
+    # equal the real download slice's nbytes.
+    from data_access_service.utils.subset_zarr_helper import subset_zarr
+
+    times = pd.date_range("2020-01-01", periods=2)
+    ii, jj = 4, 6
+    ds = xr.Dataset(
+        {
+            "temp": (("TIME", "I", "J"), np.zeros((2, ii, jj), dtype="float32")),
+            "flags": (("TIME", "I", "J"), np.zeros((2, ii, jj), dtype="int16")),
+            "LATITUDE": (("I", "J"), np.zeros((ii, jj), dtype="float64")),
+            "LONGITUDE": (("I", "J"), np.zeros((ii, jj), dtype="float64")),
+        },
+        coords={"TIME": times},
+    )
+    api, _ = _api_with_zarr(ds)
+
+    bboxes = resolve_bboxes(
+        _single_polygon_geojson(lon_min=-180, lat_min=-90, lon_max=180, lat_max=90)
+    )
+    result = estimate_single_key_size(
+        api, KEY, _resolved(bboxes=bboxes), output_format="netcdf"
+    )
+
+    download_slice = subset_zarr(
+        ds,
+        api,
+        UUID,
+        KEY,
+        pd.Timestamp("2020-01-01", tz="UTC"),
+        pd.Timestamp("2020-01-05 23:59:59", tz="UTC"),
+        bboxes[0],
+        apply_mask=True,
+    )
+    assert result["estimated_uncompressed_bytes"] == int(download_slice.nbytes)
+    # The promotion actually happened: int16 flags counted at float64 (8 bytes),
+    # so the estimate exceeds the raw un-promoted nbytes.
+    assert result["estimated_uncompressed_bytes"] > int(ds.nbytes)
 
 
 def test_unsupported_format_raises():

@@ -6,7 +6,6 @@ from typing import Optional, List
 import uuid as uuid_module
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
-from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from xarray import Dataset
 
@@ -43,6 +42,7 @@ from data_access_service.utils.routes_helper import (
     generate_feature_collection,
     generate_rect_features,
 )
+from data_access_service.utils.sse_utils import sse_it
 from data_access_service.utils.sse_wrapper import sse_wrapper
 
 router = APIRouter()
@@ -381,11 +381,16 @@ async def get_data(
 
 
 @router.post("/data/{uuid}/estimate_size", dependencies=[Depends(api_key_auth)])
-async def estimate_size_multi(
+@sse_it
+def estimate_size_multi(
     uuid: str,
     body: EstimateSizeRequest,
     api_instance: API = Depends(require_api_ready),
 ):
+    # sse_it streams this over SSE: it returns a 200 text/event-stream
+    # immediately, sends "processing" heartbeats while the (blocking) work runs
+    # in a worker thread, then emits the estimate dict in a final "result" event.
+    # Errors are raised below surface as SSE "error" events rather than HTTP status codes
     logger.debug(
         "estimate_size_multi start: uuid=%s keys=%s start=%s end=%s f=%s "
         "has_polygon=%s columns=%s",
@@ -401,22 +406,15 @@ async def estimate_size_multi(
         time.perf_counter()
     )  # for performance tracking of this endpoint (debug purpose)
 
-    try:
-        # Offload the blocking, CPU/metadata work to a threadpool thread.
-        result = await run_in_threadpool(
-            api_instance.estimate_datasets_size,
-            uuid,
-            keys=body.keys,
-            start_date=body.start_date,
-            end_date=body.end_date,
-            multi_polygon=body.multi_polygon,
-            columns=body.columns,
-            output_format=body.output_format,
-        )
-    except (ValueError, TypeError) as e:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
-    except NotImplementedError as e:
-        raise HTTPException(status_code=HTTPStatus.NOT_IMPLEMENTED, detail=str(e))
+    result = api_instance.estimate_datasets_size(
+        uuid,
+        keys=body.keys,
+        start_date=body.start_date,
+        end_date=body.end_date,
+        multi_polygon=body.multi_polygon,
+        columns=body.columns,
+        output_format=body.output_format,
+    )
 
     elapsed = time.perf_counter() - t0
     logger.info("estimate_size_multi done in %.3fs", elapsed)
@@ -427,4 +425,4 @@ async def estimate_size_multi(
             detail=f"No matching keys found for uuid={uuid}, keys={body.keys}",
         )
 
-    return Response(content=json.dumps(result), media_type="application/json")
+    return result

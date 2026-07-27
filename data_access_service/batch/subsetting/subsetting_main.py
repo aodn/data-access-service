@@ -50,7 +50,7 @@ def init(api: API, job_id_of_init, parameters):
         start_date_str=subset_request.start_date,
         end_date_str=subset_request.end_date,
         multi_polygon=subset_request.multi_polygon,
-        bboxes=subset_request.bboxes,  # already parsed in get_subset_request; reuse
+        bboxes=subset_request.bboxes,
     )
 
     # Step 4: If the requested data not available, email the user and stop here.
