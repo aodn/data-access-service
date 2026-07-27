@@ -1,11 +1,14 @@
+import os
+
 from http import HTTPStatus
-
 from fastapi import APIRouter, Request
-
 from data_access_service.utils.routes_helper import (
     HealthCheckResponse,
     get_api_instance,
 )
+
+VERSION = os.getenv("APP_VERSION", "main-SNAPSHOT")
+GIT_SHA = os.getenv("GIT_SHA")
 
 router = APIRouter()
 
@@ -26,3 +29,15 @@ async def health_check(request: Request):
         return HealthCheckResponse(status="UP", status_code=HTTPStatus.OK)
     else:
         return HealthCheckResponse(status="STARTING", status_code=HTTPStatus.OK)
+
+
+@router.get("/manage/info")
+def get_info():
+    return {
+        "application": {
+            "name": "data-access-service",
+            "description": "Data Access Service",
+            "version": VERSION,
+        },
+        "git": {"commit": {"id": GIT_SHA}},
+    }
