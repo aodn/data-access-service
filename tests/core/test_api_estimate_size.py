@@ -274,7 +274,7 @@ def test_zarr_curvilinear_netcdf_skips_mask_but_matches_download_nbytes():
         KEY,
         pd.Timestamp("2020-01-01", tz="UTC"),
         pd.Timestamp("2020-01-05 23:59:59", tz="UTC"),
-        bboxes[0],
+        bboxes,
         apply_mask=True,
     )
     assert result["estimated_uncompressed_bytes"] == int(download_slice.nbytes)

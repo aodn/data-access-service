@@ -155,8 +155,12 @@ def _estimate_zarr_size(
         # subset_zarr returns a lazily-sliced xarray.Dataset - the SAME dim
         # slicing the batch download uses. apply_mask=False skips the eager
         # .where() (OOM on the non-dask store); it never changed nbytes anyway.
+        # TODO: call subset_zarr ONCE with every bbox and measure
+        # the union grid, instead of summing per-bbox slices. The download now
+        # builds that union grid in one pass, so this per-bbox sum no longer
+        # mirrors it for multi-polygon requests.
         dataset: xarray.Dataset = subset_zarr(
-            zarr_store, api, uuid, key, date_start, date_end, bbox, apply_mask=False
+            zarr_store, api, uuid, key, date_start, date_end, [bbox], apply_mask=False
         )
 
         # Measure the uncompressed and output sizes for this slice, per format.

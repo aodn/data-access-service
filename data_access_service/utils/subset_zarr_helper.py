@@ -7,8 +7,9 @@ Everything returned is a lazily-sliced xarray.Dataset: no chunk is loaded, so
 callers can either write it out (download) or read .nbytes (estimate).
 """
 
-from typing import Any
+from typing import Any, Iterable, Sequence
 
+import numpy as np
 import xarray
 from xarray import DataArray
 
@@ -24,42 +25,72 @@ def subset_zarr(
     key: str,
     start_date,
     end_date,
-    bbox: BoundingBox,
+    bboxes: Sequence[BoundingBox],
     apply_mask: bool = True,
 ) -> xarray.Dataset:
-    """Apply one time range + one bbox to a zarr dataset.
+    """Apply one time range + one or more bboxes to a zarr dataset.
 
     Returns a lazily-sliced xarray.Dataset (no compute). Raises ValueError if a
     condition targets a name that is neither a dimension nor a variable of the
-    dataset.
+    dataset, or if bboxes is empty.
 
-    apply_mask: when True (batch download) the curvilinear 2D-variable
-    conditions are applied via .where(). When False (size estimation) the
-    .where()is skipped: on a non-dask store it is eager and would load the
-    whole store from S3 (OOM), and it never changes the shape/nbytes anyway
-    (drop=False).
+    With N bboxes the result is the union grid: the smallest rectangular grid holding all the requested boxes - every lat/lon position covered
+    by at least one bbox, with the cells that belong to no bbox set to NaN.
+
+    apply_mask: when True (batch download) the .where() mask is applied - both
+    the curvilinear 2D-variable conditions and the multi-bbox cross-cell
+    blanking. When False (size estimation) the .where() is skipped: on a
+    non-dask store it is eager and would load the whole store from S3 (OOM), and
+    it never changes the shape/nbytes anyway (drop=False).
     """
-    conditions = subset_conditions(api, uuid, key, start_date, end_date, bbox)
+    if not bboxes:
+        raise ValueError(
+            f"subset_zarr needs at least one bbox (dataset: {key}). Callers pass "
+            "ResolvedSubsetRequest.effective_bboxes, which defaults to the whole globe."
+        )
 
-    dim_conditions: dict[str, slice] = {}  # for .sel() on indexed dimensions
-    mask: DataArray | None = (
-        None  # for .where() on N-dimensional variables (especially curvilinear lat/lon)
-    )
+    conditions_per_bbox = [
+        subset_conditions(api, uuid, key, start_date, end_date, bbox) for bbox in bboxes
+    ]
 
-    for dim_name, (min_value, max_value) in conditions.items():
-        if is_dim(dim_name, dataset):
-            form_dim_conditions(dim_conditions, dim_name, min_value, max_value, dataset)
-        elif is_var(dim_name, dataset):
-            mask = form_mask(mask, dim_name, min_value, max_value, dataset)
-        else:
+    for dim_name in conditions_per_bbox[0]:
+        if not is_dim(dim_name, dataset) and not is_var(dim_name, dataset):
             raise ValueError(
                 f"Condition key: {dim_name} is neither dim, coord nor data_var in "
                 f"the dataset. Dataset: {key}"
             )
 
-    subset = dataset
-    if dim_conditions:
-        subset = subset.sel(**dim_conditions)
+    # Step 1: cut the store down to the positions ANY bbox asks for.
+    dim_indexers = {
+        dim_name: form_dim_indexer(
+            dataset, dim_name, [c[dim_name] for c in conditions_per_bbox]
+        )
+        for dim_name in conditions_per_bbox[0]
+        if is_dim(dim_name, dataset)
+    }
+    subset = dataset.isel(**dim_indexers) if dim_indexers else dataset
+
+    # Step 2: one mask term per bbox, OR'd together, so a cell survives when it
+    # is inside ANY bbox. Built on the already-indexed `subset` so mask and data
+    # share the same axes. Two kinds of condition end up here:
+    #   - dimensions whose range differs between bboxes (lat/lon): the union
+    #     indexer above keeps the "cross" cells that no single bbox asked for,
+    #     and this blanks them. A dimension asking for the same range in every
+    #     bbox (time) is already exact, so it is skipped.
+    #   - N-dimensional variables, especially curvilinear 2D lat/lon, which
+    #     cannot be indexed by value at all.
+    mask: DataArray | None = None
+    for conditions in conditions_per_bbox:
+        bbox_mask: DataArray | None = None
+        for dim_name, (min_value, max_value) in conditions.items():
+            if is_dim(dim_name, dataset) and not varies_between_bboxes(
+                dim_name, conditions_per_bbox
+            ):
+                continue
+            bbox_mask = form_mask(bbox_mask, dim_name, min_value, max_value, subset)
+        if bbox_mask is not None:
+            mask = bbox_mask if mask is None else (mask | bbox_mask)
+
     if mask is not None and apply_mask:
         # NOTE: KEEP drop=False
         # The size estimate SKIPS this .where() and relies on the
@@ -98,6 +129,19 @@ def is_var(key: str, dataset: xarray.Dataset) -> bool:
     return key in dataset.variables
 
 
+def varies_between_bboxes(
+    dim_name: str, conditions_per_bbox: Sequence[dict[str, list]]
+) -> bool:
+    """True when the bboxes ask for different ranges on this dimension.
+
+    The time range is the same for every bbox, the lat/lon ranges usually are
+    not. Only a varying dimension can produce "cross" cells that the union
+    indexer picks up but no bbox actually asked for.
+    """
+    first = conditions_per_bbox[0][dim_name]
+    return any(conditions[dim_name] != first for conditions in conditions_per_bbox[1:])
+
+
 def form_mask(
     existing_mask: DataArray | None,
     dim_name: str,
@@ -111,24 +155,29 @@ def form_mask(
     return existing_mask & var_mask
 
 
-def form_dim_conditions(
-    existing_conditions: dict[str, slice] | None,
-    dim_name: str,
-    min_value: Any,
-    max_value: Any,
+def form_dim_indexer(
     dataset: xarray.Dataset,
-) -> dict[str, slice]:
-    # slice direction must match the axis direction, or .sel() returns empty
-    slice_from = min_value
-    slice_to = max_value
+    dim_name: str,
+    ranges: Iterable[Sequence[Any]],
+) -> Any:
+    """Positions on `dim_name` covered by ANY of the ranges, as an .isel() indexer.
 
-    # if descending, swap
-    if dataset[dim_name][0] > dataset[dim_name][-1]:
-        slice_from = max_value
-        slice_to = min_value
+    Value comparison rather than .sel(slice(...)) so the axis direction does not
+    matter (a descending lat axis needs the slice reversed, which is easy to get
+    wrong) and so several ranges can be OR'd together.
 
-    dim_condition = {dim_name: slice(slice_from, slice_to)}
-    if existing_conditions is None:
-        return dim_condition
-    existing_conditions.update(dim_condition)
-    return existing_conditions
+    A contiguous run comes back as a plain slice - the single-bbox case then
+    indexes exactly the same block of the store it always did, with no fancy
+    indexing in the way.
+    """
+    values = dataset[dim_name].values
+    selected = np.zeros(values.shape, dtype=bool)
+    for min_value, max_value in ranges:
+        selected |= (values >= min_value) & (values <= max_value)
+
+    positions = np.nonzero(selected)[0]
+    if positions.size == 0:
+        return slice(0, 0)
+    if positions[-1] - positions[0] + 1 == positions.size:
+        return slice(int(positions[0]), int(positions[-1]) + 1)
+    return positions

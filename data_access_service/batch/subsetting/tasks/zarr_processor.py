@@ -151,39 +151,30 @@ class ZarrProcessor:
         self.log.info("Chunking dataset with %d time steps per chunk", time_per_chunk)
         zarr_store = zarr_store.chunk({time_dim: time_per_chunk})
 
-        # Apply the subset per bbox and merge. subset_zarr is the single owner
-        # of the slicing, shared with the size estimate so both select the same
-        # region (utils.subset_zarr_helper).
-        merged_dataset: xarray.Dataset | None = None
-        for bbox in self.bboxes:
-            subset = subset_zarr(
-                zarr_store,
-                self.api,
-                self.uuid,
-                key,
-                self.start_date,
-                self.end_date,
-                bbox,
-            )
-
-            if not isinstance(subset, xarray.Dataset):
-                raise TypeError(
-                    f"Data for key: {key} is not an xarray.Dataset. This only support zarr format."
-                )
-
-            if merged_dataset is None:
-                merged_dataset = subset
-            else:
-                merged_dataset = xarray.merge(
-                    [merged_dataset, subset], compat="override"
-                )
-
-        if merged_dataset is None:
+        # Apply ALL bboxes in one pass
+        # subset_zarr is the single owner of the slicing, shared with the size
+        # estimate so both select the same
+        if not self.bboxes:
             self.log.warning(
                 f"No data found for key: {key} in the specified conditions."
             )
             return None
-        return merged_dataset
+
+        subset = subset_zarr(
+            zarr_store,
+            self.api,
+            self.uuid,
+            key,
+            self.start_date,
+            self.end_date,
+            self.bboxes,
+        )
+
+        if not isinstance(subset, xarray.Dataset):
+            raise TypeError(
+                f"Data for key: {key} is not an xarray.Dataset. This only support zarr format."
+            )
+        return subset
 
     def __write_to_s3_as_netcdf(self, dataset: xarray.Dataset, key: str):
         dataset = ignore_invalid_unicode_in_attrs(dataset)
