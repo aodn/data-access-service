@@ -27,6 +27,8 @@ from tenacity import (
 # How often to emit a progress log line while a long query is running.
 _PROGRESS_LOG_INTERVAL_SECONDS = 60
 
+log = logging.getLogger(__name__)
+
 
 class DuckDBClient(ABC):
     """Common interface over a DuckDB connection.
@@ -146,21 +148,55 @@ class PmTileDuckDBClient(DuckDBClient):
         return self._duckdb_client
 
     def close(self):
-        if self._duckdb_client is not None:
-            with self._lock:
-                self._duckdb_client.close()
-        self._duckdb_client = None
+        """Close this client's cursor only (not the process-global connection)."""
+        with self._lock:
+            cursor = self._duckdb_client
+            self._duckdb_client = None
+            self._con = None
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    self._logger.exception(
+                        "Failed to close PmTileDuckDBClient cursor; continuing shutdown"
+                    )
+
+    @classmethod
+    def _shrink_connection_memory(cls, connection) -> None:
+        """Best-effort shrink of DuckDB buffer pool before native teardown.
+
+        Lowering ``memory_limit`` / threads can release cached pages without the
+        more aggressive (and historically crash-prone) module-level ``duckdb.close()``.
+        Failures are ignored: the connection is about to be closed anyway.
+        """
+        for sql in (
+            "SET threads TO 1",
+            "SET memory_limit = '64MB'",
+        ):
+            try:
+                connection.execute(sql)
+            except Exception:
+                log.debug("Pre-close DuckDB setting failed: %s", sql, exc_info=True)
 
     @classmethod
     def shutdown(cls) -> None:
         """Close the process-global connection and remove its temp directory.
 
-        The batch loop processes datasets sequentially in one long-lived
-        process; without this, the global connection's buffer pool (up to
-        ``memory_limit``) and HTTP metadata cache accumulate across datasets
-        and never return to the OS. Any cursors from :meth:`get_instance`
-        become invalid, so only call this once a dataset is fully processed.
-        The next ``get_instance`` call lazily rebuilds a fresh connection.
+        Idempotent when already shut down. Callers use this:
+
+        * After geojsonseq/metadata and **before tippecanoe**, so the buffer
+          pool (up to ``memory_limit``) is free for the tippecanoe subprocess
+          on memory-constrained Batch hosts.
+        * Between datasets in a multi-dataset batch run, so RSS does not
+          ratchet up via the HTTP metadata cache and buffer pool.
+
+        Any cursors from :meth:`get_instance` become invalid. The next
+        ``get_instance`` call (e.g. a new client for the next dataset) lazily
+        rebuilds a fresh connection.
+
+        Note: do **not** call module-level ``duckdb.close()`` after
+        ``connection.close()`` — that double-teardown path has been observed to
+        SIGSEGV the forked PMTiles worker after a long httpfs/h3 staging job.
         """
         with cls._lock:
             connection = cls._global_db_connection
@@ -169,12 +205,28 @@ class PmTileDuckDBClient(DuckDBClient):
             # later datasets reusing a half-closed connection.
             cls._global_db_connection = None
             cls._temp_dir_object = None
-            try:
-                if connection is not None:
+
+        # Close outside the class lock so a slow/native close cannot stall
+        # another thread that only needs to observe "already shut down".
+        try:
+            if connection is not None:
+                log.info("DuckDB shutdown: shrinking buffer pool")
+                cls._shrink_connection_memory(connection)
+                log.info("DuckDB shutdown: closing connection")
+                try:
                     connection.close()
-            finally:
-                if temp_dir is not None:
+                except Exception:
+                    log.exception(
+                        "DuckDB connection.close() failed; continuing temp cleanup"
+                    )
+                log.info("DuckDB shutdown: connection closed")
+        finally:
+            if temp_dir is not None:
+                try:
+                    log.info("DuckDB shutdown: cleaning temp directory")
                     temp_dir.cleanup()
+                except Exception:
+                    log.exception("DuckDB temp directory cleanup failed")
 
     @retry(
         stop=stop_after_attempt(MAX_READ_ATTEMPTS),

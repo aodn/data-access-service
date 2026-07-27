@@ -174,7 +174,8 @@ class TestApi(unittest.TestCase):
     def test_refresh_uuid_dataset_map_logs_dataset_failure_and_continues(self):
         api = API()
         api._metadata = MagicMock()
-        api._metadata.metadata_catalog_uncached.return_value = {
+        # Prefer .catalog when it is a real dict; keep uncached as fallback.
+        catalog = {
             "bad_dataset.parquet": {},
             "good_dataset.parquet": {
                 "dataset_metadata": {
@@ -182,6 +183,8 @@ class TestApi(unittest.TestCase):
                 }
             },
         }
+        api._metadata.catalog = catalog
+        api._metadata.metadata_catalog_uncached.return_value = catalog
 
         def get_metadata_uuid(data):
             if data == {}:
@@ -206,6 +209,45 @@ class TestApi(unittest.TestCase):
         self.assertIn("good_dataset.parquet", api._raw["good-uuid"])
         self.assertIn("good-uuid", api._cached_metadata)
         self.assertIn("good_dataset.parquet", api._cached_metadata["good-uuid"])
+        self.assertIn("good-uuid", api._schema_keys)
+        self.assertIn("good_dataset.parquet", api._schema_keys["good-uuid"])
+
+    def test_release_memory_for_pmtiles_batch_drops_raw_and_non_parquet(self):
+        api = API()
+        from data_access_service.core.descriptor import Descriptor
+
+        api._cached_metadata = {
+            "u1": {
+                "a.parquet": Descriptor(uuid="u1", dname="a.parquet"),
+                "b.zarr": Descriptor(uuid="u1", dname="b.zarr"),
+            },
+            "u2": {
+                "c.zarr": Descriptor(uuid="u2", dname="c.zarr"),
+            },
+        }
+        api._schema_keys = {
+            "u1": {
+                "a.parquet": frozenset({"LATITUDE", "LONGITUDE", "TIME"}),
+                "b.zarr": frozenset({"x"}),
+            },
+            "u2": {"c.zarr": frozenset({"y"})},
+        }
+        api._raw = {"u1": {"a.parquet": b"blob", "b.zarr": b"zblob"}}
+        api._instance = object()
+
+        api.release_memory_for_pmtiles_batch()
+
+        self.assertEqual(api._raw, {})
+        self.assertIsNone(api._instance)
+        self.assertEqual(list(api._cached_metadata.keys()), ["u1"])
+        self.assertEqual(list(api._cached_metadata["u1"].keys()), ["a.parquet"])
+        self.assertEqual(
+            api._schema_keys["u1"]["a.parquet"],
+            frozenset({"LATITUDE", "LONGITUDE", "TIME"}),
+        )
+        # map_column_names still works from schema keys alone
+        cols = api.map_column_names("u1", "a.parquet", ["LATITUDE"])
+        self.assertEqual(cols, ["LATITUDE"])
 
     def test_normalize_lon(self):
         """Test None"""

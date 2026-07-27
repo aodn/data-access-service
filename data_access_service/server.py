@@ -46,8 +46,6 @@ def api_setup(application: FastAPI) -> API:
     except Exception:
         api.initialize_metadata()
 
-    application.include_router(api_router)
-    application.include_router(tiler_router)
     return api
 
 
@@ -99,6 +97,11 @@ async def lifespan(application: FastAPI):
 
 app = FastAPI(lifespan=lifespan, title="Data Access Service")
 configure_gzip_middleware(app)
+# Register routes once at import time. Including them from lifespan/api_setup would
+# re-mount the same routers on every TestClient (or api_setup) call and produce
+# FastAPI "Duplicate Operation ID" warnings when generating the OpenAPI schema.
+app.include_router(api_router)
+app.include_router(tiler_router)
 
 
 if __name__ == "__main__":
