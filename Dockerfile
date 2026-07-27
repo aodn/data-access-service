@@ -1,4 +1,12 @@
 FROM mambaorg/micromamba:2 AS conda-base
+
+# Accept the build argument from GitHub Actions
+ARG APP_VERSION=unknown
+ARG GIT_SHA=unknown
+
+# Set it as an environment variable for Python to read
+ENV APP_VERSION=$APP_VERSION
+ENV GIT_SHA=$GIT_SHA
 # Using micromamba (a fast alternative to conda) to build the exact environment
 
 # Temp work around due to deps in cloud optimized lib use xarray lib that is fork by Loz with some fix
