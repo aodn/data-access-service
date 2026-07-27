@@ -364,9 +364,9 @@ def test_no_spatial_filter_uses_whole_globe_bbox():
     assert result["estimated_uncompressed_bytes"] == dataset.nbytes
 
 
-def test_multi_polygon_multiple_bboxes_summed():
-    # Two polygons (both covering the tiny dataset) -> sliced per bbox and the
-    # per-bbox .nbytes are SUMMED (overlaps counted twice = upper bound).
+def test_multi_polygon_overlapping_bboxes_counted_once():
+    # Two overlapping polygons (both covering the tiny dataset) -> ONE
+    # subset_zarr pass over the union grid, so the overlap is counted once.
     dataset = _make_dataset()
     api, _ = _api_with_zarr(dataset)
 
@@ -386,9 +386,72 @@ def test_multi_polygon_multiple_bboxes_summed():
         api, KEY, _resolved(bboxes=resolve_bboxes(polygon)), output_format="netcdf"
     )
 
-    assert "summed 2 polygon bboxes" in result["notes"]
-    # each bbox covers the whole dataset -> bytes are summed (2x)
-    assert result["estimated_uncompressed_bytes"] == 2 * dataset.nbytes
+    assert "union grid of 2 polygon bboxes" in result["notes"]
+    # each bbox covers the whole dataset -> the union is the dataset, once
+    assert result["estimated_uncompressed_bytes"] == dataset.nbytes
+
+
+def test_multi_polygon_disjoint_bboxes_estimate_matches_download_region():
+    # Two disjoint boxes -> the estimate must measure the SAME union grid the
+    # download writes: every lat/lon position covered by either box (with NaN
+    # cross cells), NOT the sum of the two boxes and NOT the full envelope.
+    from data_access_service.utils.subset_zarr_helper import subset_zarr
+
+    times = pd.date_range("2020-01-01", periods=3)
+    # all data vars gridded on (TIME, LAT, LON), so download .where() promotes
+    # nothing new and nbytes is directly comparable
+    dataset = xr.Dataset(
+        {
+            "sst": (
+                ("TIME", "LATITUDE", "LONGITUDE"),
+                np.zeros((3, 4, 5), dtype="float32"),
+            )
+        },
+        coords={
+            "TIME": times,
+            "LATITUDE": np.arange(4, dtype="float64"),  # [0, 1, 2, 3]
+            "LONGITUDE": np.arange(5, dtype="float64"),  # [0, 1, 2, 3, 4]
+        },
+    )
+    api, _ = _api_with_zarr(dataset)
+
+    # box A: lat [0,1] x lon [0,1]; box B: lat [2.5,3.5] x lon [3,4] - disjoint
+    ring_a = [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]
+    ring_b = [[3, 2.5], [4, 2.5], [4, 3.5], [3, 3.5], [3, 2.5]]
+    polygon = (
+        '{"type": "MultiPolygon", "coordinates": ['
+        + "["
+        + str(ring_a).replace("'", "")
+        + "],"
+        + "["
+        + str(ring_b).replace("'", "")
+        + "]]}"
+    )
+    bboxes = resolve_bboxes(polygon)
+
+    result = estimate_single_key_size(
+        api, KEY, _resolved(bboxes=bboxes), output_format="netcdf"
+    )
+
+    # Oracle: the union grid = lat positions {0,1,3} x lon positions {0,1,3,4}.
+    union_grid = dataset.isel(LATITUDE=[0, 1, 3], LONGITUDE=[0, 1, 3, 4])
+    assert result["estimated_uncompressed_bytes"] == union_grid.nbytes
+    # smaller than the envelope (4 lat x 5 lon), bigger than the sum of the
+    # two solid boxes (2x2 + 2x2 = 8 cells < 3x4 = 12 cells)
+    assert result["estimated_uncompressed_bytes"] < dataset.nbytes
+
+    # And it is exactly what the download slices (mask keeps shape, drop=False).
+    download_slice = subset_zarr(
+        dataset,
+        api,
+        UUID,
+        KEY,
+        pd.Timestamp("2020-01-01", tz="UTC"),
+        pd.Timestamp("2020-01-05 23:59:59", tz="UTC"),
+        bboxes,
+        apply_mask=True,
+    )
+    assert result["estimated_uncompressed_bytes"] == int(download_slice.nbytes)
 
 
 def test_invalid_multi_polygon_raises():

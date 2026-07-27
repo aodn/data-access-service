@@ -111,10 +111,12 @@ def _estimate_zarr_size(
     columns: list[str] | None,
     output_format: str,
 ) -> dict:
-    """Estimate the download size of one zarr key, summed over its bboxes.
+    """Estimate the download size of one zarr key.
 
-    Overlapping bboxes are summed (counted once per box), so a multi-polygon
-    estimate is an upper bound.
+    All bboxes are applied in ONE subset_zarr call - the same union grid the
+    batch download writes - so the estimate measures the download's region, not
+    a per-bbox sum (which under-counted the NaN cells between disjoint boxes
+    and double-counted overlaps).
 
     :param zarr_store: the raw, unsliced lazy dataset for this key
     :param bboxes: effective bboxes to slice
@@ -128,8 +130,9 @@ def _estimate_zarr_size(
     notes: list[str] = []
     if len(bboxes) > 1:
         notes.append(
-            f"summed {len(bboxes)} polygon bboxes "
-            "(overlapping regions counted once per box -> upper bound)"
+            f"union grid of {len(bboxes)} polygon bboxes "
+            "(NaN filler between boxes compresses to almost nothing in the "
+            "real file -> output estimate is an upper bound)"
         )
     if columns:
         # Column subsetting isn't implemented yet; once it is, it will be applied
@@ -137,9 +140,6 @@ def _estimate_zarr_size(
         # For now the estimate covers ALL columns
         log.info("column subsetting not implemented yet; ignoring columns %s", columns)
         notes.append(f"column subsetting not supported yet; columns skipped: {columns}")
-
-    total_uncompressed = 0
-    total_output = 0
 
     log.debug(
         "_estimate_zarr_size: uuid=%s key=%s slice=[%s..%s] bboxes=%d format=%s",
@@ -151,25 +151,23 @@ def _estimate_zarr_size(
         output_format,
     )
 
-    for bbox in bboxes:
-        # subset_zarr returns a lazily-sliced xarray.Dataset - the SAME dim
-        # slicing the batch download uses. apply_mask=False skips the eager
-        # .where() (OOM on the non-dask store); it never changed nbytes anyway.
-        # TODO: call subset_zarr ONCE with every bbox and measure
-        # the union grid, instead of summing per-bbox slices. The download now
-        # builds that union grid in one pass, so this per-bbox sum no longer
-        # mirrors it for multi-polygon requests.
-        dataset: xarray.Dataset = subset_zarr(
-            zarr_store, api, uuid, key, date_start, date_end, [bbox], apply_mask=False
-        )
+    # subset_zarr returns a lazily-sliced xarray.Dataset - the SAME union grid
+    # the batch download writes (all bboxes in one pass). apply_mask=False skips
+    # the eager .where() (OOM on the non-dask store); drop=False means it never
+    # changed the shape/nbytes anyway.
+    dataset: xarray.Dataset = subset_zarr(
+        zarr_store, api, uuid, key, date_start, date_end, bboxes, apply_mask=False
+    )
 
-        # Measure the uncompressed and output sizes for this slice, per format.
-        if output_format == "geotiff":
-            uncompressed, output = _measure_geotiff(api, dataset, uuid, key, notes)
-        elif output_format == "netcdf":
-            uncompressed, output = _measure_netcdf(dataset, output_format, notes)
-        total_uncompressed += uncompressed
-        total_output += output
+    # Measure the uncompressed and output sizes of the union grid, per format.
+    if output_format == "geotiff":
+        total_uncompressed, total_output = _measure_geotiff(
+            api, dataset, uuid, key, notes
+        )
+    elif output_format == "netcdf":
+        total_uncompressed, total_output = _measure_netcdf(
+            dataset, output_format, notes
+        )
 
     # Human-readable size summary (applies to every output format).
     notes.append(
