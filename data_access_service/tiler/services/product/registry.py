@@ -28,11 +28,12 @@ import logging
 from pathlib import Path
 
 from data_access_service.config.tiler.paths import PRODUCTS_CONFIG_PATH
-from data_access_service.tiler.schemas.products import ProductConfig
+from data_access_service.tiler.schemas.products import CoastalFillConfig, ProductConfig
 from data_access_service.tiler.services.product.product import (
     CoastalFill,
     DataTileConfig,
     Product,
+    VisualTileConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,10 @@ def load_products() -> None:
     logger.info(f"Loaded {len(PRODUCTS)} products from {_config_path}")
 
 
+def _coastal_fill(config: CoastalFillConfig | None) -> CoastalFill | None:
+    return CoastalFill(max_dist_px=config.max_dist_px) if config else None
+
+
 def _from_dict(entry: dict) -> Product:
     """Validate one products.json entry against ProductConfig (extra="forbid"
     catches typos), after resolving the one default that depends on ``id``
@@ -115,10 +120,9 @@ def _from_dict(entry: dict) -> Product:
         data_tile=DataTileConfig(
             chunk_px=parsed.data_tile.chunk_px,
             padding=parsed.data_tile.padding,
-            coastal_fill=(
-                CoastalFill(max_dist_px=parsed.data_tile.coastal_fill.max_dist_px)
-                if parsed.data_tile.coastal_fill
-                else None
-            ),
+            coastal_fill=_coastal_fill(parsed.data_tile.coastal_fill),
+        ),
+        visual_tile=VisualTileConfig(
+            coastal_fill=_coastal_fill(parsed.visual_tile.coastal_fill),
         ),
     )

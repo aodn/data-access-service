@@ -19,7 +19,7 @@ import xarray as xr
 
 from data_access_service.tiler.services.caching.deduper import Deduper
 from data_access_service.tiler.services.caching.processed_cache import (
-    processed_memo,
+    data_processed_memo,
 )
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.rendering.kernels import (
@@ -117,7 +117,7 @@ def _get_processed(
 
     Concurrent identical requests always share one compute in-process via
     ``_processed_dedup`` (independent of ``CACHE_BACKEND``); when
-    ``CACHE_BACKEND=redis``, ``processed_memo`` additionally coalesces across
+    ``CACHE_BACKEND=redis``, ``data_processed_memo`` additionally coalesces across
     instances and caches the result.
     """
     key = (product.source_path, date, tuple(product.variables), lod)
@@ -126,7 +126,7 @@ def _get_processed(
         return _compute_processed(product, load_ds(), lod)
 
     def compute() -> tuple[list[np.ndarray], np.ndarray]:
-        return processed_memo.get_or_compute(key, factory)
+        return data_processed_memo.get_or_compute(key, factory)
 
     return _processed_dedup.dedupe(key, compute)
 

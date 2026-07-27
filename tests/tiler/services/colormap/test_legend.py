@@ -13,14 +13,6 @@ from PIL import Image
 import data_access_service.tiler.services.colormap.legend as legend_renderer
 
 
-@pytest.fixture(autouse=True)
-def clear_legend_cache():
-    """The legend renderer is lru_cached — strict isolation between tests."""
-    legend_renderer.render_legend.cache_clear()
-    yield
-    legend_renderer.render_legend.cache_clear()
-
-
 def _decode(png: bytes) -> np.ndarray:
     return np.array(Image.open(io.BytesIO(png)))
 
@@ -74,13 +66,6 @@ def test_colorbar_top_strip_varies_across_width():
     assert tuple(left) != tuple(right), "color bar appears flat — gradient missing"
 
 
-def test_legend_caches_results():
-    """Hitting render_legend twice with the same args should return the SAME bytes."""
-    a = legend_renderer.render_legend("viridis", rescale=(0.0, 1.0))
-    b = legend_renderer.render_legend("viridis", rescale=(0.0, 1.0))
-    assert a is b  # lru_cache returns the same object
-
-
 def test_different_rescale_produces_different_legend():
     a = legend_renderer.render_legend(
         "viridis", rescale=(0.0, 1.0), width=128, height=40
@@ -108,11 +93,6 @@ def test_categorical_renders_discrete_blocks(monkeypatch):
         colormap_config._custom_colormap_modes, "_test_cats", "categorical"
     )
 
-    # Force LRU caches to refresh against the just-registered colormap.
-    import data_access_service.tiler.services.colormap.resolver as colormap_lookup
-
-    colormap_lookup.resolve_colormap.cache_clear()
-
     png = legend_renderer.render_legend("_test_cats", width=300, height=20)
     img = _decode(png)
     assert img.shape == (20, 300, 4)
@@ -135,10 +115,6 @@ def test_categorical_legend_rejects_rescale(monkeypatch):
         colormap_config._custom_colormap_modes, "_test_cats", "categorical"
     )
 
-    import data_access_service.tiler.services.colormap.resolver as colormap_lookup
-
-    colormap_lookup.resolve_colormap.cache_clear()
-
     with pytest.raises(ValueError, match="(?i)rescale"):
         legend_renderer.render_legend(
             "_test_cats", rescale=(0.0, 1.0), width=300, height=40
@@ -152,17 +128,3 @@ def test_horizontal_height_too_small_for_labels_does_not_crash():
     )
     img = _decode(png)
     assert img.shape == (10, 100, 4)
-
-
-def test_invalidation_hook_clears_cache():
-    """colormap_config invalidation must drop legend caches."""
-    _ = legend_renderer.render_legend("viridis", width=64, height=20)
-    assert legend_renderer.render_legend.cache_info().currsize > 0
-
-    # Trigger the invalidation chain.
-    import data_access_service.tiler.services.colormap.registry as colormap_config
-
-    for hook in colormap_config._invalidation_hooks:
-        hook()
-
-    assert legend_renderer.render_legend.cache_info().currsize == 0

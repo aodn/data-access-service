@@ -3,29 +3,19 @@
 A legend is a colored bar plus, optionally, three tick labels (lo, mid, hi).
 Continuous colormaps render as a smooth gradient; categorical colormaps render
 as equal-width blocks, one per registered category.
-
-Memoised by full argument tuple — legend PNGs are pure functions of their args
-and frontends typically request the same legend many times per page load. The
-cache is cleared together with the underlying colormap LUTs whenever the custom
-colormap registry changes (see [[colormap.resolver]]).
 """
 
 import io
-from functools import lru_cache
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from data_access_service.tiler.services.colormap.registry import (
-    is_categorical,
-    on_invalidate,
-)
+from data_access_service.tiler.services.colormap.registry import is_categorical
 from data_access_service.tiler.services.colormap.resolver import resolve_colormap
 
 _LABEL_PX = 20  # pixels reserved alongside the bar for tick labels
 
 
-@lru_cache(maxsize=256)
 def render_legend(
     colormap_name: str,
     rescale: tuple[float, float] | None = None,
@@ -144,6 +134,3 @@ def _draw_v_labels(
         lh = bbox[3] - bbox[1]
         ty = max(0, min(y - lh // 2, height - lh))
         draw.text((bar_w + 4, ty), label, fill=(0, 0, 0, 255), font=font)
-
-
-on_invalidate(render_legend.cache_clear)

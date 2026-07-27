@@ -104,6 +104,33 @@ def test_coastal_fill_absent_defaults_to_none(isolated_products):
     assert PRODUCTS["plain"].data_tile.coastal_fill is None
 
 
+def test_load_with_visual_tile_coastal_fill(isolated_products):
+    """visual_tile.coastal_fill is independent of data_tile.coastal_fill —
+    a product can set one, both, or neither."""
+    _write(
+        isolated_products,
+        [
+            {
+                "id": "sparse",
+                "source_path": "s3://bucket/x.zarr",
+                "variable": "V",
+                "data_tile": {"coastal_fill": {"max_dist_px": 4}},
+                "visual_tile": {"coastal_fill": {"max_dist_px": 8}},
+            }
+        ],
+    )
+    registry.load_products()
+    p = PRODUCTS["sparse"]
+    assert p.data_tile.coastal_fill.max_dist_px == 4
+    assert p.visual_tile.coastal_fill.max_dist_px == 8
+
+
+def test_visual_tile_coastal_fill_absent_defaults_to_none(isolated_products):
+    _write(isolated_products, [_entry("plain")])
+    registry.load_products()
+    assert PRODUCTS["plain"].visual_tile.coastal_fill is None
+
+
 def test_ocean_masked_absent_defaults_to_false(isolated_products):
     _write(isolated_products, [_entry("plain")])
     registry.load_products()

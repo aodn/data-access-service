@@ -5,11 +5,21 @@ from pydantic import BaseModel, ConfigDict, Field
 from data_access_service.config.tiler.constants import TILE
 
 if TYPE_CHECKING:
-    from data_access_service.tiler.services.product.product import Product
+    from data_access_service.tiler.services.product.product import CoastalFill, Product
 
 
 class CoastalFillConfig(BaseModel):
     max_dist_px: int
+
+
+def _coastal_fill_config(
+    coastal_fill: "CoastalFill | None",
+) -> CoastalFillConfig | None:
+    return (
+        CoastalFillConfig(max_dist_px=coastal_fill.max_dist_px)
+        if coastal_fill
+        else None
+    )
 
 
 class DataTileConfig(BaseModel):
@@ -30,6 +40,17 @@ class DataTileConfig(BaseModel):
     coastal_fill: CoastalFillConfig | None = None
 
 
+class VisualTileConfig(BaseModel):
+    """Fields specific to the /visual_tiles pipeline: independent coastal-fill
+    opt-in/tuning from DataTileConfig's — see ``product.VisualTileConfig``
+    for the runtime counterpart this mirrors and why it's kept separate.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    coastal_fill: CoastalFillConfig | None = None
+
+
 class ProductConfig(BaseModel):
     """The resolved configuration of a product: validated straight from a
     products.json entry on load (see registry._from_dict — id-dependent
@@ -39,10 +60,10 @@ class ProductConfig(BaseModel):
     extra="forbid" catches config typos on the way in.
 
     Served identically at both /tiler/data_tiles/products and
-    /tiler/visual_tiles/products — data_tile is nested (rather than a set of
-    flat fields) specifically so a /visual_tiles client, which has no
-    chunking/padding/coastal-fill concept, can see at a glance which part of
-    the payload doesn't apply to it.
+    /tiler/visual_tiles/products — data_tile/visual_tile are nested (rather
+    than a set of flat fields) so each client can see at a glance which part
+    of the payload is its own pipeline's config (e.g. /visual_tiles has no
+    chunking/padding concept, so those only ever appear under data_tile).
 
     Fields here must match Product's fields, except for lod_grids (computed,
     not config).
@@ -57,6 +78,7 @@ class ProductConfig(BaseModel):
     metadata_uuid: str | None = None
     ocean_masked: bool
     data_tile: DataTileConfig = Field(default_factory=DataTileConfig)
+    visual_tile: VisualTileConfig = Field(default_factory=VisualTileConfig)
 
     @classmethod
     def from_product(cls, product: "Product") -> "ProductConfig":
@@ -69,13 +91,10 @@ class ProductConfig(BaseModel):
             data_tile=DataTileConfig(
                 chunk_px=product.data_tile.chunk_px,
                 padding=product.data_tile.padding,
-                coastal_fill=(
-                    CoastalFillConfig(
-                        max_dist_px=product.data_tile.coastal_fill.max_dist_px
-                    )
-                    if product.data_tile.coastal_fill
-                    else None
-                ),
+                coastal_fill=_coastal_fill_config(product.data_tile.coastal_fill),
+            ),
+            visual_tile=VisualTileConfig(
+                coastal_fill=_coastal_fill_config(product.visual_tile.coastal_fill),
             ),
         )
 

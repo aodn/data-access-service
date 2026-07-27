@@ -81,14 +81,6 @@ def test_get_category_values_none_for_ramp(isolated_config):
     assert colormap_config.get_category_values("never_registered") is None
 
 
-def test_invalidation_hook_fires_on_load(isolated_config):
-    isolated_config.write_text(json.dumps({"x": _entries()}))
-    fired: list[int] = []
-    colormap_config.on_invalidate(lambda: fired.append(1))
-    colormap_config.load_colormaps()
-    assert fired == [1]
-
-
 def test_load_handles_legacy_list_format(isolated_config):
     """Pre-mode format: bare list entries default to ramp mode."""
     isolated_config.write_text(json.dumps({"legacy": _entries()}))

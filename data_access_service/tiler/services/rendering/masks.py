@@ -1,17 +1,22 @@
-"""Grid masks and coastal fill for data-tile products.
+"""Grid masks and coastal fill, shared by the data-tile and visual-tile pipelines.
 
-  * ``inpaint_nearest`` — coastal fill (opt-in via ``Product.data_tile.coastal_fill``) for
-    sparse products (e.g. GSLA at 0.2° ≈ 22 km/cell): extends valid data toward
-    the coast by copying the nearest valid value into NaN cells within
-    ``max_dist_px``. The coastal gap is at the *edge* of the data (extrapolation),
-    so plain interpolation can't close it; nearest-valid fill can, while the
-    distance cap keeps us from fabricating values far from any real measurement.
-    Applied in ``data_tiles._compute_processed``.
-  * ``land_mask_for_grid`` — a boolean land mask sampled from the committed global
-    Natural Earth raster (src/app/assets/land_mask.npz) onto a render grid, so the
-    caller can cut fabricated values back off the land. Reuses the exact lon/lat →
-    pixel mapping the resample/shader assume (linspace over the grid bounds,
-    north→south). Applied in ``data_tiles._compute_processed``.
+  * ``inpaint_nearest`` — coastal fill (opt-in via ``Product.data_tile.coastal_fill``
+    / ``Product.visual_tile.coastal_fill``, independently) for sparse products
+    (e.g. GSLA at 0.2° ≈ 22 km/cell): extends valid data toward the coast by
+    copying the nearest valid value into NaN cells within ``max_dist_px``. The
+    coastal gap is at the *edge* of the data (extrapolation), so plain
+    interpolation can't close it; nearest-valid fill can, while the distance cap
+    keeps us from fabricating values far from any real measurement. Applied in
+    ``data_tiles._compute_processed`` and ``visual_tiles._to_scalar_parts``.
+  * ``land_mask_for_coords`` / ``land_mask_for_grid`` — a boolean land mask
+    sampled from the committed global Natural Earth raster
+    (src/app/assets/land_mask.npz), so the caller can cut fabricated values back
+    off the land. ``land_mask_for_grid`` assumes a linspace render grid (used by
+    ``data_tiles._compute_processed``); ``visual_tiles._to_scalar_parts`` instead
+    cuts land at native resolution — before any Web Mercator reprojection, using
+    the source array's own (possibly non-evenly-spaced) coordinates directly via
+    ``land_mask_for_coords`` — so the reprojected tile/bbox output already
+    reflects the cut with no separate per-projection land-mask logic needed.
   * ``apply_ocean_mask`` — a regional ocean-validity mask
     (src/app/assets/ocean_mask.npz) used to null anomalous values outside the valid
     model domain. Unlike the two above this is applied to the *raw slice* at read
@@ -25,7 +30,6 @@ No new runtime deps: numpy + scipy only (scipy already required). The .npz asset
 are pre-baked by scripts (no netCDF engine at runtime).
 """
 
-from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -70,7 +74,35 @@ def load_land_mask() -> tuple[np.ndarray, dict[str, float]]:
     return _land_mask, _land_meta
 
 
-@lru_cache(maxsize=64)
+def land_mask_for_coords(lons: np.ndarray, lats: np.ndarray) -> np.ndarray:
+    """Boolean land mask (True = land) for explicit per-column ``lons`` / per-row
+    ``lats`` (outer product — a ``(len(lats), len(lons))`` result), sampled from
+    the committed global raster via nearest grid point. Longitudes are wrapped
+    into [-180, 180) so antimeridian-straddling domains (GSLA spans 57–185°E)
+    index the global mask correctly.
+
+    Mirrors ``ocean_valid_for_coords``: takes the grid's own real coordinates
+    rather than assuming a linear lon/lat spacing, so it's correct for any
+    rectilinear source grid (each row a single lat, each column a single lon),
+    not just an evenly-spaced one.
+    """
+    land, meta = load_land_mask()
+    h_src, w_src = land.shape
+    res = meta["res"]
+
+    lons = (
+        (np.asarray(lons, dtype=float) + 180.0) % 360.0
+    ) - 180.0  # wrap to [-180, 180)
+    lats = np.asarray(lats, dtype=float)
+
+    cols = np.floor((lons - meta["lon_min"]) / res).astype(np.intp)
+    rows = np.floor((meta["lat_max"] - lats) / res).astype(np.intp)
+    np.clip(cols, 0, w_src - 1, out=cols)
+    np.clip(rows, 0, h_src - 1, out=rows)
+
+    return land[np.ix_(rows, cols)]
+
+
 def land_mask_for_grid(
     lon_min: float,
     lon_max: float,
@@ -84,26 +116,11 @@ def land_mask_for_grid(
     Target coordinates follow ``linspace(lon_min, lon_max, total_w)`` and
     ``linspace(lat_max, lat_min, total_h)`` — the same mapping
     ``resample_variables_to_grid`` and the WebGL shader use (docs/technical.md §5.6),
-    so the cut lines up with the rendered pixels. Longitudes are wrapped into
-    [-180, 180) so antimeridian-straddling domains (GSLA spans 57–185°E) index the
-    global mask correctly.
-
-    Result is cached: it's static per (product grid), independent of date/data.
+    so the cut lines up with the rendered pixels.
     """
-    land, meta = load_land_mask()
-    h_src, w_src = land.shape
-    res = meta["res"]
-
     lons = np.linspace(lon_min, lon_max, total_w)
     lats = np.linspace(lat_max, lat_min, total_h)  # north → south
-    lons = ((lons + 180.0) % 360.0) - 180.0  # wrap to [-180, 180)
-
-    cols = np.floor((lons - meta["lon_min"]) / res).astype(np.intp)
-    rows = np.floor((meta["lat_max"] - lats) / res).astype(np.intp)
-    np.clip(cols, 0, w_src - 1, out=cols)
-    np.clip(rows, 0, h_src - 1, out=rows)
-
-    return land[np.ix_(rows, cols)]
+    return land_mask_for_coords(lons, lats)
 
 
 def load_ocean_mask() -> tuple[np.ndarray, dict[str, float]]:

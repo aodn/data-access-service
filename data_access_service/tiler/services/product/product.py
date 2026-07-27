@@ -30,8 +30,6 @@ class DataTileConfig:
 
     chunk_px: tuple[int, int] = TILE.chunk_px
     padding: int = TILE.padding
-    # TODO: coastal_fill is data-tile only now, but we may want to expose it in visual tiles too.
-    # So we can have also a VisualTileConfig which only has coastal_fill. So we could set coastal_fill independently for visual tiles.
     coastal_fill: CoastalFill | None = None
     # Computed, not settable in products.json — populated lazily from the store's
     # native dimensions on first request (see get_lod_grids below). This is the one
@@ -80,6 +78,18 @@ class DataTileConfig:
 
 
 @dataclass(frozen=True)
+class VisualTileConfig:
+    """Fields used only by the /visual_tiles pipeline. Independent of
+    DataTileConfig's own coastal_fill — a product can opt into coastal
+    inpainting for one tile type without the other, or tune the fill distance
+    differently per pipeline (data tiles fill on the LOD-resampled grid;
+    visual tiles fill on the native-resolution array before reprojection).
+    """
+
+    coastal_fill: CoastalFill | None = None
+
+
+@dataclass(frozen=True)
 class Product:
     id: str
     source_path: str
@@ -89,6 +99,7 @@ class Product:
     metadata_uuid: str | None = None
     ocean_masked: bool = False
     data_tile: DataTileConfig = field(default_factory=DataTileConfig)
+    visual_tile: VisualTileConfig = field(default_factory=VisualTileConfig)
 
     def __post_init__(self) -> None:
         if not self.variable:

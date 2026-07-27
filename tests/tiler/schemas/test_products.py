@@ -13,7 +13,14 @@ from data_access_service.tiler.schemas.products import ProductConfig
 from data_access_service.tiler.schemas.products import (
     DataTileConfig as DataTileConfigSchema,
 )
-from data_access_service.tiler.services.product.product import DataTileConfig, Product
+from data_access_service.tiler.schemas.products import (
+    VisualTileConfig as VisualTileConfigSchema,
+)
+from data_access_service.tiler.services.product.product import (
+    DataTileConfig,
+    Product,
+    VisualTileConfig,
+)
 
 # lod_grids is the one deliberate exception: it's computed from the store's
 # native dimensions (requires an S3 round-trip to resolve), not per-product
@@ -35,3 +42,9 @@ def test_data_tile_config_fields_match_product_data_tile_except_computed():
     data_tile_fields = {f.name for f in dataclasses.fields(DataTileConfig)}
     config_fields = set(DataTileConfigSchema.model_fields)
     assert data_tile_fields - _COMPUTED_ONLY_FIELDS == config_fields
+
+
+def test_visual_tile_config_fields_match_product_visual_tile():
+    visual_tile_fields = {f.name for f in dataclasses.fields(VisualTileConfig)}
+    config_fields = set(VisualTileConfigSchema.model_fields)
+    assert visual_tile_fields == config_fields
