@@ -1,6 +1,7 @@
 from abc import ABC
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import Any
 
 
 class TimeGroupBy(str, Enum):
@@ -8,6 +9,34 @@ class TimeGroupBy(str, Enum):
 
     MONTH = "month"
     DATE = "date"
+
+
+@dataclass(frozen=True)
+class PmtilesSidecarMetadata:
+    """JSON sidecar written beside a generated ``.pmtiles`` file (``{dname}.metadata``)."""
+
+    min_date: int
+    max_date: int
+    time_group_by: TimeGroupBy
+    last_updated: str
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-serialisable dict (``time_group_by`` as its string value)."""
+        return {
+            "min_date": self.min_date,
+            "max_date": self.max_date,
+            "time_group_by": self.time_group_by.value,
+            "last_updated": self.last_updated,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "PmtilesSidecarMetadata":
+        return cls(
+            min_date=int(data["min_date"]),
+            max_date=int(data["max_date"]),
+            time_group_by=TimeGroupBy(data["time_group_by"]),
+            last_updated=str(data["last_updated"]),
+        )
 
 
 @dataclass(frozen=True)

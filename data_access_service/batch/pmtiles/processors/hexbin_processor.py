@@ -1,6 +1,7 @@
 import gzip
 import json
 import os
+from datetime import datetime, timezone
 from typing import Sequence, List, Optional, Dict, Tuple
 
 from data_access_service.batch.pmtiles.helpers.features_help import build_hex_feature
@@ -9,7 +10,11 @@ from data_access_service.batch.pmtiles.processors.abstract_processor import (
 )
 from data_access_service.core.duckdbclient import PmTileDuckDBClient
 
-from data_access_service.models.pmtiles_types import HexLayerSpec, TimeGroupBy
+from data_access_service.models.pmtiles_types import (
+    HexLayerSpec,
+    PmtilesSidecarMetadata,
+    TimeGroupBy,
+)
 from data_access_service.utils.memory_utils import log_memory_usage
 
 
@@ -59,26 +64,31 @@ class HexbinProcessor(AbstractProcessor):
         log_memory_usage(self.logger, "before staging scan")
 
         sql = f"""
-                COPY (
+            COPY (
+                WITH casted_data AS (
                     SELECT
-                        printf('%x', h3_latlng_to_cell(
+                        h3_latlng_to_cell(
                             CAST({quoted_lat} AS DOUBLE),
                             CAST({quoted_lon} AS DOUBLE),
                             {int(self.__get_max_res())}
-                        )) AS h_high,
-                        {time_key_sql} AS {time_col},
-                        COUNT(*)::UBIGINT AS c
+                        ) AS h_cell,
+                        {time_key_sql} AS {time_col}
                     FROM read_parquet('{self.get_s3_uri()}', hive_partitioning=true, union_by_name=true)
-                    WHERE
-                        {quoted_lon} IS NOT NULL
-                        AND {quoted_lat} IS NOT NULL
-                        AND {quoted_time} IS NOT NULL
-                        AND CAST({quoted_lon} AS DOUBLE) BETWEEN -180 AND 180
-                        AND CAST({quoted_lat} AS DOUBLE) BETWEEN -90 AND 90
-                    GROUP BY h_high, {time_col}
-                    HAVING h_high IS NOT NULL
-                ) TO '{self.get_staged_path()}' (FORMAT PARQUET)
-            """
+                    WHERE {quoted_lon} IS NOT NULL
+                      AND {quoted_lat} IS NOT NULL
+                      AND {quoted_time} IS NOT NULL
+                      AND CAST({quoted_lon} AS DOUBLE) BETWEEN -180 AND 180
+                      AND CAST({quoted_lat} AS DOUBLE) BETWEEN -90 AND 90
+                )
+                SELECT
+                    printf('%x', h_cell) AS h_high,
+                    {time_col},
+                    COUNT(*)::UBIGINT AS c
+                FROM casted_data
+                WHERE h_cell IS NOT NULL
+                GROUP BY h_cell, {time_col}
+            ) TO '{self.get_staged_path()}' (FORMAT PARQUET)
+        """
         self.pm_client.execute(sql)
         self.logger.info("High-res parquet file complete.")
         self._log_staged_parquet_preview(time_col=time_col)
@@ -214,25 +224,24 @@ class HexbinProcessor(AbstractProcessor):
                 "cannot generate metadata"
             )
 
-        min_date = int(row[0])
-        max_date = int(row[1])
-        metadata = {
-            "min_date": min_date,
-            "max_date": max_date,
-            "time_group_by": self.pmtiles_config.time_group_by.value,
-        }
+        metadata = PmtilesSidecarMetadata(
+            min_date=int(row[0]),
+            max_date=int(row[1]),
+            time_group_by=self.pmtiles_config.time_group_by,
+            last_updated=datetime.now(timezone.utc).isoformat(),
+        )
 
         metadata_path = self.get_metadata_path()
         os.makedirs(os.path.dirname(os.path.abspath(metadata_path)), exist_ok=True)
         with open(metadata_path, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, separators=(",", ":"))
+            json.dump(metadata.to_dict(), f, separators=(",", ":"))
 
         self.logger.info(
             "Wrote metadata to %s (min_date=%s, max_date=%s, time_group_by=%s)",
             metadata_path,
-            min_date,
-            max_date,
-            self.pmtiles_config.time_group_by.value,
+            metadata.min_date,
+            metadata.max_date,
+            metadata.time_group_by.value,
         )
         return metadata_path
 

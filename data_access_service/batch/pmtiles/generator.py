@@ -1,14 +1,16 @@
+import os
 import tempfile
 import threading
 
 from data_access_service import Config, init_log
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.api import BaseAPI
+from data_access_service.utils.memory_utils import log_memory_usage
+
 from .processors.hexbin_processor import HexbinProcessor
 from ...models.pmtiles_types import (
     PmtilesVisualizationStyle,
 )
-from ...utils import pmtiles_utils
 
 config = Config.get_config()
 logger = init_log(config)
@@ -24,15 +26,131 @@ class PmtilesGenerationInProgressError(RuntimeError):
     """Raised when a PMTiles generation is requested while another is running."""
 
 
-def generate_pmtiles_for_all_parquets(api: BaseAPI):
+def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
+    """Generate PMTiles for every parquet dataset in its own short-lived process.
+
+    Each dataset is handled in a forked child so DuckDB / tippecanoe allocations
+    are returned to the OS when the child exits. Fork (not re-exec) reuses the
+    already-initialized ``api`` via copy-on-write — no metadata reload per
+    dataset. Datasets run sequentially so only one heavy worker is live at a
+    time.
+
+    Invariant: the parent must not open ``PmTileDuckDBClient`` before forking;
+    the child creates its own process-global DuckDB connection.
+
+    Args:
+        api: Initialized API with metadata loaded.
+        uuid: Optional catalog UUID. When set, only parquet datasets for that
+            UUID are processed (useful for local/debug runs of a single product).
+    """
     metadata_list = api.get_mapped_meta_data(uuid=None)
 
-    for k, v in metadata_list.items():
-        dataset_names = v.keys()
-        for dataset_name in dataset_names:
-            # only process parquets
+    # Materialise the work list before trimming so we do not depend on the
+    # full cached map (zarr entries etc.) remaining in the parent.
+    work: list[tuple[str, str]] = []
+    for k, v in sorted(metadata_list.items()):
+        if uuid is not None and k != uuid:
+            continue
+        for dataset_name in v.keys():
             if dataset_name.endswith(".parquet"):
-                generate_pmtiles_for_parquets(api, k, dataset_name)
+                work.append((k, dataset_name))
+
+    if uuid is not None:
+        logger.info(
+            "PMTiles batch restricted to uuid=%s (%s parquet dataset(s))",
+            uuid,
+            len(work),
+        )
+        if not work:
+            logger.warning(
+                "No parquet datasets found for uuid=%s; nothing to generate",
+                uuid,
+            )
+            return
+    else:
+        logger.info(
+            "PMTiles batch for all UUIDs (%s parquet dataset(s))",
+            len(work),
+        )
+
+    # Drop full raw schemas / non-parquet metadata so the parent (and COW
+    # fork children) start each dataset with a smaller baseline RSS.
+    api.release_memory_for_pmtiles_batch()
+
+    for k, dataset_name in work:
+        ok = _generate_pmtiles_for_parquets_in_subprocess(api, k, dataset_name)
+        if not ok:
+            logger.error(
+                "PMTiles worker failed for uuid=%s dataset=%s",
+                k,
+                dataset_name,
+            )
+        log_memory_usage(logger, f"after child for {dataset_name}")
+
+
+def _generate_pmtiles_for_parquets_in_subprocess(
+    api: BaseAPI, uuid: str, dname: str
+) -> bool:
+    """Fork a worker for one dataset; wait until it exits.
+
+    The child inherits the parent's initialized ``api`` (no catalog reload).
+    Returns True when the child exits with code 0. Uses ``os._exit`` in the
+    child so parent atexit handlers do not run twice.
+
+    TODO: The reason we need this is some memory is not free correctly and due
+    to short timeline, it is easier to fork a new process and kill it at end
+    which make sure memory reclaim
+    """
+    logger.info(
+        "Forking PMTiles worker parent_pid=%s uuid=%s dataset=%s",
+        os.getpid(),
+        uuid,
+        dname,
+    )
+    pid = os.fork()
+    if pid == 0:
+        # Child: never return into the parent loop.
+        try:
+            ok = _generate_pmtiles_for_parquets(api, uuid, dname)
+            log_memory_usage(logger, f"worker exit ({dname})")
+            os._exit(0 if ok else 1)
+        except BaseException:
+            logger.exception("PMTiles worker crashed uuid=%s dataset=%s", uuid, dname)
+            os._exit(1)
+
+    # Parent
+    _, status = os.waitpid(pid, 0)
+    if os.WIFEXITED(status):
+        code = os.WEXITSTATUS(status)
+        if code == 0:
+            logger.info(
+                "PMTiles worker finished successfully for uuid=%s dataset=%s",
+                uuid,
+                dname,
+            )
+            return True
+        logger.error(
+            "PMTiles worker exit code=%s for uuid=%s dataset=%s",
+            code,
+            uuid,
+            dname,
+        )
+        return False
+
+    # Raw wait status (e.g. 139 = SIGSEGV + core): decode for operators.
+    termsig = os.WTERMSIG(status) if os.WIFSIGNALED(status) else None
+    coredump = os.WCOREDUMP(status) if hasattr(os, "WCOREDUMP") else False
+    logger.error(
+        "PMTiles worker signaled status=%s termsig=%s coredump=%s "
+        "for uuid=%s dataset=%s "
+        "(common: 11=SIGSEGV native crash, 9=SIGKILL often OOM killer)",
+        status,
+        termsig,
+        coredump,
+        uuid,
+        dname,
+    )
+    return False
 
 
 def generate_pmtiles_for_parquets(api: BaseAPI, uuid: str, dname: str) -> bool:
