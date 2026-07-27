@@ -63,19 +63,18 @@ def test_load_with_chunk_px_and_padding(isolated_products):
                 "id": "tuned",
                 "source_path": "s3://bucket/x.zarr",
                 "variable": "V",
-                "chunk_px": [128, 96],
-                "padding": 4,
+                "data_tile": {"chunk_px": [128, 96], "padding": 4},
             }
         ],
     )
     registry.load_products()
     p = PRODUCTS["tuned"]
-    assert p.chunk_px == (128, 96)
-    assert p.padding == 4
+    assert p.data_tile.chunk_px == (128, 96)
+    assert p.data_tile.padding == 4
 
 
 def test_load_rejects_unknown_field(isolated_products):
-    """max_lods/min_coarsest are global-only (see LODConfig) — not a per-product key."""
+    """max_lods/min_coarsest are global-only (see DataTileLodConfig) — not a per-product key."""
     _write(isolated_products, [_entry("bad", max_lods=6)])
     with pytest.raises(ValidationError):
         registry.load_products()
@@ -89,20 +88,20 @@ def test_load_with_coastal_fill(isolated_products):
                 "id": "sparse",
                 "source_path": "s3://bucket/x.zarr",
                 "variable": "V",
-                "coastal_fill": {"max_dist_px": 4},
+                "data_tile": {"coastal_fill": {"max_dist_px": 4}},
             }
         ],
     )
     registry.load_products()
     p = PRODUCTS["sparse"]
-    assert p.coastal_fill is not None
-    assert p.coastal_fill.max_dist_px == 4
+    assert p.data_tile.coastal_fill is not None
+    assert p.data_tile.coastal_fill.max_dist_px == 4
 
 
 def test_coastal_fill_absent_defaults_to_none(isolated_products):
     _write(isolated_products, [_entry("plain")])
     registry.load_products()
-    assert PRODUCTS["plain"].coastal_fill is None
+    assert PRODUCTS["plain"].data_tile.coastal_fill is None
 
 
 def test_ocean_masked_absent_defaults_to_false(isolated_products):

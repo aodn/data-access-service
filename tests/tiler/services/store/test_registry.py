@@ -5,6 +5,7 @@ import pytest
 import xarray as xr
 
 from data_access_service.tiler.services.product.product import (
+    DataTileConfig,
     Product,
     get_lod_grids,
 )
@@ -67,10 +68,10 @@ def test_get_lod_grids_populates_product(monkeypatch):
         xr, "open_zarr", lambda *_, **__: _make_ds(time=1, lat=74, lon=102)
     )
     product = Product(id="t1", source_path="s3://test/grids.zarr", variable="var")
-    assert product.lod_grids == {}
+    assert product.data_tile.lod_grids == {}
     grids = get_lod_grids(product)
     assert grids
-    assert product.lod_grids is grids
+    assert product.data_tile.lod_grids is grids
 
 
 def test_get_lod_grids_fast_path_skips_store(monkeypatch):
@@ -82,7 +83,7 @@ def test_get_lod_grids_fast_path_skips_store(monkeypatch):
         id="t2",
         source_path="s3://test/preset.zarr",
         variable="var",
-        lod_grids={1: (2, 2)},
+        data_tile=DataTileConfig(lod_grids={1: (2, 2)}),
     )
     grids = get_lod_grids(product)
     assert grids == {1: (2, 2)}

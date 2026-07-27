@@ -9,7 +9,11 @@ assets are present and sane.
 import numpy as np
 import xarray as xr
 
-from data_access_service.tiler.services.product.product import CoastalFill, Product
+from data_access_service.tiler.services.product.product import (
+    CoastalFill,
+    DataTileConfig,
+    Product,
+)
 from data_access_service.tiler.services.rendering.data_tiles import (
     _compute_processed,
 )
@@ -144,10 +148,12 @@ def _product(coastal_fill, product_id="t"):
         id=product_id,
         source_path="",
         variable="GSLA",
-        lod_grids={1: (2, 2)},
-        chunk_px=(8, 8),
-        padding=0,
-        coastal_fill=coastal_fill,
+        data_tile=DataTileConfig(
+            lod_grids={1: (2, 2)},
+            chunk_px=(8, 8),
+            padding=0,
+            coastal_fill=coastal_fill,
+        ),
     )
 
 

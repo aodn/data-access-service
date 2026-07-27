@@ -27,31 +27,15 @@ import json
 import logging
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
-
 from data_access_service.config.tiler.paths import PRODUCTS_CONFIG_PATH
-from data_access_service.tiler.services.product.product import CoastalFill, Product
+from data_access_service.tiler.schemas.products import ProductConfig
+from data_access_service.tiler.services.product.product import (
+    CoastalFill,
+    DataTileConfig,
+    Product,
+)
 
 logger = logging.getLogger(__name__)
-
-
-class _CoastalFillEntry(BaseModel):
-    max_dist_px: int
-
-
-class _ProductEntry(BaseModel):
-    """The allowlisted shape of one products.json entry."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    source_path: str
-    variable: str | list[str]
-    chunk_px: tuple[int, int] | None = None
-    padding: int | None = None
-    coastal_fill: _CoastalFillEntry | None = None
-    ocean_masked: bool | None = None
-    metadata_uuid: str | None = None
 
 
 _config_path = Path(PRODUCTS_CONFIG_PATH)
@@ -113,26 +97,28 @@ def load_products() -> None:
 
 
 def _from_dict(entry: dict) -> Product:
-    parsed = _ProductEntry(**entry)
-    kwargs: dict = {}
-    if parsed.chunk_px is not None:
-        kwargs["chunk_px"] = parsed.chunk_px
-    if parsed.padding is not None:
-        kwargs["padding"] = parsed.padding
+    """Validate one products.json entry against ProductConfig (extra="forbid"
+    catches typos), after resolving the one default that depends on ``id``
+    (ocean_masked) — every other default (chunk_px, padding) lives directly on
+    ProductConfig/DataTileConfig and applies automatically when omitted.
+    """
+    payload = dict(entry)
+    if payload.get("ocean_masked") is None:
+        payload["ocean_masked"] = entry["id"] in _OCEAN_MASKED_BY_DEFAULT
+    parsed = ProductConfig(**payload)
     return Product(
         id=parsed.id,
         source_path=parsed.source_path,
         variable=parsed.variable,
-        coastal_fill=(
-            CoastalFill(max_dist_px=parsed.coastal_fill.max_dist_px)
-            if parsed.coastal_fill
-            else None
-        ),
-        ocean_masked=(
-            parsed.ocean_masked
-            if parsed.ocean_masked is not None
-            else parsed.id in _OCEAN_MASKED_BY_DEFAULT
-        ),
+        ocean_masked=parsed.ocean_masked,
         metadata_uuid=parsed.metadata_uuid,
-        **kwargs,
+        data_tile=DataTileConfig(
+            chunk_px=parsed.data_tile.chunk_px,
+            padding=parsed.data_tile.padding,
+            coastal_fill=(
+                CoastalFill(max_dist_px=parsed.data_tile.coastal_fill.max_dist_px)
+                if parsed.data_tile.coastal_fill
+                else None
+            ),
+        ),
     )

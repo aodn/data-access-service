@@ -17,7 +17,7 @@ from data_access_service.tiler.services.product.product import Product
 
 # --- LOD / tile geometry contract -----------------------------------------
 #
-# LODConfig and TileConfig are baked into the frontend WebGL shader's texture
+# DataTileLodConfig and DataTileDefaults are baked into the frontend WebGL shader's texture
 # atlas layout. Changing any of these values without a coordinated frontend
 # redeploy silently corrupts rendering — no error, just wrong pixels.
 

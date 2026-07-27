@@ -1,6 +1,6 @@
 """Grid masks and coastal fill for data-tile products.
 
-  * ``inpaint_nearest`` — coastal fill (opt-in via ``Product.coastal_fill``) for
+  * ``inpaint_nearest`` — coastal fill (opt-in via ``Product.data_tile.coastal_fill``) for
     sparse products (e.g. GSLA at 0.2° ≈ 22 km/cell): extends valid data toward
     the coast by copying the nearest valid value into NaN cells within
     ``max_dist_px``. The coastal gap is at the *edge* of the data (extrapolation),

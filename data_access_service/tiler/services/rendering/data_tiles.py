@@ -63,16 +63,17 @@ def _compute_processed(
         For multi-variable products this prevents one channel encoding a sentinel
         zero while the mask claims valid data.
     """
-    grid_cols, grid_rows = product.lod_grids[lod]
-    total_w = grid_cols * product.chunk_px[0]
-    total_h = grid_rows * product.chunk_px[1]
+    data_tile = product.data_tile
+    grid_cols, grid_rows = data_tile.lod_grids[lod]
+    total_w = grid_cols * data_tile.chunk_px[0]
+    total_h = grid_rows * data_tile.chunk_px[1]
     variables = product.variables
 
     raw = resample_variables_to_grid(ds, variables, total_w, total_h)
     # Sparse products (e.g. GSLA): extend valid data toward the coast before
     # normalising, so the filled cells register as valid in the per-variable mask.
-    if product.coastal_fill is not None:
-        raw = [inpaint_nearest(r, product.coastal_fill.max_dist_px) for r in raw]
+    if data_tile.coastal_fill is not None:
+        raw = [inpaint_nearest(r, data_tile.coastal_fill.max_dist_px) for r in raw]
 
     # Scalar: pack one value across 3 bytes (R/G/B) for sub-percent precision over the
     # data range. Multi-variable: one byte per channel — precision drops to ~0.4%, but
@@ -97,7 +98,7 @@ def _compute_processed(
     # Anomalous values outside the model's valid ocean domain (Product.ocean_masked)
     # are already nulled on the raw slice (masks.apply_ocean_mask), so they arrive
     # here as NaN and fall out of the per-variable valid masks above — nothing to do.
-    if product.coastal_fill is not None:
+    if data_tile.coastal_fill is not None:
         lon_min, lon_max = float(ds.lon.min()), float(ds.lon.max())
         lat_min, lat_max = float(ds.lat.min()), float(ds.lat.max())
         # Cut the coastal fill (and any data that bled over land) back off using
@@ -173,13 +174,14 @@ def render_tile(
 ) -> bytes:
     normalised, ocean = _get_processed(product, load_ds, lod, date)
 
-    grid_cols, grid_rows = product.lod_grids[lod]
-    total_w = grid_cols * product.chunk_px[0]
-    total_h = grid_rows * product.chunk_px[1]
+    data_tile = product.data_tile
+    grid_cols, grid_rows = data_tile.lod_grids[lod]
+    total_w = grid_cols * data_tile.chunk_px[0]
+    total_h = grid_rows * data_tile.chunk_px[1]
 
     def chunk_of(arr: np.ndarray) -> np.ndarray:
         return _extract_chunk(
-            arr, cx, cy, total_w, total_h, product.chunk_px, product.padding
+            arr, cx, cy, total_w, total_h, data_tile.chunk_px, data_tile.padding
         )
 
     chunks = [chunk_of(arr) for arr in normalised]
