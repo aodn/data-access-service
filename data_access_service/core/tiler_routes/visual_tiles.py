@@ -263,7 +263,9 @@ def _resolve_resolution(
     return derived_w, height
 
 
-_WEB_MERCATOR_EXTENT = 20_037_508.342789244  # EPSG:3857 world-square half-extent, meters
+_WEB_MERCATOR_EXTENT = (
+    20_037_508.342789244  # EPSG:3857 world-square half-extent, meters
+)
 
 # Plausible geographic-degree magnitude: lon up to 360 (covers the documented
 # antimeridian workaround, e.g. 57..185), lat strictly -90..90.
@@ -313,7 +315,12 @@ def _validate_bbox_for_crs(bbox: tuple[float, float, float, float], crs: str) ->
             )
     else:  # EPSG:3857
         lo, hi = -_WEB_MERCATOR_EXTENT, _WEB_MERCATOR_EXTENT
-        if not (lo <= minx <= hi and lo <= maxx <= hi and lo <= miny <= hi and lo <= maxy <= hi):
+        if not (
+            lo <= minx <= hi
+            and lo <= maxx <= hi
+            and lo <= miny <= hi
+            and lo <= maxy <= hi
+        ):
             raise HTTPException(
                 status_code=400,
                 detail=(
