@@ -5,7 +5,11 @@ import numpy as np
 import xarray as xr
 
 import data_access_service.tiler.services.product.registry as registry
-from data_access_service.tiler.services.product.product import CoastalFill, Product
+from data_access_service.tiler.services.product.product import (
+    CoastalFill,
+    DataTileConfig,
+    Product,
+)
 
 
 def test_get_products_coastal_fill_null_when_absent(client, monkeypatch):
@@ -16,7 +20,7 @@ def test_get_products_coastal_fill_null_when_absent(client, monkeypatch):
             id="sparse",
             source_path="s3://b/x.zarr",
             variable="GSLA",
-            coastal_fill=CoastalFill(max_dist_px=4),
+            data_tile=DataTileConfig(coastal_fill=CoastalFill(max_dist_px=4)),
         ),
     )
     monkeypatch.setitem(
@@ -28,8 +32,8 @@ def test_get_products_coastal_fill_null_when_absent(client, monkeypatch):
     r = client.get("/api/v1/das/tiler/data_tiles/products")
     assert r.status_code == 200
     by_id = {p["id"]: p for p in r.json()}
-    assert by_id["sparse"]["coastal_fill"] == {"max_dist_px": 4}
-    assert by_id["plain"]["coastal_fill"] is None
+    assert by_id["sparse"]["data_tile"]["coastal_fill"] == {"max_dist_px": 4}
+    assert by_id["plain"]["data_tile"]["coastal_fill"] is None
 
 
 def test_get_products_reflects_effective_state(client, monkeypatch):
@@ -50,8 +54,8 @@ def test_get_products_reflects_effective_state(client, monkeypatch):
     assert r.status_code == 200
     by_id = {p["id"]: p for p in r.json()}
     p = by_id["model_sea_level_anomaly_gridded_realtime:ucur+vcur"]
-    assert p["chunk_px"] == [240, 192]
-    assert p["padding"] == 1
+    assert p["data_tile"]["chunk_px"] == [240, 192]
+    assert p["data_tile"]["padding"] == 1
     # ocean_masked here comes from the Product's own default (False), since this
     # instance was constructed directly rather than via registry._from_dict —
     # the default-by-id rule lives in _from_dict, not on Product itself.
@@ -152,7 +156,7 @@ def test_tile_out_of_bounds(client):
 
 def test_tile_missing_date(client):
     def _lod_grids_with_update(product):
-        product.lod_grids.update(_LOD_GRIDS)
+        product.data_tile.lod_grids.update(_LOD_GRIDS)
         return _LOD_GRIDS
 
     with (
@@ -365,7 +369,8 @@ def test_availability_ok(client):
             "full_date_range": {"start": "2024-06-01", "end": "2024-07-01"},
         }
     }
-    assert body["max_lods"] == 4
+    assert "max_lods" not in body
+    assert "data_tile" not in body
 
 
 def test_availability_date_filters(client):

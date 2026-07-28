@@ -5,7 +5,6 @@ import xarray as xr
 from fastapi import APIRouter, Header, HTTPException, Path, Query, Response
 from fastapi.openapi.models import Example
 
-from data_access_service.config.tiler.constants import LOD
 from data_access_service.config.tiler.http_cache import (
     IMMUTABLE_CACHE_HEADERS,
     compute_etag,
@@ -100,11 +99,7 @@ def get_products_availability(
 ):
     products = {}
 
-    fingerprint_parts = [
-        f"max_lods={LOD.max_lods}",
-        f"from={from_date or ''}",
-        f"to={to_date or ''}",
-    ]
+    fingerprint_parts = [f"from={from_date or ''}", f"to={to_date or ''}"]
     # iter_product_items returns a snapshot list so a concurrent reload can't
     # raise RuntimeError ("dictionary changed size during iteration") here.
     for product_id, product in iter_product_items():
@@ -128,14 +123,7 @@ def get_products_availability(
         )
 
     etag = compute_etag("|".join(fingerprint_parts))
-    return etag_response(
-        {
-            "products": products,
-            "max_lods": LOD.max_lods,
-        },
-        etag,
-        if_none_match,
-    )
+    return etag_response({"products": products}, etag, if_none_match)
 
 
 @router.get(

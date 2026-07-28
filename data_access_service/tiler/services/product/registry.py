@@ -27,31 +27,16 @@ import json
 import logging
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
-
 from data_access_service.config.tiler.paths import PRODUCTS_CONFIG_PATH
-from data_access_service.tiler.services.product.product import CoastalFill, Product
+from data_access_service.tiler.schemas.products import CoastalFillConfig, ProductConfig
+from data_access_service.tiler.services.product.product import (
+    CoastalFill,
+    DataTileConfig,
+    Product,
+    VisualTileConfig,
+)
 
 logger = logging.getLogger(__name__)
-
-
-class _CoastalFillEntry(BaseModel):
-    max_dist_px: int
-
-
-class _ProductEntry(BaseModel):
-    """The allowlisted shape of one products.json entry."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    source_path: str
-    variable: str | list[str]
-    chunk_px: tuple[int, int] | None = None
-    padding: int | None = None
-    coastal_fill: _CoastalFillEntry | None = None
-    ocean_masked: bool | None = None
-    metadata_uuid: str | None = None
 
 
 _config_path = Path(PRODUCTS_CONFIG_PATH)
@@ -95,14 +80,17 @@ def iter_product_items() -> list[tuple[str, Product]]:
 def load_products() -> None:
     """Read products.json from disk into PRODUCTS. Called once on startup.
 
+    products.json is committed static config (config/tiler/products.json) — it should
+    always be present on disk. A missing file means a broken deploy/package, not a
+    legitimate empty state, so this raises rather than silently serving zero products.
+
     Updates PRODUCTS in place without ever exposing an empty state to concurrent readers:
     additions/updates are applied first, then removals. A reader that races a reload sees
     either the previous set, the new set, or a transient with stale entries still
     present — never an empty dict.
     """
     if not _config_path.exists():
-        logger.warning("No products.json found — starting with empty product list")
-        return
+        raise FileNotFoundError(f"products.json not found at {_config_path}")
     entries: list[dict] = json.loads(_config_path.read_text())
     new = {entry["id"]: _from_dict(entry) for entry in entries}
     for product_id, product in new.items():
@@ -112,27 +100,32 @@ def load_products() -> None:
     logger.info(f"Loaded {len(PRODUCTS)} products from {_config_path}")
 
 
+def _coastal_fill(config: CoastalFillConfig | None) -> CoastalFill | None:
+    return CoastalFill(max_dist_px=config.max_dist_px) if config else None
+
+
 def _from_dict(entry: dict) -> Product:
-    parsed = _ProductEntry(**entry)
-    kwargs: dict = {}
-    if parsed.chunk_px is not None:
-        kwargs["chunk_px"] = parsed.chunk_px
-    if parsed.padding is not None:
-        kwargs["padding"] = parsed.padding
+    """Validate one products.json entry against ProductConfig (extra="forbid"
+    catches typos), after resolving the one default that depends on ``id``
+    (ocean_masked) — every other default (chunk_px, padding) lives directly on
+    ProductConfig/DataTileConfig and applies automatically when omitted.
+    """
+    payload = dict(entry)
+    if payload.get("ocean_masked") is None:
+        payload["ocean_masked"] = entry["id"] in _OCEAN_MASKED_BY_DEFAULT
+    parsed = ProductConfig(**payload)
     return Product(
         id=parsed.id,
         source_path=parsed.source_path,
         variable=parsed.variable,
-        coastal_fill=(
-            CoastalFill(max_dist_px=parsed.coastal_fill.max_dist_px)
-            if parsed.coastal_fill
-            else None
-        ),
-        ocean_masked=(
-            parsed.ocean_masked
-            if parsed.ocean_masked is not None
-            else parsed.id in _OCEAN_MASKED_BY_DEFAULT
-        ),
+        ocean_masked=parsed.ocean_masked,
         metadata_uuid=parsed.metadata_uuid,
-        **kwargs,
+        data_tile=DataTileConfig(
+            chunk_px=parsed.data_tile.chunk_px,
+            padding=parsed.data_tile.padding,
+            coastal_fill=_coastal_fill(parsed.data_tile.coastal_fill),
+        ),
+        visual_tile=VisualTileConfig(
+            coastal_fill=_coastal_fill(parsed.visual_tile.coastal_fill),
+        ),
     )

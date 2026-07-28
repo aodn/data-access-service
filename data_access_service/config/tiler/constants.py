@@ -7,8 +7,10 @@ COORD_NAMES = {"TIME": "time", "LATITUDE": "lat", "LONGITUDE": "lon"}
 
 
 @dataclass(frozen=True)
-class LODConfig:
-    """Server-shader contract for the data-tile LOD pyramid.
+class DataTileLodConfig:
+    """Server-shader contract for the data-tile LOD pyramid. Global policy, not
+    a per-product default like DataTileDefaults — never overridable in
+    products.json (see test_load_rejects_unknown_field).
 
     Bundled here (rather than passed at runtime or read from env) because these
     values are baked into the WebGL shader on the frontend — changing one without
@@ -27,20 +29,21 @@ class LODConfig:
     min_coarsest: tuple[int, int] = (2, 2)
 
 
-LOD = LODConfig()
+LOD = DataTileLodConfig()
 
 
 @dataclass(frozen=True)
-class TileConfig:
-    """Per-product tile geometry defaults — also part of the server↔shader contract.
+class DataTileDefaults:
+    """Fallback data-tile geometry — also part of the server↔shader contract.
 
     ``chunk_px`` is the visible tile size; ``padding`` is the extra ring of edge
     pixels included on each side so the shader can sample a bilinear filter
-    without seams between tiles. Both are overridable per product in products.json, but the defaults here are.
+    without seams between tiles. Both are overridable per product in
+    products.json (see ``product.DataTileConfig``, which these default into).
     """
 
     chunk_px: tuple[int, int] = (240, 192)
     padding: int = 1
 
 
-TILE = TileConfig()
+TILE = DataTileDefaults()
