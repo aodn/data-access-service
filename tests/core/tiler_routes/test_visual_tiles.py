@@ -236,6 +236,10 @@ def test_bbox_png_ok(client):
             "data_access_service.core.tiler_routes.visual_tiles.render_bbox",
             return_value=_PNG,
         ),
+        patch(
+            "data_access_service.core.tiler_routes.visual_tiles.default_bbox_from_store",
+            return_value=(140.0, -40.0, 150.0, -30.0),
+        ),
     ):
         response = client.get(
             "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/bbox.png"
@@ -254,12 +258,80 @@ def test_bbox_webp_ok(client):
             "data_access_service.core.tiler_routes.visual_tiles.render_bbox",
             return_value=_WEBP,
         ),
+        patch(
+            "data_access_service.core.tiler_routes.visual_tiles.default_bbox_from_store",
+            return_value=(140.0, -40.0, 150.0, -30.0),
+        ),
     ):
         response = client.get(
             "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/bbox.webp"
         )
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/webp"
+
+
+def test_bbox_epsg4326_latitude_out_of_range_rejected(client):
+    # A Web Mercator meter value used as a degree latitude is nowhere near -90..90.
+    response = client.get(
+        "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/bbox.png"
+        "?bbox=140,-5000000,150,-30&crs=EPSG:4326"
+    )
+    assert response.status_code == 400
+    assert "epsg:4326" in response.json()["detail"].lower()
+
+
+def test_bbox_epsg3857_out_of_world_extent_rejected(client):
+    # Beyond the +-20037508m Web Mercator world square.
+    response = client.get(
+        "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/bbox.png"
+        "?bbox=140,-40,150,30000000000&crs=EPSG:3857"
+    )
+    assert response.status_code == 400
+    assert "epsg:3857" in response.json()["detail"].lower()
+
+
+def test_bbox_degree_scale_bbox_defaulting_to_mercator_rejected(client):
+    # crs omitted -> defaults to EPSG:3857. A plain 10x10 degree bbox is a
+    # technically-valid but absurdly tiny (~10m) Mercator span, almost certainly
+    # a caller who forgot crs=EPSG:4326 rather than a genuine request.
+    response = client.get(
+        "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/bbox.png"
+        "?bbox=140,-40,150,-30"
+    )
+    assert response.status_code == 400
+    assert "looks like geographic degrees" in response.json()["detail"].lower()
+    assert "epsg:4326" in response.json()["detail"].lower()
+
+
+def test_bbox_wide_degree_bbox_defaulting_to_mercator_rejected(client):
+    # A whole-world degree bbox (span 360x180) would slip past a span-only
+    # check, but every coordinate is still individually degree-plausible, so
+    # the magnitude check catches it regardless of how wide the span is.
+    response = client.get(
+        "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/bbox.png"
+        "?bbox=-180,-90,180,90"
+    )
+    assert response.status_code == 400
+    assert "looks like geographic degrees" in response.json()["detail"].lower()
+
+
+def test_bbox_degree_scale_bbox_with_explicit_crs_ok(client):
+    # Same bbox as above, but with crs=EPSG:4326 made explicit -> accepted.
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.shared.load_slice",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.visual_tiles.render_bbox",
+            return_value=_PNG,
+        ),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/bbox.png"
+            "?bbox=140,-40,150,-30&crs=EPSG:4326"
+        )
+    assert response.status_code == 200
 
 
 def test_bbox_legacy_url_without_extension_returns_404(client):
@@ -384,9 +456,15 @@ def test_categorical_tile_rejects_rescale(client, mcs_product):
 
 
 def test_categorical_bbox_rejects_rescale(client, mcs_product):
-    with patch(
-        "data_access_service.core.tiler_routes.shared.load_slice",
-        return_value=_make_categorical_ds(),
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.shared.load_slice",
+            return_value=_make_categorical_ds(),
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.visual_tiles.default_bbox_from_store",
+            return_value=(140.0, -40.0, 150.0, -30.0),
+        ),
     ):
         response = client.get(
             "/api/v1/das/tiler/visual_tiles/mcs/2024-01-01/bbox.png?rescale=0,4"
@@ -430,6 +508,10 @@ def test_categorical_bbox_mismatched_colormap_rejected(client, mcs_product):
             "data_access_service.core.tiler_routes.shared.load_slice",
             return_value=_make_categorical_ds(),
         ),
+        patch(
+            "data_access_service.core.tiler_routes.visual_tiles.default_bbox_from_store",
+            return_value=(140.0, -40.0, 150.0, -30.0),
+        ),
     ):
         response = client.get(
             "/api/v1/das/tiler/visual_tiles/mcs/2024-01-01/bbox.png?colormap=mcs_bbox_bad"
@@ -455,7 +537,7 @@ def test_categorical_animation_mismatched_colormap_rejected(client, mcs_product)
     ):
         response = client.get(
             "/api/v1/das/tiler/visual_tiles/mcs/2024-01-01/2024-01-03/animation.apng"
-            "?bbox=140,-40,150,-30&width=64&height=64&colormap=mcs_anim_bad"
+            "?bbox=140,-40,150,-30&crs=EPSG:4326&width=64&height=64&colormap=mcs_anim_bad"
         )
     assert response.status_code == 400
     assert "flag_values" in response.json()["detail"]
@@ -583,7 +665,7 @@ def test_animation_explicit_bbox_passed_through(client):
         # (which would try to open the real store to read lat/lon spacing).
         response = client.get(
             "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/2024-01-01/animation.apng"
-            "?bbox=100,-50,160,-10&width=256&height=256"
+            "?bbox=100,-50,160,-10&crs=EPSG:4326&width=256&height=256"
         )
     assert response.status_code == 200
     assert captured["bbox"] == (100.0, -50.0, 160.0, -10.0)
@@ -628,7 +710,7 @@ def test_animation_native_resolution_used_when_both_dims_omitted(client):
         patch_render,
     ):
         response = client.get(
-            "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/2024-01-01/animation.apng?bbox=57,-70,180,0"
+            "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/2024-01-01/animation.apng?bbox=57,-70,180,0&crs=EPSG:4326"
         )
     assert response.status_code == 200
     assert captured["wh"] == (640, 350)
@@ -651,7 +733,7 @@ def test_animation_height_derived_from_bbox_aspect_when_only_width_given(client)
     ):
         response = client.get(
             "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/2024-01-01/animation.apng"
-            "?bbox=100,-50,150,-10&width=500"
+            "?bbox=100,-50,150,-10&crs=EPSG:4326&width=500"
         )
     assert response.status_code == 200
     assert captured["wh"] == (500, 400)
@@ -673,7 +755,7 @@ def test_animation_width_derived_from_bbox_aspect_when_only_height_given(client)
     ):
         response = client.get(
             "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/2024-01-01/animation.apng"
-            "?bbox=100,-50,150,-10&height=400"
+            "?bbox=100,-50,150,-10&crs=EPSG:4326&height=400"
         )
     assert response.status_code == 200
     assert captured["wh"] == (500, 400)
@@ -697,7 +779,7 @@ def test_animation_derived_dimension_clamped_to_max(client):
     ):
         response = client.get(
             "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/2024-01-01/animation.apng"
-            "?bbox=0,-0.25,100,0.25&height=2000"
+            "?bbox=0,-0.25,100,0.25&crs=EPSG:4326&height=2000"
         )
     assert response.status_code == 200
     assert captured["wh"] == (2048, 2000)

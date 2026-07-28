@@ -263,13 +263,88 @@ def _resolve_resolution(
     return derived_w, height
 
 
+_WEB_MERCATOR_EXTENT = 20_037_508.342789244  # EPSG:3857 world-square half-extent, meters
+
+# Plausible geographic-degree magnitude: lon up to 360 (covers the documented
+# antimeridian workaround, e.g. 57..185), lat strictly -90..90.
+_DEGREE_LON_RANGE = (-180.0, 360.0)
+_DEGREE_LAT_RANGE = (-90.0, 90.0)
+
+
+def _looks_like_degrees(bbox: tuple[float, float, float, float]) -> bool:
+    """True if every coordinate is individually plausible as a lon/lat degree value.
+
+    This checks magnitude, not span — a degree bbox can be anywhere from a few
+    meters to 360 degrees wide, so a span-based "is this too small" check can't
+    catch a wide degree bbox (e.g. -180,-90,180,90, span 360x180) misread as
+    Mercator metres. Checking each coordinate's own plausible range catches it
+    regardless of span: a genuine Web Mercator bbox with every coordinate this
+    small would describe a sub-360-metre crop sitting right at the map's origin
+    (0degN, 0degE) — not a realistic request against this service's IMOS ocean products.
+    """
+    minx, miny, maxx, maxy = bbox
+    lon_lo, lon_hi = _DEGREE_LON_RANGE
+    lat_lo, lat_hi = _DEGREE_LAT_RANGE
+    return (
+        lon_lo <= minx <= lon_hi
+        and lon_lo <= maxx <= lon_hi
+        and lat_lo <= miny <= lat_hi
+        and lat_lo <= maxy <= lat_hi
+    )
+
+
+def _validate_bbox_for_crs(bbox: tuple[float, float, float, float], crs: str) -> None:
+    """Reject a bbox whose magnitudes don't plausibly match the claimed crs's units.
+
+    Without this, swapping crs (e.g. passing degree-scale numbers with
+    crs=EPSG:3857, or meter-scale numbers with crs=EPSG:4326) silently produces
+    a nonsense crop instead of an error — bbox_to_wgs84 has no way to detect
+    the units are wrong on its own.
+    """
+    minx, miny, maxx, maxy = bbox
+    if crs == "EPSG:4326":
+        if not (-90.0 <= miny <= 90.0 and -90.0 <= maxy <= 90.0):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"bbox latitude out of range for crs=EPSG:4326 (expected -90..90): "
+                    f"miny={miny}, maxy={maxy}. Did you mean crs=EPSG:3857?"
+                ),
+            )
+    else:  # EPSG:3857
+        lo, hi = -_WEB_MERCATOR_EXTENT, _WEB_MERCATOR_EXTENT
+        if not (lo <= minx <= hi and lo <= maxx <= hi and lo <= miny <= hi and lo <= maxy <= hi):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"bbox out of range for crs=EPSG:3857 (expected within "
+                    f"±{hi:.0f} meters): {bbox}. Did you mean crs=EPSG:4326?"
+                ),
+            )
+        if _looks_like_degrees(bbox):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"bbox {bbox} looks like geographic degrees, not EPSG:3857 meters "
+                    "(every value falls within typical lon/lat range). "
+                    "Did you mean crs=EPSG:4326?"
+                ),
+            )
+
+
 def _parse_bbox_and_crs(
     bbox: str | None, crs: str, source_path: str
-) -> tuple[tuple[float, float, float, float], str]:
+) -> tuple[tuple[float, float, float, float], str, str]:
     """Validate the crs param and parse the bbox string.
 
-    When bbox is None, falls back to the dataset's native bounds and forces
-    crs back to EPSG:4326 (the bounds are always reported in WGS84).
+    Returns (bbox_tuple, bounds_crs, dst_crs):
+    - ``bounds_crs`` is the CRS used to interpret ``bbox_tuple``'s numbers. When
+      bbox is None, this is forced to EPSG:4326 regardless of the requested crs,
+      because the dataset's native bounds (``default_bbox_from_store``) are
+      always reported in WGS84.
+    - ``dst_crs`` is the caller's requested output projection — the validated
+      ``crs`` value, unaffected by whether bbox was given. It decides the CRS
+      of the *rendered* image, not just how the input bbox is read.
     """
     crs = crs.upper()
     if crs not in ("EPSG:4326", "EPSG:3857"):
@@ -277,23 +352,28 @@ def _parse_bbox_and_crs(
             status_code=400, detail="crs must be 'EPSG:4326' or 'EPSG:3857'"
         )
     if bbox is None:
-        return default_bbox_from_store(source_path), "EPSG:4326"
+        return default_bbox_from_store(source_path), "EPSG:4326", crs
     try:
         minx, miny, maxx, maxy = (float(v) for v in bbox.split(","))
     except ValueError as e:
         raise HTTPException(
             status_code=400, detail="bbox must be 'minx,miny,maxx,maxy'"
         ) from e
-    return (minx, miny, maxx, maxy), crs
+    _validate_bbox_for_crs((minx, miny, maxx, maxy), crs)
+    return (minx, miny, maxx, maxy), crs, crs
 
 
 @router.get(
     "/{product_id}/{date}/bbox.{ext}",
     summary="Visualisation tile by bbox",
     description=(
-        "Renders a colourised PNG or WebP for an arbitrary bounding box. "
-        "Accepts EPSG:4326 geographic coordinates (degrees, default) or EPSG:3857 Web Mercator (meters) via the crs parameter. "
-        "Compatible with Mapbox GL raster sources using the {bbox-epsg-3857} placeholder (pass crs=EPSG:3857). "
+        "Renders a colourised PNG or WebP for an arbitrary bounding box. The crs parameter "
+        "controls both how the input bbox numbers are interpreted and the projection of the "
+        "output image — same value for both, matching the OGC WMS SRS/CRS convention. "
+        "Default is EPSG:3857 (Web Mercator), so with no crs argument this is a drop-in "
+        "raster source for Mapbox GL / MapLibre / Leaflet / OpenLayers. Pass crs=EPSG:4326 "
+        "for a Plate Carrée crop instead — e.g. for non-slippy-map / scientific consumers "
+        "that want geographic-degree pixel spacing. "
         "WebP is rejected for categorical colormaps because lossy compression corrupts the discrete colour boundaries."
     ),
 )
@@ -304,9 +384,14 @@ def get_bbox(
         pattern="^(png|webp)$",
         description="Output image format — 'png' (lossless) or 'webp' (lossy, ~50% smaller).",
     ),
-    bbox: str = Query(
-        "89.0,-60.0,180.0,10.0",
-        description="Bounding box as 'minx,miny,maxx,maxy' in the CRS specified by the crs parameter.",
+    bbox: str | None = Query(
+        None,
+        description=(
+            "Bounding box as 'minx,miny,maxx,maxy' in the CRS specified by the crs "
+            "parameter — Web Mercator meters for 'EPSG:3857' (default), geographic degrees "
+            "for 'EPSG:4326'. Defaults to the dataset's native bounds (interpreted as "
+            "EPSG:4326, regardless of crs, when bbox is omitted)."
+        ),
     ),
     width: int = Query(256, ge=1, le=2048),
     height: int = Query(256, ge=1, le=2048),
@@ -327,8 +412,14 @@ def get_bbox(
         ),
     ),
     crs: str = Query(
-        "EPSG:4326",
-        description="Coordinate reference system of the bbox. 'EPSG:4326' (default) for geographic degrees; 'EPSG:3857' for Web Mercator meters (Mapbox {bbox-epsg-3857}).",
+        "EPSG:3857",
+        description=(
+            "CRS of both the input bbox numbers and the rendered output image. "
+            "'EPSG:3857' (default) for Web Mercator meters — matches Mapbox's "
+            "{bbox-epsg-3857} placeholder and needs no client-side reprojection. "
+            "'EPSG:4326' for geographic degrees in and a Plate Carrée image out. "
+            "Has no effect on output when bbox is omitted (see bbox)."
+        ),
     ),
 ):
     if colormap_name is not None:
@@ -337,7 +428,9 @@ def get_bbox(
     validate_date(date)
     variable = single_variable_or_400(product, context="visual tiles")
 
-    bbox_tuple, crs = _parse_bbox_and_crs(bbox, crs, product.source_path)
+    bbox_tuple, bounds_crs, dst_crs = _parse_bbox_and_crs(
+        bbox, crs, product.source_path
+    )
 
     rescale_range = parse_rescale(rescale)
 
@@ -348,7 +441,8 @@ def get_bbox(
         bbox_tuple,
         width,
         height,
-        crs,
+        bounds_crs,
+        dst_crs,
         colormap_name,
         rescale_range,
         ext,
@@ -366,7 +460,8 @@ def get_bbox(
             height,
             colormap_name,
             rescale_range,
-            crs=crs,
+            crs=bounds_crs,
+            dst_crs=dst_crs,
             fmt=ext,
             coastal_fill=product.visual_tile.coastal_fill,
             source_path=product.source_path,
@@ -388,7 +483,10 @@ def get_bbox(
     summary="Animated bbox over a date range",
     description=(
         f"Renders the same bbox across every available date in [from_date, to_date] "
-        f"and assembles them into an animated image (GIF / APNG / animated WebP). "
+        f"and assembles them into an animated image (GIF / APNG / animated WebP). The crs "
+        f"parameter controls both the input bbox's coordinates and the output frames' "
+        f"projection (same value for both); default EPSG:3857 (Web Mercator) makes this a "
+        f"drop-in raster source for Mapbox GL / MapLibre / Leaflet / OpenLayers out of the box. "
         f"Intended for demos and quick visualisations — not optimised for high traffic. "
         f"At most {_MAX_ANIMATION_FRAMES} frames per request; requests beyond that are rejected. "
         f"If bbox is omitted, the dataset's native bounds are used (clamped to ±180° lon). "
@@ -410,7 +508,13 @@ async def get_animation(
     ),
     bbox: str | None = Query(
         None,
-        description="Bounding box as 'minx,miny,maxx,maxy' in the CRS specified by the crs parameter. Defaults to the dataset's native bounds.",
+        description=(
+            "Bounding box as 'minx,miny,maxx,maxy' in the CRS specified by the crs "
+            "parameter — Web Mercator meters for 'EPSG:3857' (default), geographic degrees "
+            "for 'EPSG:4326'. Output frames are reprojected to that same crs. Defaults to "
+            "the dataset's native bounds (interpreted as EPSG:4326, regardless of crs, when "
+            "bbox is omitted)."
+        ),
     ),
     width: int | None = Query(
         None,
@@ -450,8 +554,13 @@ async def get_animation(
         ),
     ),
     crs: str = Query(
-        "EPSG:4326",
-        description="CRS of the bbox. 'EPSG:4326' (default) for geographic degrees; 'EPSG:3857' for Web Mercator meters.",
+        "EPSG:3857",
+        description=(
+            "CRS of both the input bbox numbers and the rendered output frames. "
+            "'EPSG:3857' (default) for Web Mercator meters — needs no client-side "
+            "reprojection. 'EPSG:4326' for geographic degrees in and Plate Carrée frames "
+            "out. Has no effect on output when bbox is omitted (see bbox)."
+        ),
     ),
     duration: int = Query(
         200, ge=10, le=5000, description="Milliseconds per frame in the animation."
@@ -472,7 +581,7 @@ async def get_animation(
 
     # Offloaded: each may call get_store, which can block on xr.open_zarr on
     # cold path or while a TTL refresh is racing the cached entry.
-    bbox_tuple, crs = await anyio.to_thread.run_sync(
+    bbox_tuple, bounds_crs, dst_crs = await anyio.to_thread.run_sync(
         _parse_bbox_and_crs, bbox, crs, product.source_path
     )
 
@@ -515,7 +624,7 @@ async def get_animation(
         )
 
     resolved_w, resolved_h = await anyio.to_thread.run_sync(
-        _resolve_resolution, product.source_path, bbox_tuple, crs, width, height
+        _resolve_resolution, product.source_path, bbox_tuple, bounds_crs, width, height
     )
 
     # Fan out the per-frame S3 reads in parallel on the anyio pool, gated by
@@ -546,7 +655,8 @@ async def get_animation(
                 resolved_h,
                 colormap_name,
                 rescale_range,
-                crs=crs,
+                crs=bounds_crs,
+                dst_crs=dst_crs,
                 fmt=ext,
                 duration_ms=duration,
                 coastal_fill=product.visual_tile.coastal_fill,

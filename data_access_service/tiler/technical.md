@@ -40,7 +40,7 @@
 
 ## 1. Overview
 
-The tiler is a set of FastAPI routers, mounted inside the larger `data-access-service` app (`data_access_service/server.py`), that produce on-demand PNG/WebP tiles for IMOS ocean data products held in Zarr stores on S3. It is not a standalone service — it shares the app's process, event loop, and lifespan with the rest of `data-access-service` (the non-tiler API mounted via `api_router`).
+The tiler is a set of FastAPI routers, mounted inside the larger `data-access-service` app (`data_access_service/server.py`), that produce on-demand PNG/WebP tiles for IMOS ocean data products held in Zarr stores on S3. It is not a standalone service — it shares the app's process, event loop, and lifespan with the rest of `data-access-service` (the non-tiler API mounted via `api_router`). Its routes live under `{Config.BASE_URL}/tiler/data_tiles/*` and `{Config.BASE_URL}/tiler/visual_tiles/*` (`BASE_URL = "/api/v1/das"` today) and every one of them requires an `X-API-Key` header — see [§6](#6-url-contract-and-api-surface). This doc uses the shorthand `/data_tiles/...` / `/visual_tiles/...` for readability everywhere else.
 
 **Scope.** The tiler serves **gridded data stored as Zarr** only. Every product is a Zarr store on S3 with a regular lat/lon grid (`time`, `lat`, `lon` dimensions, optionally with a variable axis). Non-gridded data (point observations, vessel tracks, swath/orbit data) and non-Zarr formats (NetCDF, HDF5, COG, GeoTIFF) are out of scope — the entire pipeline, from `load_slice` through the LOD algorithm to the WebGL atlas, assumes a regular gridded Zarr source. See [§2](#2-why-zarr) for _why_ Zarr.
 
@@ -49,7 +49,7 @@ It exposes **two independent tile pipelines** from the same underlying data:
 | Pipeline        | Output CRS               | Coordinate convention                                                                                  | Consumer                                                                             |
 | --------------- | ------------------------ | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
 | `/data_tiles`   | EPSG:4326 (Plate Carrée) | Custom LOD pyramid: `z` = LOD level, `x`/`y` = chunk col/row                                           | WebGL shader (decodes raw values, reprojects on GPU)                                 |
-| `/visual_tiles` | EPSG:3857 (Web Mercator) | Standard Web Mercator slippy-map (XYZ) tiles, plus a bbox endpoint and a date-range animation endpoint | Any slippy-map client (MapboxGL, MapLibre, Leaflet, OpenLayers, OSM-style consumers) |
+| `/visual_tiles` | EPSG:3857 (Web Mercator) for the `{z}/{x}/{y}` tile endpoint, `/bbox`, and `/animation` alike — see [§5.4](#54-visual-tiles--generated-in-epsg3857-web-mercator) | Standard Web Mercator slippy-map (XYZ) tiles, plus a bbox endpoint and a date-range animation endpoint | Any slippy-map client (MapboxGL, MapLibre, Leaflet, OpenLayers, OSM-style consumers) — all three endpoints are drop-in `raster` sources |
 
 The same Zarr slice is the source for both pipelines; they diverge at the renderer. See [§5](#5-tile-coordinate-systems-and-projection-pipeline) for the full distinction.
 
@@ -73,10 +73,10 @@ Two pipelines — `/data_tiles/*` and `/visual_tiles/*` — serve the same under
 flowchart TD
     client(["Client — WebGL / slippy-map library"])
 
-    subgraph ROUTERS["HTTP layer  ·  core/tiler_routes  (mounted inside data_access_service/server.py)"]
+    subgraph ROUTERS["HTTP layer  ·  core/tiler_routes  (mounted at {BASE_URL}/tiler/*, api_key_auth + require_tiler_ready on every route)"]
         direction LR
-        dtRouter["/data_tiles/*"]
-        vtRouter["/visual_tiles/*"]
+        dtRouter["/tiler/data_tiles/*"]
+        vtRouter["/tiler/visual_tiles/*"]
         prodRouter["/products · /manifest · /point<br/>(mounted on both)"]
     end
 
@@ -182,7 +182,7 @@ data_access_service/
       colormaps.json               ← static custom-colormap config, committed with the code
   core/
     tiler_routes/
-      __init__.py                 ← mounts data_tiles + visual_tiles routers under the app
+      __init__.py                 ← mounts data_tiles + visual_tiles routers under {Config.BASE_URL}/tiler/*, with api_key_auth + require_tiler_ready on every route
       shared.py                   ← PRODUCT_EX/DATE_EX examples, get_product_or_404, load_slice_or_404,
                                      validate_date, resolve_colormap_or_error, single_variable_or_400,
                                      parse_rescale, mark_tiler_ready/require_tiler_ready — see §11
@@ -227,7 +227,7 @@ data_access_service/
     assets/
       land_mask.npz                   ← committed Natural Earth land mask (coastal fill) — see §7.6
       ocean_mask.npz                  ← committed ocean-validity mask — see §7.6
-    Architecture.md                    ← caching-focused diagram + ledger (narrower companion to this doc)
+    caching_redis_plan.md               ← current caching state + Redis/ElastiCache backend plan (meeting brief)
     technical.md                       ← this file
 tests/
 ```
@@ -270,6 +270,8 @@ The server produces tiles in **two different coordinate reference systems** depe
 | **Multi-variable support**      | Yes (UV products such as `ucur+vcur`)                                               | No (single-variable products only; enforced by `single_variable_or_400`)                                           |
 | **Per-tile decode manifest**    | Required (`/{product_id}/{date}/manifest.json`)                                     | Not applicable                                                                                                     |
 | **Extra non-tile endpoints**    | —                                                                                   | `/bbox` (arbitrary region), `/animation` (date-range GIF/APNG/WebP)                                                |
+
+This table describes the `{z}/{x}/{y}` tile endpoints specifically. `/bbox` and `/animation` output the same **EPSG:3857 (Web Mercator)** by default, since their `?crs=` query parameter defaults to `EPSG:3857` — see [§5.4](#54-visual-tiles--generated-in-epsg3857-web-mercator) for how `?crs=` drives both the input bbox's coordinates and the output projection together.
 
 The data-tiles `z` axis indexes a **custom LOD pyramid** anchored to the product's own extent — see [§7](#7-data-tile-internals) for the algorithm that derives the pyramid from each Zarr store's dimensions.
 
@@ -314,9 +316,22 @@ The manifest returns geographic bounds (`lonMin`, `lonMax`, `latMin`, `latMax`) 
 3. Reprojects the relevant 4326 region into a 256×256 Mercator-grid array.
 4. Returns the array, which the renderer then rescales (per `rescale` or auto-derived min/max), maps through the colormap LUT, and encodes as PNG/WebP.
 
-Because the output is already in Web Mercator, visual tiles work directly with any map library that consumes XYZ Web Mercator tiles — MapboxGL `raster` sources, Leaflet, OpenLayers, Mapbox `{bbox-epsg-3857}` raster placeholders, etc. **No client-side reprojection is required.**
+Because the tile output is already in Web Mercator, `/{z}/{x}/{y}.{ext}` works directly with any map library that consumes XYZ Web Mercator tiles — MapboxGL `raster` sources, Leaflet, OpenLayers, etc. **No client-side reprojection is required.**
 
-The `/bbox.{ext}` endpoint follows the same pipeline using `reader.part(...)`; it accepts the bbox in either EPSG:4326 or EPSG:3857 (controlled by `?crs=`) and produces a Web Mercator image in the requested format.
+**`/bbox.{ext}`'s `?crs=` query parameter controls both the input bbox's coordinates and the output image's projection — the same value drives both, matching the OGC WMS `SRS`/`CRS` convention.** The route (`_parse_bbox_and_crs` in `core/tiler_routes/visual_tiles.py`) validates and uppercases `crs` once, then uses it two ways:
+
+- **As `bounds_crs`**, to interpret the caller-supplied bbox *input* numbers via `bbox_to_wgs84` (`services/store/spatial.py`) — `EPSG:4326` degrees or `EPSG:3857` metres — before converting to WGS84 for cropping. When `bbox` is omitted, this is forced to `EPSG:4326` regardless of `crs`, because `default_bbox_from_store`'s native bounds are always WGS84.
+- **As `dst_crs`**, passed straight through to `XarrayReader.part(bbox_wgs84, dst_crs=dst_crs, width=..., height=..., reproject_method=...)` (`_bbox_parts_to_rgba` / `render_bbox` in `services/rendering/visual_tiles.py`) to set the *output* projection — independent of whether `bbox` was omitted.
+
+`crs` defaults to `EPSG:3857`, so a request with no `crs` argument gets a genuine Web Mercator reprojection (pixels evenly spaced in Web Mercator metres) — a drop-in raster source for MapboxGL/MapLibre/Leaflet/OpenLayers `raster` layers, the same as the `{z}/{x}/{y}` tile endpoint. Passing `crs=EPSG:4326` instead switches both legs: the bbox input is read as geographic degrees, *and* the output becomes a Plate-Carrée crop — useful for non-slippy-map consumers that want geographic-degree pixel spacing (e.g. further scientific processing).
+
+`/animation` (`render_bbox_animation`) takes the same `crs` (as `bounds_crs`) and `dst_crs` split, so every animation frame follows the same rule.
+
+**Unit guard (`_validate_bbox_for_crs`).** Because a single `crs` value now governs both legs, a caller who gets the units wrong for one of them (e.g. degree-scale numbers under `crs=EPSG:3857`, since that's now the default) would otherwise get a silently wrong crop rather than an error. `_validate_bbox_for_crs` rejects with `400` before rendering:
+
+- **`crs=EPSG:4326`**: latitude outside `[-90, 90]` — catches real Web Mercator metre values (which run into the millions) passed as degrees.
+- **`crs=EPSG:3857`, world-extent check**: any coordinate outside `±20,037,508.34` metres — catches degree values large enough to already be out of range.
+- **`crs=EPSG:3857`, magnitude check (`_looks_like_degrees`)**: rejects if *every* coordinate individually falls within plausible lon/lat range (`lon` in `[-180, 360]`, `lat` in `[-90, 90]`). This is a magnitude check, not a span check — an earlier version used a minimum-span threshold, but a wide degree bbox like `-180,-90,180,90` (span 360°×180°) has plenty of "span" as fake metres and would slip past that. Checking each coordinate's own plausible range instead catches degree-scale bboxes regardless of span: a genuine Web Mercator bbox with every coordinate this small describes a crop sitting within a few hundred metres of the map's origin (0°N, 0°E) — not a realistic request against this service's IMOS ocean products. This is exactly the failure mode of omitting `crs` with a degree bbox now that the default is `EPSG:3857`: without this guard, the request wouldn't error on CRS validity, it would silently crop a sliver near null island instead of the intended region.
 
 ### 5.5 Frontend integration
 
@@ -346,7 +361,11 @@ There is no per-LOD zoom-threshold field in the manifest today — the client is
 
 `z`/`x`/`y` mean different things in each tile API — see [§5](#5-tile-coordinate-systems-and-projection-pipeline).
 
+**Mount path and auth.** Every path below is relative to the actual mount point: `{Config.BASE_URL}/tiler/data_tiles/...` and `{Config.BASE_URL}/tiler/visual_tiles/...` (`core/tiler_routes/__init__.py`), where `BASE_URL = "/api/v1/das"` today — e.g. the data-tile endpoint's real path is `GET /api/v1/das/tiler/data_tiles/{product_id}/{date}/{z}/{x}/{y}.png`. This doc uses the shorthand `/data_tiles/...` / `/visual_tiles/...` throughout to keep examples readable. **Every tiler route also requires an `X-API-Key` header** — the whole `tiler_router` carries `dependencies=[Depends(api_key_auth), Depends(require_tiler_ready)]`, so a request is rejected with `401` (wrong/missing key, `utils/api_utils.py`) or `503` (tiler still starting up, [§11.3](#113-readiness-gate)) before it ever reaches a route handler.
+
 **HTTP caching.** All tile-shaped bytes (`.png`/`.webp`/`.gif`/`.apng`, manifest, point) are served with `IMMUTABLE_CACHE_HEADERS` (`config/tiler/http_cache.py`): `Cache-Control: public, s-maxage=31536000, max-age=0, must-revalidate` — a year at the CDN, `must-revalidate` on the browser (relying on `s-maxage` so CloudFront still serves cached bytes for a year). This works because every such URL is fully determined by its path — the date is in the URL, so once a date's data exists the URL → bytes mapping never changes; there is no separate cache-busting version constant. Listing endpoints whose body can change without the URL changing (`/products`, `/manifest`, `/colormaps`) instead use `REVALIDATE_CACHE_HEADERS` (`max-age=300, must-revalidate`) plus an `ETag`/`If-None-Match` 304 short-circuit (`compute_etag`/`etag_response`).
+
+**Response compression.** `configure_gzip_middleware` (`core/middleware.py`, applied in `server.py`) adds Starlette's `GZipMiddleware` (`minimum_size=1000`, `compresslevel=5`) app-wide — this targets the JSON endpoints above (`/manifest`, `/products`, `/colormaps`), where large date arrays compress well. Image tiles (PNG/GIF/WebP/APNG) are excluded: they're already compressed, so re-gzipping them is pure CPU waste on the hot tile path. The exclusion works by appending `"image/"` to Starlette's `DEFAULT_EXCLUDED_CONTENT_TYPES`; `tests/test_server.py::test_gzip_skips_image_tiles` fails loudly if a Starlette upgrade ever drops that behaviour.
 
 ### 6.1 Shared endpoints (mounted under both `/data_tiles` and `/visual_tiles`)
 
@@ -427,10 +446,10 @@ Without `rescale`, only the color bar is rendered. With `rescale`, 20 pixels alo
 
 | Query param | Default                 | Description                                                                                                                      |
 | ----------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `bbox`      | dataset's native bounds | Bounding box as `minx,miny,maxx,maxy` in the CRS specified by `crs`                                                              |
+| `bbox`      | dataset's native bounds | Bounding box as `minx,miny,maxx,maxy` — the CRS of these *input* numbers, and of the rendered output, per `crs` (same value drives both — see [§5.4](#54-visual-tiles--generated-in-epsg3857-web-mercator)). **When omitted, `crs` only affects the output** — `_parse_bbox_and_crs` (`core/tiler_routes/visual_tiles.py`) falls back to `default_bbox_from_store` and always reads those native bounds as `EPSG:4326` for input purposes, regardless of what `crs` was passed; the output projection still follows `crs`. |
 | `width`     | `256`                   | Output image width in pixels (1–2048)                                                                                            |
 | `height`    | `256`                   | Output image height in pixels (1–2048)                                                                                           |
-| `crs`       | `EPSG:4326`             | CRS of the bbox coordinates. `EPSG:4326` for geographic degrees; `EPSG:3857` for Web Mercator metres (Mapbox `{bbox-epsg-3857}`) |
+| `crs`       | `EPSG:3857`             | CRS of both the *input* `bbox` coordinates and the rendered *output* image — same value drives both — see [§5.4](#54-visual-tiles--generated-in-epsg3857-web-mercator). `EPSG:3857` (default) for Web Mercator metres in and out (Mapbox `{bbox-epsg-3857}`); `EPSG:4326` for geographic degrees in and a Plate-Carrée image out. When `bbox` is omitted, only affects the output — the input bounds are always read as `EPSG:4326`. |
 
 #### 6.3.1 Animation endpoint
 
@@ -446,12 +465,12 @@ GET /visual_tiles/{product_id}/{from_date}/{to_date}/animation.{ext}
 
 | Query param | Default                               | Description                                                                                                                                                                                                              |
 | ----------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `bbox`      | dataset's native extent               | `minx,miny,maxx,maxy` in the CRS specified by `crs`. When omitted, the dataset's lat/lon bounds are used (clamped to ±180° lon for antimeridian-straddling grids; pass `bbox` explicitly to render the slice past 180°). |
+| `bbox`      | dataset's native extent               | `minx,miny,maxx,maxy` in the CRS specified by `crs` (see [§5.4](#54-visual-tiles--generated-in-epsg3857-web-mercator) — `crs` governs both how these numbers are interpreted and the output frames' projection). When omitted, **`crs` only affects the output**: the dataset's lat/lon bounds are always read as `EPSG:4326` (clamped to ±180° lon for antimeridian-straddling grids; pass `bbox` explicitly to render the slice past 180°), while output frames still follow `crs`. |
 | `width`     | _(see "Resolution defaulting" below)_ | Output frame width in pixels (1–2048).                                                                                                                                                                                   |
 | `height`    | _(see "Resolution defaulting" below)_ | Output frame height in pixels (1–2048).                                                                                                                                                                                  |
 | `colormap`  | `viridis`                             | Colormap name. A categorical colormap may only be applied to a categorical variable and is rejected as animated WebP (use `.apng` or `.gif`).                                                                            |
 | `rescale`   | union of all frames                   | `min,max`. The default spans the union of every requested date so the colour ramp is stable frame-to-frame; auto-ranging per frame would flicker.                                                                        |
-| `crs`       | `EPSG:4326`                           | CRS of the explicit `bbox`. The default bbox is always returned in EPSG:4326 regardless of `crs`.                                                                                                                        |
+| `crs`       | `EPSG:3857`                           | CRS of both the explicit `bbox` *input* and the rendered *output* frames — same value drives both. The default bbox (when `bbox` omitted) is always read as `EPSG:4326` regardless of `crs`, but output frames still follow `crs`.                                                                                                                        |
 | `duration`  | `200`                                 | Milliseconds per frame (10–5000).                                                                                                                                                                                        |
 
 **Resolution defaulting** — `_resolve_resolution` (`core/tiler_routes/visual_tiles.py`):
@@ -466,7 +485,7 @@ GET /visual_tiles/{product_id}/{from_date}/{to_date}/animation.{ext}
 
 **Caching design** — this endpoint deliberately differs from the other tile endpoints: it calls `load_slice_uncached` (`services/store/slice_loader.py`), which bypasses the L2 slice cache entirely, so a rare 30-frame request can't evict hot slices serving the steady-state `/visual_tiles` and `/data_tiles` endpoints.
 
-**Frame loading** — the handler is `async def`. Per-frame `load_slice_uncached` calls are dispatched in parallel via `asyncio.gather(*(anyio.to_thread.run_sync(..., limiter=_ANIMATION_LIMITER) for ...))`, so a cold N-frame request blocks on roughly the slowest single-frame S3 read rather than the serial sum. Frame order is preserved because `gather` returns results in input order. This runs under `_ANIMATION_LIMITER` (`animation_workers`, default 10) — a budget independent of the default tile-handler limiter, so a 30-frame fan-out can't starve tile-handler slots. See [§12.6](#126-one-pool-two-named-budgets).
+**Frame loading** — the handler is `async def`. Per-frame `load_slice_uncached` calls are dispatched in parallel via `asyncio.gather(*(anyio.to_thread.run_sync(..., limiter=_ANIMATION_LIMITER) for ...))`, so a cold N-frame request blocks on roughly the slowest single-frame S3 read rather than the serial sum. Frame order is preserved because `gather` returns results in input order. This runs under `_ANIMATION_LIMITER` (`animation_workers`, default 10) — a budget independent of the default tile-handler limiter, so a 30-frame fan-out can't starve tile-handler slots. See [§12.3](#123-one-pool-two-named-budgets).
 
 ---
 
@@ -591,6 +610,8 @@ Everything specific to the `/visual_tiles` pipeline: how the renderer guards aga
 - `lon ∈ [−180, 360]` (allows 0–360 convention before normalisation)
 
 A dataset in a projected CRS (e.g. UTM, GDA94/MGA) would have coordinate values in the millions and is rejected immediately with a descriptive `ValueError` (mapped to HTTP 400). This prevents silent mis-rendering — the hardcoded `write_crs("EPSG:4326")` call would otherwise label projected coordinates as geographic without error.
+
+**Not to be confused with the `/bbox` endpoint's `?crs=` query parameter.** This guard is about the *source dataset's own* coordinates, always assumed geographic — it has nothing to do with `?crs=`, which (for `/bbox` and `/animation`) drives both how `bbox_to_wgs84` interprets the caller-supplied bbox numbers (`EPSG:4326` degrees or `EPSG:3857` metres) *and* the output image's projection — see [§5.4](#54-visual-tiles--generated-in-epsg3857-web-mercator).
 
 ### 8.2 Antimeridian handling
 
@@ -814,7 +835,7 @@ It deliberately waits for the non-tiler API's own startup before doing tiler wor
 
 ### 11.3 Readiness gate
 
-`mark_tiler_ready()` / `require_tiler_ready()` (`core/tiler_routes/shared.py`) back a `503 Service Unavailable` FastAPI dependency: any tiler route guarded by it returns 503 with a clear message until `run_tiler_warmup` has finished, instead of quietly serving from an empty product/colormap registry during the startup window.
+`mark_tiler_ready()` / `require_tiler_ready()` (`core/tiler_routes/shared.py`) back a `503 Service Unavailable` FastAPI dependency, applied router-wide (`core/tiler_routes/__init__.py`): every tiler route returns 503 with a clear message until `run_tiler_warmup` has finished, instead of quietly serving from an empty product/colormap registry during the startup window. It's applied alongside `api_key_auth` (`utils/api_utils.py`) on the same router — `dependencies=[Depends(api_key_auth), Depends(require_tiler_ready)]` — so every tiler request is checked for a valid `X-API-Key` header (401 on failure) before the readiness gate even runs.
 
 ### 11.4 What prewarm does and doesn't do
 
