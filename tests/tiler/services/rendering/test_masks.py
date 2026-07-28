@@ -9,13 +9,18 @@ assets are present and sane.
 import numpy as np
 import xarray as xr
 
-from data_access_service.tiler.services.product.product import CoastalFill, Product
+from data_access_service.tiler.services.product.product import (
+    CoastalFill,
+    DataTileConfig,
+    Product,
+)
 from data_access_service.tiler.services.rendering.data_tiles import (
     _compute_processed,
 )
 from data_access_service.tiler.services.rendering.masks import (
     apply_ocean_mask,
     inpaint_nearest,
+    land_mask_for_coords,
     land_mask_for_grid,
     load_land_mask,
     load_ocean_mask,
@@ -74,6 +79,28 @@ def test_land_mask_antimeridian_wraps():
     # Sanity: the global mask is not degenerate.
     land, _ = load_land_mask()
     assert 0.2 < float(land.mean()) < 0.5
+
+
+# --- land_mask_for_coords --------------------------------------------------
+
+
+def test_land_mask_for_coords_matches_known_points():
+    """Same known points as test_land_mask_known_points, via explicit coords
+    rather than a linspace grid — exercises the path visual_tiles uses to cut
+    land at native resolution (see _to_scalar_parts)."""
+    land = land_mask_for_coords(
+        np.array([133.9, -0.1, 160.0, -140.0]), np.array([-23.7, 51.5, -40.0, 0.0])
+    )
+    assert bool(land[0, 0]) is True  # central Australia
+    assert bool(land[1, 1]) is True  # London
+    assert bool(land[2, 2]) is False  # Tasman Sea
+    assert bool(land[3, 3]) is False  # mid Pacific
+
+
+def test_land_mask_for_coords_wraps_antimeridian():
+    # GSLA spans to 185°E; 182°E must wrap to -178°E (open Pacific), not clip to 180.
+    land = land_mask_for_coords(np.array([182.0]), np.array([0.0]))
+    assert bool(land[0, 0]) is False
 
 
 # --- ocean mask sampling --------------------------------------------------
@@ -144,10 +171,12 @@ def _product(coastal_fill, product_id="t"):
         id=product_id,
         source_path="",
         variable="GSLA",
-        lod_grids={1: (2, 2)},
-        chunk_px=(8, 8),
-        padding=0,
-        coastal_fill=coastal_fill,
+        data_tile=DataTileConfig(
+            lod_grids={1: (2, 2)},
+            chunk_px=(8, 8),
+            padding=0,
+            coastal_fill=coastal_fill,
+        ),
     )
 
 

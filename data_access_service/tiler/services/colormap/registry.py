@@ -1,6 +1,5 @@
 import json
 import logging
-from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
@@ -18,19 +17,6 @@ _custom_colormap_modes: dict[str, ColormapMode] = {}
 # store them explicitly to validate a colormap against a product's flag_values at
 # request time (see [[colormap.categorical]] callers).
 _custom_colormap_values: dict[str, list[int]] = {}
-
-# Callbacks invoked whenever the registry changes. Lets downstream modules
-# (e.g. colormap_lookup, legend_renderer) clear their LUT/legend LRU caches
-# without us importing them — colormap_config would otherwise have to do a
-# function-local import of those modules to break the cycle. The list is
-# populated at downstream-module import time and never trimmed; the small
-# bounded set is fine for this app.
-_invalidation_hooks: list[Callable[[], None]] = []
-
-
-def on_invalidate(hook: Callable[[], None]) -> None:
-    """Register a callback to fire after every colormap registry change."""
-    _invalidation_hooks.append(hook)
 
 
 def get_colormap(name: str) -> list[tuple[int, int, int, int]] | None:
@@ -99,5 +85,3 @@ def _reload(data: dict[str, list | dict]) -> None:
             _custom_colormap_values[name] = list(value.get("values", []))
         else:
             _custom_colormaps[name] = [tuple(rgba) for rgba in value]  # type: ignore[misc]
-    for hook in _invalidation_hooks:
-        hook()

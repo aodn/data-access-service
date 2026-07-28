@@ -202,7 +202,19 @@ def get_tile(
         ds = load_slice_or_404(
             product.source_path, date, [variable], ocean_masked=product.ocean_masked
         )
-        return render_tile(ds, variable, x, y, z, colormap_name, rescale_range, fmt=ext)
+        return render_tile(
+            ds,
+            variable,
+            x,
+            y,
+            z,
+            colormap_name,
+            rescale_range,
+            fmt=ext,
+            coastal_fill=product.visual_tile.coastal_fill,
+            source_path=product.source_path,
+            date=date,
+        )
 
     try:
         body = _tile_dedup.dedupe(key, _do_render)
@@ -356,6 +368,9 @@ def get_bbox(
             rescale_range,
             crs=crs,
             fmt=ext,
+            coastal_fill=product.visual_tile.coastal_fill,
+            source_path=product.source_path,
+            date=date,
         )
 
     try:
@@ -534,6 +549,9 @@ async def get_animation(
                 crs=crs,
                 fmt=ext,
                 duration_ms=duration,
+                coastal_fill=product.visual_tile.coastal_fill,
+                source_path=product.source_path,
+                dates=dates,
             )
         )
     except ValueError as e:

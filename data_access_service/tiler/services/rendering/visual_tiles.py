@@ -29,7 +29,16 @@ from data_access_service.tiler.services.colormap.registry import (
     get_category_values,
     is_categorical,
 )
+from data_access_service.tiler.services.caching.deduper import Deduper
+from data_access_service.tiler.services.caching.processed_cache import (
+    visual_processed_memo,
+)
 from data_access_service.tiler.services.colormap.resolver import resolve_colormap
+from data_access_service.tiler.services.product.product import CoastalFill
+from data_access_service.tiler.services.rendering.masks import (
+    inpaint_nearest,
+    land_mask_for_coords,
+)
 from data_access_service.tiler.services.store.spatial import bbox_to_wgs84
 from data_access_service.tiler.utils.image import (
     AnimatedFormat,
@@ -40,6 +49,47 @@ from data_access_service.tiler.utils.image import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Always in-process, independent of CACHE_BACKEND — see Deduper's docstring
+# for why this matters even (especially) under CACHE_BACKEND=none: it coalesces
+# a burst of concurrent tile requests for the same (product, date) — the common
+# case when a map viewport loads many tiles at once — onto one inpaint + land-cut
+# compute instead of one per tile.
+_fill_dedup = Deduper()
+
+
+def _get_filled_values(
+    source_path: str,
+    date: str,
+    variable: str,
+    coastal_fill: CoastalFill,
+    values: np.ndarray,
+    lons: np.ndarray,
+    lats: np.ndarray,
+) -> np.ndarray:
+    """Inpaint + land-cut ``values``, cached per (source_path, date, variable,
+    coastal_fill) so every tile/bbox/animation-frame request for the same date
+    shares one compute instead of redoing distance_transform_edt + the land
+    lookup per request (see caching.processed_cache).
+
+    The returned array is shared across every caller for this key (in-process,
+    and cross-instance under a real CacheBackend) — marked read-only so an
+    accidental downstream mutation fails loudly instead of corrupting it for
+    every other caller.
+    """
+    key = (source_path, date, variable, coastal_fill.max_dist_px)
+
+    def factory() -> np.ndarray:
+        filled = inpaint_nearest(values, coastal_fill.max_dist_px).copy()
+        land = land_mask_for_coords(lons, lats)
+        filled[land] = np.nan
+        filled.setflags(write=False)
+        return filled
+
+    def compute() -> np.ndarray:
+        return visual_processed_memo.get_or_compute(key, factory)
+
+    return _fill_dedup.dedupe(key, compute)
 
 
 def warmup_visual() -> None:
@@ -213,7 +263,13 @@ def _apply_crs(da: xr.DataArray) -> xr.DataArray:
     return da.rio.write_crs("EPSG:4326").rio.set_spatial_dims(x_dim="lon", y_dim="lat")
 
 
-def _to_scalar_parts(ds: xr.Dataset, variable: str) -> list[xr.DataArray]:
+def _to_scalar_parts(
+    ds: xr.Dataset,
+    variable: str,
+    coastal_fill: CoastalFill | None = None,
+    source_path: str = "",
+    date: str = "",
+) -> list[xr.DataArray]:
     """Return float32 DataArrays ready for XarrayReader.
 
     Returns one element in the common case. Returns two elements when the data
@@ -228,8 +284,34 @@ def _to_scalar_parts(ds: xr.Dataset, variable: str) -> list[xr.DataArray]:
 
     lon == 180 is excluded from both segments so that rioxarray's half-pixel padding
     keeps each segment's bounds strictly inside the ±180 limit rio_tiler enforces.
+
+    If ``coastal_fill`` is set (``Product.visual_tile.coastal_fill``), NaN gaps
+    are filled from the nearest valid cell before any reprojection — once, on
+    the native-resolution array, so every zoom level's bilinear resample sees
+    the same filled source (mirrors data_tiles' inpaint, but at native
+    resolution rather than an LOD-resampled grid, and independently
+    configurable — see product.VisualTileConfig). Any fill that landed on real
+    land is then cut back off (via the same committed Natural Earth raster
+    data_tiles uses) before reprojection, so every downstream render path —
+    tile, bbox, animation — inherits the cut with no per-projection logic of
+    its own (see rendering.masks module docstring). ``source_path``/``date``
+    are only used as the cache key for this step (see ``_get_filled_values``)
+    — panning/zooming across many tiles of the same date shares one compute.
+    Default to "" for callers that don't need cross-request cache correctness
+    (e.g. tests exercising a single call in isolation).
     """
     da = ds[variable].astype(np.float32)
+    if coastal_fill is not None:
+        filled = _get_filled_values(
+            source_path,
+            date,
+            variable,
+            coastal_fill,
+            da.values,
+            da.lon.values,
+            da.lat.values,
+        )
+        da = da.copy(data=filled)
 
     lat_min, lat_max = float(da.lat.min()), float(da.lat.max())
     lon_min, lon_max = float(da.lon.min()), float(da.lon.max())
@@ -285,6 +367,9 @@ def render_tile(
     colormap_name: str | None = None,
     rescale: tuple[float, float] | None = None,
     fmt: ImageFormat = "png",
+    coastal_fill: CoastalFill | None = None,
+    source_path: str = "",
+    date: str = "",
 ) -> bytes:
     """Return a 256×256 Web Mercator tile encoded as ``fmt``.
 
@@ -292,11 +377,12 @@ def render_tile(
     variables (CF ``flag_values``) take the discrete-lookup path — nearest-neighbour
     resampling and a value-indexed LUT, no rescale; see [[colormap.categorical]].
     ``colormap_name`` None means "unspecified" (default viridis ramp / default
-    categorical palette).
+    categorical palette). ``coastal_fill`` is ``Product.visual_tile.coastal_fill``;
+    ``source_path``/``date`` key its cache (see ``_to_scalar_parts``).
     """
     attrs = ds[variable].attrs
     _validate_categorical_request(variable, attrs, colormap_name, fmt, rescale=rescale)
-    parts = _to_scalar_parts(ds, variable)
+    parts = _to_scalar_parts(ds, variable, coastal_fill, source_path, date)
 
     if is_categorical_variable(attrs):
         scheme = resolve_scheme(attrs, colormap_name)
@@ -377,16 +463,21 @@ def render_bbox(
     rescale: tuple[float, float] | None = None,
     crs: str = "EPSG:4326",
     fmt: ImageFormat = "png",
+    coastal_fill: CoastalFill | None = None,
+    source_path: str = "",
+    date: str = "",
 ) -> bytes:
     """Return an image for an arbitrary bbox encoded as ``fmt``.
 
     bbox must be (minx, miny, maxx, maxy) in the given crs ('EPSG:4326' degrees or 'EPSG:3857' meters).
     Returns a fully transparent tile when the bbox does not intersect the data. Categorical
     variables take the discrete-lookup path (see [[colormap.categorical]] / `render_tile`).
+    ``coastal_fill`` is ``Product.visual_tile.coastal_fill``;
+    ``source_path``/``date`` key its cache (see ``_to_scalar_parts``).
     """
     attrs = ds[variable].attrs
     _validate_categorical_request(variable, attrs, colormap_name, fmt, rescale=rescale)
-    parts = _to_scalar_parts(ds, variable)
+    parts = _to_scalar_parts(ds, variable, coastal_fill, source_path, date)
     bbox_wgs84 = bbox_to_wgs84(bbox, crs)
     lo, la_min, hi, la_max = bbox_wgs84
 
@@ -426,6 +517,9 @@ def render_bbox_animation(
     crs: str = "EPSG:4326",
     fmt: AnimatedFormat = "webp",
     duration_ms: int = 200,
+    coastal_fill: CoastalFill | None = None,
+    source_path: str = "",
+    dates: list[str] | None = None,
 ) -> bytes:
     """Render the same bbox across ``datasets`` and assemble as an animated image.
 
@@ -435,16 +529,26 @@ def render_bbox_animation(
     Frames whose data does not intersect the bbox are emitted as fully transparent
     so timing stays aligned with the date sequence. Categorical variables take the
     discrete-lookup path (nearest resampling, value-indexed LUT, no rescale).
+    ``coastal_fill`` is ``Product.visual_tile.coastal_fill``, applied identically
+    to every frame (it's a static per-product setting, not per-date).
+    ``source_path``/``dates`` (one per ``datasets`` entry) key each frame's fill
+    cache (see ``_to_scalar_parts``) so a repeated animation request — or another
+    endpoint hitting the same (product, date) — reuses each frame's compute.
     """
     if not datasets:
         raise ValueError("render_bbox_animation requires at least one dataset")
+    if dates is None:
+        dates = [""] * len(datasets)
 
     attrs = datasets[0][variable].attrs
     _validate_categorical_request(
         variable, attrs, colormap_name, fmt, rescale=rescale, animated=True
     )
 
-    parts_per_frame = [_to_scalar_parts(ds, variable) for ds in datasets]
+    parts_per_frame = [
+        _to_scalar_parts(ds, variable, coastal_fill, source_path, d)
+        for ds, d in zip(datasets, dates, strict=True)
+    ]
     bbox_wgs84 = bbox_to_wgs84(bbox, crs)
 
     if is_categorical_variable(attrs):

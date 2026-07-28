@@ -31,17 +31,18 @@ def render_manifest(product: Product, ds: xr.Dataset) -> dict[str, Any]:
         "latMin": lat_min_g,
         "latMax": lat_max_g,
     }
+    data_tile = product.data_tile
     lod_meta = {
         str(lod): {
-            "grid": list(product.lod_grids[lod]),
-            "chunkPx": list(product.chunk_px),
+            "grid": list(data_tile.lod_grids[lod]),
+            "chunkPx": list(data_tile.chunk_px),
             "storedPx": [
-                product.chunk_px[0] + 2 * product.padding,
-                product.chunk_px[1] + 2 * product.padding,
+                data_tile.chunk_px[0] + 2 * data_tile.padding,
+                data_tile.chunk_px[1] + 2 * data_tile.padding,
             ],
-            "padding": product.padding,
+            "padding": data_tile.padding,
         }
-        for lod in product.lod_grids
+        for lod in data_tile.lod_grids
     }
 
     if isinstance(product.variable, list):

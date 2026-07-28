@@ -6,6 +6,8 @@ cases without needing a real Zarr store.
 """
 
 import io
+import threading
+import time
 
 import numpy as np
 import pytest
@@ -13,6 +15,7 @@ import xarray as xr
 from PIL import Image
 
 import data_access_service.tiler.services.rendering.visual_tiles as visual_renderer
+from data_access_service.tiler.services.product.product import CoastalFill
 from data_access_service.tiler.utils.image import TILE_SIZE
 
 
@@ -102,6 +105,51 @@ def test_to_scalar_parts_rejects_non_geographic_crs():
         visual_renderer._to_scalar_parts(ds, "v")
 
 
+def _ds_with_gap() -> xr.Dataset:
+    """All-valid ramp with a small NaN hole in the middle, for coastal-fill tests."""
+    ds = _scalar_ds(size=16)
+    ds["GSLA"].values[7:9, 7:9] = np.nan
+    return ds
+
+
+def _ocean_ds_with_gap() -> xr.Dataset:
+    """Same as _ds_with_gap, but positioned over open Southern Ocean (south of
+    Tasmania) so the real land mask doesn't zero out the whole test region —
+    _ds_with_gap's default lon/lat box overlaps mainland southeastern Australia."""
+    ds = _scalar_ds(lat=(-45.0, -40.0), lon=(150.0, 160.0), size=16)
+    ds["GSLA"].values[7:9, 7:9] = np.nan
+    return ds
+
+
+def test_to_scalar_parts_no_coastal_fill_leaves_gap_nan():
+    ds = _ds_with_gap()
+    parts = visual_renderer._to_scalar_parts(ds, "GSLA")
+    assert np.isnan(parts[0].values[7:9, 7:9]).all()
+
+
+def test_to_scalar_parts_coastal_fill_fills_gap_within_distance():
+    # Over open ocean: _ds_with_gap's default box overlaps mainland Australia,
+    # where the land cut (also applied here — see _to_scalar_parts) would
+    # immediately erase the fill, masking the effect this test checks for.
+    ds = _ocean_ds_with_gap()
+    parts = visual_renderer._to_scalar_parts(ds, "GSLA", CoastalFill(max_dist_px=4))
+    assert not np.isnan(parts[0].values[7:9, 7:9]).any()
+
+
+def test_to_scalar_parts_coastal_fill_cuts_fill_that_lands_on_land():
+    """The reverse of the ocean case above: over land, coastal_fill's fill must
+    not survive — this is the land-cut this whole feature is guarding."""
+    ds = _ds_with_gap()  # lat(-40,-30)/lon(140,150): mainland southeastern Australia
+    parts = visual_renderer._to_scalar_parts(ds, "GSLA", CoastalFill(max_dist_px=4))
+    assert np.isnan(parts[0].values[7:9, 7:9]).all()
+
+
+def test_to_scalar_parts_coastal_fill_respects_max_dist_px():
+    ds = _ds_with_gap()
+    parts = visual_renderer._to_scalar_parts(ds, "GSLA", CoastalFill(max_dist_px=0))
+    assert np.isnan(parts[0].values[7:9, 7:9]).all()
+
+
 # ---------------------------------------------------------------------------
 # _rescale_range
 # ---------------------------------------------------------------------------
@@ -169,6 +217,31 @@ def test_render_tile_rescale_changes_output():
     a = visual_renderer.render_tile(ds, "GSLA", 29, 18, 5, rescale=(0.0, 1.0))
     b = visual_renderer.render_tile(ds, "GSLA", 29, 18, 5, rescale=(0.0, 0.1))
     assert a != b
+
+
+def test_render_bbox_coastal_fill_increases_opaque_pixel_count():
+    """A NaN gap leaves transparent pixels; coastal_fill should make more of them opaque.
+
+    Uses render_bbox (not render_tile) tightly cropped over the gap — at a
+    Web Mercator tile's coarser zoom the 2-pixel native gap is too small
+    relative to the tile to reliably show up in the resampled output.
+    """
+    ds = _ocean_ds_with_gap()
+    bbox = (154.0, -43.5, 156.0, -41.5)  # brackets the gap in _ocean_ds_with_gap
+    without_fill = visual_renderer.render_bbox(
+        ds, "GSLA", bbox=bbox, width=64, height=64
+    )
+    with_fill = visual_renderer.render_bbox(
+        ds,
+        "GSLA",
+        bbox=bbox,
+        width=64,
+        height=64,
+        coastal_fill=CoastalFill(max_dist_px=4),
+    )
+    opaque_without = (_decode_png(without_fill)[..., 3] > 0).sum()
+    opaque_with = (_decode_png(with_fill)[..., 3] > 0).sum()
+    assert opaque_with > opaque_without
 
 
 def test_render_bbox_in_wgs84():
@@ -250,3 +323,80 @@ def test_render_bbox_animation_all_nan_does_not_error():
     )
     img = Image.open(io.BytesIO(out))
     assert img.format == "GIF"
+
+
+# ---------------------------------------------------------------------------
+# concurrent stampede protection (always in-process, independent of CACHE_BACKEND)
+# ---------------------------------------------------------------------------
+
+
+def test_concurrent_tiles_at_same_date_share_one_fill_compute(monkeypatch):
+    """Two different tiles (z/x/y) for the same (source_path, date, variable,
+    coastal_fill) must share one inpaint+land-cut compute when requested
+    concurrently, not each redo it independently. This is what `_fill_dedup`
+    (services.caching.deduper) protects — see its docstring for why this
+    matters even under CACHE_BACKEND=none."""
+    ds = _ocean_ds_with_gap()
+    calls = 0
+    proceed = threading.Event()
+    real_inpaint = visual_renderer.inpaint_nearest
+
+    def slow_inpaint(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        proceed.wait(timeout=2)
+        return real_inpaint(*args, **kwargs)
+
+    monkeypatch.setattr(visual_renderer, "inpaint_nearest", slow_inpaint)
+
+    results: list[bytes] = []
+
+    def render(x, y):
+        results.append(
+            visual_renderer.render_tile(
+                ds,
+                "GSLA",
+                x,
+                y,
+                5,
+                coastal_fill=CoastalFill(max_dist_px=4),
+                source_path="s3://test/gap.zarr",
+                date="2024-01-01",
+            )
+        )
+
+    threads = [
+        threading.Thread(target=render, args=(29, 18)),
+        threading.Thread(target=render, args=(30, 18)),
+    ]
+    for t in threads:
+        t.start()
+    time.sleep(0.1)  # let both threads register on the in-flight key
+    proceed.set()
+    for t in threads:
+        t.join(timeout=2)
+
+    assert (
+        calls == 1
+    ), "expected exactly one inpaint compute; the rest should share it via _fill_dedup"
+    assert len(results) == 2
+
+
+def test_get_filled_values_returns_read_only_array():
+    """The cached array is shared across every caller for its key — read-only
+    so an accidental downstream mutation fails loudly instead of silently
+    corrupting it for every other caller."""
+    ds = _ocean_ds_with_gap()
+    da = ds["GSLA"].astype(np.float32)
+    filled = visual_renderer._get_filled_values(
+        "s3://test/gap.zarr",
+        "2024-01-01",
+        "GSLA",
+        CoastalFill(max_dist_px=4),
+        da.values,
+        da.lon.values,
+        da.lat.values,
+    )
+    assert not filled.flags.writeable
+    with pytest.raises(ValueError, match="read-only"):
+        filled[0, 0] = 1.0

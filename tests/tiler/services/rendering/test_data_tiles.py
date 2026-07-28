@@ -6,7 +6,7 @@ import xarray as xr
 
 import data_access_service.tiler.services.rendering.data_tiles as data_tiles_module
 from data_access_service.tiler.services.product.manifest import render_manifest
-from data_access_service.tiler.services.product.product import Product
+from data_access_service.tiler.services.product.product import DataTileConfig, Product
 from data_access_service.tiler.services.rendering.data_tiles import render_tile
 from data_access_service.tiler.services.rendering.kernels import (
     resample_variables_to_grid,
@@ -32,18 +32,14 @@ SCALAR_PRODUCT = Product(
     id="test_scalar",
     source_path="",
     variable="sst",
-    lod_grids={1: (1, 1)},
-    chunk_px=(8, 8),
-    padding=0,
+    data_tile=DataTileConfig(lod_grids={1: (1, 1)}, chunk_px=(8, 8), padding=0),
 )
 
 UV_PRODUCT = Product(
     id="test_uv",
     source_path="",
     variable=["u", "v"],
-    lod_grids={1: (1, 1)},
-    chunk_px=(8, 8),
-    padding=0,
+    data_tile=DataTileConfig(lod_grids={1: (1, 1)}, chunk_px=(8, 8), padding=0),
 )
 
 # 2x2 grid of 8px chunks so two different tiles (cx, cy) map to the same
@@ -53,9 +49,7 @@ MULTI_TILE_PRODUCT = Product(
     id="test_multi_tile",
     source_path="",
     variable="sst",
-    lod_grids={1: (2, 2)},
-    chunk_px=(8, 8),
-    padding=0,
+    data_tile=DataTileConfig(lod_grids={1: (2, 2)}, chunk_px=(8, 8), padding=0),
 )
 
 
@@ -100,9 +94,7 @@ CATEGORICAL_PRODUCT = Product(
     id="test_cat",
     source_path="",
     variable="cat",
-    lod_grids={1: (1, 1)},
-    chunk_px=(8, 8),
-    padding=0,
+    data_tile=DataTileConfig(lod_grids={1: (1, 1)}, chunk_px=(8, 8), padding=0),
 )
 
 

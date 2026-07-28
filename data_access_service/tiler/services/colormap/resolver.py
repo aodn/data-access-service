@@ -2,27 +2,14 @@
 
 Distinct from [[colormap.registry]]: that module handles persistence and the
 custom registry on disk. This module is the runtime fallback chain used by
-every render call — custom → rio-tiler → matplotlib — plus the LRU caches that
-keep repeat lookups O(1).
-
-LRU cache invalidation is wired here (rather than in colormap_config) to keep
-the dependency direction one-way: colormap_config fires hooks; downstream
-consumers register themselves.
+every render call — custom → rio-tiler → matplotlib.
 """
-
-from functools import lru_cache
 
 import numpy as np
 
-from data_access_service.tiler.services.colormap.registry import (
-    get_colormap,
-    on_invalidate,
-)
+from data_access_service.tiler.services.colormap.registry import get_colormap
 
 
-# LRU because resolve_colormap is called on every visual-tile render; render_legend
-# has its own cache so this LRU is effectively just for the tile path.
-@lru_cache(maxsize=64)
 def resolve_colormap(name: str) -> dict[int, tuple[int, int, int, int]]:
     """Return a rio-tiler colormap dict for the given name.
 
@@ -53,6 +40,3 @@ def resolve_colormap(name: str) -> dict[int, tuple[int, int, int, int]]:
         i: (int(rgba[i, 0]), int(rgba[i, 1]), int(rgba[i, 2]), int(rgba[i, 3]))
         for i in range(256)
     }
-
-
-on_invalidate(resolve_colormap.cache_clear)
