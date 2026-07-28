@@ -80,14 +80,17 @@ def iter_product_items() -> list[tuple[str, Product]]:
 def load_products() -> None:
     """Read products.json from disk into PRODUCTS. Called once on startup.
 
+    products.json is committed static config (config/tiler/products.json) — it should
+    always be present on disk. A missing file means a broken deploy/package, not a
+    legitimate empty state, so this raises rather than silently serving zero products.
+
     Updates PRODUCTS in place without ever exposing an empty state to concurrent readers:
     additions/updates are applied first, then removals. A reader that races a reload sees
     either the previous set, the new set, or a transient with stale entries still
     present — never an empty dict.
     """
     if not _config_path.exists():
-        logger.warning("No products.json found — starting with empty product list")
-        return
+        raise FileNotFoundError(f"products.json not found at {_config_path}")
     entries: list[dict] = json.loads(_config_path.read_text())
     new = {entry["id"]: _from_dict(entry) for entry in entries}
     for product_id, product in new.items():

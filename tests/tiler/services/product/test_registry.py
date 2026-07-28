@@ -37,9 +37,9 @@ def _write(cfg, entries):
     cfg.write_text(json.dumps(entries))
 
 
-def test_load_products_no_file_is_noop(isolated_products):
-    registry.load_products()
-    assert PRODUCTS == {}
+def test_load_products_no_file_raises(isolated_products):
+    with pytest.raises(FileNotFoundError):
+        registry.load_products()
 
 
 def test_load_populates_products(isolated_products):
