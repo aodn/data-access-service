@@ -17,18 +17,18 @@ from data_access_service.utils.email_templates.email_images import (
 
 
 def _to_display_date(value):
-    """Format an ISO date (YYYY-MM-DD) as the Australian dd/mm/yyyy.
+    """Format an ISO date (YYYY-MM-DD) as DD MMM YYYY, e.g. 05 Jan 2024.
 
     Any value that is not a plain ISO date is returned unchanged.
     """
     try:
-        return datetime.strptime(value, "%Y-%m-%d").strftime("%d/%m/%Y")
+        return datetime.strptime(value, "%Y-%m-%d").strftime("%d %b %Y")
     except (ValueError, TypeError):
         return value
 
 
 def form_subsetting_divs(start_date, end_date, multi_polygon):
-    """Form subsetting section with time range, bounding boxes and polygons"""
+    """Form subsetting section with date range, bounding boxes and polygons"""
 
     # Hide if dates are NON_SPECIFIED or match default values (1970-01-01 to today)
     has_dates = False
@@ -66,7 +66,7 @@ def form_subsetting_divs(start_date, end_date, multi_polygon):
     bbox_divs = form_bbox_divs(bboxes) if has_bboxes else ""
     polygon_divs = form_polygon_divs(polygons) if has_polygons else ""
 
-    # Form time range section if dates exist (Australian dd/mm/yyyy display format)
+    # Form date range section if dates exist (DD MMM YYYY display format)
     time_range_section = ""
     if has_dates:
         display_start = _to_display_date(start_date)
@@ -103,7 +103,7 @@ def form_subsetting_divs(start_date, end_date, multi_polygon):
                                                     <tr>
                                                         <td align="left" width="100%">
                                                             <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 14px; font-weight: 500; line-height: 157%; text-align: left; color: #090c02">
-                                                                <p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">Time Range</p>
+                                                                <p style="Margin:0;mso-line-height-alt:22px;font-size:14px;line-height:157%;">Date Range</p>
                                                             </div>
                                                         </td>
                                                     </tr>

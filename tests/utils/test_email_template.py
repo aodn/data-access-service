@@ -1,5 +1,5 @@
 """Tests for the download email's subsetting section: classifying a selection
-into bounding boxes vs freeform polygons and rendering it (plus the time range)
+into bounding boxes vs freeform polygons and rendering it (plus the date range)
 into the email HTML."""
 
 import unittest
@@ -142,31 +142,31 @@ class TestSubsettingPolygon(unittest.TestCase):
         self.assertIn("Polygon Selection", html)
 
     def test_default_dates_are_suppressed(self):
-        # The portal's "no time filter" default is 1970-01-01 .. today; it must
-        # not render as a time range. Pair it with a polygon so the section still
-        # renders and we can assert the time range specifically is absent.
+        # The portal's "no date filter" default is 1970-01-01 .. today; it must
+        # not render as a date range. Pair it with a polygon so the section still
+        # renders and we can assert the date range specifically is absent.
         today = pandas.Timestamp.today().strftime("%Y-%m-%d")
         html = form_subsetting_divs("1970-01-01", today, FREEFORM_POLYGON)
 
         self.assertIn("Polygon Selection", html)
-        self.assertNotIn("Time Range", html)
+        self.assertNotIn("Date Range", html)
 
     def test_default_dates_without_area_returns_empty(self):
         # Default dates and no spatial selection means nothing to show at all.
         today = pandas.Timestamp.today().strftime("%Y-%m-%d")
         self.assertEqual(form_subsetting_divs("1970-01-01", today, None), "")
 
-    def test_time_range_uses_australian_date_format(self):
+    def test_date_range_uses_day_month_year_format(self):
         html = form_subsetting_divs("2024-01-05", "2024-12-31", None)
 
-        self.assertIn("05/01/2024 - 31/12/2024", html)
+        self.assertIn("05 Jan 2024 - 31 Dec 2024", html)
 
     def test_malformed_geometry_does_not_crash(self):
         # A malformed multi_polygon must not break the email; the spatial section
         # is simply omitted while the rest of the email still renders.
         html = form_subsetting_divs("2024-01-05", "2024-12-31", "not-valid-geojson")
 
-        self.assertIn("05/01/2024 - 31/12/2024", html)
+        self.assertIn("05 Jan 2024 - 31 Dec 2024", html)
         self.assertNotIn("Bounding Box", html)
         self.assertNotIn("Polygon Selection", html)
 
