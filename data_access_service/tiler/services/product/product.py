@@ -96,6 +96,8 @@ class Product:
     variable: str | list[str]
     # Links this product to the GeoNetwork/STAC collection it belongs to, so ogcapi-java can
     # group products by collection UUID. Optional and generic for both visual and data tiles.
+    # Resolved at load time from the runtime catalog (see registry._resolve_metadata_uuid),
+    # not set in products.json — None if the product's dataset isn't in that catalog yet.
     metadata_uuid: str | None = None
     ocean_masked: bool = False
     data_tile: DataTileConfig = field(default_factory=DataTileConfig)

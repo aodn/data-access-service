@@ -77,12 +77,19 @@ def iter_product_items() -> list[tuple[str, Product]]:
     return list(PRODUCTS.items())
 
 
-def load_products() -> None:
+def load_products(dataset_uuid_map: dict[str, str] | None = None) -> None:
     """Read products.json from disk into PRODUCTS. Called once on startup.
 
     products.json is committed static config (config/tiler/products.json) — it should
     always be present on disk. A missing file means a broken deploy/package, not a
     legitimate empty state, so this raises rather than silently serving zero products.
+
+    ``dataset_uuid_map`` (dataset filename -> metadata UUID, see
+    ``API.get_dataset_uuid_map``) resolves each product's ``metadata_uuid`` from the
+    runtime catalog rather than a hardcoded products.json field — that catalog is the
+    actual source of truth, so a hand-copied value would just be another place for it
+    to go stale. Pass ``None`` (the default) to skip resolution and leave
+    ``metadata_uuid`` unset, e.g. in tests that don't care about it.
 
     Updates PRODUCTS in place without ever exposing an empty state to concurrent readers:
     additions/updates are applied first, then removals. A reader that races a reload sees
@@ -92,7 +99,7 @@ def load_products() -> None:
     if not _config_path.exists():
         raise FileNotFoundError(f"products.json not found at {_config_path}")
     entries: list[dict] = json.loads(_config_path.read_text())
-    new = {entry["id"]: _from_dict(entry) for entry in entries}
+    new = {entry["id"]: _from_dict(entry, dataset_uuid_map) for entry in entries}
     for product_id, product in new.items():
         PRODUCTS[product_id] = product
     for stale_id in [k for k in PRODUCTS if k not in new]:
@@ -104,12 +111,46 @@ def _coastal_fill(config: CoastalFillConfig | None) -> CoastalFill | None:
     return CoastalFill(max_dist_px=config.max_dist_px) if config else None
 
 
-def _from_dict(entry: dict) -> Product:
+def _resolve_metadata_uuid(
+    entry: dict, dataset_uuid_map: dict[str, str] | None
+) -> str | None:
+    """Look up ``entry``'s metadata UUID in the runtime catalog map by matching
+    its ``source_path`` basename against a catalog dataset filename. Logs and
+    returns None on a miss rather than failing startup — metadata_uuid is only
+    used for GeoNetwork/STAC grouping, not for serving tiles, so a product
+    should still load without it.
+    """
+    if dataset_uuid_map is None:
+        return None
+    dataset_name = entry["source_path"].rstrip("/").rsplit("/", 1)[-1]
+    uuid = dataset_uuid_map.get(dataset_name)
+    if uuid is None:
+        logger.warning(
+            "No metadata_uuid found in runtime catalog for product '%s' "
+            "(dataset '%s') — loading it with metadata_uuid=None",
+            entry["id"],
+            dataset_name,
+        )
+    return uuid
+
+
+def _from_dict(entry: dict, dataset_uuid_map: dict[str, str] | None = None) -> Product:
     """Validate one products.json entry against ProductConfig (extra="forbid"
     catches typos), after resolving the one default that depends on ``id``
     (ocean_masked) — every other default (chunk_px, padding) lives directly on
     ProductConfig/DataTileConfig and applies automatically when omitted.
+
+    metadata_uuid is resolved from the runtime catalog (see
+    _resolve_metadata_uuid), not read from the entry. It stays a declared field
+    on ProductConfig only because that same model serializes GET /products
+    output — extra="forbid" can't catch a stray "metadata_uuid" left in
+    products.json, so that's rejected explicitly here instead.
     """
+    if "metadata_uuid" in entry:
+        raise ValueError(
+            f"Product '{entry.get('id')}': metadata_uuid is resolved from the runtime "
+            "catalog at load time and must not be set in products.json"
+        )
     payload = dict(entry)
     if payload.get("ocean_masked") is None:
         payload["ocean_masked"] = entry["id"] in _OCEAN_MASKED_BY_DEFAULT
@@ -119,7 +160,7 @@ def _from_dict(entry: dict) -> Product:
         source_path=parsed.source_path,
         variable=parsed.variable,
         ocean_masked=parsed.ocean_masked,
-        metadata_uuid=parsed.metadata_uuid,
+        metadata_uuid=_resolve_metadata_uuid(entry, dataset_uuid_map),
         data_tile=DataTileConfig(
             chunk_px=parsed.data_tile.chunk_px,
             padding=parsed.data_tile.padding,

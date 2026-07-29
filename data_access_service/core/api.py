@@ -618,6 +618,19 @@ class API(BaseAPI):
             return value
         return {"not_exist": Descriptor(uuid=uuid)}
 
+    def get_dataset_uuid_map(self) -> Dict[str, str]:
+        """Invert ``_cached_metadata`` (uuid -> dataset_name -> Descriptor) into
+        ``dataset_name -> uuid``, so callers that only know a dataset's filename
+        (e.g. the tiler product registry, keyed by ``source_path``) can look up
+        its metadata UUID without hardcoding it. Dataset names are unique catalog
+        keys (see refresh_uuid_dataset_map), so the inversion is 1:1.
+        """
+        return {
+            dataset_name: uuid
+            for uuid, datasets in self._cached_metadata.items()
+            for dataset_name in datasets
+        }
+
     def get_raw_meta_data(self, uuid: str) -> Dict[str, Any]:
         value = self._raw.get(uuid)
 

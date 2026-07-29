@@ -62,23 +62,24 @@ def test_get_products_reflects_effective_state(client, monkeypatch):
     assert p["ocean_masked"] is False
 
 
-def test_list_products_metadata_uuid_null_when_absent(client, tmp_path, monkeypatch):
+def test_list_products_metadata_uuid_resolved_from_runtime_catalog(
+    client, tmp_path, monkeypatch
+):
+    """metadata_uuid is resolved from the runtime dataset_uuid_map passed to
+    load_products (see startup.py: load_products(api.get_dataset_uuid_map())),
+    not read from products.json — a product whose dataset isn't in that map
+    still loads, with metadata_uuid null."""
     cfg = tmp_path / "products.json"
     cfg.write_text(
         json.dumps(
             [
-                {
-                    "id": "linked",
-                    "source_path": "s3://b/x.zarr",
-                    "variable": "GSLA",
-                    "metadata_uuid": "uuid-123",
-                },
+                {"id": "linked", "source_path": "s3://b/x.zarr", "variable": "GSLA"},
                 {"id": "plain", "source_path": "s3://b/y.zarr", "variable": "V"},
             ]
         )
     )
     monkeypatch.setattr(registry, "_config_path", cfg)
-    registry.load_products()
+    registry.load_products(dataset_uuid_map={"x.zarr": "uuid-123"})
 
     r = client.get("/api/v1/das/tiler/data_tiles/products")
     assert r.status_code == 200

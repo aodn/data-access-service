@@ -28,7 +28,7 @@ async def run_tiler_warmup(api: API) -> None:
     logger.info("Waiting for API metadata init before starting other tasks")
     await wait_until_api_ready(api)
 
-    load_products()
+    load_products(api.get_dataset_uuid_map())
     load_colormaps()
     await anyio.to_thread.run_sync(warmup_resample)
     await anyio.to_thread.run_sync(warmup_visual)

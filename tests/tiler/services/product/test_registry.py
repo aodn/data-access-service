@@ -146,15 +146,35 @@ def test_ocean_masked_defaults_true_for_listed_product(isolated_products):
 
 
 def test_metadata_uuid_absent_defaults_to_none(isolated_products):
+    """No dataset_uuid_map passed (e.g. caller doesn't care) -> metadata_uuid stays None."""
     _write(isolated_products, [_entry("plain")])
     registry.load_products()
     assert PRODUCTS["plain"].metadata_uuid is None
 
 
-def test_metadata_uuid_set_from_entry(isolated_products):
-    _write(isolated_products, [_entry("linked", metadata_uuid="uuid-123")])
-    registry.load_products()
+def test_metadata_uuid_resolved_from_dataset_uuid_map(isolated_products):
+    """metadata_uuid is looked up by source_path basename in the runtime catalog map,
+    not read from products.json (see startup.py: load_products(api.get_dataset_uuid_map()))."""
+    _write(isolated_products, [_entry("linked", source="s3://bucket/x.zarr")])
+    registry.load_products(dataset_uuid_map={"x.zarr": "uuid-123"})
     assert PRODUCTS["linked"].metadata_uuid == "uuid-123"
+
+
+def test_metadata_uuid_missing_from_map_defaults_to_none(isolated_products):
+    """A dataset_uuid_map was provided but has no entry for this product's dataset -
+    load anyway with metadata_uuid=None rather than failing startup or dropping the
+    product, since metadata_uuid is only used for GeoNetwork/STAC grouping."""
+    _write(isolated_products, [_entry("orphan", source="s3://bucket/unknown.zarr")])
+    registry.load_products(dataset_uuid_map={"x.zarr": "uuid-123"})
+    assert "orphan" in PRODUCTS
+    assert PRODUCTS["orphan"].metadata_uuid is None
+
+
+def test_metadata_uuid_in_entry_raises(isolated_products):
+    """metadata_uuid is runtime-derived now, not hand-set in products.json."""
+    _write(isolated_products, [_entry("linked", metadata_uuid="uuid-123")])
+    with pytest.raises(ValueError):
+        registry.load_products()
 
 
 def test_ocean_masked_explicit_false_overrides_default(isolated_products):

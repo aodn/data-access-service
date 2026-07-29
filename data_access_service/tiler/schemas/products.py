@@ -74,7 +74,10 @@ class ProductConfig(BaseModel):
     id: str
     source_path: str
     variable: str | list[str]
-    # Links this product to its GeoNetwork/STAC collection UUID. Null when absent.
+    # Links this product to its GeoNetwork/STAC collection UUID. Resolved from the
+    # runtime catalog at load time (see registry._resolve_metadata_uuid) rather than
+    # read from products.json — declared here only so this same model can serialize
+    # it for GET /products output. Null when the catalog has no match.
     metadata_uuid: str | None = None
     ocean_masked: bool
     data_tile: DataTileConfig = Field(default_factory=DataTileConfig)
