@@ -154,7 +154,8 @@ def test_metadata_uuid_absent_defaults_to_none(isolated_products):
 
 def test_metadata_uuid_resolved_from_dataset_uuid_map(isolated_products):
     """metadata_uuid is looked up by source_path basename in the runtime catalog map,
-    not read from products.json (see startup.py: load_products(api.get_dataset_uuid_map()))."""
+    not read from products.json (see startup.py: load_products(api.get_dataset_uuid_map())).
+    """
     _write(isolated_products, [_entry("linked", source="s3://bucket/x.zarr")])
     registry.load_products(dataset_uuid_map={"x.zarr": "uuid-123"})
     assert PRODUCTS["linked"].metadata_uuid == "uuid-123"
