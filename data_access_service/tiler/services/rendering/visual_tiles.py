@@ -424,6 +424,7 @@ def _bbox_parts_to_rgba(
     vmin: float,
     span: float,
     cm: dict[int, tuple[int, int, int, int]],
+    dst_crs: str = "EPSG:3857",
 ) -> np.ndarray | None:
     """Resample each antimeridian-split part into the bbox, composite, return RGBA.
 
@@ -437,6 +438,7 @@ def _bbox_parts_to_rgba(
             with XarrayReader(da) as reader:
                 img = reader.part(
                     (lon_min, lat_min, lon_max, lat_max),
+                    dst_crs=dst_crs,
                     width=width,
                     height=height,
                     reproject_method="bilinear",
@@ -462,6 +464,7 @@ def render_bbox(
     colormap_name: str | None = None,
     rescale: tuple[float, float] | None = None,
     crs: str = "EPSG:4326",
+    dst_crs: str = "EPSG:3857",
     fmt: ImageFormat = "png",
     coastal_fill: CoastalFill | None = None,
     source_path: str = "",
@@ -469,7 +472,9 @@ def render_bbox(
 ) -> bytes:
     """Return an image for an arbitrary bbox encoded as ``fmt``.
 
-    bbox must be (minx, miny, maxx, maxy) in the given crs ('EPSG:4326' degrees or 'EPSG:3857' meters).
+    bbox must be (minx, miny, maxx, maxy) in ``crs`` ('EPSG:4326' degrees or 'EPSG:3857'
+    meters) — this controls only how the input numbers are interpreted. ``dst_crs`` is
+    the CRS of the *output* image, independent of ``crs``.
     Returns a fully transparent tile when the bbox does not intersect the data. Categorical
     variables take the discrete-lookup path (see [[colormap.categorical]] / `render_tile`).
     ``coastal_fill`` is ``Product.visual_tile.coastal_fill``;
@@ -488,6 +493,7 @@ def render_bbox(
             scheme.lut(),
             lambda r: r.part(
                 (lo, la_min, hi, la_max),
+                dst_crs=dst_crs,
                 width=width,
                 height=height,
                 reproject_method="nearest",
@@ -502,7 +508,9 @@ def render_bbox(
     span = vmax - vmin or 1.0
     cm = resolve_colormap(colormap_name or "viridis")
 
-    result = _bbox_parts_to_rgba(parts, bbox_wgs84, width, height, vmin, span, cm)
+    result = _bbox_parts_to_rgba(
+        parts, bbox_wgs84, width, height, vmin, span, cm, dst_crs=dst_crs
+    )
     return encode_rgba(result, fmt) if result is not None else empty_tile(fmt)
 
 
@@ -515,6 +523,7 @@ def render_bbox_animation(
     colormap_name: str | None = None,
     rescale: tuple[float, float] | None = None,
     crs: str = "EPSG:4326",
+    dst_crs: str = "EPSG:3857",
     fmt: AnimatedFormat = "webp",
     duration_ms: int = 200,
     coastal_fill: CoastalFill | None = None,
@@ -523,6 +532,8 @@ def render_bbox_animation(
 ) -> bytes:
     """Render the same bbox across ``datasets`` and assemble as an animated image.
 
+    ``crs`` controls only how the input ``bbox`` numbers are interpreted; ``dst_crs``
+    is the CRS of the output frames, independent of ``crs``.
     When ``rescale`` is None, vmin/vmax is computed across the union of every frame's
     data so the colour ramp stays stable from frame to frame; computing it per-frame
     causes flicker in low-variance areas.
@@ -558,6 +569,7 @@ def render_bbox_animation(
         def _read_part(r: XarrayReader) -> ImageData:
             return r.part(
                 (lo, la_min, hi, la_max),
+                dst_crs=dst_crs,
                 width=width,
                 height=height,
                 reproject_method="nearest",
@@ -586,7 +598,9 @@ def render_bbox_animation(
 
     frames: list[np.ndarray] = []
     for parts in parts_per_frame:
-        rgba = _bbox_parts_to_rgba(parts, bbox_wgs84, width, height, vmin, span, cm)
+        rgba = _bbox_parts_to_rgba(
+            parts, bbox_wgs84, width, height, vmin, span, cm, dst_crs=dst_crs
+        )
         if rgba is None:
             rgba = np.zeros((height, width, 4), dtype=np.uint8)
         frames.append(rgba)
