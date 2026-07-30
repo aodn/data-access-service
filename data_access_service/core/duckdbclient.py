@@ -56,6 +56,34 @@ class DuckDBClient(ABC):
     def close(self) -> None:
         """Release the connection or cursor held by this client."""
 
+    def create_s3_secret(self, bucket: str) -> None:
+        """Create a DuckDB S3 secret scoped to ``bucket`` from boto3 credentials."""
+        boto_session = boto3.Session()
+
+        # Not useful in testing
+        if boto_session is not None and boto_session.get_credentials() is not None:
+            creds = boto_session.get_credentials().get_frozen_credentials()
+            region = boto_session.region_name or "ap-southeast-2"
+
+            def lit(value: str) -> str:
+                return "'" + value.replace("'", "''") + "'"
+
+            def ident(name: str) -> str:
+                return '"' + name.replace('"', '""') + '"'
+
+            self.execute(
+                f"""
+                CREATE OR REPLACE SECRET {ident(f"{bucket}_s3")} (
+                    TYPE S3,
+                    KEY_ID {lit(creds.access_key)},
+                    SECRET {lit(creds.secret_key)},
+                    SESSION_TOKEN {lit(creds.token or "")},
+                    REGION {lit(region)},
+                    SCOPE 's3://{bucket}'
+                )
+                """
+            )
+
 
 class PmTileDuckDBClient(DuckDBClient):
     # Process-global singletons
@@ -145,6 +173,8 @@ class PmTileDuckDBClient(DuckDBClient):
                     cursor.execute(f"SET enable_progress_bar = {show};")
                     cursor.execute(f"SET enable_progress_bar_print = {show};")
                     self._duckdb_client = cursor
+                    # Avoid NewRelic capture the log which is too huge and unless
+                    self.create_s3_secret(self._config.bucket_name)
         return self._duckdb_client
 
     def close(self):
@@ -242,12 +272,12 @@ class PmTileDuckDBClient(DuckDBClient):
     ) -> duckdb.DuckDBPyConnection:
         if not self._config.show_progress:
             if params is None:
-                return self._con.execute(sql)
-            return self._con.execute(sql, params)
+                return self._duckdb_client.execute(sql)
+            return self._duckdb_client.execute(sql, params)
         with self._progress_logger(sql):
             if params is None:
-                return self._con.execute(sql)
-            return self._con.execute(sql, params)
+                return self._duckdb_client.execute(sql)
+            return self._duckdb_client.execute(sql, params)
 
     @contextmanager
     def _progress_logger(self, sql: str) -> Iterator[None]:
@@ -260,7 +290,7 @@ class PmTileDuckDBClient(DuckDBClient):
         stop = threading.Event()
         started = time.monotonic()
         sql_preview = " ".join(sql.split())[:120]
-        connection = self._con
+        connection = self._duckdb_client
 
         def _poll() -> None:
             while not stop.wait(_PROGRESS_LOG_INTERVAL_SECONDS):
@@ -451,31 +481,6 @@ class ParquetDuckDBClient(DuckDBClient):
         finally:
             with self._cursors_lock:
                 self._active_cursors.discard(cursor)
-
-    def create_s3_secret(self, bucket: str) -> None:
-        """Create a DuckDB S3 secret scoped to ``bucket`` from boto3 credentials."""
-        boto_session = boto3.Session()
-        creds = boto_session.get_credentials().get_frozen_credentials()
-        region = boto_session.region_name or "ap-southeast-2"
-
-        def lit(value: str) -> str:
-            return "'" + value.replace("'", "''") + "'"
-
-        def ident(name: str) -> str:
-            return '"' + name.replace('"', '""') + '"'
-
-        self.execute(
-            f"""
-            CREATE OR REPLACE SECRET {ident(f"{bucket}_s3")} (
-                TYPE S3,
-                KEY_ID {lit(creds.access_key)},
-                SECRET {lit(creds.secret_key)},
-                SESSION_TOKEN {lit(creds.token or "")},
-                REGION {lit(region)},
-                SCOPE 's3://{bucket}'
-            )
-        """
-        )
 
     def close(self) -> None:
         """Cancel any in-flight queries, then close the connection.

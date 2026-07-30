@@ -12,4 +12,5 @@ aws:
     job_definition: generate-csv-data-file-dev
 pmtiles:
   config:
-    threads: 3
+    threads: 12
+    use_fork_process: False
