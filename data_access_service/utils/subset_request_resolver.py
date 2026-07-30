@@ -5,7 +5,6 @@ keys, which date range, which area. This module is the single owner of that
 interpretation, so the consumers cannot drift apart.
 """
 
-import json
 from dataclasses import dataclass, replace
 from typing import List, Optional, Tuple, Union
 
@@ -155,11 +154,11 @@ def resolve_date_range(
 
 def resolve_bboxes(multi_polygon: Union[str, dict, None]) -> List[BoundingBox]:
     """Parse a GeoJSON MultiPolygon (string or already-parsed dict) into
-    bounding boxes. Returns [] when there is no spatial filter."""
+    bounding boxes, one per merged polygon (overlapping polygons are dissolved
+    first, so their overlap is counted once). Returns [] when there is no
+    spatial filter."""
     if multi_polygon is None or multi_polygon == NON_SPECIFIED:
         return []
-    if isinstance(multi_polygon, dict):
-        multi_polygon = json.dumps(multi_polygon)
     return MultiPolygonHelper(multi_polygon=multi_polygon).bboxes
 
 

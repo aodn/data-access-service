@@ -365,8 +365,9 @@ def test_no_spatial_filter_uses_whole_globe_bbox():
 
 
 def test_multi_polygon_overlapping_bboxes_counted_once():
-    # Two overlapping polygons (both covering the tiny dataset) -> ONE
-    # subset_zarr pass over the union grid, so the overlap is counted once.
+    # Two overlapping polygons (both covering the tiny dataset) are dissolved
+    # into ONE polygon at resolve time (multi_polygon_helper.merge_polygons), so
+    # the overlap is counted once and there is no second bbox to union.
     dataset = _make_dataset()
     api, _ = _api_with_zarr(dataset)
 
@@ -382,12 +383,15 @@ def test_multi_polygon_overlapping_bboxes_counted_once():
         + "]]}"
     )
 
+    bboxes = resolve_bboxes(polygon)
+    assert len(bboxes) == 1, "overlapping polygons must merge into one outline"
+
     result = estimate_single_key_size(
-        api, KEY, _resolved(bboxes=resolve_bboxes(polygon)), output_format="netcdf"
+        api, KEY, _resolved(bboxes=bboxes), output_format="netcdf"
     )
 
-    assert "union grid of 2 polygon bboxes" in result["notes"]
-    # each bbox covers the whole dataset -> the union is the dataset, once
+    assert "union grid of" not in result["notes"]
+    # the merged bbox covers the whole dataset -> the dataset, counted once
     assert result["estimated_uncompressed_bytes"] == dataset.nbytes
 
 
