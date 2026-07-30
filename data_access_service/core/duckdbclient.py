@@ -61,7 +61,7 @@ class DuckDBClient(ABC):
         boto_session = boto3.Session()
 
         # Not useful in testing
-        if boto_session is not None:
+        if boto_session is not None and boto_session.get_credentials() is not None:
             creds = boto_session.get_credentials().get_frozen_credentials()
             region = boto_session.region_name or "ap-southeast-2"
 
