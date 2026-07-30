@@ -71,6 +71,20 @@ def _curvilinear_grid() -> xr.Dataset:
     )
 
 
+def _trajectory() -> xr.Dataset:
+    """A ship track: LATITUDE and LONGITUDE are both 1D variables along TIME, so
+    each time step is ONE point - not a lat x lon plane (real store:
+    vessel_satellite_radiance_delayed_qc.zarr)."""
+    return xr.Dataset(
+        {
+            "radiance": ("TIME", np.arange(4.0)),
+            "LATITUDE": ("TIME", np.array([0.0, 1.0, 8.0, 9.0])),
+            "LONGITUDE": ("TIME", np.array([0.0, 1.0, 8.0, 9.0])),
+        },
+        coords={"TIME": pd.date_range("2020-01-01", periods=4)},
+    )
+
+
 # bbox args are (min_lon, min_lat, max_lon, max_lat)
 BOX_LOW = BoundingBox(0, 0, 2, 2)  # lat/lon [0, 2]
 BOX_HIGH = BoundingBox(7, 7, 9, 9)  # lat/lon [7, 9]
@@ -320,6 +334,35 @@ def test_curvilinear_grid_masked_by_polygon_shape():
     )
     np.testing.assert_array_equal(kept, expected)
     assert kept.any(), "the polygon covers part of this grid"
+
+
+def test_trajectory_lat_lon_are_paired_not_meshed():
+    # LATITUDE and LONGITUDE both run along TIME, so they are one point per step.
+    # Meshing them would produce a (TIME, TIME) mask, which xarray cannot
+    # broadcast - the download of vessel_satellite_radiance_delayed_qc.zarr fails
+    # outright. Only the steps whose own point is inside the shape survive.
+    ds = _trajectory()
+    low_corner = shapely_box(0, 0, 2, 2)
+
+    subset = _run(ds, [bbox_of(low_corner)], geometry=low_corner)
+
+    assert dict(subset.sizes) == {"TIME": 2}
+    kept = np.isfinite(subset.radiance.values)
+    np.testing.assert_array_equal(kept, [True, True])
+
+
+def test_trajectory_steps_outside_the_shape_are_blanked():
+    # Same track (the time range keeps its first two steps), with a shape that
+    # covers only step 0. Step 1 cannot be cropped away - lat/lon are not
+    # dimensions - so it must come back NaN.
+    ds = _trajectory()
+    first_only = ShapelyPolygon([(-1, -1), (0.5, -1), (0.5, 0.5), (-1, 0.5)])
+
+    subset = _run(ds, [bbox_of(first_only)], geometry=first_only)
+
+    assert dict(subset.sizes) == {"TIME": 2}
+    kept = np.isfinite(subset.radiance.values)
+    np.testing.assert_array_equal(kept, [True, False])
 
 
 def test_geometry_mask_keeps_shape_for_the_estimate():

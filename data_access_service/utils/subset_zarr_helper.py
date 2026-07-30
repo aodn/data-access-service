@@ -182,9 +182,12 @@ def form_geometry_mask(
 ) -> DataArray:
     """True where a cell's lat/lon lies inside `area`, boundary included.
 
-    One point-in-polygon test covers both grid layouts, no special case:
-      - regular grid: 1D lat and lon axes, meshed into the (lat, lon) plane
-      - curvilinear grid: 2D LATITUDE/LONGITUDE variables sharing dims (I, J)
+    One point-in-polygon test covers every layout the stores use, no special case:
+      - lat/lon on the SAME dims: paired position by position. Covers a
+        curvilinear grid (2D on (I, J)) and a trajectory (both 1D along TIME,
+        where each time step is one point, not a row x column plane).
+      - lat/lon on DIFFERENT 1D axes: a regular grid, meshed into the (lat, lon)
+        plane.
 
     The lat/lon values are read here (coordinate-sized, not data-sized); the data
     variables stay lazy.
@@ -192,13 +195,13 @@ def form_geometry_mask(
     lat = dataset[lat_name]
     lon = dataset[lon_name]
 
-    if lat.ndim == 1 and lon.ndim == 1:
+    if lat.dims == lon.dims:
+        lat_values, lon_values = lat.values, lon.values
+        dims = lat.dims
+    elif lat.ndim == 1 and lon.ndim == 1:
         # meshgrid's default indexing gives (lat, lon)-shaped planes
         lon_values, lat_values = np.meshgrid(lon.values, lat.values)
         dims = lat.dims + lon.dims
-    elif lat.dims == lon.dims:
-        lat_values, lon_values = lat.values, lon.values
-        dims = lat.dims
     else:
         raise ValueError(
             f"Cannot mask by area: {lat_name} {lat.dims} and {lon_name} {lon.dims} "
