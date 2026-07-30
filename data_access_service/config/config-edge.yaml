@@ -12,4 +12,4 @@ aws:
     job_definition: data-access-service-batch-job-definition
 pmtiles:
   config:
-    use_fork_process: False
+    use_fork_process: True
