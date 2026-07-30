@@ -25,11 +25,11 @@ from data_access_service.models.bounding_box import BoundingBox
 # ---------------------------------------------------------------------------
 # The user draws an area on the map; the email shows it back to them.
 #
-# The area comes in as GeoJSON, and we decide how to display it by counting its
-# corners. GeoJSON repeats the first corner at the end to "close" the shape, so
-# that duplicate is not counted:
-#     4 corners or fewer -> a rectangle, shown as a "Bounding Box"
-#     more than 4 corners -> shown as a "Polygon"
+# The area comes in as GeoJSON, and we decide how to display it by its shape.
+# GeoJSON repeats the first corner at the end to "close" the shape, so that
+# duplicate is not counted:
+#     an axis-aligned rectangle -> shown as a "Bounding Box"
+#     any other shape (triangle, freeform quad, pentagon...) -> a "Polygon"
 #
 # Note: GeoJSON lists each corner as [longitude, latitude], but the email shows
 # it the usual way round, latitude first.
@@ -45,6 +45,18 @@ FREEFORM_POLYGON = (
 RECTANGLE_BBOX = (
     '{"type":"MultiPolygon","coordinates":[[[[145,-40],[145,-41],'
     "[146,-41],[146,-40],[145,-40]]]]}"
+)
+
+# Triangle: 3 unique vertices (+ closing point) -> a Polygon
+TRIANGLE_POLYGON = (
+    '{"type":"MultiPolygon","coordinates":[[[[145.0,-40.0],[146.0,-41.0],'
+    "[144.5,-41.5],[145.0,-40.0]]]]}"
+)
+
+# Quadrilateral: 4 unique vertices but not an axis-aligned rectangle -> a Polygon
+QUAD_POLYGON = (
+    '{"type":"MultiPolygon","coordinates":[[[[145.0,-40.0],[146.2,-40.3],'
+    "[146.0,-41.5],[144.8,-41.0],[145.0,-40.0]]]]}"
 )
 
 # One request holding both a rectangle ring and a pentagon ring
@@ -73,10 +85,26 @@ class TestSubsettingPolygon(unittest.TestCase):
         )  # 6 GeoJSON points minus the closing point
 
     def test_split_rectangle_is_bbox_not_polygon(self):
-        # 4 unique vertices (<= 4) -> collapsed into a bounding box, not a polygon.
+        # An axis-aligned rectangle -> collapsed into a bounding box, not a polygon.
         bboxes, polygons = split_bboxes_and_polygons(RECTANGLE_BBOX)
         self.assertEqual(len(bboxes), 1)
         self.assertEqual(len(polygons), 0)
+
+    def test_split_triangle_is_polygon_not_bbox(self):
+        # 3 vertices drawn with the polygon tool -> a freeform polygon, not
+        # collapsed into its bounding box.
+        bboxes, polygons = split_bboxes_and_polygons(TRIANGLE_POLYGON)
+        self.assertEqual(len(bboxes), 0)
+        self.assertEqual(len(polygons), 1)
+        self.assertEqual(len(polygons[0]), 3)  # closing point removed
+
+    def test_split_non_rectangular_quad_is_polygon_not_bbox(self):
+        # 4 vertices but not an axis-aligned rectangle -> a freeform polygon;
+        # only true rectangles become bounding boxes.
+        bboxes, polygons = split_bboxes_and_polygons(QUAD_POLYGON)
+        self.assertEqual(len(bboxes), 0)
+        self.assertEqual(len(polygons), 1)
+        self.assertEqual(len(polygons[0]), 4)  # closing point removed
 
     def test_form_polygon_divs_lists_vertices(self):
         _, polygons = split_bboxes_and_polygons(FREEFORM_POLYGON)

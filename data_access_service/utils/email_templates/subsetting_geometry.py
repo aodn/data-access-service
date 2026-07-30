@@ -1,8 +1,8 @@
 """Classify a subset request's geometry for email rendering.
 
 Splits a GeoJSON MultiPolygon into bounding boxes and freeform polygons so the
-download email can show each with the right layout. Mirrors the ogcapi-java
-EmailUtils split.
+download email can show each with the right layout. ogcapi-java EmailUtils has
+a similar split, but still classifies by vertex count.
 """
 
 import geojson
@@ -14,9 +14,18 @@ from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.models.subset_request import NON_SPECIFIED
 from data_access_service.utils.multi_polygon_helper import get_bbox_from
 
-# A rectangle bounding box has 4 corners; a ring with more unique vertices
-# than this is treated as a freeform polygon rather than a bounding box.
-_MAX_BBOX_VERTICES = 4
+
+def _is_axis_aligned_rectangle(vertices: list) -> bool:
+    """True when the ring is exactly the axis-aligned rectangle of its own
+    bounding box. Vertices may carry an elevation (a 3rd value); only lon/lat
+    are compared."""
+    unique_corners = {(vertex[0], vertex[1]) for vertex in vertices}
+    unique_lons = {lon for lon, _ in unique_corners}
+    unique_lats = {lat for _, lat in unique_corners}
+
+    # 4 distinct corners drawn from only 2 longitudes x 2 latitudes can only
+    # be the min/max corner combinations of a rectangle.
+    return len(unique_corners) == 4 and len(unique_lons) == 2 and len(unique_lats) == 2
 
 
 def _remove_closing_point(ring: list) -> list:
@@ -43,10 +52,10 @@ def split_bboxes_and_polygons(
 ) -> Tuple[List[BoundingBox], List[list]]:
     """Split a GeoJSON MultiPolygon into bounding boxes and freeform polygons.
 
-    Each ring is classified by its number of unique vertices: 4 or fewer is a
-    bounding box, more than 4 is a freeform polygon (kept as its [lon, lat]
-    vertices). Whole-globe bounding boxes are dropped since they mean "no area
-    filter".
+    Each ring is classified by shape: an axis-aligned rectangle is a bounding
+    box, anything else (triangle, freeform quad, pentagon...) is a freeform
+    polygon (kept as its [lon, lat] vertices). Whole-globe bounding boxes are
+    dropped since they mean "no area filter".
     """
     bboxes: List[BoundingBox] = []
     polygons: List[list] = []
@@ -64,8 +73,8 @@ def split_bboxes_and_polygons(
         outer_ring = polygon[0] if polygon else []
         vertices = _remove_closing_point(outer_ring)
 
-        # More corners than a rectangle -> render it as a freeform polygon.
-        if len(vertices) > _MAX_BBOX_VERTICES:
+        # Anything that is not an axis-aligned rectangle keeps its vertices.
+        if not _is_axis_aligned_rectangle(vertices):
             polygons.append(vertices)
             continue
 
