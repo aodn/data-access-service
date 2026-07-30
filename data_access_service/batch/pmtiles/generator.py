@@ -27,16 +27,21 @@ class PmtilesGenerationInProgressError(RuntimeError):
 
 
 def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
-    """Generate PMTiles for every parquet dataset in its own short-lived process.
+    """Generate PMTiles for every parquet dataset in the catalog.
 
-    Each dataset is handled in a forked child so DuckDB / tippecanoe allocations
-    are returned to the OS when the child exits. Fork (not re-exec) reuses the
-    already-initialized ``api`` via copy-on-write — no metadata reload per
-    dataset. Datasets run sequentially so only one heavy worker is live at a
+    Process isolation is controlled by ``pmtiles.config.use_fork_process``:
+
+    * **True (default):** each dataset runs in a forked child so DuckDB /
+      tippecanoe allocations are returned to the OS when the child exits.
+      Fork (not re-exec) reuses the already-initialized ``api`` via
+      copy-on-write — no metadata reload per dataset. Invariant: the parent
+      must not open ``PmTileDuckDBClient`` before forking; the child creates
+      its own process-global DuckDB connection.
+    * **False:** each dataset runs in the main app process (no ``os.fork``).
+      Useful for local debug or when an APM agent cannot tolerate forking.
+
+    Datasets always run sequentially so only one heavy worker is live at a
     time.
-
-    Invariant: the parent must not open ``PmTileDuckDBClient`` before forking;
-    the child creates its own process-global DuckDB connection.
 
     Args:
         api: Initialized API with metadata loaded.
@@ -73,19 +78,30 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
             len(work),
         )
 
+    use_fork = config.get_pmtiles_config().use_fork_process
+    logger.info(
+        "PMTiles batch process isolation: use_fork_process=%s",
+        use_fork,
+    )
+
     # Drop full raw schemas / non-parquet metadata so the parent (and COW
     # fork children) start each dataset with a smaller baseline RSS.
     api.release_memory_for_pmtiles_batch()
 
     for k, dataset_name in work:
-        ok = _generate_pmtiles_for_parquets_in_subprocess(api, k, dataset_name)
+        if use_fork:
+            ok = _generate_pmtiles_for_parquets_in_subprocess(api, k, dataset_name)
+            after_label = f"after child for {dataset_name}"
+        else:
+            ok = _generate_pmtiles_for_parquets(api, k, dataset_name)
+            after_label = f"after in-process run for {dataset_name}"
         if not ok:
             logger.error(
                 "PMTiles worker failed for uuid=%s dataset=%s",
                 k,
                 dataset_name,
             )
-        log_memory_usage(logger, f"after child for {dataset_name}")
+        log_memory_usage(logger, after_label)
 
 
 def _generate_pmtiles_for_parquets_in_subprocess(

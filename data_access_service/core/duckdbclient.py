@@ -242,12 +242,12 @@ class PmTileDuckDBClient(DuckDBClient):
     ) -> duckdb.DuckDBPyConnection:
         if not self._config.show_progress:
             if params is None:
-                return self._con.execute(sql)
-            return self._con.execute(sql, params)
+                return self._duckdb_client.execute(sql)
+            return self._duckdb_client.execute(sql, params)
         with self._progress_logger(sql):
             if params is None:
-                return self._con.execute(sql)
-            return self._con.execute(sql, params)
+                return self._duckdb_client.execute(sql)
+            return self._duckdb_client.execute(sql, params)
 
     @contextmanager
     def _progress_logger(self, sql: str) -> Iterator[None]:

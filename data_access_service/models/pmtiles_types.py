@@ -53,6 +53,11 @@ class PmtilesGenerationConfig:
     show_progress: bool
     # "month" (YYYYMM) or "date" (YYYYMMDD); default month preserves existing behavior.
     time_group_by: TimeGroupBy = TimeGroupBy.MONTH
+    # When True (default), batch generation forks one short-lived child per
+    # parquet dataset so DuckDB/tippecanoe memory returns to the OS on exit.
+    # When False, each dataset runs in the main process (useful for local
+    # debug or agents that do not tolerate os.fork, e.g. some APM agents).
+    use_fork_process: bool = True
 
 
 @dataclass

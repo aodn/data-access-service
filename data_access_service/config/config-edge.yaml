@@ -10,3 +10,6 @@ aws:
   batch:
     job_queue: data-access-service-batch-job-queue
     job_definition: data-access-service-batch-job-definition
+pmtiles:
+  config:
+    use_fork_process: False

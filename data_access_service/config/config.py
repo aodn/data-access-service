@@ -245,6 +245,7 @@ class Config:
             bucket_name=bucket_name,
             show_progress=pmconfig.get("show_progress", True),
             time_group_by=time_group_by,
+            use_fork_process=bool(pmconfig.get("use_fork_process", True)),
         )
 
     def get_parquets_config(self) -> ParquetsGenerationConfig:
