@@ -1,5 +1,4 @@
-"""Resolve a dataset key's latitude / longitude / time dimension names.
-"""
+"""Resolve a dataset key's latitude / longitude / time dimension names."""
 
 from data_access_service.core.constants import (
     STR_LATITUDE_UPPER_CASE,

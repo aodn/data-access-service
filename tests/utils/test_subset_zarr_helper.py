@@ -1,8 +1,9 @@
 """Unit tests for subset_zarr (utils.subset_zarr_helper) - the single shared
-owner of "apply one time range + N bboxes to a zarr dataset".
+owner of "apply one time range + the requested area to a zarr dataset".
 
 The multi-polygon download only contained polygon 1's data. subset_zarr now
-applies all bboxes in one pass (union-grid .isel() + one OR'd .where() mask).
+crops every requested position in one pass (union-grid .isel()) and blanks the
+cells the crop had to include with one point-in-polygon .where() mask.
 """
 
 import dask.array as da
@@ -11,8 +12,13 @@ import pandas as pd
 import pytest
 import xarray as xr
 from unittest.mock import MagicMock
+from shapely.geometry import MultiPolygon as ShapelyMultiPolygon
+from shapely.geometry import Point as ShapelyPoint
+from shapely.geometry import Polygon as ShapelyPolygon
+from shapely.geometry import box as shapely_box
 
 from data_access_service.models.bounding_box import BoundingBox
+from data_access_service.utils.multi_polygon_helper import bbox_of
 from data_access_service.utils.subset_zarr_helper import subset_zarr
 
 UUID = "test-uuid"
@@ -186,6 +192,156 @@ def test_curvilinear_multi_bbox_extends_mask_not_shape():
     kept_two = int(np.isfinite(two.temp.isel(TIME=0)).sum())
     assert kept_one > 0
     assert kept_two > kept_one, "second box must add cells on a curvilinear grid"
+
+
+def _expected_inside(geometry, lats, lons) -> np.ndarray:
+    """Oracle mask: shapely point-in-polygon per cell, in (lat, lon) order.
+
+    Written as an explicit loop, not vectorised, so it does not lean on the same
+    call the implementation uses.
+    """
+    return np.array(
+        [[geometry.intersects(ShapelyPoint(lon, lat)) for lon in lons] for lat in lats]
+    )
+
+
+# A right triangle over the lower-left of the grid. Its hypotenuse runs exactly
+# through the cell centres (0,4), (2,2), (4,0), so it also covers "cells ON the
+# boundary are kept". Bbox = lat/lon [0, 4], so the crop must include the upper
+# right corner cells that the triangle does not cover.
+TRIANGLE = ShapelyPolygon([(0, 0), (4, 0), (0, 4)])
+
+
+def test_polygon_shape_blanks_cells_only_the_bbox_asked_for():
+    # The whole point of the geometry mask: the crop is a rectangle (all the zarr
+    # library can slice), so the cells outside the drawn shape must come back NaN
+    # while the shape's own cells - boundary included - keep their data.
+    ds = _regular_grid()
+
+    subset = _run(ds, [bbox_of(TRIANGLE)], geometry=TRIANGLE)
+
+    assert dict(subset.sizes) == {"TIME": 2, "LATITUDE": 5, "LONGITUDE": 5}
+    kept = np.isfinite(subset.sst.isel(TIME=0).values)
+    np.testing.assert_array_equal(kept, _expected_inside(TRIANGLE, range(5), range(5)))
+    # spot checks: inside, on the hypotenuse, and outside it
+    t0 = subset.sst.isel(TIME=0)
+    assert np.isfinite(t0.sel(LATITUDE=1, LONGITUDE=1))
+    assert np.isfinite(t0.sel(LATITUDE=2, LONGITUDE=2)), "boundary cell dropped"
+    assert np.isnan(t0.sel(LATITUDE=4, LONGITUDE=4))
+    # the data that survived is the store's own, not shifted or re-gridded
+    assert t0.sel(LATITUDE=1, LONGITUDE=1) == ds.sst.isel(
+        TIME=0, LATITUDE=1, LONGITUDE=1
+    )
+
+
+def test_polygon_hole_is_blanked():
+    # A polygon with a hole (the user cut a piece out) - the hole's cells are
+    # outside the shape, so they must be NaN.
+    ds = _regular_grid()
+    with_hole = ShapelyPolygon(
+        [(0, 0), (6, 0), (6, 6), (0, 6)], [[(2, 2), (4, 2), (4, 4), (2, 4)]]
+    )
+
+    subset = _run(ds, [bbox_of(with_hole)], geometry=with_hole)
+
+    t0 = subset.sst.isel(TIME=0)
+    assert np.isnan(t0.sel(LATITUDE=3, LONGITUDE=3)), "hole not blanked"
+    assert np.isfinite(t0.sel(LATITUDE=2, LONGITUDE=2)), "hole edge is still inside"
+    assert np.isfinite(t0.sel(LATITUDE=1, LONGITUDE=5))
+
+
+def test_rectangular_polygon_is_cropped_not_masked():
+    # The common portal case: a drawn rectangle IS its own bbox, so the crop
+    # already selects exactly those cells. No .where() means no NaN and no dtype
+    # promotion - the download stays byte-for-byte what it was.
+    ds = _regular_grid()
+    rectangle = shapely_box(0, 0, 2, 2)
+
+    subset = _run(ds, [bbox_of(rectangle)], geometry=rectangle)
+    crop_only = _run(ds, [bbox_of(rectangle)])
+
+    assert subset.sst.dtype == ds.sst.dtype
+    assert not np.isnan(subset.sst.values).any()
+    np.testing.assert_array_equal(subset.sst.values, crop_only.sst.values)
+
+
+def test_disjoint_polygons_keep_both_shapes_and_blank_the_cross():
+    # Two separate drawn areas: both keep their own data, and the cells the union
+    # grid had to include (box 1's lats x box 2's lons) are NaN.
+    ds = _regular_grid()
+    low = shapely_box(0, 0, 2, 2)
+    high = shapely_box(7, 7, 9, 9)
+    geometry = ShapelyMultiPolygon([low, high])
+
+    subset = _run(ds, [bbox_of(low), bbox_of(high)], geometry=geometry)
+
+    assert dict(subset.sizes) == {"TIME": 2, "LATITUDE": 6, "LONGITUDE": 6}
+    t0 = subset.sst.isel(TIME=0)
+    assert not np.isnan(t0.isel(LATITUDE=slice(0, 3), LONGITUDE=slice(0, 3))).any()
+    assert not np.isnan(t0.isel(LATITUDE=slice(3, 6), LONGITUDE=slice(3, 6))).any()
+    assert np.isnan(t0.isel(LATITUDE=slice(0, 3), LONGITUDE=slice(3, 6))).all()
+
+
+def test_overlapping_polygons_are_one_shape_not_two_passes():
+    # Overlap is dissolved before we get here (multi_polygon_helper), so the L
+    # shape arrives as ONE geometry with ONE bbox: the crop covers the L's
+    # envelope and the mask blanks the corner the L does not reach.
+    ds = _regular_grid()
+    l_shape = shapely_box(0, 0, 4, 2).union(shapely_box(0, 0, 2, 4))
+
+    subset = _run(ds, [bbox_of(l_shape)], geometry=l_shape)
+
+    assert dict(subset.sizes) == {"TIME": 2, "LATITUDE": 5, "LONGITUDE": 5}
+    t0 = subset.sst.isel(TIME=0)
+    assert np.isfinite(t0.sel(LATITUDE=1, LONGITUDE=4)), "the wide arm of the L"
+    assert np.isfinite(t0.sel(LATITUDE=4, LONGITUDE=1)), "the tall arm of the L"
+    assert np.isnan(t0.sel(LATITUDE=4, LONGITUDE=4)), "the corner outside the L"
+
+
+def test_curvilinear_grid_masked_by_polygon_shape():
+    # 2D LATITUDE/LONGITUDE go through the same point-in-polygon mask, no special
+    # case: the shape stays I x J and the cells outside the polygon are NaN.
+    ds = _curvilinear_grid()
+
+    subset = _run(ds, [bbox_of(TRIANGLE)], geometry=TRIANGLE)
+
+    assert dict(subset.sizes) == {"TIME": 2, "I": 4, "J": 6}
+    kept = np.isfinite(subset.temp.isel(TIME=0).values)
+    expected = np.array(
+        [
+            [
+                TRIANGLE.intersects(
+                    ShapelyPoint(float(ds.LONGITUDE[i, j]), float(ds.LATITUDE[i, j]))
+                )
+                for j in range(ds.sizes["J"])
+            ]
+            for i in range(ds.sizes["I"])
+        ]
+    )
+    np.testing.assert_array_equal(kept, expected)
+    assert kept.any(), "the polygon covers part of this grid"
+
+
+def test_geometry_mask_keeps_shape_for_the_estimate():
+    # The estimate skips the mask (eager .where() on a non-dask store -> OOM) and
+    # relies on drop=False: masked and unmasked must agree on shape and nbytes.
+    ds = _regular_grid()
+
+    masked = _run(ds, [bbox_of(TRIANGLE)], geometry=TRIANGLE, apply_mask=True)
+    unmasked = _run(ds, [bbox_of(TRIANGLE)], geometry=TRIANGLE, apply_mask=False)
+
+    assert dict(unmasked.sizes) == dict(masked.sizes)
+    assert int(unmasked.nbytes) == int(masked.nbytes)
+    assert not np.isnan(unmasked.sst.values).any()
+
+
+def test_geometry_mask_stays_lazy():
+    # The mask reads the lat/lon axes only; the data variables must not compute.
+    ds = _regular_grid().chunk({"TIME": 1})
+
+    subset = _run(ds, [bbox_of(TRIANGLE)], geometry=TRIANGLE)
+
+    assert isinstance(subset.sst.data, da.Array)
 
 
 def test_empty_bboxes_raises():

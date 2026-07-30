@@ -33,6 +33,7 @@ from data_access_service.core.constants import (
 from data_access_service.utils.subset_request_resolver import (
     ResolvedSubsetRequest,
     resolve_bboxes,
+    resolve_geometry,
 )
 
 
@@ -74,6 +75,7 @@ def _resolved(
     end=pd.Timestamp("2020-01-05 23:59:59", tz="UTC"),
     bboxes=(),
     columns=None,
+    geometry=None,
 ) -> ResolvedSubsetRequest:
     """A ResolvedSubsetRequest as resolve_subset_request would produce for these tests."""
     return ResolvedSubsetRequest(
@@ -83,6 +85,7 @@ def _resolved(
         end_date=end,
         bboxes=list(bboxes),
         columns=columns,
+        geometry=geometry,
     )
 
 
@@ -431,10 +434,12 @@ def test_multi_polygon_disjoint_bboxes_estimate_matches_download_region():
         + str(ring_b).replace("'", "")
         + "]]}"
     )
+    # both come from the same polygon, exactly as resolve_subset_request does it
     bboxes = resolve_bboxes(polygon)
+    geometry = resolve_geometry(polygon)
 
     result = estimate_single_key_size(
-        api, KEY, _resolved(bboxes=bboxes), output_format="netcdf"
+        api, KEY, _resolved(bboxes=bboxes, geometry=geometry), output_format="netcdf"
     )
 
     # Oracle: the union grid = lat positions {0,1,3} x lon positions {0,1,3,4}.
@@ -454,8 +459,75 @@ def test_multi_polygon_disjoint_bboxes_estimate_matches_download_region():
         pd.Timestamp("2020-01-05 23:59:59", tz="UTC"),
         bboxes,
         apply_mask=True,
+        geometry=geometry,
     )
     assert result["estimated_uncompressed_bytes"] == int(download_slice.nbytes)
+
+
+def test_polygon_shape_estimate_matches_download_region():
+    # A polygon that is NOT its bbox: the download crops the bbox and NaN-fills
+    # the cells outside the shape. The estimate skips that mask, so it must still
+    # measure the same grid - and say so in its notes.
+    from data_access_service.utils.subset_zarr_helper import subset_zarr
+
+    dataset = xr.Dataset(
+        {
+            "sst": (
+                ("TIME", "LATITUDE", "LONGITUDE"),
+                np.zeros((3, 5, 5), dtype="float32"),
+            )
+        },
+        coords={
+            "TIME": pd.date_range("2020-01-01", periods=3),
+            "LATITUDE": np.arange(5, dtype="float64"),
+            "LONGITUDE": np.arange(5, dtype="float64"),
+        },
+    )
+    api, _ = _api_with_zarr(dataset)
+
+    # a triangle over lat/lon [0, 4]: same bbox as a full rectangle, half the area
+    triangle = (
+        '{"type": "MultiPolygon", "coordinates": [[[[0, 0], [4, 0], [0, 4], [0, 0]]]]}'
+    )
+    bboxes = resolve_bboxes(triangle)
+    geometry = resolve_geometry(triangle)
+
+    result = estimate_single_key_size(
+        api, KEY, _resolved(bboxes=bboxes, geometry=geometry), output_format="netcdf"
+    )
+
+    download_slice = subset_zarr(
+        dataset,
+        api,
+        UUID,
+        KEY,
+        pd.Timestamp("2020-01-01", tz="UTC"),
+        pd.Timestamp("2020-01-05 23:59:59", tz="UTC"),
+        bboxes,
+        apply_mask=True,
+        geometry=geometry,
+    )
+    assert result["estimated_uncompressed_bytes"] == int(download_slice.nbytes)
+    # the blanked cells are real: the download did not just keep the rectangle
+    assert np.isnan(download_slice.sst.isel(TIME=0).values).any()
+    assert "come out as NaN" in result["notes"]
+
+
+def test_rectangular_polygon_estimate_has_no_nan_note():
+    # The common case - one drawn rectangle - blanks nothing, so the estimate must
+    # not claim it is an upper bound because of NaN filler.
+    dataset = _make_dataset()
+    api, _ = _api_with_zarr(dataset)
+
+    polygon = _single_polygon_geojson(lon_min=10, lat_min=30, lon_max=30, lat_max=40)
+    result = estimate_single_key_size(
+        api,
+        KEY,
+        _resolved(bboxes=resolve_bboxes(polygon), geometry=resolve_geometry(polygon)),
+        output_format="netcdf",
+    )
+
+    assert "come out as NaN" not in result["notes"]
 
 
 def test_invalid_multi_polygon_raises():

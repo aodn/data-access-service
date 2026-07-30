@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from typing import List, Optional, Tuple, Union
 
 import pandas as pd
+from shapely.geometry.base import BaseGeometry
 
 from data_access_service.core.constants import UNIX_EPOCH_UTC, WHOLE_GLOBE_BBOX
 from data_access_service.models.bounding_box import BoundingBox
@@ -30,6 +31,10 @@ class ResolvedSubsetRequest:
     end_date: Optional[pd.Timestamp]
     bboxes: List[BoundingBox]
     columns: Optional[List[str]] = None
+    # the drawn area itself, the shape `bboxes` are the bounding boxes of. The
+    # zarr path crops by bbox then blanks the cells outside this
+    # (subset_zarr_helper.area_to_keep). None means no area was given.
+    geometry: Optional[BaseGeometry] = None
 
     @property
     def has_data(self) -> bool:
@@ -41,9 +46,9 @@ class ResolvedSubsetRequest:
     def effective_bboxes(self) -> List[BoundingBox]:
         """The bboxes to slice with: empty means "no spatial filter", which
         becomes one whole-globe bbox. Explicit bounds (not open/None slices)
-        because the batch mask path compares values against them
-        (subset_zarr_helper.form_mask). Both the batch download and the size
-        estimate must slice from THIS list so they select the same region.
+        because the crop compares values against them
+        (subset_zarr_helper.form_dim_indexer). Both the batch download and the
+        size estimate must slice from THIS list so they select the same region.
         """
         return self.bboxes or [WHOLE_GLOBE_BBOX]
 
@@ -69,6 +74,9 @@ def resolve_subset_request(
        parse the GeoJSON MultiPolygon here (the estimation path, which only
        has the raw string). Passing them through keeps SubsetRequest.bboxes
        and ResolvedSubsetRequest.bboxes the same list - they cannot drift.
+    4. resolve geometry: the merged drawn shape the bboxes came from, always
+       from the MultiPolygon (both paths carry it), so the zarr subset can blank
+       the cells its bbox crop had to include.
 
     :raises ValueError/TypeError: on unparseable dates or a bad multi_polygon
     """
@@ -85,6 +93,7 @@ def resolve_subset_request(
         end_date=end_date,
         bboxes=resolved_bboxes,
         columns=columns,
+        geometry=resolve_geometry(multi_polygon),
     )
 
 
@@ -160,6 +169,15 @@ def resolve_bboxes(multi_polygon: Union[str, dict, None]) -> List[BoundingBox]:
     if multi_polygon is None or multi_polygon == NON_SPECIFIED:
         return []
     return MultiPolygonHelper(multi_polygon=multi_polygon).bboxes
+
+
+def resolve_geometry(multi_polygon: Union[str, dict, None]) -> Optional[BaseGeometry]:
+    """Parse a GeoJSON MultiPolygon into the merged shape its bboxes come from
+    (overlapping polygons dissolved into one outline). Returns None when there is
+    no spatial filter, which the zarr subset reads as "crop only, do not mask"."""
+    if multi_polygon is None or multi_polygon == NON_SPECIFIED:
+        return None
+    return MultiPolygonHelper(multi_polygon=multi_polygon).geometry
 
 
 def trim_date_range_for_keys(

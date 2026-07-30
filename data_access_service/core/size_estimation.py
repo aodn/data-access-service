@@ -17,6 +17,7 @@ from typing import Optional
 
 import pandas as pd
 import xarray
+from shapely.geometry.base import BaseGeometry
 from xarray.core import dtypes as xr_dtypes
 
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, ZarrDataSource
@@ -93,6 +94,7 @@ def estimate_single_key_size(
             resolved_subset_request.effective_bboxes,
             resolved_subset_request.columns,
             output_format,
+            resolved_subset_request.geometry,
         )
     elif isinstance(ds, ParquetDataSource):
         raise NotImplementedError("Parquet size estimate is not implemented yet")
@@ -110,6 +112,7 @@ def _estimate_zarr_size(
     bboxes: list,
     columns: list[str] | None,
     output_format: str,
+    geometry: BaseGeometry | None = None,
 ) -> dict:
     """Estimate the download size of one zarr key.
 
@@ -122,17 +125,24 @@ def _estimate_zarr_size(
     :param bboxes: effective bboxes to slice
     :param columns: requested columns; currently ignored
     :param output_format: "netcdf" or "geotiff"
+    :param geometry: the drawn area the bboxes came from; the download blanks the
+        cells outside it, which is what makes the output figure an upper bound
     :return: dict with uuid, key, format, estimated_uncompressed_bytes,
         estimated_output_bytes, and human-readable notes
     """
-    from data_access_service.utils.subset_zarr_helper import subset_zarr
+    from data_access_service.utils.subset_zarr_helper import area_to_keep, subset_zarr
 
     notes: list[str] = []
     if len(bboxes) > 1:
+        notes.append(f"union grid of {len(bboxes)} polygon bboxes")
+
+    # area_to_keep is the download's own "is anything blanked?" decision, so the
+    # note cannot drift from what the file actually contains
+    lat_name, lon_name, _ = resolve_dim_names(api, uuid, key)
+    if area_to_keep(zarr_store, lat_name, lon_name, bboxes, geometry) is not None:
         notes.append(
-            f"union grid of {len(bboxes)} polygon bboxes "
-            "(NaN filler between boxes compresses to almost nothing in the "
-            "real file -> output estimate is an upper bound)"
+            "cells outside the requested area come out as NaN (they compress to "
+            "almost nothing in the real file -> output estimate is an upper bound)"
         )
     if columns:
         # Column subsetting isn't implemented yet; once it is, it will be applied
@@ -151,12 +161,20 @@ def _estimate_zarr_size(
         output_format,
     )
 
-    # subset_zarr returns a lazily-sliced xarray.Dataset - the SAME union grid
-    # the batch download writes (all bboxes in one pass). apply_mask=False skips
-    # the eager .where() (OOM on the non-dask store); drop=False means it never
-    # changed the shape/nbytes anyway.
+    # subset_zarr returns a lazily-sliced xarray.Dataset - the SAME region the
+    # batch download writes (all bboxes in one pass). apply_mask=False skips the
+    # eager .where() (OOM on the non-dask store); the mask uses drop=False, so it
+    # only NaN-fills cells, never changes the shape/nbytes.
     dataset: xarray.Dataset = subset_zarr(
-        zarr_store, api, uuid, key, date_start, date_end, bboxes, apply_mask=False
+        zarr_store,
+        api,
+        uuid,
+        key,
+        date_start,
+        date_end,
+        bboxes,
+        apply_mask=False,
+        geometry=geometry,
     )
 
     # Measure the uncompressed and output sizes of the union grid, per format.

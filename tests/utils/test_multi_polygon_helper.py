@@ -134,6 +134,22 @@ class TestMultiPolygonHelper:
             10,
         )
 
+    def test_geometry_is_the_merged_shape_the_bboxes_came_from(self):
+        # what the zarr subset masks with: one Polygon for one merged shape, a
+        # MultiPolygon when the drawn areas stay apart, None when none was drawn
+        one = MultiPolygonHelper(
+            multi_polygon=_multi_polygon(_rect(10, 0, 30, 10), _rect(20, 0, 40, 10))
+        )
+        two = MultiPolygonHelper(
+            multi_polygon=_multi_polygon(_rect(10, 0, 20, 10), _rect(50, 0, 60, 10))
+        )
+
+        assert one.geometry.geom_type == "Polygon"
+        assert one.geometry.bounds == (10, 0, 40, 10)
+        assert two.geometry.geom_type == "MultiPolygon"
+        assert len(two.geometry.geoms) == 2
+        assert MultiPolygonHelper(multi_polygon=None).geometry is None
+
     def test_disjoint_polygons_give_one_bbox_each_matching_polygons(self):
         helper = MultiPolygonHelper(
             multi_polygon=_multi_polygon(_rect(10, 0, 20, 10), _rect(50, 0, 60, 10))

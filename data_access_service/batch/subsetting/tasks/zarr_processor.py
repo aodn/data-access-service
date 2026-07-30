@@ -67,6 +67,7 @@ class ZarrProcessor:
         self.start_date = resolved.start_date
         self.end_date = resolved.end_date
         self.bboxes = resolved.effective_bboxes
+        self.geometry = resolved.geometry
 
     # Read-through views onto subset_request — single source of truth, no drift.
     @property
@@ -151,9 +152,9 @@ class ZarrProcessor:
         self.log.info("Chunking dataset with %d time steps per chunk", time_per_chunk)
         zarr_store = zarr_store.chunk({time_dim: time_per_chunk})
 
-        # Apply ALL bboxes in one pass
-        # subset_zarr is the single owner of the slicing, shared with the size
-        # estimate so both select the same
+        # Apply ALL bboxes in one pass, then blank what falls outside the drawn
+        # polygons. subset_zarr is the single owner of the slicing, shared with
+        # the size estimate so both select the same region.
         if not self.bboxes:
             self.log.warning(
                 f"No data found for key: {key} in the specified conditions."
@@ -168,6 +169,7 @@ class ZarrProcessor:
             self.start_date,
             self.end_date,
             self.bboxes,
+            geometry=self.geometry,
         )
 
         if not isinstance(subset, xarray.Dataset):

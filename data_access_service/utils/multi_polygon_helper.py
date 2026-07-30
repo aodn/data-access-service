@@ -11,6 +11,7 @@ import geojson
 
 from typing import List, Optional, Union
 from geojson import MultiPolygon, Polygon
+from shapely.geometry import MultiPolygon as ShapelyMultiPolygon
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
@@ -114,6 +115,18 @@ def bbox_of(polygon: ShapelyPolygon) -> BoundingBox:
     )
 
 
+def as_one_geometry(polygons: List[ShapelyPolygon]) -> Optional[BaseGeometry]:
+    """The polygons as ONE geometry, for point-in-polygon masking
+    (subset_zarr_helper.form_geometry_mask). None for no polygons, which callers
+    read as "no area given, do not mask".
+    """
+    if not polygons:
+        return None
+    if len(polygons) == 1:
+        return polygons[0]
+    return ShapelyMultiPolygon(polygons)
+
+
 class MultiPolygonHelper:
     def __init__(self, multi_polygon: Union[str, dict, MultiPolygon, None]):
 
@@ -140,3 +153,8 @@ class MultiPolygonHelper:
     def polygons(self) -> List[ShapelyPolygon]:
         """The merged polygons the bboxes came from, in the same order."""
         return self._polygons
+
+    @property
+    def geometry(self) -> Optional[BaseGeometry]:
+        """The merged polygons as one geometry; None when no area was given."""
+        return as_one_geometry(self._polygons)

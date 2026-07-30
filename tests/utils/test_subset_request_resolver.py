@@ -9,6 +9,7 @@ from data_access_service.core.constants import WHOLE_GLOBE_BBOX
 from data_access_service.utils.subset_request_resolver import (
     resolve_bboxes,
     resolve_date_range,
+    resolve_geometry,
     resolve_subset_request,
 )
 
@@ -153,6 +154,56 @@ class TestResolveBboxes:
     def test_non_multipolygon_geometry_raises(self):
         with pytest.raises(TypeError):
             resolve_bboxes('{"type": "Point", "coordinates": [10, 20]}')
+
+
+class TestResolveGeometry:
+    def test_none_means_no_shape_to_mask_with(self):
+        assert resolve_geometry(None) is None
+        assert resolve_geometry("non-specified") is None
+
+    def test_single_polygon_is_its_own_shape(self):
+        geometry = resolve_geometry(_SINGLE_POLYGON)
+
+        assert geometry.geom_type == "Polygon"
+        assert geometry.bounds == (10, 20, 30, 40)
+
+    def test_overlapping_polygons_become_one_shape(self):
+        overlapping = (
+            '{"type":"MultiPolygon","coordinates":'
+            "[[[[0,0],[4,0],[4,2],[0,2],[0,0]]],"
+            "[[[0,0],[2,0],[2,4],[0,4],[0,0]]]]}"
+        )
+        geometry = resolve_geometry(overlapping)
+
+        # dissolved into one L-shaped outline: 8 + 8 - the 2x2 overlap
+        assert geometry.geom_type == "Polygon"
+        assert geometry.area == pytest.approx(12)
+
+    def test_resolved_request_carries_bboxes_and_geometry_from_one_polygon(self):
+        api = _mock_api(known_keys=["a.zarr"])
+
+        resolved = resolve_subset_request(
+            api, UUID, ["a.zarr"], "2024-01-01", "2024-12-31", _SINGLE_POLYGON
+        )
+
+        assert len(resolved.bboxes) == 1
+        bbox = resolved.bboxes[0]
+        assert resolved.geometry.bounds == (
+            bbox.min_lon,
+            bbox.min_lat,
+            bbox.max_lon,
+            bbox.max_lat,
+        )
+
+    def test_resolved_request_has_no_geometry_without_a_polygon(self):
+        api = _mock_api(known_keys=["a.zarr"])
+
+        resolved = resolve_subset_request(
+            api, UUID, ["a.zarr"], "2024-01-01", "2024-12-31", None
+        )
+
+        assert resolved.geometry is None
+        assert resolved.effective_bboxes == [WHOLE_GLOBE_BBOX]
 
 
 def test_whole_globe_bbox_bounds():

@@ -7,10 +7,14 @@ Everything returned is a lazily-sliced xarray.Dataset: no chunk is loaded, so
 callers can either write it out (download) or read .nbytes (estimate).
 """
 
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Optional, Sequence
 
 import numpy as np
+import shapely
 import xarray
+from shapely.geometry import box as shapely_box
+from shapely.geometry.base import BaseGeometry
+from shapely.ops import unary_union
 from xarray import DataArray
 
 from data_access_service.models.bounding_box import BoundingBox
@@ -27,21 +31,31 @@ def subset_zarr(
     end_date,
     bboxes: Sequence[BoundingBox],
     apply_mask: bool = True,
+    geometry: Optional[BaseGeometry] = None,
 ) -> xarray.Dataset:
-    """Apply one time range + one or more bboxes to a zarr dataset.
+    """Apply one time range + the requested area to a zarr dataset.
 
     Returns a lazily-sliced xarray.Dataset (no compute). Raises ValueError if a
     condition targets a name that is neither a dimension nor a variable of the
     dataset, or if bboxes is empty.
 
-    With N bboxes the result is the union grid: the smallest rectangular grid holding all the requested boxes - every lat/lon position covered
-    by at least one bbox, with the cells that belong to no bbox set to NaN.
+    Two steps, because the zarr library can only slice by value ranges:
 
-    apply_mask: when True (batch download) the .where() mask is applied - both
-    the curvilinear 2D-variable conditions and the multi-bbox cross-cell
-    blanking. When False (size estimation) the .where() is skipped: on a
-    non-dask store it is eager and would load the whole store from S3 (OOM), and
-    it never changes the shape/nbytes anyway (drop=False).
+    1. CROP: .isel() every lat/lon position covered by at least one bbox. With N
+       bboxes that is the union grid - not the bounding envelope of all of them.
+    2. MASK: .where() the cells the crop had to include but nobody asked for, so
+       they come out as NaN: outside the drawn polygons when `geometry` is given
+       (`geometry` is the merged shape, bboxes are only its bounding boxes), or
+       outside the bboxes themselves when the crop could not express them
+       exactly. See area_to_keep.
+
+    :param bboxes: bounding boxes of the requested area, at least one
+    :param geometry: the user's merged polygons (multi_polygon_helper), the shape
+        the bboxes came from. None means "no polygon given" - see area_to_keep.
+    :param apply_mask: when True (batch download) step 2 runs. When False (size
+        estimation) it is skipped: on a non-dask store .where() is eager and
+        would load the whole store from S3 (OOM), and with drop=False it never
+        changes the shape/nbytes anyway.
     """
     if not bboxes:
         raise ValueError(
@@ -49,8 +63,10 @@ def subset_zarr(
             "ResolvedSubsetRequest.effective_bboxes, which defaults to the whole globe."
         )
 
+    lat_name, lon_name, time_name = resolve_dim_names(api, uuid, key)
     conditions_per_bbox = [
-        subset_conditions(api, uuid, key, start_date, end_date, bbox) for bbox in bboxes
+        subset_conditions(lat_name, lon_name, time_name, start_date, end_date, bbox)
+        for bbox in bboxes
     ]
 
     for dim_name in conditions_per_bbox[0]:
@@ -70,53 +86,40 @@ def subset_zarr(
     }
     subset = dataset.isel(**dim_indexers) if dim_indexers else dataset
 
-    # Step 2: one mask term per bbox, OR'd together, so a cell survives when it
-    # is inside ANY bbox. Built on the already-indexed `subset` so mask and data
-    # share the same axes. Two kinds of condition end up here:
-    #   - dimensions whose range differs between bboxes (lat/lon): the union
-    #     indexer above keeps the "cross" cells that no single bbox asked for,
-    #     and this blanks them. A dimension asking for the same range in every
-    #     bbox (time) is already exact, so it is skipped.
-    #   - N-dimensional variables, especially curvilinear 2D lat/lon, which
-    #     cannot be indexed by value at all.
-    mask: DataArray | None = None
-    for conditions in conditions_per_bbox:
-        bbox_mask: DataArray | None = None
-        for dim_name, (min_value, max_value) in conditions.items():
-            if is_dim(dim_name, dataset) and not varies_between_bboxes(
-                dim_name, conditions_per_bbox
-            ):
-                continue
-            bbox_mask = form_mask(bbox_mask, dim_name, min_value, max_value, subset)
-        if bbox_mask is not None:
-            mask = bbox_mask if mask is None else (mask | bbox_mask)
-
-    if mask is not None and apply_mask:
-        # NOTE: KEEP drop=False
-        # The size estimate SKIPS this .where() and relies on the
-        # invariant that .where(drop=False) only promotes dtypes (mirrored via
-        # maybe_promote in size_estimation._nbytes_by_compressibility), never
-        # changes shape. Switching to drop=True would crop the grid and change nbytes,
-        # silently making every estimate wrong. If you must change it, update the
-        # estimation path to match.
-        subset = subset.where(mask, drop=False)
+    # Step 2: blank whatever the crop could not express. Only built when it will
+    # be used - it reads the lat/lon values, which the estimate path avoids.
+    if apply_mask:
+        area = area_to_keep(dataset, lat_name, lon_name, bboxes, geometry)
+        if area is not None:
+            # NOTE: KEEP drop=False
+            # The size estimate SKIPS this .where() and relies on the
+            # invariant that .where(drop=False) only promotes dtypes (mirrored via
+            # maybe_promote in size_estimation._nbytes_by_compressibility), never
+            # changes shape. Switching to drop=True would crop the grid and change nbytes,
+            # silently making every estimate wrong. If you must change it, update the
+            # estimation path to match.
+            subset = subset.where(
+                form_geometry_mask(subset, lat_name, lon_name, area), drop=False
+            )
     return subset
 
 
 def subset_conditions(
-    api, uuid: str, key: str, start_date, end_date, bbox: BoundingBox
+    lat_name: str,
+    lon_name: str,
+    time_name: str,
+    start_date,
+    end_date,
+    bbox: BoundingBox,
 ) -> dict[str, list]:
     """Build {dim_name: [min, max]} for the time/lat/lon filters of one bbox.
 
-    Dimension names are resolved from the dataset's own metadata. Add more
-    conditions here if they become supported.
+    Add more conditions here if they become supported.
     """
-    lat_dim, lon_dim, time_dim = resolve_dim_names(api, uuid, key)
-
     return {
-        time_dim: [to_naive_utc(start_date), to_naive_utc(end_date)],
-        lat_dim: [bbox.min_lat, bbox.max_lat],
-        lon_dim: [bbox.min_lon, bbox.max_lon],
+        time_name: [to_naive_utc(start_date), to_naive_utc(end_date)],
+        lat_name: [bbox.min_lat, bbox.max_lat],
+        lon_name: [bbox.min_lon, bbox.max_lon],
     }
 
 
@@ -129,30 +132,82 @@ def is_var(key: str, dataset: xarray.Dataset) -> bool:
     return key in dataset.variables
 
 
-def varies_between_bboxes(
-    dim_name: str, conditions_per_bbox: Sequence[dict[str, list]]
-) -> bool:
-    """True when the bboxes ask for different ranges on this dimension.
-
-    The time range is the same for every bbox, the lat/lon ranges usually are
-    not. Only a varying dimension can produce "cross" cells that the union
-    indexer picks up but no bbox actually asked for.
-    """
-    first = conditions_per_bbox[0][dim_name]
-    return any(conditions[dim_name] != first for conditions in conditions_per_bbox[1:])
-
-
-def form_mask(
-    existing_mask: DataArray | None,
-    dim_name: str,
-    min_value: Any,
-    max_value: Any,
+def area_to_keep(
     dataset: xarray.Dataset,
+    lat_name: str,
+    lon_name: str,
+    bboxes: Sequence[BoundingBox],
+    geometry: Optional[BaseGeometry],
+) -> Optional[BaseGeometry]:
+    """The area a cell must fall inside to survive, or None when the crop
+    already selected exactly the requested cells and nothing needs blanking.
+
+    Also answers "will the download NaN-fill anything?" for the size estimate,
+    so the two cannot disagree about it.
+
+    - the user's merged polygons when we have them: the crop only used their
+      bounding boxes, so the shape itself (holes, diagonals, the corners of an
+      L-shaped union) still has to be applied. A polygon that IS its own bbox
+      needs no mask - the crop is already that rectangle, and skipping .where()
+      keeps the data's own dtypes.
+    - else the bboxes as rectangles: the crop could not express them exactly,
+      either because lat/lon are 2D variables that cannot be indexed by value,
+      or because several boxes leave "cross" cells in the union grid that belong
+      to no box.
+    - None when a single bbox was cropped by value: those cells ARE the request.
+      This is also what keeps the whole-globe default (no polygon given) from
+      masking at all - a -180..180 rectangle would blank every cell of a store
+      whose longitudes run 0..360.
+    """
+    # one bbox on indexable (1D) lat/lon axes is the only case the crop states
+    # exactly, cell for cell
+    exact_crop = (
+        len(bboxes) == 1 and is_dim(lat_name, dataset) and is_dim(lon_name, dataset)
+    )
+    rectangles = [
+        shapely_box(bbox.min_lon, bbox.min_lat, bbox.max_lon, bbox.max_lat)
+        for bbox in bboxes
+    ]
+    if geometry is not None:
+        if exact_crop and geometry.equals(rectangles[0]):
+            return None
+        return geometry
+    if exact_crop:
+        return None
+    return unary_union(rectangles)
+
+
+def form_geometry_mask(
+    dataset: xarray.Dataset, lat_name: str, lon_name: str, area: BaseGeometry
 ) -> DataArray:
-    var_mask = (dataset[dim_name] >= min_value) & (dataset[dim_name] <= max_value)
-    if existing_mask is None:
-        return var_mask
-    return existing_mask & var_mask
+    """True where a cell's lat/lon lies inside `area`, boundary included.
+
+    One point-in-polygon test covers both grid layouts, no special case:
+      - regular grid: 1D lat and lon axes, meshed into the (lat, lon) plane
+      - curvilinear grid: 2D LATITUDE/LONGITUDE variables sharing dims (I, J)
+
+    The lat/lon values are read here (coordinate-sized, not data-sized); the data
+    variables stay lazy.
+    """
+    lat = dataset[lat_name]
+    lon = dataset[lon_name]
+
+    if lat.ndim == 1 and lon.ndim == 1:
+        # meshgrid's default indexing gives (lat, lon)-shaped planes
+        lon_values, lat_values = np.meshgrid(lon.values, lat.values)
+        dims = lat.dims + lon.dims
+    elif lat.dims == lon.dims:
+        lat_values, lon_values = lat.values, lon.values
+        dims = lat.dims
+    else:
+        raise ValueError(
+            f"Cannot mask by area: {lat_name} {lat.dims} and {lon_name} {lon.dims} "
+            "are neither 1D axes nor variables on the same dims"
+        )
+
+    # cells whose lat/lon is NaN (curvilinear fill values) fall outside anything
+    inside = shapely.intersects_xy(area, lon_values, lat_values)
+    return xarray.DataArray(inside, dims=dims)
 
 
 def form_dim_indexer(
