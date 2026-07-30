@@ -59,27 +59,30 @@ class DuckDBClient(ABC):
     def create_s3_secret(self, bucket: str) -> None:
         """Create a DuckDB S3 secret scoped to ``bucket`` from boto3 credentials."""
         boto_session = boto3.Session()
-        creds = boto_session.get_credentials().get_frozen_credentials()
-        region = boto_session.region_name or "ap-southeast-2"
 
-        def lit(value: str) -> str:
-            return "'" + value.replace("'", "''") + "'"
+        # Not useful in testing
+        if boto_session is not None:
+            creds = boto_session.get_credentials().get_frozen_credentials()
+            region = boto_session.region_name or "ap-southeast-2"
 
-        def ident(name: str) -> str:
-            return '"' + name.replace('"', '""') + '"'
+            def lit(value: str) -> str:
+                return "'" + value.replace("'", "''") + "'"
 
-        self.execute(
-            f"""
-            CREATE OR REPLACE SECRET {ident(f"{bucket}_s3")} (
-                TYPE S3,
-                KEY_ID {lit(creds.access_key)},
-                SECRET {lit(creds.secret_key)},
-                SESSION_TOKEN {lit(creds.token or "")},
-                REGION {lit(region)},
-                SCOPE 's3://{bucket}'
+            def ident(name: str) -> str:
+                return '"' + name.replace('"', '""') + '"'
+
+            self.execute(
+                f"""
+                CREATE OR REPLACE SECRET {ident(f"{bucket}_s3")} (
+                    TYPE S3,
+                    KEY_ID {lit(creds.access_key)},
+                    SECRET {lit(creds.secret_key)},
+                    SESSION_TOKEN {lit(creds.token or "")},
+                    REGION {lit(region)},
+                    SCOPE 's3://{bucket}'
+                )
+                """
             )
-            """
-        )
 
 
 class PmTileDuckDBClient(DuckDBClient):
