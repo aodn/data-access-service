@@ -9,26 +9,46 @@ The workers only measure metadata, never load the data:
   a per-format compression ratio
 - zarr (geotiff output): dimension-based - one raster per (gridded variable
   x time step), sized lat x lon, scaled by a zip ratio
-- parquet: not implemented yet (raises NotImplementedError)
+- parquet: partition pruning + row-group statistics read from the file
+  FOOTERS, converted to CSV text bytes and scaled by a zip ratio
 """
 
 import logging
+from datetime import datetime
+from math import ceil
 from typing import Optional
 
+import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.compute as pc
+import pyarrow.dataset as pa_ds
 import xarray
+from shapely import wkb
+from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
 from xarray.core import dtypes as xr_dtypes
 
-from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, ZarrDataSource
+from aodn_cloud_optimised.lib.DataQuery import (
+    ParquetDataSource,
+    PolygonNotIntersectingError,
+    ZarrDataSource,
+    get_timestamps_boundary_values,
+    query_unique_value,
+)
 
 from data_access_service.core.constants import (
+    COMPRESSION_RATIO_CSV_GZIP,
     OUTPUT_FORMAT_COMPRESSION_RATIO,
     ASSUMED_STRING_BYTES,
     GEOTIFF_ZIP_RATIO,
     GEOTIFF_INT_PIXEL_BYTES,
     GEOTIFF_CURVILINEAR_INFLATION,
+    MAX_FRAGMENT_FOOTER_READS,
+    PARQUET_UNCOMPRESSED_TO_CSV_RATIO,
 )
+from data_access_service.models.bounding_box import BoundingBox
+from data_access_service.utils.date_time_utils import ensure_timezone
 from data_access_service.utils.geotiff_export import geotiff_eligible_vars, has_ij_dims
 from data_access_service.utils.subset_request_resolver import (
     ResolvedSubsetRequest,
@@ -93,7 +113,17 @@ def estimate_single_key_size(
             resolved_subset_request.geometry,
         )
     elif isinstance(ds, ParquetDataSource):
-        raise NotImplementedError("Parquet size estimate is not implemented yet")
+        return _estimate_parquet_size(
+            api,
+            ds,
+            uuid,
+            key,
+            date_start,
+            date_end,
+            resolved_subset_request.bboxes,
+            resolved_subset_request.columns,
+            output_format,
+        )
     else:
         return None
 
@@ -357,14 +387,379 @@ def _nbytes_by_compressibility(
     return compressible, incompressible
 
 
-def _empty_estimate(uuid: str, key: str, output_format: str) -> dict:
-    """Zero-size estimate, returned when the requested range is outside the
-    dataset's temporal extent (the batch download produces no data here)."""
+def _estimate_parquet_size(
+    api,
+    parquet_ds: ParquetDataSource,
+    uuid: str,
+    key: str,
+    date_start: pd.Timestamp,
+    date_end: pd.Timestamp,
+    bboxes: list[BoundingBox],
+    columns: list[str] | None,
+    output_format: str,
+) -> dict:
+    """Estimate the download size of one parquet key, from metadata only.
+
+    Nothing here reads a data page. Two levels of pruning narrow the dataset
+    down to the request, both off metadata the download itself prunes on:
+
+    1. partitions (free, path-based): the `timestamp` buckets bracketing the
+       date range, and the `polygon` partitions intersecting any bbox
+    2. row groups (one footer read per surviving file): keep only row groups
+       whose TIME/LATITUDE/LONGITUDE statistics overlap the request
+
+    The surviving row groups give a row count and the UNCOMPRESSED parquet
+    bytes, which become CSV text bytes and then the ZIP.
+
+    Note the different meaning of `estimated_uncompressed_bytes` here: for zarr
+    it is the in-memory nbytes, for parquet it is the size of the CSV text you
+    get after unzipping. Both answer "how big once uncompressed".
+
+    :param parquet_ds: the datasource; only its cached `.dataset` is touched,
+        never get_data
+    :param bboxes: bboxes to prune with; empty means no spatial filter
+    :param columns: requested columns; ignored, and the CSV download ignores
+        them too
+    :param output_format: the requested format - a parquet key always downloads
+        as a CSV zip, so this only decides a note
+    :return: dict with uuid, key, format, estimated_uncompressed_bytes,
+        estimated_output_bytes, and human-readable notes
+    """
+    notes: list[str] = []
+    if len(bboxes) > 1:
+        notes.append(f"union of {len(bboxes)} polygon bboxes")
+    if columns:
+        # Aligned with the download: query_data in generate_dataset.py passes no
+        # columns either, so the CSV always carries every column.
+        log.info("column subsetting not implemented yet; ignoring columns %s", columns)
+        notes.append(f"column subsetting not supported yet; columns skipped: {columns}")
+    if output_format != "csv":
+        # data_collection.py picks the output by STORAGE type, not by the
+        # requested format: a .parquet key is always written out as a CSV zip.
+        notes.append(
+            f"parquet keys always download as a CSV zip; '{output_format}' "
+            "estimated as CSV"
+        )
+
+    date_start = ensure_timezone(date_start)
+    date_end = ensure_timezone(date_end)
+    lat_name, lon_name, time_name = api.resolve_dim_names(uuid, key)
+
+    # Cached on the datasource the API singleton holds - the first access does
+    # the recursive S3 listing, later requests reuse it. Never re-create a
+    # dataset per request: query_unique_value caches on id(dataset).
+    dataset = parquet_ds.dataset
+
+    log.debug(
+        "_estimate_parquet_size: uuid=%s key=%s slice=[%s..%s] bboxes=%d format=%s",
+        uuid,
+        key,
+        date_start,
+        date_end,
+        len(bboxes),
+        output_format,
+    )
+
+    try:
+        partition_expr = _partition_filter(dataset, date_start, date_end, bboxes, notes)
+    except PolygonNotIntersectingError:
+        # Genuinely no data for this area - not an error, a zero estimate.
+        return _empty_estimate(
+            uuid,
+            key,
+            output_format,
+            note="no data partitions intersect the requested area",
+        )
+
+    # Keyed by path so a fragment can only be counted once, whatever matched it.
+    fragments = list(
+        {f.path: f for f in dataset.get_fragments(filter=partition_expr)}.values()
+    )
+    surviving = len(fragments)
+    if surviving == 0:
+        return _empty_estimate(
+            uuid, key, output_format, note="no data files match the requested subset"
+        )
+
+    # One footer per fragment is one S3 GET, so cap the work and extrapolate.
+    scale = 1.0
+    if surviving > MAX_FRAGMENT_FOOTER_READS:
+        step = ceil(surviving / MAX_FRAGMENT_FOOTER_READS)
+        fragments = fragments[::step]
+        scale = surviving / len(fragments)
+        notes.append(f"sampled {len(fragments)} of {surviving} files, extrapolated")
+
+    rows = 0
+    parquet_uncompressed = 0
+    for fragment in fragments:
+        # .metadata reads the file FOOTER only. It is re-read per access, so it
+        # is not retained beyond this iteration.
+        metadata = fragment.metadata
+        for i in range(metadata.num_row_groups):
+            row_group = metadata.row_group(i)
+            if not _row_group_overlaps(
+                row_group, time_name, lat_name, lon_name, date_start, date_end, bboxes
+            ):
+                continue
+            rows += row_group.num_rows
+            for c in range(row_group.num_columns):
+                parquet_uncompressed += row_group.column(c).total_uncompressed_size
+
+    rows = int(rows * scale)
+    parquet_uncompressed = int(parquet_uncompressed * scale)
+
+    # Binary parquet bytes -> CSV text -> the ZIP that is actually downloaded.
+    csv_text_bytes = int(parquet_uncompressed * PARQUET_UNCOMPRESSED_TO_CSV_RATIO)
+    total_uncompressed = csv_text_bytes
+    total_output = int(csv_text_bytes * COMPRESSION_RATIO_CSV_GZIP)
+
+    if bboxes:
+        notes.append(
+            "bbox upper bound: the download filters to the exact polygon(s), "
+            "the estimate counts the bounding box"
+        )
+    notes.append(
+        "row-group granularity: partially-matching row groups are counted "
+        "whole (upper bound)"
+    )
+    notes.append(f"~{rows:,} rows across {surviving} file(s)")
+    notes.append(
+        f"estimated download size ~{_bytes_to_mb(total_output)} MB "
+        f"(uncompressed ~{_bytes_to_mb(total_uncompressed)} MB)"
+    )
+
+    deduped_notes = list(dict.fromkeys(notes))
+
+    log.debug(
+        "_estimate_parquet_size: totals rows=%d uncompressed=%d output=%d",
+        rows,
+        total_uncompressed,
+        total_output,
+    )
+
+    return {
+        "uuid": uuid,
+        "key": key,
+        "format": output_format,
+        "estimated_uncompressed_bytes": total_uncompressed,
+        "estimated_output_bytes": total_output,
+        "notes": "; ".join(deduped_notes),
+    }
+
+
+def _partition_filter(
+    dataset: pa_ds.Dataset,
+    date_start: pd.Timestamp,
+    date_end: pd.Timestamp,
+    bboxes: list[BoundingBox],
+    notes: list[str],
+) -> Optional[pc.Expression]:
+    """Build a PARTITION-ONLY expression for get_fragments.
+
+    Only `timestamp` and `polygon` appear in it - row-level predicates would
+    make get_fragments open files, and the row-level work is done off the
+    footers instead (_row_group_overlaps).
+
+    :return: the expression, or None when neither dimension can be pruned
+    :raises PolygonNotIntersectingError: no polygon partition intersects any bbox
+    """
+    parts = [
+        _timestamp_partition_expr(dataset, date_start, date_end, notes),
+        _polygon_partition_expr(dataset, bboxes, notes),
+    ]
+    parts = [p for p in parts if p is not None]
+    if not parts:
+        return None
+
+    expression = parts[0]
+    for part in parts[1:]:
+        expression = expression & part
+    return expression
+
+
+def _timestamp_partition_expr(
+    dataset: pa_ds.Dataset,
+    date_start: pd.Timestamp,
+    date_end: pd.Timestamp,
+    notes: list[str],
+) -> Optional[pc.Expression]:
+    """Restrict to the `timestamp` partition buckets bracketing the date range,
+    using the same boundary helper the download's time filter uses.
+
+    Returns None (no time pruning, an upper bound) when the dataset has no
+    timestamp partitions or the boundaries cannot be worked out."""
+    try:
+        if not query_unique_value(dataset, "timestamp"):
+            notes.append("no timestamp partitions; time pruning skipped (upper bound)")
+            return None
+        bucket_start, bucket_end = get_timestamps_boundary_values(
+            dataset, date_start, date_end
+        )
+    except Exception as e:
+        log.warning("timestamp partition pruning skipped: %s", e)
+        notes.append("timestamp partitions unreadable; time pruning skipped")
+        return None
+
+    return (
+        pc.field("timestamp") >= _timestamp_partition_scalar(dataset, bucket_start)
+    ) & (pc.field("timestamp") <= _timestamp_partition_scalar(dataset, bucket_end))
+
+
+def _timestamp_partition_scalar(dataset: pa_ds.Dataset, value) -> pa.Scalar:
+    """Cast a partition boundary to the dataset's own `timestamp` field type.
+
+    Hive partition columns are inferred from directory names, so the same
+    logical value is int32 in one dataset and a string in another; comparing an
+    int64 literal against a string field raises ArrowNotImplementedError.
+    (Mirrors DataQuery._timestamp_scalar, which is private to the library.)"""
+    try:
+        ts_type = dataset.schema.field("timestamp").type
+    except KeyError:
+        ts_type = pa.int64()
+
+    if pa.types.is_string(ts_type) or pa.types.is_large_string(ts_type):
+        return pa.scalar(str(int(value)), type=ts_type)
+    return pa.scalar(int(value), type=ts_type)
+
+
+def _polygon_partition_expr(
+    dataset: pa_ds.Dataset, bboxes: list[BoundingBox], notes: list[str]
+) -> Optional[pc.Expression]:
+    """Restrict to the `polygon` partitions intersecting ANY requested bbox -
+    the union, so a partition shared by two bboxes appears once.
+
+    Returns None (no spatial pruning) when there is no spatial filter at all or
+    the dataset is not partitioned by polygon.
+
+    :raises PolygonNotIntersectingError: nothing intersects, i.e. no data
+    """
+    if not bboxes:
+        # Empty bboxes means "no spatial filter" - same convention as the zarr
+        # path. Do NOT fabricate a whole-globe box.
+        return None
+
+    try:
+        partitions = query_unique_value(dataset, "polygon")
+    except Exception as e:
+        log.warning("polygon partition pruning skipped: %s", e)
+        partitions = set()
+    if not partitions:
+        notes.append("no polygon partitions; spatial pruning skipped (upper bound)")
+        return None
+
+    requested = [
+        box(bbox.min_lon, bbox.min_lat, bbox.max_lon, bbox.max_lat) for bbox in bboxes
+    ]
+    matching = [
+        hex_wkb
+        for hex_wkb in partitions
+        if _partition_intersects_any(hex_wkb, requested)
+    ]
+    if not matching:
+        raise PolygonNotIntersectingError(
+            "No polygon partition intersects the requested area"
+        )
+
+    return pc.field("polygon").isin(matching)
+
+
+def _partition_intersects_any(hex_wkb: str, requested: list) -> bool:
+    """Whether one `polygon` partition value (WKB hex) intersects any requested
+    shape. An unparseable partition value counts as intersecting, so a bad
+    directory name can only over-estimate, never drop real data."""
+    try:
+        partition_shape = wkb.loads(bytes.fromhex(hex_wkb))
+    except Exception as e:
+        log.warning("unreadable polygon partition %s: %s", hex_wkb, e)
+        return True
+    return any(partition_shape.intersects(shape) for shape in requested)
+
+
+def _row_group_overlaps(
+    row_group,
+    time_name: str | None,
+    lat_name: str | None,
+    lon_name: str | None,
+    date_start: pd.Timestamp,
+    date_end: pd.Timestamp,
+    bboxes: list[BoundingBox],
+) -> bool:
+    """Whether one row group can hold rows the download would keep, judged
+    purely on the min/max statistics in the footer.
+
+    Missing statistics mean "cannot rule it out", so the row group is kept -
+    the estimate stays an upper bound."""
+    ranges = _row_group_column_ranges(row_group)
+
+    time_range = ranges.get(time_name) if time_name else None
+    if time_range is not None:
+        low, high = _as_utc_timestamp(time_range[0]), _as_utc_timestamp(time_range[1])
+        if low is not None and high is not None:
+            if high < date_start or low > date_end:
+                return False
+
+    if bboxes:
+        lat_range = ranges.get(lat_name) if lat_name else None
+        lon_range = ranges.get(lon_name) if lon_name else None
+        if lat_range is not None and lon_range is not None:
+            # The row group's own bounding box; keep it if it overlaps any
+            # requested box in BOTH axes.
+            if not any(
+                bbox.min_lat <= lat_range[1]
+                and lat_range[0] <= bbox.max_lat
+                and bbox.min_lon <= lon_range[1]
+                and lon_range[0] <= bbox.max_lon
+                for bbox in bboxes
+            ):
+                return False
+
+    return True
+
+
+def _row_group_column_ranges(row_group) -> dict:
+    """{column name: (min, max)} for the columns of one row group that carry
+    statistics. Columns without them are simply absent."""
+    ranges = {}
+    for i in range(row_group.num_columns):
+        column = row_group.column(i)
+        statistics = column.statistics
+        if statistics is not None and statistics.has_min_max:
+            ranges[column.path_in_schema] = (statistics.min, statistics.max)
+    return ranges
+
+
+def _as_utc_timestamp(value) -> Optional[pd.Timestamp]:
+    """A time statistic as a UTC-aware Timestamp, or None when it is not a
+    date at all.
+
+    pyarrow hands back a NAIVE Timestamp for a timestamp column, which cannot
+    be compared with the request's UTC bounds. A time column stored as a plain
+    number (epoch seconds) is ambiguous, so we return None and let the caller
+    keep the row group rather than guess a unit and prune wrongly."""
+    if not isinstance(value, (pd.Timestamp, datetime, np.datetime64)):
+        return None
+    timestamp = pd.Timestamp(value)
+    return (
+        timestamp.tz_localize("UTC")
+        if timestamp.tz is None
+        else timestamp.tz_convert("UTC")
+    )
+
+
+def _empty_estimate(
+    uuid: str,
+    key: str,
+    output_format: str,
+    note: str = "requested date range is outside the dataset's temporal extent",
+) -> dict:
+    """Zero-size estimate, returned when the request cannot match any data (by
+    default because the requested range is outside the dataset's temporal
+    extent - the batch download produces no data here)."""
     return {
         "uuid": uuid,
         "key": key,
         "format": output_format,
         "estimated_uncompressed_bytes": 0,
         "estimated_output_bytes": 0,
-        "notes": "requested date range is outside the dataset's temporal extent",
+        "notes": note,
     }
