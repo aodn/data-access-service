@@ -1,14 +1,12 @@
-import json
 import math
 
 import xarray as xr
-from fastapi import APIRouter, Header, HTTPException, Path, Query, Response
+from fastapi import APIRouter, HTTPException, Path, Query, Response
 from fastapi.openapi.models import Example
 
 from data_access_service.config.tiler.http_cache import (
     IMMUTABLE_CACHE_HEADERS,
-    compute_etag,
-    etag_response,
+    REVALIDATE_CACHE_HEADERS,
 )
 from data_access_service.tiler.schemas.products import (
     ManifestResponse,
@@ -55,15 +53,11 @@ def _require_point_in_bounds(ds: xr.Dataset, lat: float, lon: float) -> None:
 @router.get(
     "/products",
     summary="List products",
-    responses={
-        200: {"model": list[ProductConfig]},
-        304: {"description": "Not Modified — ETag matched, response body is empty"},
-    },
+    response_model=list[ProductConfig],
 )
-async def get_products(if_none_match: str | None = Header(None, alias="if-none-match")):
-    data = [ProductConfig.from_product(p).model_dump() for p in iter_products()]
-    etag = compute_etag(json.dumps(data, sort_keys=True, default=str))
-    return etag_response(data, etag, if_none_match)
+async def get_products(response: Response):
+    response.headers.update(REVALIDATE_CACHE_HEADERS)
+    return [ProductConfig.from_product(p) for p in iter_products()]
 
 
 @router.get(
@@ -73,13 +67,10 @@ async def get_products(if_none_match: str | None = Header(None, alias="if-none-m
         "Returns available dates for every product. "
         "`from` defaults to each product's earliest available date; `to` is unbounded by default."
     ),
-    # response_model=ManifestResponse,  # can't use this because of the dynamic ETag-based 304 response
-    responses={
-        200: {"model": ManifestResponse},
-        304: {"description": "Not Modified — ETag matched, response body is empty"},
-    },
+    response_model=ManifestResponse,
 )
 def get_products_availability(
+    response: Response,
     from_date: str | None = Query(
         None,
         alias="from",
@@ -94,12 +85,9 @@ def get_products_availability(
         description="End date (inclusive), YYYY-MM-DD. Defaults to no upper bound.",
         openapi_examples={"default": Example(value="2024-12-31")},
     ),
-    if_none_match: str | None = Header(None, alias="if-none-match"),
-    # Automatically sent by browser using previous ETag from previous response.
 ):
     products = {}
 
-    fingerprint_parts = [f"from={from_date or ''}", f"to={to_date or ''}"]
     # iter_product_items returns a snapshot list so a concurrent reload can't
     # raise RuntimeError ("dictionary changed size during iteration") here.
     for product_id, product in iter_product_items():
@@ -118,12 +106,9 @@ def get_products_availability(
                 "end": all_dates[-1] if all_dates else None,
             },
         }
-        fingerprint_parts.append(
-            f"{product_id}:{len(dates)}:{dates[-1] if dates else ''}"
-        )
 
-    etag = compute_etag("|".join(fingerprint_parts))
-    return etag_response({"products": products}, etag, if_none_match)
+    response.headers.update(REVALIDATE_CACHE_HEADERS)
+    return {"products": products}
 
 
 @router.get(
