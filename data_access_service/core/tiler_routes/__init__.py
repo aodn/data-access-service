@@ -6,7 +6,7 @@ from data_access_service.core.tiler_routes.shared import require_tiler_ready
 from data_access_service.core.tiler_routes.visual_tiles import (
     router as visual_tiles_router,
 )
-from data_access_service.utils.api_utils import api_key_auth
+from data_access_service.core.routes.auth import api_key_auth
 
 router = APIRouter(
     prefix=Config.BASE_URL,

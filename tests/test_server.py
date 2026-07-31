@@ -7,7 +7,7 @@ from data_access_service.core.tiler_routes.shared import mark_tiler_ready
 from data_access_service.server import app
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.product.registry import PRODUCTS
-from data_access_service.utils.api_utils import api_key_auth
+from data_access_service.core.routes.auth import api_key_auth
 
 # A PNG large enough to clear GZipMiddleware's minimum_size, so the no-gzip assertion
 # below exercises the content-type exclusion rather than passing on the size threshold.

@@ -27,13 +27,13 @@ from data_access_service.sites.sites import (
     SiteFeatureCollection,
 )
 from data_access_service.models.estimate_size_request import EstimateSizeRequest
-from data_access_service.utils.api_utils import api_key_auth
+from data_access_service.core.routes.auth import api_key_auth
 from data_access_service.utils.date_time_utils import (
     ensure_timezone,
     MIN_DATE,
     DATE_FORMAT,
 )
-from data_access_service.utils.routes_helper import (
+from data_access_service.core.routes.helpers import (
     get_site_service,
     require_api_ready,
     verify_datatime_param,

@@ -10,6 +10,7 @@ callers can either write it out (download) or read .nbytes (estimate).
 from typing import Any, Iterable, Optional, Sequence
 
 import numpy as np
+from pandas import Timestamp
 import shapely
 import xarray
 from shapely.geometry import box as shapely_box
@@ -19,16 +20,16 @@ from xarray import DataArray
 
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.utils.date_time_utils import to_naive_utc
-from data_access_service.utils.dim_names_utils import resolve_dim_names
 
 
 def subset_zarr(
     dataset: xarray.Dataset,
-    api,
-    uuid: str,
     key: str,
-    start_date,
-    end_date,
+    lat_name: str,
+    lon_name: str,
+    time_name: str,
+    start_date: Timestamp,
+    end_date: Timestamp,
     bboxes: Sequence[BoundingBox],
     apply_mask: bool = True,
     geometry: Optional[BaseGeometry] = None,
@@ -49,6 +50,14 @@ def subset_zarr(
        outside the bboxes themselves when the crop could not express them
        exactly. See area_to_keep.
 
+    :param key: dataset key, used in error messages only
+    :param start_date/end_date: both required - form_dim_indexer selects by
+        comparing values, so None is not an "open end", it is a TypeError.
+        Callers get them from ResolvedSubsetRequest, which only has dates when
+        has_data is True; both call sites already check that first.
+    :param lat_name/lon_name/time_name: the dataset's own dimension names, from
+        api.resolve_dim_names(uuid, key). Passed in rather than looked up here so
+        this stays independent of the API service.
     :param bboxes: bounding boxes of the requested area, at least one
     :param geometry: the user's merged polygons (multi_polygon_helper), the shape
         the bboxes came from. None means "no polygon given" - see area_to_keep.
@@ -63,7 +72,6 @@ def subset_zarr(
             "ResolvedSubsetRequest.effective_bboxes, which defaults to the whole globe."
         )
 
-    lat_name, lon_name, time_name = resolve_dim_names(api, uuid, key)
     conditions_per_bbox = [
         subset_conditions(lat_name, lon_name, time_name, start_date, end_date, bbox)
         for bbox in bboxes
@@ -108,8 +116,8 @@ def subset_conditions(
     lat_name: str,
     lon_name: str,
     time_name: str,
-    start_date,
-    end_date,
+    start_date: Timestamp,
+    end_date: Timestamp,
     bbox: BoundingBox,
 ) -> dict[str, list]:
     """Build {dim_name: [min, max]} for the time/lat/lon filters of one bbox.

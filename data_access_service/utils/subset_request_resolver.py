@@ -14,6 +14,13 @@ from shapely.geometry.base import BaseGeometry
 from data_access_service.core.constants import UNIX_EPOCH_UTC, WHOLE_GLOBE_BBOX
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.models.subset_request import NON_SPECIFIED, SubsetRequest
+from data_access_service.utils.date_time_utils import (
+    end_of_day_nano,
+    ensure_timezone,
+    resolve_non_specified_dates,
+    start_of_day_nano,
+    supply_day_with_nano_precision,
+)
 from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
 
 
@@ -102,8 +109,6 @@ def normalize_request(api, subset_request: SubsetRequest) -> SubsetRequest:
     resolved to defaults, so every later reader (child jobs, result emails)
     sees the actual values instead of the raw user input.
     """
-    from data_access_service.utils.date_time_utils import resolve_non_specified_dates
-
     start_date, end_date = resolve_non_specified_dates(
         subset_request.start_date, subset_request.end_date
     )
@@ -142,11 +147,6 @@ def resolve_date_range(
 
     Without api/keys it is a pure string-to-Timestamp conversion (steps 1-2).
     """
-    from data_access_service.utils.date_time_utils import (
-        resolve_non_specified_dates,
-        supply_day_with_nano_precision,
-    )
-
     start_str, end_str = resolve_non_specified_dates(start_date_str, end_date_str)
     start_date, end_date = supply_day_with_nano_precision(start_str, end_str)
 
@@ -189,12 +189,6 @@ def trim_date_range_for_keys(
 ) -> Tuple[pd.Timestamp, pd.Timestamp] | Tuple[None, None]:
     """Trim the requested date range to the union temporal extent of the given
     keys. Returns (None, None) when the request is entirely outside it."""
-    from data_access_service.utils.date_time_utils import (
-        end_of_day_nano,
-        ensure_timezone,
-        start_of_day_nano,
-    )
-
     # convert into utc:
     requested_start_date = ensure_timezone(requested_start_date)
     requested_end_date = ensure_timezone(requested_end_date)

@@ -109,10 +109,43 @@ class BaseAPI:
     def get_api_status(self) -> bool:
         return False
 
+    async def wait_until_ready(self, timeout: float = 300) -> None:
+        """Poll get_api_status() until it's ready or timeout elapses.
+
+        Used to hold off other CPU/memory-heavy startup work (repository refresh,
+        tiler startup) until metadata init has finished, so it isn't competing
+        with them for resources.
+        """
+        waited = 0.0
+        while not self.get_api_status():
+            if waited >= timeout:
+                log.warning("Timed out waiting for API to become ready")
+                break
+            await asyncio.sleep(0.5)
+            waited += 0.5
+        log.info(f"API ready status = {self.get_api_status()} (waited {waited}s)")
+
     def map_column_names(
         self, uuid: str, key: str, columns: list[str] | None
     ) -> list[str] | None:
         pass
+
+    def resolve_dim_names(
+        self, uuid: str, key: str
+    ) -> Tuple[str | None, str | None, str | None]:
+        """Return (latitude, longitude, time) dimension names for `key`, from the
+        dataset's own metadata. Any axis the dataset does not define comes back
+        as None."""
+
+        def _one(column: str) -> str | None:
+            mapped = self.map_column_names(uuid, key, [column]) or []
+            return mapped[0] if mapped else None
+
+        return (
+            _one(STR_LATITUDE_UPPER_CASE),
+            _one(STR_LONGITUDE_UPPER_CASE),
+            _one(STR_TIME_UPPER_CASE),
+        )
 
     def release_memory_for_pmtiles_batch(self) -> None:
         """Optional hook: free memory the PMTiles batch job no longer needs.

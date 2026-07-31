@@ -3,8 +3,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from data_access_service.utils.api_utils import api_key_auth
-from data_access_service.utils.routes_helper import get_api_instance
+from data_access_service.core.routes.auth import api_key_auth
+from data_access_service.core.routes.helpers import get_api_instance
 
 router = APIRouter()
 

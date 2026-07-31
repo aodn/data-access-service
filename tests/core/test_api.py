@@ -12,7 +12,7 @@ from aodn_cloud_optimised.lib import DataQuery
 
 from data_access_service import API
 from data_access_service.core.api import BaseAPI
-from data_access_service.utils.routes_helper import (
+from data_access_service.core.routes.helpers import (
     _generate_partial_json_array,
     _response_json,
 )

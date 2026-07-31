@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
-from unittest.mock import MagicMock
 from shapely.geometry import MultiPolygon as ShapelyMultiPolygon
 from shapely.geometry import Point as ShapelyPoint
 from shapely.geometry import Polygon as ShapelyPolygon
@@ -21,21 +20,10 @@ from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.utils.multi_polygon_helper import bbox_of
 from data_access_service.utils.subset_zarr_helper import subset_zarr
 
-UUID = "test-uuid"
 KEY = "test-key"
 
 START = pd.Timestamp("2020-01-01", tz="UTC")
 END = pd.Timestamp("2020-01-02 23:59:59", tz="UTC")
-
-
-def _api():
-    """subset_zarr only needs api.map_column_names; the fixtures name their
-    dims TIME/LATITUDE/LONGITUDE, so an identity map resolves them."""
-    api = MagicMock()
-    api.map_column_names = MagicMock(
-        side_effect=lambda uuid, key, columns: list(columns)
-    )
-    return api
 
 
 def _regular_grid() -> xr.Dataset:
@@ -91,7 +79,9 @@ BOX_HIGH = BoundingBox(7, 7, 9, 9)  # lat/lon [7, 9]
 
 
 def _run(dataset, bboxes, **kwargs):
-    return subset_zarr(dataset, _api(), UUID, KEY, START, END, bboxes, **kwargs)
+    return subset_zarr(
+        dataset, KEY, "LATITUDE", "LONGITUDE", "TIME", START, END, bboxes, **kwargs
+    )
 
 
 def test_single_bbox_unchanged_from_plain_sel():

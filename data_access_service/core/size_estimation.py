@@ -29,7 +29,6 @@ from data_access_service.core.constants import (
     GEOTIFF_INT_PIXEL_BYTES,
     GEOTIFF_CURVILINEAR_INFLATION,
 )
-from data_access_service.utils.dim_names_utils import resolve_dim_names
 from data_access_service.utils.geotiff_export import geotiff_eligible_vars, has_ij_dims
 from data_access_service.utils.subset_request_resolver import (
     ResolvedSubsetRequest,
@@ -107,8 +106,8 @@ def _estimate_zarr_size(
     zarr_store: xarray.Dataset,
     uuid: str,
     key: str,
-    date_start: pd.Timestamp | None,
-    date_end: pd.Timestamp | None,
+    date_start: pd.Timestamp,
+    date_end: pd.Timestamp,
     bboxes: list,
     columns: list[str] | None,
     output_format: str,
@@ -138,7 +137,7 @@ def _estimate_zarr_size(
 
     # area_to_keep is the download's own "is anything blanked?" decision, so the
     # note cannot drift from what the file actually contains
-    lat_name, lon_name, _ = resolve_dim_names(api, uuid, key)
+    lat_name, lon_name, time_name = api.resolve_dim_names(uuid, key)
     if area_to_keep(zarr_store, lat_name, lon_name, bboxes, geometry) is not None:
         notes.append(
             "cells outside the requested area come out as NaN (they compress to "
@@ -167,9 +166,10 @@ def _estimate_zarr_size(
     # only NaN-fills cells, never changes the shape/nbytes.
     dataset: xarray.Dataset = subset_zarr(
         zarr_store,
-        api,
-        uuid,
         key,
+        lat_name,
+        lon_name,
+        time_name,
         date_start,
         date_end,
         bboxes,
@@ -258,7 +258,7 @@ def _measure_geotiff(
     Raises ValueError when no gridded variable is found at all (genuinely
     non-gridded data, e.g. point/timeseries).
     """
-    lat_name, lon_name, time_name = resolve_dim_names(api, uuid, key)
+    lat_name, lon_name, time_name = api.resolve_dim_names(uuid, key)
 
     # curvilinear grids index by integer I/J instead of lon/lat; the real
     # exporter warps I/J -> lat/lon before writing (geotiff_export.py). A size

@@ -272,9 +272,8 @@ def test_zarr_curvilinear_netcdf_skips_mask_but_matches_download_nbytes():
 
     download_slice = subset_zarr(
         ds,
-        api,
-        UUID,
         KEY,
+        *api.resolve_dim_names(UUID, KEY),
         pd.Timestamp("2020-01-01", tz="UTC"),
         pd.Timestamp("2020-01-05 23:59:59", tz="UTC"),
         bboxes,
@@ -452,9 +451,8 @@ def test_multi_polygon_disjoint_bboxes_estimate_matches_download_region():
     # And it is exactly what the download slices (mask keeps shape, drop=False).
     download_slice = subset_zarr(
         dataset,
-        api,
-        UUID,
         KEY,
+        *api.resolve_dim_names(UUID, KEY),
         pd.Timestamp("2020-01-01", tz="UTC"),
         pd.Timestamp("2020-01-05 23:59:59", tz="UTC"),
         bboxes,
@@ -498,9 +496,8 @@ def test_polygon_shape_estimate_matches_download_region():
 
     download_slice = subset_zarr(
         dataset,
-        api,
-        UUID,
         KEY,
+        *api.resolve_dim_names(UUID, KEY),
         pd.Timestamp("2020-01-01", tz="UTC"),
         pd.Timestamp("2020-01-05 23:59:59", tz="UTC"),
         bboxes,

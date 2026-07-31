@@ -14,7 +14,6 @@ from data_access_service.tiler.services.product.registry import (
 from data_access_service.tiler.services.rendering.kernels import warmup_resample
 from data_access_service.tiler.services.rendering.visual_tiles import warmup_visual
 from data_access_service.tiler.services.store.registry import prewarm_stores
-from data_access_service.utils.api_utils import wait_until_api_ready
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +25,7 @@ async def run_tiler_warmup(api: API) -> None:
     it for CPU/memory.
     """
     logger.info("Waiting for API metadata init before starting other tasks")
-    await wait_until_api_ready(api)
+    await api.wait_until_ready()
 
     load_products()
     load_colormaps()
