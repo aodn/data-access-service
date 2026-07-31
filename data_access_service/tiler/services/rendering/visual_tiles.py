@@ -20,6 +20,10 @@ from rio_tiler.io.xarray import XarrayReader
 from rio_tiler.models import ImageData
 from rioxarray.exceptions import NoDataInBounds
 
+from data_access_service.tiler.services.caching.deduper import Deduper
+from data_access_service.tiler.services.caching.processed_cache import (
+    visual_processed_memo,
+)
 from data_access_service.tiler.services.colormap.categorical import (
     RGBA,
     is_categorical_variable,
@@ -28,10 +32,6 @@ from data_access_service.tiler.services.colormap.categorical import (
 from data_access_service.tiler.services.colormap.registry import (
     get_category_values,
     is_categorical,
-)
-from data_access_service.tiler.services.caching.deduper import Deduper
-from data_access_service.tiler.services.caching.processed_cache import (
-    visual_processed_memo,
 )
 from data_access_service.tiler.services.colormap.resolver import resolve_colormap
 from data_access_service.tiler.services.product.product import CoastalFill
