@@ -18,7 +18,6 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 from xarray import DataArray
 
-from data_access_service.core.constants import WHOLE_GLOBE_BBOX
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.utils.date_time_utils import to_naive_utc
 
@@ -41,6 +40,7 @@ def subset_zarr(
 
     1. CROP: .isel() every lat/lon position covered by at least one bbox. With N
        bboxes that is the union of their grids, not one envelope around them.
+       With no bbox the time range is cropped and lat/lon are left alone.
     2. MASK: .where() the cells the crop had to include but nobody asked for, so
        they come out as NaN. See area_to_keep for which area that is.
 
@@ -48,26 +48,27 @@ def subset_zarr(
     :param lat_name/lon_name/time_name: the dataset's own dimension names, from
         api.resolve_dim_names(uuid, key)
     :param start_date/end_date: both required - None is not an "open end"
-    :param bboxes: the requested area, at least one box
+    :param bboxes: the requested area. Empty means the user asked for no spatial
+        filter, so the time range is the only filter: the whole grid is kept,
+        untouched (no crop, no mask).
     :param geometry: the merged polygons the bboxes came from, None if the user
         drew no polygon
     :param apply_mask: False for the size estimate only: on a non-dask store
         .where() is eager and would load the whole store from S3 (OOM), and with
         drop=False it cannot change nbytes anyway.
 
-    Raises ValueError if bboxes is empty, or a condition names something that is
-    neither a dimension nor a variable of the dataset.
+    Raises ValueError if a condition names something that is neither a dimension
+    nor a variable of the dataset.
     """
-    if not bboxes:
-        raise ValueError(
-            f"subset_zarr needs at least one bbox (dataset: {key}). Callers pass "
-            "ResolvedSubsetRequest.effective_bboxes, which defaults to the whole globe."
-        )
-    # Step 1: build the conditions for each bbox, then check they are all valid
-    conditions_per_bbox = [
-        subset_conditions(lat_name, lon_name, time_name, start_date, end_date, bbox)
-        for bbox in bboxes
-    ]
+    # Step 1: build the conditions for each bbox, then check they are all valid.
+    # No bbox means no spatial filter, so time is the only condition.
+    if bboxes:
+        conditions_per_bbox = [
+            subset_conditions(lat_name, lon_name, time_name, start_date, end_date, bbox)
+            for bbox in bboxes
+        ]
+    else:
+        conditions_per_bbox = [time_condition(time_name, start_date, end_date)]
 
     for dim_name in conditions_per_bbox[0]:
         if not is_dim(dim_name, dataset) and not is_var(dim_name, dataset):
@@ -112,10 +113,18 @@ def subset_conditions(
 ) -> dict[str, list]:
     """Build {dim_name: [min, max]} for the time/lat/lon filters of one bbox."""
     return {
-        time_name: [to_naive_utc(start_date), to_naive_utc(end_date)],
+        **time_condition(time_name, start_date, end_date),
         lat_name: [bbox.min_lat, bbox.max_lat],
         lon_name: [bbox.min_lon, bbox.max_lon],
     }
+
+
+def time_condition(
+    time_name: str, start_date: Timestamp, end_date: Timestamp
+) -> dict[str, list]:
+    """Build {time_name: [min, max]} - the whole condition set when the request
+    has no bbox, so lat/lon are never filtered on."""
+    return {time_name: [to_naive_utc(start_date), to_naive_utc(end_date)]}
 
 
 def is_dim(key: str, dataset: xarray.Dataset) -> bool:
@@ -125,21 +134,6 @@ def is_dim(key: str, dataset: xarray.Dataset) -> bool:
 def is_var(key: str, dataset: xarray.Dataset) -> bool:
     # both coords and data_vars are in variables
     return key in dataset.variables
-
-
-def is_whole_globe(bbox: BoundingBox) -> bool:
-    """True for the "no spatial filter" default box.
-
-    Compared by value, not identity: BoundingBox has no __eq__, and callers that
-    build their own -180..180 box mean the same thing as the shared constant
-    subset_request_resolver.effective_bboxes substitutes.
-    """
-    return (
-        bbox.min_lon == WHOLE_GLOBE_BBOX.min_lon
-        and bbox.min_lat == WHOLE_GLOBE_BBOX.min_lat
-        and bbox.max_lon == WHOLE_GLOBE_BBOX.max_lon
-        and bbox.max_lat == WHOLE_GLOBE_BBOX.max_lat
-    )
 
 
 def area_to_keep(
@@ -161,10 +155,12 @@ def area_to_keep(
       a geometry alongside its bboxes, so this branch is mostly for direct
       callers.
 
-    - None, when no mask is needed. Three ways to get here: one bbox on 1D
-      lat/lon, a drawn polygon that is itself a rectangle, or no area given at
-      all (the whole-globe default box is not a filter - see is_whole_globe).
+    - None, when no mask is needed. Three ways to get here: no bbox at all (the
+      request has no spatial filter, so nothing may be blanked), one bbox on 1D
+      lat/lon, or a drawn polygon that is itself a rectangle.
     """
+    if not bboxes:
+        return None
     exact_crop = (
         len(bboxes) == 1 and is_dim(lat_name, dataset) and is_dim(lon_name, dataset)
     )
@@ -177,13 +173,6 @@ def area_to_keep(
             return None
         return geometry
     if exact_crop:
-        return None
-    # No area was given, so the whole-globe default is not a real filter and must
-    # not become a mask. On 1D lat/lon exact_crop already returned; this catches
-    # 2D lat/lon, where the crop is skipped entirely. Masking there would run a
-    # point-in-polygon over the whole grid to keep everything, and would NaN out
-    # every cell past 180 on a store whose longitudes run 0..360.
-    if len(bboxes) == 1 and is_whole_globe(bboxes[0]):
         return None
     return unary_union(rectangles)
 

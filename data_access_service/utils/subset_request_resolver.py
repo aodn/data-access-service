@@ -51,9 +51,9 @@ class ResolvedSubsetRequest:
 
     @property
     def effective_bboxes(self) -> List[BoundingBox]:
-        """The bboxes to slice with: empty means "no spatial filter", which
-        becomes one whole-globe bbox.
-        This is the SINGLE place [] becomes [WHOLE_GLOBE_BBOX]
+        """The bboxes to slice with when a consumer needs an explicit box:
+        empty means "no spatial filter", which becomes one whole-globe bbox.
+        This is the SINGLE place [] becomes [WHOLE_GLOBE_BBOX].
         """
         return self.bboxes or [WHOLE_GLOBE_BBOX]
 

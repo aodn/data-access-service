@@ -80,9 +80,6 @@ def estimate_single_key_size(
         return _empty_estimate(uuid, key, output_format)
 
     if isinstance(ds, ZarrDataSource):
-        # effective_bboxes is shared with the batch download: empty -> whole
-        # globe, lons used raw (no [0, 360] shift). ds.zarr_store is the raw
-        # lazy dataset (opened in ZarrDataSource.__init__)
         return _estimate_zarr_size(
             api,
             ds.zarr_store,
@@ -90,7 +87,7 @@ def estimate_single_key_size(
             key,
             date_start,
             date_end,
-            resolved_subset_request.effective_bboxes,
+            resolved_subset_request.bboxes,
             resolved_subset_request.columns,
             output_format,
             resolved_subset_request.geometry,
@@ -121,7 +118,7 @@ def _estimate_zarr_size(
     and double-counted overlaps).
 
     :param zarr_store: the raw, unsliced lazy dataset for this key
-    :param bboxes: effective bboxes to slice
+    :param bboxes: bboxes to slice; empty means no spatial filter
     :param columns: requested columns; currently ignored
     :param output_format: "netcdf" or "geotiff"
     :param geometry: the drawn area the bboxes came from; the download blanks the

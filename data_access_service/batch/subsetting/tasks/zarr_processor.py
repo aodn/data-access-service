@@ -69,7 +69,7 @@ class ZarrProcessor:
         self.keys = resolved.keys
         self.start_date = resolved.start_date
         self.end_date = resolved.end_date
-        self.bboxes = resolved.effective_bboxes
+        self.bboxes = resolved.bboxes
         self.geometry = resolved.geometry
 
     # Read-through views onto subset_request — single source of truth, no drift.

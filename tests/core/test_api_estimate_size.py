@@ -358,10 +358,9 @@ def test_multi_polygon_single_slices_to_bbox():
     assert result["estimated_uncompressed_bytes"] < dataset.nbytes
 
 
-def test_no_spatial_filter_uses_whole_globe_bbox():
-    # When there are no bboxes (no multi_polygon given), the whole-globe bbox is
-    # used - the same slice the batch download uses
-    # (ResolvedSubsetRequest.effective_bboxes) - so the whole dataset is counted.
+def test_no_spatial_filter_counts_the_whole_dataset():
+    # With no bboxes (no multi_polygon given) subset_zarr slices by time only -
+    # the same slice the batch download takes - so the whole dataset is counted.
     dataset = _make_dataset()
     api, _ = _api_with_zarr(dataset)
 

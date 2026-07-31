@@ -16,7 +16,6 @@ from shapely.geometry import Point as ShapelyPoint
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry import box as shapely_box
 
-from data_access_service.core.constants import WHOLE_GLOBE_BBOX
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.utils.multi_polygon_helper import bbox_of
 from data_access_service.utils.subset_zarr_helper import area_to_keep, subset_zarr
@@ -199,30 +198,23 @@ def test_curvilinear_multi_bbox_extends_mask_not_shape():
     assert kept_two > kept_one, "second box must add cells on a curvilinear grid"
 
 
-def test_whole_globe_default_is_not_a_mask_on_a_curvilinear_grid():
-    # "No area given" resolves to the whole-globe bbox with no geometry. On 1D
-    # lat/lon exact_crop already returns None, but 2D lat/lon cannot be cropped
-    # at all, so without a guard the default box would become a real mask.
+def test_no_bbox_is_not_a_mask_on_a_curvilinear_grid():
+    # "No area given" stays an empty bbox list all the way down. On 1D lat/lon
+    # exact_crop already returns None, but 2D lat/lon cannot be cropped at all,
+    # so without the empty guard every cell would be point-in-polygon tested.
     ds = _curvilinear_grid()
 
-    assert area_to_keep(ds, "LATITUDE", "LONGITUDE", [WHOLE_GLOBE_BBOX], None) is None
-    # a caller-built box of the same bounds means the same thing (no __eq__ on
-    # BoundingBox, so this must not be an identity check)
-    assert (
-        area_to_keep(
-            ds, "LATITUDE", "LONGITUDE", [BoundingBox(-180, -90, 180, 90)], None
-        )
-        is None
-    )
+    assert area_to_keep(ds, "LATITUDE", "LONGITUDE", [], None) is None
 
 
-def test_whole_globe_default_does_not_wipe_a_0_360_store():
-    # A -180..180 rectangle does not contain lon=200, so masking a store whose
-    # longitudes run 0..360 with the default box would NaN out every cell.
+def test_no_bbox_does_not_wipe_a_0_360_store():
+    # A whole-globe -180..180 rectangle does not contain lon=200, so if "no area"
+    # became such a box, masking a store whose longitudes run 0..360 with it
+    # would NaN out every cell.
     ds = _curvilinear_grid()
     ds["LONGITUDE"] = ds.LONGITUDE + 200.0
 
-    subset = _run(ds, [WHOLE_GLOBE_BBOX])
+    subset = _run(ds, [])
 
     assert dict(subset.sizes) == {"TIME": 2, "I": 4, "J": 6}
     assert int(np.isfinite(subset.temp).sum()) == subset.temp.size
@@ -407,11 +399,19 @@ def test_geometry_mask_stays_lazy():
     assert isinstance(subset.sst.data, da.Array)
 
 
-def test_empty_bboxes_raises():
-    # Empty means the caller skipped ResolvedSubsetRequest.effective_bboxes
-    # (which defaults to the whole globe) - fail loudly, don't return everything.
-    with pytest.raises(ValueError, match="at least one bbox"):
-        _run(_regular_grid(), [])
+def test_empty_bboxes_slice_by_time_only():
+    # No bbox means the user asked for no spatial filter: the time range is the
+    # only filter, the lat/lon axes come back whole and untouched (no NaN).
+    ds = _regular_grid()
+
+    subset = _run(ds, [])
+
+    assert dict(subset.sizes) == {"TIME": 2, "LATITUDE": 10, "LONGITUDE": 10}
+    assert subset.sst.dtype == ds.sst.dtype
+    np.testing.assert_array_equal(
+        subset.sst.values,
+        ds.sel(TIME=slice(START.tz_localize(None), END.tz_localize(None))).sst.values,
+    )
 
 
 def test_unknown_condition_name_raises():

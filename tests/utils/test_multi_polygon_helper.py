@@ -101,10 +101,9 @@ class TestMergePolygons:
 
 class TestMultiPolygonHelper:
     def test_no_multi_polygon_means_no_bboxes(self):
-        # All three views must agree that no spatial filter was given. Turning
-        # that into a whole-globe bbox is ResolvedSubsetRequest.effective_bboxes'
-        # job, not this parse layer's - defaulting here made .bboxes claim a
-        # filter existed while .polygons/.geometry said it did not.
+        # All three views must agree that no spatial filter was given: [] flows
+        # straight into subset_zarr, which slices by time only. Defaulting here
+        # made .bboxes claim a filter existed while .polygons/.geometry did not.
         helper = MultiPolygonHelper(multi_polygon=None)
 
         assert helper.bboxes == []

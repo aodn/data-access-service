@@ -55,9 +55,8 @@ class TestGetSubsetRequest:
         assert (bbox.min_lon, bbox.max_lon) == (-180, 180)
 
     def test_non_specified_multi_polygon_yields_no_bboxes(self):
-        # "no spatial filter" stays [] all the way through SubsetRequest; the
-        # whole-globe substitution happens later, in
-        # ResolvedSubsetRequest.effective_bboxes.
+        # "no spatial filter" stays [] all the way through SubsetRequest and on
+        # into subset_zarr, which reads [] as "time filter only".
         req = get_subset_request(
             {**_VALID_PARAMETERS, "multi_polygon": "non-specified"}
         )
