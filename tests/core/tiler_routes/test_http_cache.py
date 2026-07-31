@@ -1,4 +1,4 @@
-"""Exercises the actual caching contract from config/tiler/http_cache.py end to end."""
+"""Exercises the actual caching contract from config/http_cache.py end to end."""
 
 from unittest.mock import patch
 
@@ -24,7 +24,7 @@ def test_immutable_endpoint_disables_browser_caching_but_not_cdn(client):
     )
 
 
-# --- REVALIDATE endpoints: ETag round-trips to 304 -------------------------
+# --- REVALIDATE endpoints: short CDN TTL, no ETag ---------------------------
 
 
 def test_manifest_is_revalidate(client):
@@ -38,40 +38,21 @@ def test_manifest_is_revalidate(client):
             return_value=[],
         ),
     ):
-        first = client.get("/api/v1/das/tiler/data_tiles/manifest")
-        assert first.status_code == 200
-        assert first.headers["cache-control"] == "public, max-age=300, must-revalidate"
-        etag = first.headers["etag"]
-
-        second = client.get(
-            "/api/v1/das/tiler/data_tiles/manifest",
-            headers={"if-none-match": etag},
-        )
-    assert second.status_code == 304
-    assert second.content == b""
+        response = client.get("/api/v1/das/tiler/data_tiles/manifest")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "public, max-age=300, must-revalidate"
+    assert "etag" not in response.headers
 
 
-def test_products_etag_round_trips_to_304(client):
-    first = client.get("/api/v1/das/tiler/data_tiles/products")
-    assert first.status_code == 200
-    assert first.headers["cache-control"] == "public, max-age=300, must-revalidate"
-    etag = first.headers["etag"]
-
-    second = client.get(
-        "/api/v1/das/tiler/data_tiles/products",
-        headers={"if-none-match": etag},
-    )
-    assert second.status_code == 304
+def test_products_is_revalidate(client):
+    response = client.get("/api/v1/das/tiler/data_tiles/products")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "public, max-age=300, must-revalidate"
+    assert "etag" not in response.headers
 
 
-def test_colormaps_etag_round_trips_to_304(client):
-    first = client.get("/api/v1/das/tiler/visual_tiles/colormaps")
-    assert first.status_code == 200
-    assert first.headers["cache-control"] == "public, max-age=300, must-revalidate"
-    etag = first.headers["etag"]
-
-    second = client.get(
-        "/api/v1/das/tiler/visual_tiles/colormaps",
-        headers={"if-none-match": etag},
-    )
-    assert second.status_code == 304
+def test_colormaps_is_revalidate(client):
+    response = client.get("/api/v1/das/tiler/visual_tiles/colormaps")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "public, max-age=300, must-revalidate"
+    assert "etag" not in response.headers

@@ -1,17 +1,15 @@
 import asyncio
 import functools
-import json
 
 import anyio
-from fastapi import APIRouter, Header, HTTPException, Path, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 from fastapi.openapi.models import Example
 from fastapi.responses import Response
 
 from data_access_service.config.config import Config
-from data_access_service.config.tiler.http_cache import (
+from data_access_service.config.http_cache import (
     IMMUTABLE_CACHE_HEADERS,
-    compute_etag,
-    etag_response,
+    REVALIDATE_CACHE_HEADERS,
 )
 from data_access_service.tiler.schemas.visual_tiles import ColormapListResponse
 from data_access_service.tiler.services.caching.deduper import Deduper
@@ -75,17 +73,11 @@ _bbox_dedup = Deduper()
 @router.get(
     "/colormaps",
     summary="List available colormaps",
-    responses={
-        200: {"model": ColormapListResponse},
-        304: {"description": "Not Modified — ETag matched, response body is empty"},
-    },
+    response_model=ColormapListResponse,
 )
-async def get_colormaps(
-    if_none_match: str | None = Header(None, alias="if-none-match")
-):
-    data = list_colormaps()
-    etag = compute_etag(json.dumps(data, sort_keys=True))
-    return etag_response(data, etag, if_none_match)
+async def get_colormaps(response: Response):
+    response.headers.update(REVALIDATE_CACHE_HEADERS)
+    return list_colormaps()
 
 
 @router.get(
@@ -143,7 +135,7 @@ def get_tile(
     z: int = Path(openapi_examples={"default": Example(value=1)}),
     x: int = Path(openapi_examples={"default": Example(value=0)}),
     y: int = Path(openapi_examples={"default": Example(value=0)}),
-    ext: ImageFormat = Path(
+    ext: ImageFormat = Path(  # noqa: B008
         pattern="^(png|webp)$",
         description="Output image format — 'png' (lossless) or 'webp' (lossy, ~50% smaller).",
     ),
@@ -255,11 +247,11 @@ def _resolve_resolution(
     if height is None:
         # Exactly one is None at this point — narrow with a runtime check for mypy.
         assert width is not None
-        derived_h = max(1, min(max_dim, int(round(width / aspect))))
+        derived_h = max(1, min(max_dim, round(width / aspect)))
         return width, derived_h
 
     assert width is None
-    derived_w = max(1, min(max_dim, int(round(height * aspect))))
+    derived_w = max(1, min(max_dim, round(height * aspect)))
     return derived_w, height
 
 
@@ -387,7 +379,7 @@ def _parse_bbox_and_crs(
 def get_bbox(
     product_id: str = Path(openapi_examples=PRODUCT_EX),
     date: str = Path(pattern=r"^\d{4}-\d{2}-\d{2}$", openapi_examples=DATE_EX),
-    ext: ImageFormat = Path(
+    ext: ImageFormat = Path(  # noqa: B008
         pattern="^(png|webp)$",
         description="Output image format — 'png' (lossless) or 'webp' (lossy, ~50% smaller).",
     ),
@@ -509,7 +501,7 @@ async def get_animation(
     product_id: str = Path(openapi_examples=PRODUCT_EX),
     from_date: str = Path(pattern=r"^\d{4}-\d{2}-\d{2}$", openapi_examples=DATE_EX),
     to_date: str = Path(pattern=r"^\d{4}-\d{2}-\d{2}$", openapi_examples=DATE_EX),
-    ext: AnimatedFormat = Path(
+    ext: AnimatedFormat = Path(  # noqa: B008
         pattern="^(gif|apng|webp)$",
         description="Animated output format — 'gif' (universal, 256-colour palette), 'apng' (lossless RGBA), or 'webp' (compressed RGBA).",
     ),

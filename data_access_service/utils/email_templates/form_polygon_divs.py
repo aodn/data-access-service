@@ -76,14 +76,14 @@ def __form_polygon_div(vertices):
                                 <td align="center" class="tr-0" style="background:transparent;font-size:0;padding:0;word-break:break-word;">
                                     <table cellpadding="0" cellspacing="0" width="100%" border="0" style="color:#000000;line-height:normal;table-layout:fixed;width:100%;border:none;">
                                         <tr>
-                                            <td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="32">
+                                            <td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="36">
                                                 <table border="0" cellpadding="0" cellspacing="0" width="100%">
                                                     <tr>
-                                                        <td align="left" width="100%"> <img alt width="32" style="display:block;width:32px;height:32px;" src="data:image/png;base64,{POLYGON_IMG}"></td>
+                                                        <td align="left" width="100%"> <img alt width="36" style="display:block;width:36px;height:36px;" src="data:image/png;base64,{POLYGON_IMG}"></td>
                                                     </tr>
                                                 </table>
                                             </td>
-                                            <td style="vertical-align:middle;color:transparent;font-size:0;" width="16"></td>
+                                            <td style="vertical-align:middle;color:transparent;font-size:0;" width="12"></td>
                                             <td align="left" class="u" style="padding:0;height:auto;word-wrap:break-word;vertical-align:middle;" width="auto">
                                                 <table border="0" cellpadding="0" cellspacing="0" width="100%">
                                                     <tr>

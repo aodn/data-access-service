@@ -194,14 +194,17 @@ class AbstractProcessor(ABC):
             )
         return lon_mapped[0]
 
-    def get_time_col_name(self) -> str:
+    def get_time_col_name(self) -> Optional[str]:
+        """Mapped TIME column name, or None when the dataset has no time field.
+
+        Callers that support timeless hexbins (synthetic single period) must
+        handle None; lat/lon remain required.
+        """
         time_mapped = self.api.map_column_names(
             uuid=self.uuid, key=self.dataset_name, columns=[STR_TIME_UPPER_CASE]
         )
         if not time_mapped:
-            raise ValueError(
-                f"Could not find timestamp column for dataset {self.dataset_name}"
-            )
+            return None
         return time_mapped[0]
 
     @time_it

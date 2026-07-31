@@ -48,6 +48,10 @@ pmtiles:
     show_progress: True
     # Temporal bucket for hexbin counts: "month" (YYYYMM) or "date" (YYYYMMDD).
     time_group_by: date
+    # True: batch PMTiles generation forks one child process per parquet
+    # dataset (reclaims DuckDB/tippecanoe memory on exit). False: run each
+    # dataset in the main app process.
+    use_fork_process: True
   layers:
     hex_z0:
       h3_resolution: 2

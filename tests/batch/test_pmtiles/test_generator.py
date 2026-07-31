@@ -13,8 +13,17 @@ from data_access_service.batch.pmtiles.generator import (
 from data_access_service.models.pmtiles_types import PmtilesVisualizationStyle
 
 
+def _enable_fork(monkeypatch, enabled: bool = True):
+    monkeypatch.setattr(
+        generator.config,
+        "get_pmtiles_config",
+        lambda: MagicMock(use_fork_process=enabled),
+    )
+
+
 class TestBatchProcessIsolation:
     def test_all_parquets_forks_one_child_per_parquet(self, monkeypatch):
+        _enable_fork(monkeypatch, True)
         api = MagicMock()
         api.get_mapped_meta_data.return_value = {
             "uuid-a": {
@@ -44,7 +53,35 @@ class TestBatchProcessIsolation:
             (api, "uuid-b", "b.parquet"),
         ]
 
+    def test_all_parquets_runs_in_process_when_fork_disabled(self, monkeypatch):
+        _enable_fork(monkeypatch, False)
+        api = MagicMock()
+        api.get_mapped_meta_data.return_value = {
+            "uuid-a": {"a.parquet": {}, "notes.txt": {}},
+            "uuid-b": {"b.parquet": {}},
+        }
+        calls = []
+        fork_spy = MagicMock(return_value=True)
+
+        def fake_in_process(passed_api, uuid, dname):
+            calls.append((uuid, dname))
+            return True
+
+        monkeypatch.setattr(
+            generator, "_generate_pmtiles_for_parquets", fake_in_process
+        )
+        monkeypatch.setattr(
+            generator, "_generate_pmtiles_for_parquets_in_subprocess", fork_spy
+        )
+        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+
+        generate_pmtiles_for_all_parquets(api)
+
+        assert calls == [("uuid-a", "a.parquet"), ("uuid-b", "b.parquet")]
+        fork_spy.assert_not_called()
+
     def test_all_parquets_can_filter_to_single_uuid(self, monkeypatch):
+        _enable_fork(monkeypatch, True)
         api = MagicMock()
         api.get_mapped_meta_data.return_value = {
             "uuid-a": {"a.parquet": {}, "notes.txt": {}},
@@ -67,6 +104,7 @@ class TestBatchProcessIsolation:
         api.release_memory_for_pmtiles_batch.assert_called_once()
 
     def test_all_parquets_uuid_filter_no_match_skips_workers(self, monkeypatch):
+        _enable_fork(monkeypatch, True)
         api = MagicMock()
         api.get_mapped_meta_data.return_value = {
             "uuid-a": {"a.parquet": {}},
@@ -149,6 +187,7 @@ class TestBatchProcessIsolation:
         )
 
     def test_batch_continues_after_failed_child(self, monkeypatch):
+        _enable_fork(monkeypatch, True)
         api = MagicMock()
         api.get_mapped_meta_data.return_value = {
             "uuid-a": {"a.parquet": {}, "b.parquet": {}},

@@ -200,3 +200,124 @@ def test_release_duckdb_order_survives_in_forked_child():
     assert (
         os.WEXITSTATUS(status) == 0
     ), f"child exited with code {os.WEXITSTATUS(status)}, expected 0"
+
+
+def _make_local_pmtiles_client():
+    """Build a client without requiring valid AWS credentials."""
+    with patch.object(PmTileDuckDBClient, "create_s3_secret", return_value=None):
+        return PmTileDuckDBClient()
+
+
+def test_detect_time_type_timestamp_column():
+    """Native TIMESTAMP columns stay as timestamp (no epoch conversion)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "ts.parquet"
+        client = _make_local_pmtiles_client()
+        client.execute(
+            f"""
+            COPY (
+                SELECT TIMESTAMP '2025-12-01 00:00:00' AS detection_timestamp
+            ) TO '{path}' (FORMAT PARQUET)
+            """
+        )
+        assert client.detect_time_type(str(path), "detection_timestamp") == "timestamp"
+
+
+def test_detect_time_type_epoch_seconds_as_bigint():
+    """BIGINT epoch *seconds* (~1e9) must not be classified as milliseconds.
+
+    Regression: detect_time_type used to map any BIGINT -> epoch_ms, which
+    turned hive partition keys like timestamp=1764547200 into 1970-01-21.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "epoch_s.parquet"
+        client = _make_local_pmtiles_client()
+        # 2025-12-01 / 2026-05-01 as Unix seconds (same scale as animal_metadata
+        # satellite-relay hive partitions).
+        client.execute(
+            f"""
+            COPY (
+                SELECT * FROM (VALUES
+                    (1764547200::BIGINT),
+                    (1777593600::BIGINT)
+                ) AS t(timestamp)
+            ) TO '{path}' (FORMAT PARQUET)
+            """
+        )
+        assert client.detect_time_type(str(path), "timestamp") == "epoch_s"
+
+        client.execute("SET TimeZone = 'UTC'")
+        d_sql = PmTileDuckDBClient.build_date_key_expression("timestamp", "epoch_s")
+        keys = {
+            r[0]
+            for r in client.execute(
+                f"SELECT DISTINCT {d_sql} FROM read_parquet('{path}')"
+            ).fetchall()
+        }
+        assert keys == {20251201, 20260501}
+
+
+def test_detect_time_type_epoch_milliseconds_as_bigint():
+    """BIGINT epoch *milliseconds* (~1e12) still classify as epoch_ms."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "epoch_ms.parquet"
+        client = _make_local_pmtiles_client()
+        # 2025-12-01 00:00:00 UTC in milliseconds.
+        client.execute(
+            f"""
+            COPY (
+                SELECT (1764547200::BIGINT * 1000) AS timestamp
+            ) TO '{path}' (FORMAT PARQUET)
+            """
+        )
+        assert client.detect_time_type(str(path), "timestamp") == "epoch_ms"
+
+        client.execute("SET TimeZone = 'UTC'")
+        d_sql = PmTileDuckDBClient.build_date_key_expression("timestamp", "epoch_ms")
+        key = client.execute(f"SELECT {d_sql} FROM read_parquet('{path}')").fetchone()[
+            0
+        ]
+        assert key == 20251201
+
+
+def test_detect_time_type_hive_partition_epoch_seconds():
+    """Hive partition keys are BIGINT; values in seconds must yield epoch_s.
+
+    Mirrors animal_metadata_satellite_relay_tagging_realtime_qc.parquet layout:
+    timestamp=<unix_s>/.../*.parquet
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "dataset.parquet"
+        part_dir = root / "timestamp=1764547200"
+        part_dir.mkdir(parents=True)
+        part_file = part_dir / "part-0.parquet"
+
+        client = _make_local_pmtiles_client()
+        client.execute(
+            f"""
+            COPY (
+                SELECT -49.35::DOUBLE AS lat, 70.22::DOUBLE AS lon
+            ) TO '{part_file}' (FORMAT PARQUET)
+            """
+        )
+
+        glob_path = str(root / "**" / "*.parquet")
+        assert client.detect_time_type(glob_path, "timestamp") == "epoch_s"
+
+        client.execute("SET TimeZone = 'UTC'")
+        d_sql = PmTileDuckDBClient.build_date_key_expression("timestamp", "epoch_s")
+        key = client.execute(
+            f"""
+            SELECT {d_sql}
+            FROM read_parquet('{glob_path}', hive_partitioning=true)
+            """
+        ).fetchone()[0]
+        assert key == 20251201
+
+
+def test_build_date_key_epoch_s_vs_epoch_ms_expression():
+    s = PmTileDuckDBClient.build_date_key_expression("timestamp", "epoch_s")
+    ms = PmTileDuckDBClient.build_date_key_expression("timestamp", "epoch_ms")
+    assert "/ 1000.0" not in s
+    assert "/ 1000.0" in ms
+    assert "%Y%m%d" in s and "%Y%m%d" in ms

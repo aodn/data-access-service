@@ -13,12 +13,29 @@ from data_access_service.core.duckdbclient import PmTileDuckDBClient
 from data_access_service.models.pmtiles_types import (
     HexLayerSpec,
     PmtilesSidecarMetadata,
+    TIMELESS_DATE_PERIOD,
+    TIMELESS_MONTH_PERIOD,
     TimeGroupBy,
 )
 from data_access_service.utils.memory_utils import log_memory_usage
 
 
 class HexbinProcessor(AbstractProcessor):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Set in build_staging_parquet: False when source has no TIME column.
+        self._has_time: bool = True
+
+    def _staged_period_column(self) -> str:
+        """Staging column alias for the active time grain (``d`` or ``ym``)."""
+        return "d" if self.pmtiles_config.time_group_by == TimeGroupBy.DATE else "ym"
+
+    def _synthetic_period(self) -> int:
+        """Stable period int for datasets with no TIME column."""
+        if self.pmtiles_config.time_group_by == TimeGroupBy.DATE:
+            return TIMELESS_DATE_PERIOD
+        return TIMELESS_MONTH_PERIOD
 
     def _time_key_sql_and_column(
         self, time_col_name: str, time_type: str
@@ -50,17 +67,39 @@ class HexbinProcessor(AbstractProcessor):
         time_col_name = self.get_time_col_name()
         quoted_lon = PmTileDuckDBClient.quote_identifier(lon_name)
         quoted_lat = PmTileDuckDBClient.quote_identifier(lat_name)
-        quoted_time = PmTileDuckDBClient.quote_identifier(time_col_name)
-        time_type = self.pm_client.detect_time_type(
-            input_path=self.get_s3_uri(), time_col=time_col_name
-        )
-        time_key_sql, time_col = self._time_key_sql_and_column(time_col_name, time_type)
 
-        self.logger.info(
-            "Staging high-res parquet file (time_group_by=%s, column=%s)...",
-            self.pmtiles_config.time_group_by.value,
-            time_col,
-        )
+        if time_col_name is None:
+            self._has_time = False
+            time_col = self._staged_period_column()
+            synthetic = self._synthetic_period()
+            time_key_sql = str(int(synthetic))
+            time_null_filter = ""
+            self.logger.info(
+                "Dataset has no TIME column; using synthetic period=%s "
+                "(time_group_by=%s, column=%s, has_time=false)",
+                synthetic,
+                self.pmtiles_config.time_group_by.value,
+                time_col,
+            )
+        else:
+            self._has_time = True
+            quoted_time = PmTileDuckDBClient.quote_identifier(time_col_name)
+            time_type = self.pm_client.detect_time_type(
+                input_path=self.get_s3_uri(), time_col=time_col_name
+            )
+            time_key_sql, time_col = self._time_key_sql_and_column(
+                time_col_name, time_type
+            )
+            time_null_filter = f"AND {quoted_time} IS NOT NULL"
+            self.logger.info(
+                "Staging high-res parquet file (time_group_by=%s, column=%s, "
+                "time_col=%s, time_type=%s, has_time=true)...",
+                self.pmtiles_config.time_group_by.value,
+                time_col,
+                time_col_name,
+                time_type,
+            )
+
         log_memory_usage(self.logger, "before staging scan")
 
         sql = f"""
@@ -76,7 +115,7 @@ class HexbinProcessor(AbstractProcessor):
                     FROM read_parquet('{self.get_s3_uri()}', hive_partitioning=true, union_by_name=true)
                     WHERE {quoted_lon} IS NOT NULL
                       AND {quoted_lat} IS NOT NULL
-                      AND {quoted_time} IS NOT NULL
+                      {time_null_filter}
                       AND CAST({quoted_lon} AS DOUBLE) BETWEEN -180 AND 180
                       AND CAST({quoted_lat} AS DOUBLE) BETWEEN -90 AND 90
                 )
@@ -209,9 +248,7 @@ class HexbinProcessor(AbstractProcessor):
                 "cannot generate metadata"
             )
 
-        time_col = (
-            "d" if self.pmtiles_config.time_group_by == TimeGroupBy.DATE else "ym"
-        )
+        time_col = self._staged_period_column()
         row = self.pm_client.execute(
             f"""
             SELECT MIN({time_col}), MAX({time_col})
@@ -229,6 +266,7 @@ class HexbinProcessor(AbstractProcessor):
             max_date=int(row[1]),
             time_group_by=self.pmtiles_config.time_group_by,
             last_updated=datetime.now(timezone.utc).isoformat(),
+            has_time=self._has_time,
         )
 
         metadata_path = self.get_metadata_path()
@@ -237,11 +275,13 @@ class HexbinProcessor(AbstractProcessor):
             json.dump(metadata.to_dict(), f, separators=(",", ":"))
 
         self.logger.info(
-            "Wrote metadata to %s (min_date=%s, max_date=%s, time_group_by=%s)",
+            "Wrote metadata to %s (min_date=%s, max_date=%s, time_group_by=%s, "
+            "has_time=%s)",
             metadata_path,
             metadata.min_date,
             metadata.max_date,
             metadata.time_group_by.value,
+            metadata.has_time,
         )
         return metadata_path
 
@@ -249,12 +289,9 @@ class HexbinProcessor(AbstractProcessor):
         return max(layer.h3_resolution for layer in self.get_layers())
 
     def __generate_hex_geojsonseq_file(self, layer: HexLayerSpec, max_res: int) -> str:
-        time_col = (
-            "d" if self.pmtiles_config.time_group_by == TimeGroupBy.DATE else "ym"
-        )
-        period_label = (
-            "day" if self.pmtiles_config.time_group_by == TimeGroupBy.DATE else "month"
-        )
+        time_col = self._staged_period_column()
+        grain = self.pmtiles_config.time_group_by
+        period_label = "day" if grain == TimeGroupBy.DATE else "month"
 
         self.pm_client.execute("DROP TABLE IF EXISTS period_counts")
 
@@ -326,11 +363,12 @@ class HexbinProcessor(AbstractProcessor):
                         try:
                             feature = build_hex_feature(
                                 cell=current_h,
-                                month_counts=current_counts,
+                                period_counts=current_counts,
                                 layer_name=layer.name,
                                 minzoom=layer.minzoom,
                                 maxzoom=layer.maxzoom,
                                 include_tippecanoe_metadata=True,
+                                grain=grain,
                             )
                             output_file.write(
                                 json.dumps(feature, separators=(",", ":")) + "\n"
@@ -348,11 +386,12 @@ class HexbinProcessor(AbstractProcessor):
                 try:
                     feature = build_hex_feature(
                         cell=current_h,
-                        month_counts=current_counts,
+                        period_counts=current_counts,
                         layer_name=layer.name,
                         minzoom=layer.minzoom,
                         maxzoom=layer.maxzoom,
                         include_tippecanoe_metadata=True,
+                        grain=grain,
                     )
                     output_file.write(json.dumps(feature, separators=(",", ":")) + "\n")
                 except ValueError as e:
