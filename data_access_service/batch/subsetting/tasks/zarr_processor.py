@@ -158,12 +158,6 @@ class ZarrProcessor:
         # Apply ALL bboxes in one pass, then blank what falls outside the drawn
         # polygons. subset_zarr is the single owner of the slicing, shared with
         # the size estimate so both select the same region.
-        if not self.bboxes:
-            self.log.warning(
-                f"No data found for key: {key} in the specified conditions."
-            )
-            return None
-
         lat_name, lon_name, time_name = self.api.resolve_dim_names(self.uuid, key)
         subset = subset_zarr(
             zarr_store,

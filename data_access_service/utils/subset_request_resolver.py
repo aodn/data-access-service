@@ -13,7 +13,7 @@ from shapely.geometry.base import BaseGeometry
 
 from data_access_service.core.constants import UNIX_EPOCH_UTC, WHOLE_GLOBE_BBOX
 from data_access_service.models.bounding_box import BoundingBox
-from data_access_service.models.subset_request import NON_SPECIFIED, SubsetRequest
+from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.date_time_utils import (
     end_of_day_nano,
     ensure_timezone,
@@ -52,10 +52,8 @@ class ResolvedSubsetRequest:
     @property
     def effective_bboxes(self) -> List[BoundingBox]:
         """The bboxes to slice with: empty means "no spatial filter", which
-        becomes one whole-globe bbox. Explicit bounds (not open/None slices)
-        because the crop compares values against them
-        (subset_zarr_helper.form_dim_indexer). Both the batch download and the
-        size estimate must slice from THIS list so they select the same region.
+        becomes one whole-globe bbox.
+        This is the SINGLE place [] becomes [WHOLE_GLOBE_BBOX]
         """
         return self.bboxes or [WHOLE_GLOBE_BBOX]
 
@@ -82,8 +80,7 @@ def resolve_subset_request(
        has the raw string). Passing them through keeps SubsetRequest.bboxes
        and ResolvedSubsetRequest.bboxes the same list - they cannot drift.
     4. resolve geometry: the merged drawn shape the bboxes came from, always
-       from the MultiPolygon (both paths carry it), so the zarr subset can blank
-       the cells its bbox crop had to include.
+       from the MultiPolygon (both paths carry it), so the zarr subset can blank the cells its bbox crop had to include.
 
     :raises ValueError/TypeError: on unparseable dates or a bad multi_polygon
     """
@@ -92,6 +89,7 @@ def resolve_subset_request(
         start_date_str, end_date_str, api=api, uuid=uuid, keys=resolved_keys
     )
     resolved_bboxes = bboxes if bboxes is not None else resolve_bboxes(multi_polygon)
+    resolved_geometry = resolve_geometry(multi_polygon)
 
     return ResolvedSubsetRequest(
         uuid=uuid,
@@ -100,7 +98,7 @@ def resolve_subset_request(
         end_date=end_date,
         bboxes=resolved_bboxes,
         columns=columns,
-        geometry=resolve_geometry(multi_polygon),
+        geometry=resolved_geometry,
     )
 
 
@@ -163,20 +161,16 @@ def resolve_date_range(
 
 def resolve_bboxes(multi_polygon: Union[str, dict, None]) -> List[BoundingBox]:
     """Parse a GeoJSON MultiPolygon (string or already-parsed dict) into
-    bounding boxes, one per merged polygon (overlapping polygons are dissolved
-    first, so their overlap is counted once). Returns [] when there is no
-    spatial filter."""
-    if multi_polygon is None or multi_polygon == NON_SPECIFIED:
-        return []
+    bounding boxes, one per merged polygon (overlapping polygons are dissolved first,
+    so their overlap is counted once). Returns [] when there is no spatial filter.
+    """
     return MultiPolygonHelper(multi_polygon=multi_polygon).bboxes
 
 
 def resolve_geometry(multi_polygon: Union[str, dict, None]) -> Optional[BaseGeometry]:
-    """Parse a GeoJSON MultiPolygon into the merged shape its bboxes come from
-    (overlapping polygons dissolved into one outline). Returns None when there is
-    no spatial filter, which the zarr subset reads as "crop only, do not mask"."""
-    if multi_polygon is None or multi_polygon == NON_SPECIFIED:
-        return None
+    """Parse a GeoJSON MultiPolygon into the merged shape (overlapping polygons dissolved
+    into one outline). Returns None when there is no spatial filter.
+    """
     return MultiPolygonHelper(multi_polygon=multi_polygon).geometry
 
 

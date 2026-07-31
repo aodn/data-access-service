@@ -100,13 +100,16 @@ class TestMergePolygons:
 
 
 class TestMultiPolygonHelper:
-    def test_no_multi_polygon_means_whole_globe(self):
+    def test_no_multi_polygon_means_no_bboxes(self):
+        # All three views must agree that no spatial filter was given. Turning
+        # that into a whole-globe bbox is ResolvedSubsetRequest.effective_bboxes'
+        # job, not this parse layer's - defaulting here made .bboxes claim a
+        # filter existed while .polygons/.geometry said it did not.
         helper = MultiPolygonHelper(multi_polygon=None)
 
-        assert len(helper.bboxes) == 1
-        assert (helper.bboxes[0].min_lon, helper.bboxes[0].max_lon) == (-180, 180)
-        assert (helper.bboxes[0].min_lat, helper.bboxes[0].max_lat) == (-90, 90)
+        assert helper.bboxes == []
         assert helper.polygons == []
+        assert helper.geometry is None
 
     def test_single_polygon_becomes_its_bbox(self):
         helper = MultiPolygonHelper(multi_polygon=_multi_polygon(_rect(10, 20, 30, 40)))

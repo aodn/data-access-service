@@ -16,7 +16,6 @@ from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
-from data_access_service.core.constants import WHOLE_GLOBE_BBOX
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.models.subset_request import NON_SPECIFIED
 
@@ -133,15 +132,15 @@ class MultiPolygonHelper:
         # TODO: the zarr subsetting library can only slice by bbox, so the
         #  polygons are reduced to their bounding boxes here. The exact shapes
         #  are kept in .polygons so the batch path can mask the leftover cells.
-        parsed = parse_multi_polygon(multi_polygon)
+        parsed_multipolygon = parse_multi_polygon(multi_polygon)
 
-        # if users do not specify multi_polygon, assume whole globe
-        if parsed is None:
+        # No multi_polygon means no spatial filter;
+        if parsed_multipolygon is None:
             self._polygons: List[ShapelyPolygon] = []
-            self._bboxes: List[BoundingBox] = [WHOLE_GLOBE_BBOX]
+            self._bboxes: List[BoundingBox] = []
             return
 
-        self._polygons = merge_polygons(parsed)
+        self._polygons = merge_polygons(parsed_multipolygon)
         self._bboxes = [bbox_of(polygon) for polygon in self._polygons]
 
     @property
