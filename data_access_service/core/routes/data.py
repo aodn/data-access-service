@@ -1,46 +1,46 @@
 import json
 import time
+import uuid as uuid_module
 from datetime import datetime, timezone
 from http import HTTPStatus
-from typing import Optional, List
-import uuid as uuid_module
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from xarray import Dataset
 
 from data_access_service import init_log
 from data_access_service.config.config import Config
+from data_access_service.config.http_cache import REVALIDATE_CACHE_HEADERS
 from data_access_service.core.api import API
 from data_access_service.core.constants import (
     STR_LATITUDE_UPPER_CASE,
     STR_LONGITUDE_UPPER_CASE,
     STR_TIME_UPPER_CASE,
 )
-from data_access_service.sites.site_feature_service import SiteFeatureService
+from data_access_service.models.estimate_size_request import EstimateSizeRequest
 from data_access_service.models.ExtendedFeatureCollection import (
     ExtendedFeatureCollection,
 )
+from data_access_service.sites.site_feature_service import SiteFeatureService
 from data_access_service.sites.sites import (
     LatestTime,
     SiteDetailsFeature,
     SiteFeatureCollection,
 )
-from data_access_service.models.estimate_size_request import EstimateSizeRequest
 from data_access_service.utils.api_utils import api_key_auth
 from data_access_service.utils.date_time_utils import (
-    ensure_timezone,
-    MIN_DATE,
     DATE_FORMAT,
+    MIN_DATE,
+    ensure_timezone,
 )
 from data_access_service.utils.routes_helper import (
+    async_response_json,
+    fetch_data,
+    generate_feature_collection,
+    generate_rect_features,
     get_site_service,
     require_api_ready,
     verify_datatime_param,
-    fetch_data,
-    async_response_json,
-    generate_feature_collection,
-    generate_rect_features,
 )
 from data_access_service.utils.sse_utils import sse_it
 from data_access_service.utils.sse_wrapper import sse_wrapper
@@ -63,9 +63,9 @@ async def has_data(
     uuid: str,
     key: str,
     request: Request,
-    api_instance: API = Depends(require_api_ready),
-    start_date: Optional[str] = MIN_DATE,
-    end_date: Optional[str] = datetime.now(timezone.utc).strftime(DATE_FORMAT),
+    api_instance: API = Depends(require_api_ready),  # noqa: B008
+    start_date: str | None = MIN_DATE,
+    end_date: str | None = datetime.now(timezone.utc).strftime(DATE_FORMAT),
 ):
     logger.info(
         "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
@@ -78,7 +78,7 @@ async def has_data(
 
 @router.get("/data/{uuid}/{key}/temporal_extent", dependencies=[Depends(api_key_auth)])
 async def get_temporal_extent(
-    uuid: str, key: str, api_instance: API = Depends(require_api_ready)
+    uuid: str, key: str, api_instance: API = Depends(require_api_ready)  # noqa: B008
 ):
     try:
         start_date, end_date = api_instance.get_temporal_extent(uuid, key)
@@ -99,7 +99,7 @@ async def get_indexing_values(
     key: str,
     start_date: str,
     end_date: str,
-    api: API = Depends(require_api_ready),
+    api: API = Depends(require_api_ready),  # noqa: B008
 ):
     """
     Get feature collection for a Zarr dataset with the given UUID and key.
@@ -178,7 +178,7 @@ async def get_zarr_rectangles(
     key: str,
     start_date: str,
     end_date: str,
-    api: API = Depends(require_api_ready),
+    api: API = Depends(require_api_ready),  # noqa: B008
 ):
     logger.info(
         "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
@@ -268,11 +268,13 @@ async def get_zarr_rectangles(
     dependencies=[Depends(api_key_auth), Depends(require_api_ready)],
 )
 def get_feature_collection_of_items_with_data_between_dates(
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    service: SiteFeatureService = Depends(get_site_service),
+    response: Response,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    service: SiteFeatureService = Depends(get_site_service),  # noqa: B008
 ) -> SiteFeatureCollection:
     """Sites with data in ``[start_date, end_date]`` as a ``SiteFeatureCollection``."""
+    response.headers.update(REVALIDATE_CACHE_HEADERS)
     return service.sites_with_data_between(start_date, end_date)
 
 
@@ -281,9 +283,11 @@ def get_feature_collection_of_items_with_data_between_dates(
     dependencies=[Depends(api_key_auth), Depends(require_api_ready)],
 )
 def get_feature_collection_of_items_latest_dates(
-    service: SiteFeatureService = Depends(get_site_service),
+    response: Response,
+    service: SiteFeatureService = Depends(get_site_service),  # noqa: B008
 ) -> LatestTime:
     """The single most recent observation time across all sites."""
+    response.headers.update(REVALIDATE_CACHE_HEADERS)
     return service.latest_time()
 
 
@@ -293,11 +297,13 @@ def get_feature_collection_of_items_latest_dates(
 )
 def get_feature_collection_of_item_details(
     site: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    service: SiteFeatureService = Depends(get_site_service),
+    response: Response,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    service: SiteFeatureService = Depends(get_site_service),  # noqa: B008
 ) -> SiteDetailsFeature:
     """One site's observation timeseries as a single details ``Feature``."""
+    response.headers.update(REVALIDATE_CACHE_HEADERS)
     return service.site_details(site, start_date, end_date)
 
 
@@ -306,15 +312,15 @@ async def get_data(
     request: Request,
     uuid: str,
     key: str,
-    api_instance: API = Depends(require_api_ready),
-    start_date: Optional[str] = Query(default=MIN_DATE),
-    end_date: Optional[str] = Query(
+    api_instance: API = Depends(require_api_ready),  # noqa: B008
+    start_date: str | None = Query(default=MIN_DATE),
+    end_date: str | None = Query(
         default=datetime.now(timezone.utc).strftime(DATE_FORMAT)
     ),
-    columns: Optional[List[str]] = Query(default=None),
-    start_depth: Optional[float] = Query(default=-1.0),
-    end_depth: Optional[float] = Query(default=-1.0),
-    f: Optional[str] = Query(default="json"),
+    columns: list[str] | None = Query(default=None),  # noqa: B008
+    start_depth: float | None = Query(default=-1.0),
+    end_depth: float | None = Query(default=-1.0),
+    f: str | None = Query(default="json"),
 ):
     # for debug purpose: track request with an assigned id which is ranomly generated
     request_id = str(uuid_module.uuid4())
@@ -385,7 +391,7 @@ async def get_data(
 def estimate_size_multi(
     uuid: str,
     body: EstimateSizeRequest,
-    api_instance: API = Depends(require_api_ready),
+    api_instance: API = Depends(require_api_ready),  # noqa: B008
 ):
     # sse_it streams this over SSE: it returns a 200 text/event-stream
     # immediately, sends "processing" heartbeats while the (blocking) work runs
