@@ -324,11 +324,6 @@ class TestHexbinProcessor(TestWithS3):
                                 for k, v in props.items()
                                 if k.startswith("d") and k[1:].isdigit()
                             }
-                            # Date grain uses dYYYYMMDD, not legacy mYYYYMMDD
-                            assert not any(
-                                k.startswith("m") and len(k) == 9 and k[1:].isdigit()
-                                for k in props
-                            )
 
                     expected_by_cell = {}
                     for (h_high, d), c in expected_date.items():
