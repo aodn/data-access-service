@@ -1,4 +1,4 @@
-"""HTTP caching policy for the tiler endpoints — single source of truth.
+"""HTTP caching policy for the tiler and sites endpoints — single source of truth.
 
 IMMUTABLE_CACHE_HEADERS — 1 year at the CDN, no browser caching.
     GET /{product_id}/{date}/{z}/{x}/{y}.png           raw data tile
@@ -14,6 +14,9 @@ REVALIDATE_CACHE_HEADERS — 5 minutes, must-revalidate, no ETag.
     GET /manifest    products availability
     GET /products    product list
     GET /colormaps   colormap list
+    GET /data/feature-collection/{product}              sites with data between dates
+    GET /data/feature-collection/{product}/latest        latest observation time
+    GET /data/feature-collection/{product}/{site}        site details timeseries
 
 CloudFront settings required to honour the above:
     1. Cache key includes all query strings.

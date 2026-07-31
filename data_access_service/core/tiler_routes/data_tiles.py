@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Path, Response
 from fastapi.openapi.models import Example
 
-from data_access_service.config.tiler.http_cache import IMMUTABLE_CACHE_HEADERS
+from data_access_service.config.http_cache import IMMUTABLE_CACHE_HEADERS
 from data_access_service.tiler.schemas.data_tiles import DataTileManifestResponse
 from data_access_service.tiler.services.product.manifest import render_manifest
 from data_access_service.tiler.services.product.product import get_lod_grids

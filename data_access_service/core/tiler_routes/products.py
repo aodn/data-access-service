@@ -4,7 +4,7 @@ import xarray as xr
 from fastapi import APIRouter, HTTPException, Path, Query, Response
 from fastapi.openapi.models import Example
 
-from data_access_service.config.tiler.http_cache import (
+from data_access_service.config.http_cache import (
     IMMUTABLE_CACHE_HEADERS,
     REVALIDATE_CACHE_HEADERS,
 )

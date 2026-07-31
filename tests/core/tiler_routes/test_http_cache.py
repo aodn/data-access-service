@@ -1,4 +1,4 @@
-"""Exercises the actual caching contract from config/tiler/http_cache.py end to end."""
+"""Exercises the actual caching contract from config/http_cache.py end to end."""
 
 from unittest.mock import patch
 

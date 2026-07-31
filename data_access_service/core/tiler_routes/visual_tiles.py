@@ -7,7 +7,7 @@ from fastapi.openapi.models import Example
 from fastapi.responses import Response
 
 from data_access_service.config.config import Config
-from data_access_service.config.tiler.http_cache import (
+from data_access_service.config.http_cache import (
     IMMUTABLE_CACHE_HEADERS,
     REVALIDATE_CACHE_HEADERS,
 )
