@@ -18,7 +18,11 @@ from data_access_service.batch.pmtiles.processors.hexbin_processor import (
     HexbinProcessor,
 )
 from data_access_service.core.duckdbclient import PmTileDuckDBClient
-from data_access_service.models.pmtiles_types import TimeGroupBy
+from data_access_service.models.pmtiles_types import (
+    TIMELESS_DATE_PERIOD,
+    TIMELESS_MONTH_PERIOD,
+    TimeGroupBy,
+)
 from data_access_service.utils.pmtiles_utils import open_pmtiles
 from tests.core.test_with_s3 import TestWithS3, REGION
 
@@ -196,6 +200,7 @@ class TestHexbinProcessor(TestWithS3):
                     assert metadata["min_date"] == min(period_keys)
                     assert metadata["max_date"] == max(period_keys)
                     assert metadata["time_group_by"] == "month"
+                    assert metadata["has_time"] is True
                     assert "last_updated" in metadata
                     assert metadata["last_updated"]  # non-empty ISO timestamp
 
@@ -317,7 +322,7 @@ class TestHexbinProcessor(TestWithS3):
                             date_counts_by_cell[cell] = {
                                 int(k[1:]): int(v)
                                 for k, v in props.items()
-                                if k.startswith("m") and k[1:].isdigit()
+                                if k.startswith("d") and k[1:].isdigit()
                             }
 
                     expected_by_cell = {}
@@ -342,8 +347,89 @@ class TestHexbinProcessor(TestWithS3):
                     assert metadata["min_date"] == min(period_keys)
                     assert metadata["max_date"] == max(period_keys)
                     assert metadata["time_group_by"] == "date"
+                    assert metadata["has_time"] is True
                     assert "last_updated" in metadata
                     assert metadata["last_updated"]
+                finally:
+                    shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_timeless_dataset_uses_synthetic_period(
+        self,
+        aws_clients,
+        upload_test_case_to_s3,
+        mock_get_fs_token_paths,
+        localstack,
+    ):
+        """No TIME column → single synthetic period; feature keys use grain prefix."""
+        config = Config.get_config()
+        api = API()
+        api.initialize_metadata()
+
+        with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
+            with tempfile.TemporaryDirectory() as tempdirname:
+                try:
+                    for grain, synthetic, prop_key in (
+                        (TimeGroupBy.MONTH, TIMELESS_MONTH_PERIOD, "m197001"),
+                        (TimeGroupBy.DATE, TIMELESS_DATE_PERIOD, "d19700101"),
+                    ):
+                        hex_processor = self._configure_hex_processor(
+                            tempdirname,
+                            api,
+                            localstack,
+                            time_group_by=grain,
+                        )
+                        with patch.object(
+                            hex_processor, "get_time_col_name", return_value=None
+                        ):
+                            hex_processor.build_staging_parquet()
+                            staged = pandas.read_parquet(
+                                hex_processor.get_staged_path()
+                            )
+                            period_col = "ym" if grain == TimeGroupBy.MONTH else "d"
+                            assert list(staged.columns) == [
+                                "h_high",
+                                period_col,
+                                "c",
+                            ]
+                            assert (staged[period_col] == synthetic).all()
+                            total_c = int(staged["c"].sum())
+                            assert total_c == len(
+                                pandas.read_parquet(ANIMAL_ACOUSTIC_CANNED_DIR)
+                            )
+
+                            geojsonseq_paths = hex_processor.generate_geojsonseq_files()
+                            high_res_path = next(
+                                p
+                                for p in geojsonseq_paths
+                                if p.endswith("hex_z10.geojsonseq.gz")
+                            )
+                            with gzip.open(high_res_path, "rt", encoding="utf-8") as f:
+                                features = [json.loads(line) for line in f]
+                            assert features
+                            for feature in features:
+                                props = feature["properties"]
+                                assert prop_key in props
+                                assert props[prop_key] > 0
+                                # Only the synthetic key for this grain
+                                period_props = [
+                                    k
+                                    for k in props
+                                    if k != "h" and len(k) > 1 and k[1:].isdigit()
+                                ]
+                                assert period_props == [prop_key]
+
+                            metadata_path = hex_processor.generate_metadata_json()
+                            with open(metadata_path, encoding="utf-8") as f:
+                                metadata = json.load(f)
+                            assert metadata["min_date"] == synthetic
+                            assert metadata["max_date"] == synthetic
+                            assert metadata["time_group_by"] == grain.value
+                            assert metadata["has_time"] is False
+
+                            # Clean intermediates between grain runs
+                            hex_processor._remove_staged_parquet()
+                            hex_processor._remove_geojsonseq_files(geojsonseq_paths)
                 finally:
                     shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
 
@@ -363,6 +449,59 @@ def test_time_group_by_default_and_invalid():
             config.config["pmtiles"]["config"].pop("time_group_by", None)
         else:
             config.config["pmtiles"]["config"]["time_group_by"] = original
+
+
+def test_period_property_key_prefixes():
+    from data_access_service.batch.pmtiles.helpers.features_help import (
+        apply_period_counts,
+        period_property_key,
+    )
+    from data_access_service.models.pmtiles_types import (
+        TIMELESS_DATE_PERIOD,
+        TIMELESS_MONTH_PERIOD,
+    )
+
+    assert period_property_key(20240115, TimeGroupBy.DATE) == "d20240115"
+    assert period_property_key(202401, TimeGroupBy.MONTH) == "m202401"
+    assert period_property_key(TIMELESS_DATE_PERIOD, TimeGroupBy.DATE) == "d19700101"
+    assert period_property_key(TIMELESS_MONTH_PERIOD, TimeGroupBy.MONTH) == "m197001"
+
+    props: dict = {"h": "abc"}
+    apply_period_counts(props, {20240115: 3, 20240116: 0}, TimeGroupBy.DATE)
+    assert props == {"h": "abc", "d20240115": 3}
+
+
+def test_sidecar_metadata_has_time_roundtrip():
+    from data_access_service.models.pmtiles_types import PmtilesSidecarMetadata
+
+    timed = PmtilesSidecarMetadata(
+        min_date=20240101,
+        max_date=20240101,
+        time_group_by=TimeGroupBy.DATE,
+        last_updated="2026-01-01T00:00:00+00:00",
+        has_time=True,
+    )
+    assert timed.to_dict()["has_time"] is True
+    assert PmtilesSidecarMetadata.from_dict(timed.to_dict()).has_time is True
+
+    timeless = PmtilesSidecarMetadata(
+        min_date=TIMELESS_DATE_PERIOD,
+        max_date=TIMELESS_DATE_PERIOD,
+        time_group_by=TimeGroupBy.DATE,
+        last_updated="2026-01-01T00:00:00+00:00",
+        has_time=False,
+    )
+    assert timeless.to_dict()["has_time"] is False
+    assert PmtilesSidecarMetadata.from_dict(timeless.to_dict()).has_time is False
+
+    # Legacy sidecar without has_time defaults to True (real time)
+    legacy = {
+        "min_date": 19700101,
+        "max_date": 19700101,
+        "time_group_by": "date",
+        "last_updated": "2026-01-01T00:00:00+00:00",
+    }
+    assert PmtilesSidecarMetadata.from_dict(legacy).has_time is True
 
 
 def test_build_time_key_expressions():
