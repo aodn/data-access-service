@@ -327,31 +327,72 @@ class PmTileDuckDBClient(DuckDBClient):
                 sql_preview,
             )
 
+    # Epoch values above this absolute magnitude are treated as milliseconds.
+    # Modern epoch-seconds are ~1e9; epoch-milliseconds are ~1e12. 1e11 is well
+    # above any realistic second-based timestamp (year ~5138) and below any
+    # modern millisecond timestamp (ms since ~1973).
+    _EPOCH_MS_ABS_THRESHOLD = 1e11
+
+    _TIMESTAMP_SQL_TYPES = frozenset(
+        {
+            "TIMESTAMP",
+            "TIMESTAMP_NS",
+            "TIMESTAMP_MS",
+            "TIMESTAMP_S",
+            "TIMESTAMP WITH TIME ZONE",
+            "TIMESTAMPTZ",
+            "DATE",
+            "INTERVAL",
+        }
+    )
+    _NUMERIC_SQL_TYPES = frozenset(
+        {
+            "TINYINT",
+            "SMALLINT",
+            "INTEGER",
+            "BIGINT",
+            "HUGEINT",
+            "UTINYINT",
+            "USMALLINT",
+            "UINTEGER",
+            "UBIGINT",
+            "FLOAT",
+            "DOUBLE",
+            "REAL",
+            "DECIMAL",
+            "NUMERIC",
+        }
+    )
+
     def detect_time_type(
         self,
         input_path: str,
         time_col: str,
     ) -> str:
-        col_quoted = PmTileDuckDBClient.quote_identifier(time_col)
+        """Infer how ``time_col`` stores time in the parquet dataset.
 
-        sample_path = input_path
-        if not (
-            input_path.endswith("_metadata") or input_path.endswith("_common_metadata")
-        ):
-            try:
-                files = self._con.execute(
-                    f"SELECT * FROM glob('{input_path}') LIMIT 1"
-                ).fetchall()
-                if files:
-                    sample_path = files[0][0]
-            except Exception:
-                pass
+        Returns one of ``"timestamp"``, ``"epoch_ms"``, ``"epoch_s"``.
+
+        Integer / numeric columns are classified by magnitude of sampled values
+        rather than DuckDB's SQL type alone: Hive partition keys are always
+        promoted to ``BIGINT``, so type-based heuristics mis-label epoch
+        *seconds* (e.g. ``timestamp=1764547200``) as milliseconds and produce
+        1970-01-21 date keys.
+        """
+        col_quoted = PmTileDuckDBClient.quote_identifier(time_col)
+        source_sql = self._parquet_source_sql(input_path)
 
         try:
             rows = self._con.execute(
-                f"DESCRIBE SELECT {col_quoted} FROM read_parquet('{sample_path}') LIMIT 0"
+                f"DESCRIBE SELECT {col_quoted} FROM {source_sql} LIMIT 0"
             ).fetchall()
         except Exception:
+            self._logger.warning(
+                "detect_time_type: failed to DESCRIBE %s in %s; defaulting to timestamp",
+                time_col,
+                input_path,
+                exc_info=True,
+            )
             return "timestamp"
 
         col_type = None
@@ -365,9 +406,65 @@ class PmTileDuckDBClient(DuckDBClient):
                 f"Column '{time_col}' not found in schema of '{input_path}'."
             )
 
-        if any(t in col_type for t in ("TIMESTAMP", "DATE", "INTERVAL")):
+        base_type = col_type.split("(", 1)[0].strip()
+
+        if base_type in self._TIMESTAMP_SQL_TYPES or base_type.startswith("TIMESTAMP"):
+            self._logger.info(
+                "detect_time_type: column=%s sql_type=%s -> timestamp",
+                time_col,
+                col_type,
+            )
             return "timestamp"
-        if any(t in col_type for t in ("BIGINT", "HUGEINT", "UBIGINT")):
+
+        if base_type in self._NUMERIC_SQL_TYPES:
+            time_type = self._detect_epoch_unit(source_sql, col_quoted)
+            self._logger.info(
+                "detect_time_type: column=%s sql_type=%s -> %s",
+                time_col,
+                col_type,
+                time_type,
+            )
+            return time_type
+
+        self._logger.info(
+            "detect_time_type: column=%s sql_type=%s (unhandled) -> timestamp",
+            time_col,
+            col_type,
+        )
+        return "timestamp"
+
+    def _parquet_source_sql(self, input_path: str) -> str:
+        """SQL table expression that exposes both file columns and Hive keys."""
+        # Prefer the full dataset glob with hive_partitioning so partition
+        # columns (e.g. timestamp=1764547200/) are part of the schema. A single
+        # file path without hive_partitioning would hide those keys.
+        if input_path.endswith("_metadata") or input_path.endswith("_common_metadata"):
+            return f"read_parquet('{input_path}')"
+        return (
+            f"read_parquet('{input_path}', hive_partitioning=true, union_by_name=true)"
+        )
+
+    def _detect_epoch_unit(self, source_sql: str, col_quoted: str) -> str:
+        """Classify numeric epoch values as seconds or milliseconds by magnitude."""
+        try:
+            max_abs = self._con.execute(
+                f"""
+                SELECT MAX(ABS(CAST({col_quoted} AS DOUBLE)))
+                FROM {source_sql}
+                WHERE {col_quoted} IS NOT NULL
+                """
+            ).fetchone()[0]
+        except Exception:
+            self._logger.warning(
+                "detect_time_type: failed to sample numeric values; defaulting to epoch_s",
+                exc_info=True,
+            )
+            return "epoch_s"
+
+        if max_abs is None:
+            return "epoch_s"
+
+        if float(max_abs) >= self._EPOCH_MS_ABS_THRESHOLD:
             return "epoch_ms"
         return "epoch_s"
 

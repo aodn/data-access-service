@@ -57,9 +57,12 @@ class HexbinProcessor(AbstractProcessor):
         time_key_sql, time_col = self._time_key_sql_and_column(time_col_name, time_type)
 
         self.logger.info(
-            "Staging high-res parquet file (time_group_by=%s, column=%s)...",
+            "Staging high-res parquet file (time_group_by=%s, column=%s, "
+            "time_col=%s, time_type=%s)...",
             self.pmtiles_config.time_group_by.value,
             time_col,
+            time_col_name,
+            time_type,
         )
         log_memory_usage(self.logger, "before staging scan")
 
