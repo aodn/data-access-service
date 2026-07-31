@@ -14,6 +14,7 @@ import boto3
 import duckdb
 import logging
 
+from data_access_service.config.config import IntTestConfig
 from data_access_service.models.pmtiles_types import PmtilesGenerationConfig
 from data_access_service.models.sites_types import ParquetsGenerationConfig
 from data_access_service import Config
@@ -61,7 +62,11 @@ class DuckDBClient(ABC):
         boto_session = boto3.Session()
 
         # Not useful in testing
-        if boto_session is not None and boto_session.get_credentials() is not None:
+        if (
+            boto_session is not None
+            and boto_session.get_credentials() is not None
+            and not isinstance(Config.get_config(), IntTestConfig)
+        ):
             creds = boto_session.get_credentials().get_frozen_credentials()
             region = boto_session.region_name or "ap-southeast-2"
 
