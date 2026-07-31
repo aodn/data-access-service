@@ -112,7 +112,7 @@ def ensure_timezone(dt: pd.Timestamp) -> pd.Timestamp:
 
 
 def to_naive_utc(ts: pd.Timestamp | None) -> pd.Timestamp | None:
-    """Convert a timestamp to naive UTC for slicing the zarr time coordinate, which cannot be compared against timezone-aware values."""
+    """Convert a timestamp to naive UTC for slicing the zarr time coordinate, which cannot be compared against timezone-aware values.None passes through so an open slice stays open."""
     if ts is None:
         return None
     if ts.tz is not None:

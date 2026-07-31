@@ -135,10 +135,14 @@ def _estimate_zarr_size(
     if len(bboxes) > 1:
         notes.append(f"union grid of {len(bboxes)} polygon bboxes")
 
-    # area_to_keep is the download's own "is anything blanked?" decision, so the
-    # note cannot drift from what the file actually contains
     lat_name, lon_name, time_name = api.resolve_dim_names(uuid, key)
-    if area_to_keep(zarr_store, lat_name, lon_name, bboxes, geometry) is not None:
+    # Whether the download's .where() will actually run. It decides both the note
+    # and the dtype promotion in _nbytes_by_compressibility - when no mask runs,
+    # an int var stays int and must NOT be sized as the promoted float64.
+    will_mask = (
+        area_to_keep(zarr_store, lat_name, lon_name, bboxes, geometry) is not None
+    )
+    if will_mask:
         notes.append(
             "cells outside the requested area come out as NaN (they compress to "
             "almost nothing in the real file -> output estimate is an upper bound)"
@@ -184,7 +188,7 @@ def _estimate_zarr_size(
         )
     elif output_format == "netcdf":
         total_uncompressed, total_output = _measure_netcdf(
-            dataset, output_format, notes
+            dataset, output_format, notes, will_mask
         )
 
     # Human-readable size summary (applies to every output format).
@@ -212,7 +216,7 @@ def _estimate_zarr_size(
 
 
 def _measure_netcdf(
-    dataset: xarray.Dataset, output_format: str, notes: list[str]
+    dataset: xarray.Dataset, output_format: str, notes: list[str], will_mask: bool
 ) -> tuple[int, int]:
     """(uncompressed, output) for netcdf.
 
@@ -221,7 +225,7 @@ def _measure_netcdf(
     string/object vars are written uncompressed and pass through at 1.0.
     Applying one flat ratio to the whole nbytes would over-count compression
     on the coords (which never shrink)."""
-    compressible, incompressible = _nbytes_by_compressibility(dataset)
+    compressible, incompressible = _nbytes_by_compressibility(dataset, will_mask)
     uncompressed = compressible + incompressible
     ratio = OUTPUT_FORMAT_COMPRESSION_RATIO[output_format]
     output = int(compressible * ratio) + incompressible
@@ -323,10 +327,17 @@ def _estimated_string_width(dtype) -> int:
     return ASSUMED_STRING_BYTES
 
 
-def _nbytes_by_compressibility(dataset: xarray.Dataset) -> tuple[int, int]:
+def _nbytes_by_compressibility(
+    dataset: xarray.Dataset, will_mask: bool
+) -> tuple[int, int]:
     """
     The download zlib-compresses only numeric data vars (dtype.kind in {i, u, f});
-    coords and string/object vars are written uncompressed. dtypes are taken after .where() promotion (via the same maybe_promote), so the split matches the download.
+    coords and string/object vars are written uncompressed.
+
+    `will_mask` says whether the download's .where() actually runs (i.e. whether
+    area_to_keep returned an area). Only then does it NaN-fill, which promotes
+    int/uint vars to float64 - so only then may we size them as promoted. Sizing
+    an unmasked int16 var as float64 over-estimates it 4x.
 
     String-like data vars promote to object (8-byte pointer) under maybe_promote,
     but the download stores them as fixed-width S{N}, so we size them by
@@ -336,9 +347,11 @@ def _nbytes_by_compressibility(dataset: xarray.Dataset) -> tuple[int, int]:
     incompressible = 0
     for name, var in dataset.variables.items():
         if name in dataset.data_vars:
-            promoted_dtype, _ = xr_dtypes.maybe_promote(var.dtype)
-            if promoted_dtype.kind in {"i", "u", "f"}:
-                compressible += int(var.size) * promoted_dtype.itemsize
+            dtype = var.dtype
+            if will_mask:
+                dtype, _ = xr_dtypes.maybe_promote(dtype)
+            if dtype.kind in {"i", "u", "f"}:
+                compressible += int(var.size) * dtype.itemsize
             else:
                 # object/string/bool -> stored as fixed-width S{N}, uncompressed
                 incompressible += int(var.size) * _estimated_string_width(var.dtype)

@@ -263,8 +263,12 @@ def test_zarr_curvilinear_netcdf_skips_mask_but_matches_download_nbytes():
     )
     api, _ = _api_with_zarr(ds)
 
+    # A real drawn area, NOT the whole globe: the whole-globe default means "no
+    # spatial filter" and area_to_keep returns None for it, so no mask would run
+    # and there would be no promotion to mirror (see
+    # test_whole_globe_default_is_not_a_mask_on_a_curvilinear_grid).
     bboxes = resolve_bboxes(
-        _single_polygon_geojson(lon_min=-180, lat_min=-90, lon_max=180, lat_max=90)
+        _single_polygon_geojson(lon_min=-5, lat_min=-5, lon_max=5, lat_max=5)
     )
     result = estimate_single_key_size(
         api, KEY, _resolved(bboxes=bboxes), output_format="netcdf"

@@ -16,9 +16,10 @@ from shapely.geometry import Point as ShapelyPoint
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry import box as shapely_box
 
+from data_access_service.core.constants import WHOLE_GLOBE_BBOX
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.utils.multi_polygon_helper import bbox_of
-from data_access_service.utils.subset_zarr_helper import subset_zarr
+from data_access_service.utils.subset_zarr_helper import area_to_keep, subset_zarr
 
 KEY = "test-key"
 
@@ -196,6 +197,35 @@ def test_curvilinear_multi_bbox_extends_mask_not_shape():
     kept_two = int(np.isfinite(two.temp.isel(TIME=0)).sum())
     assert kept_one > 0
     assert kept_two > kept_one, "second box must add cells on a curvilinear grid"
+
+
+def test_whole_globe_default_is_not_a_mask_on_a_curvilinear_grid():
+    # "No area given" resolves to the whole-globe bbox with no geometry. On 1D
+    # lat/lon exact_crop already returns None, but 2D lat/lon cannot be cropped
+    # at all, so without a guard the default box would become a real mask.
+    ds = _curvilinear_grid()
+
+    assert area_to_keep(ds, "LATITUDE", "LONGITUDE", [WHOLE_GLOBE_BBOX], None) is None
+    # a caller-built box of the same bounds means the same thing (no __eq__ on
+    # BoundingBox, so this must not be an identity check)
+    assert (
+        area_to_keep(
+            ds, "LATITUDE", "LONGITUDE", [BoundingBox(-180, -90, 180, 90)], None
+        )
+        is None
+    )
+
+
+def test_whole_globe_default_does_not_wipe_a_0_360_store():
+    # A -180..180 rectangle does not contain lon=200, so masking a store whose
+    # longitudes run 0..360 with the default box would NaN out every cell.
+    ds = _curvilinear_grid()
+    ds["LONGITUDE"] = ds.LONGITUDE + 200.0
+
+    subset = _run(ds, [WHOLE_GLOBE_BBOX])
+
+    assert dict(subset.sizes) == {"TIME": 2, "I": 4, "J": 6}
+    assert int(np.isfinite(subset.temp).sum()) == subset.temp.size
 
 
 def _expected_inside(geometry, lats, lons) -> np.ndarray:

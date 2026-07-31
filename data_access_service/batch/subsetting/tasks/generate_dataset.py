@@ -275,12 +275,8 @@ def _generate_partition_output_with_polygon(
     had_data = False
     if multi_polygon is not None:
         # The multiple polygons may overlap, merge those overlaps into
-        # non-overlapping polygons (shared with the zarr path, see
-        # utils.multi_polygon_helper)
+        # non-overlapping polygons
         for shapely_poly in merge_polygons(multi_polygon):
-            # every polygon must be queried, so call first and keep the flag
-            # sticky - `had_data or _generate_partition_output(...)` would
-            # short-circuit and skip the rest once one polygon had data
             polygon_had_data = _generate_partition_output(
                 api,
                 folder_path,

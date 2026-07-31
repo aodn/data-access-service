@@ -23,11 +23,11 @@ from data_access_service.utils.email_templates.download_email import (
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils import geotiff_export
 from data_access_service.utils.process_logger import ProcessLogger
-from data_access_service.batch.subsetting.helpers.chunking import (
+from data_access_service.batch.subsetting.helpers.zarr_chunking import (
     get_available_thread_count,
     get_time_steps_per_chunk,
 )
-from data_access_service.batch.subsetting.helpers.netcdf_encoding import (
+from data_access_service.batch.subsetting.helpers.netcdf_compat import (
     convert_object_dtype_variables,
     ignore_invalid_unicode_in_attrs,
 )
