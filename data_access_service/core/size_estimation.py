@@ -155,6 +155,7 @@ def _estimate_zarr_size(
         cells outside it, which is what makes the output figure an upper bound
     :return: dict with uuid, key, format, estimated_uncompressed_bytes,
         estimated_output_bytes, and human-readable notes
+    :raises ValueError: if output_format is one a zarr key cannot download as
     """
     from data_access_service.utils.subset_zarr_helper import area_to_keep, subset_zarr
 
@@ -216,6 +217,14 @@ def _estimate_zarr_size(
     elif output_format == "netcdf":
         total_uncompressed, total_output = _measure_netcdf(
             dataset, output_format, notes, will_mask
+        )
+    else:
+        # "csv" is a valid request format, but only for parquet keys - the
+        # download's zarr_processor.__format_handler has no csv handler and
+        # raises the same way, so there is no size to promise here.
+        raise ValueError(
+            f"'{output_format}' export not possible for {key}: a zarr key "
+            "downloads as netcdf or geotiff only."
         )
 
     # Human-readable size summary (applies to every output format).
