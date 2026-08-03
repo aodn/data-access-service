@@ -18,10 +18,18 @@ from data_access_service.batch.pmtiles.processors.hexbin_processor import (
     HexbinProcessor,
 )
 from data_access_service.core.duckdbclient import PmTileDuckDBClient
+from data_access_service.batch.pmtiles.helpers.features_help import (
+    build_counts_tree_from_days,
+    build_counts_tree_from_months,
+    build_counts_tree_from_years,
+)
 from data_access_service.models.pmtiles_types import (
+    COUNTS_PROPERTY,
+    DAYS_KEY,
     TIMELESS_DATE_PERIOD,
     TIMELESS_MONTH_PERIOD,
     TIMELESS_YEAR_PERIOD,
+    TOTAL_KEY,
     TimeGroupBy,
 )
 from data_access_service.utils.pmtiles_utils import open_pmtiles
@@ -69,6 +77,45 @@ def _expected_staged_aggregates_from_input(
         .size()
     )
     return {(str(h), int(p)): int(c) for (h, p), c in grouped.items()}
+
+
+def _parse_counts_tree(props: dict) -> dict:
+    """Parse feature property ``c`` (JSON string) to nested map."""
+    raw = props[COUNTS_PROPERTY]
+    assert isinstance(raw, str), "counts property must be a JSON string for MVT"
+    return json.loads(raw)
+
+
+def _flatten_days_from_tree(tree: dict) -> Dict[int, int]:
+    out: Dict[int, int] = {}
+    for y, year_node in tree.items():
+        for m, month_node in year_node.items():
+            if m == TOTAL_KEY:
+                continue
+            for d, count in month_node.get(DAYS_KEY, {}).items():
+                out[int(f"{y}{m}{d}")] = int(count)
+    return out
+
+
+def _flatten_months_from_tree(tree: dict) -> Dict[int, int]:
+    out: Dict[int, int] = {}
+    for y, year_node in tree.items():
+        for m, month_node in year_node.items():
+            if m == TOTAL_KEY:
+                continue
+            out[int(f"{y}{m}")] = int(month_node[TOTAL_KEY])
+    return out
+
+
+def _flatten_years_from_tree(tree: dict) -> Dict[int, int]:
+    return {int(y): int(year_node[TOTAL_KEY]) for y, year_node in tree.items()}
+
+
+def _by_cell_period(expected: Dict[Tuple[str, int], int]) -> Dict[str, Dict[int, int]]:
+    out: Dict[str, Dict[int, int]] = {}
+    for (h, p), c in expected.items():
+        out.setdefault(h, {})[p] = c
+    return out
 
 
 class TestHexbinProcessor(TestWithS3):
@@ -322,18 +369,25 @@ class TestHexbinProcessor(TestWithS3):
                             feature = json.loads(line)
                             props = feature["properties"]
                             cell = props["h"]
-                            date_counts_by_cell[cell] = {
-                                int(k[1:]): int(v)
-                                for k, v in props.items()
-                                if k.startswith("d") and k[1:].isdigit()
-                            }
+                            tree = _parse_counts_tree(props)
+                            days = _flatten_days_from_tree(tree)
+                            date_counts_by_cell[cell] = days
+                            # Month/year totals must match day rollups.
+                            month_from_days: Dict[int, int] = {}
+                            year_from_days: Dict[int, int] = {}
+                            for d, c in days.items():
+                                month_from_days[d // 100] = (
+                                    month_from_days.get(d // 100, 0) + c
+                                )
+                                year_from_days[d // 10000] = (
+                                    year_from_days.get(d // 10000, 0) + c
+                                )
+                            assert _flatten_months_from_tree(tree) == month_from_days
+                            assert _flatten_years_from_tree(tree) == year_from_days
 
-                    expected_by_cell = {}
-                    for (h_high, d), c in expected_date.items():
-                        expected_by_cell.setdefault(h_high, {})[d] = c
-
+                    expected_by_cell = _by_cell_period(expected_date)
                     assert date_counts_by_cell == expected_by_cell, (
-                        f"geojsonseq date properties mismatch.\n"
+                        f"geojsonseq date tree mismatch.\n"
                         f"expected={expected_by_cell}\n"
                         f"actual={date_counts_by_cell}"
                     )
@@ -384,12 +438,12 @@ class TestHexbinProcessor(TestWithS3):
                     hex_processor.build_staging_parquet()
 
                     df = pandas.read_parquet(hex_processor.get_staged_path())
-                    assert list(df.columns) == ["h_high", "y", "c"]
-                    assert ((df["y"] >= 1000) & (df["y"] <= 9999)).all()
+                    assert list(df.columns) == ["h_high", "yr", "c"]
+                    assert ((df["yr"] >= 1000) & (df["yr"] <= 9999)).all()
 
                     expected_year = _expected_staged_aggregates_from_input("year")
                     actual = {
-                        (str(row.h_high), int(row.y)): int(row.c)
+                        (str(row.h_high), int(row.yr)): int(row.c)
                         for row in df.itertuples(index=False)
                     }
                     assert actual == expected_year, (
@@ -413,18 +467,15 @@ class TestHexbinProcessor(TestWithS3):
                             feature = json.loads(line)
                             props = feature["properties"]
                             cell = props["h"]
-                            year_counts_by_cell[cell] = {
-                                int(k[1:]): int(v)
-                                for k, v in props.items()
-                                if k.startswith("y") and k[1:].isdigit()
-                            }
+                            tree = _parse_counts_tree(props)
+                            # Year-only tree has no month children.
+                            for year_node in tree.values():
+                                assert set(year_node.keys()) == {TOTAL_KEY}
+                            year_counts_by_cell[cell] = _flatten_years_from_tree(tree)
 
-                    expected_by_cell = {}
-                    for (h_high, y), c in expected_year.items():
-                        expected_by_cell.setdefault(h_high, {})[y] = c
-
+                    expected_by_cell = _by_cell_period(expected_year)
                     assert year_counts_by_cell == expected_by_cell, (
-                        f"geojsonseq year properties mismatch.\n"
+                        f"geojsonseq year tree mismatch.\n"
                         f"expected={expected_by_cell}\n"
                         f"actual={year_counts_by_cell}"
                     )
@@ -448,7 +499,7 @@ class TestHexbinProcessor(TestWithS3):
         mock_get_fs_token_paths,
         localstack,
     ):
-        """time_group_by=all → day staging with d/m/y properties on each feature."""
+        """time_group_by=all → day staging; nested c tree with day/month/year totals."""
         config = Config.get_config()
         api = API()
         api.initialize_metadata()
@@ -483,13 +534,6 @@ class TestHexbinProcessor(TestWithS3):
                         if p.endswith("hex_z10.geojsonseq.gz")
                     )
 
-                    def _props_by_prefix(props, prefix):
-                        return {
-                            int(k[len(prefix) :]): int(v)
-                            for k, v in props.items()
-                            if k.startswith(prefix) and k[len(prefix) :].isdigit()
-                        }
-
                     date_by_cell: Dict[str, Dict[int, int]] = {}
                     month_by_cell: Dict[str, Dict[int, int]] = {}
                     year_by_cell: Dict[str, Dict[int, int]] = {}
@@ -498,25 +542,18 @@ class TestHexbinProcessor(TestWithS3):
                             feature = json.loads(line)
                             props = feature["properties"]
                             cell = props["h"]
-                            date_by_cell[cell] = _props_by_prefix(props, "d")
-                            month_by_cell[cell] = _props_by_prefix(props, "m")
-                            year_by_cell[cell] = _props_by_prefix(props, "y")
-                            # Each feature must carry all three grains.
+                            tree = _parse_counts_tree(props)
+                            date_by_cell[cell] = _flatten_days_from_tree(tree)
+                            month_by_cell[cell] = _flatten_months_from_tree(tree)
+                            year_by_cell[cell] = _flatten_years_from_tree(tree)
                             assert date_by_cell[cell]
                             assert month_by_cell[cell]
                             assert year_by_cell[cell]
 
-                    def _by_cell(expected):
-                        out: Dict[str, Dict[int, int]] = {}
-                        for (h, p), c in expected.items():
-                            out.setdefault(h, {})[p] = c
-                        return out
+                    assert date_by_cell == _by_cell_period(expected_date)
+                    assert month_by_cell == _by_cell_period(expected_month)
+                    assert year_by_cell == _by_cell_period(expected_year)
 
-                    assert date_by_cell == _by_cell(expected_date)
-                    assert month_by_cell == _by_cell(expected_month)
-                    assert year_by_cell == _by_cell(expected_year)
-
-                    # Per-cell totals must match across grains.
                     for cell in date_by_cell:
                         day_total = sum(date_by_cell[cell].values())
                         assert day_total == sum(month_by_cell[cell].values())
@@ -541,7 +578,7 @@ class TestHexbinProcessor(TestWithS3):
         mock_get_fs_token_paths,
         localstack,
     ):
-        """No TIME column → single synthetic period; feature keys use grain prefix."""
+        """No TIME column → synthetic period; nested c tree for the grain."""
         config = Config.get_config()
         api = API()
         api.initialize_metadata()
@@ -549,15 +586,54 @@ class TestHexbinProcessor(TestWithS3):
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
             with tempfile.TemporaryDirectory() as tempdirname:
                 try:
-                    for grain, synthetic, prop_keys, period_col in (
-                        (TimeGroupBy.MONTH, TIMELESS_MONTH_PERIOD, ["m197001"], "ym"),
-                        (TimeGroupBy.DATE, TIMELESS_DATE_PERIOD, ["d19700101"], "d"),
-                        (TimeGroupBy.YEAR, TIMELESS_YEAR_PERIOD, ["y1970"], "y"),
+                    for grain, synthetic, period_col, check_tree in (
+                        (
+                            TimeGroupBy.MONTH,
+                            TIMELESS_MONTH_PERIOD,
+                            "ym",
+                            lambda tree, n: (
+                                tree == {"1970": {TOTAL_KEY: n, "01": {TOTAL_KEY: n}}}
+                            ),
+                        ),
+                        (
+                            TimeGroupBy.DATE,
+                            TIMELESS_DATE_PERIOD,
+                            "d",
+                            lambda tree, n: (
+                                tree
+                                == {
+                                    "1970": {
+                                        TOTAL_KEY: n,
+                                        "01": {
+                                            TOTAL_KEY: n,
+                                            DAYS_KEY: {"01": n},
+                                        },
+                                    }
+                                }
+                            ),
+                        ),
+                        (
+                            TimeGroupBy.YEAR,
+                            TIMELESS_YEAR_PERIOD,
+                            "yr",
+                            lambda tree, n: (tree == {"1970": {TOTAL_KEY: n}}),
+                        ),
                         (
                             TimeGroupBy.ALL,
                             TIMELESS_DATE_PERIOD,
-                            ["d19700101", "m197001", "y1970"],
                             "d",
+                            lambda tree, n: (
+                                tree
+                                == {
+                                    "1970": {
+                                        TOTAL_KEY: n,
+                                        "01": {
+                                            TOTAL_KEY: n,
+                                            DAYS_KEY: {"01": n},
+                                        },
+                                    }
+                                }
+                            ),
                         ),
                     ):
                         hex_processor = self._configure_hex_processor(
@@ -593,17 +669,18 @@ class TestHexbinProcessor(TestWithS3):
                             with gzip.open(high_res_path, "rt", encoding="utf-8") as f:
                                 features = [json.loads(line) for line in f]
                             assert features
+                            feature_total = 0
                             for feature in features:
                                 props = feature["properties"]
-                                for prop_key in prop_keys:
-                                    assert prop_key in props
-                                    assert props[prop_key] > 0
-                                period_props = sorted(
-                                    k
-                                    for k in props
-                                    if k != "h" and len(k) > 1 and k[1:].isdigit()
-                                )
-                                assert period_props == sorted(prop_keys)
+                                assert set(props.keys()) >= {"h", COUNTS_PROPERTY}
+                                tree = _parse_counts_tree(props)
+                                n = _flatten_years_from_tree(tree)
+                                assert len(n) == 1 and 1970 in n
+                                feature_total += n[1970]
+                                # Per-feature tree shape: only synthetic buckets.
+                                cell_count = n[1970]
+                                assert check_tree(tree, cell_count)
+                            assert feature_total == total_c
 
                             metadata_path = hex_processor.generate_metadata_json()
                             with open(metadata_path, encoding="utf-8") as f:
@@ -637,53 +714,61 @@ def test_time_group_by_default_and_invalid():
             config.config["pmtiles"]["config"]["time_group_by"] = original
 
 
-def test_period_property_key_prefixes():
+def test_nested_counts_tree_encoding():
     from data_access_service.batch.pmtiles.helpers.features_help import (
-        apply_all_period_counts,
-        apply_period_counts,
-        period_property_key,
-        rollup_day_counts,
-    )
-    from data_access_service.models.pmtiles_types import (
-        TIMELESS_DATE_PERIOD,
-        TIMELESS_MONTH_PERIOD,
-        TIMELESS_YEAR_PERIOD,
+        apply_counts_tree,
+        build_hex_feature,
+        counts_tree_for_grain,
     )
 
-    assert period_property_key(20240115, TimeGroupBy.DATE) == "d20240115"
-    assert period_property_key(202401, TimeGroupBy.MONTH) == "m202401"
-    assert period_property_key(2022, TimeGroupBy.YEAR) == "y2022"
-    assert period_property_key(TIMELESS_DATE_PERIOD, TimeGroupBy.DATE) == "d19700101"
-    assert period_property_key(TIMELESS_MONTH_PERIOD, TimeGroupBy.MONTH) == "m197001"
-    assert period_property_key(TIMELESS_YEAR_PERIOD, TimeGroupBy.YEAR) == "y1970"
+    day_tree = build_counts_tree_from_days(
+        {20240115: 3, 20240116: 2, 20240201: 1, 20250101: 4}
+    )
+    assert day_tree == {
+        "2024": {
+            TOTAL_KEY: 6,
+            "01": {TOTAL_KEY: 5, DAYS_KEY: {"15": 3, "16": 2}},
+            "02": {TOTAL_KEY: 1, DAYS_KEY: {"01": 1}},
+        },
+        "2025": {
+            TOTAL_KEY: 4,
+            "01": {TOTAL_KEY: 4, DAYS_KEY: {"01": 4}},
+        },
+    }
+
+    month_tree = build_counts_tree_from_months({202401: 5, 202402: 1, 202501: 4})
+    assert month_tree == {
+        "2024": {TOTAL_KEY: 6, "01": {TOTAL_KEY: 5}, "02": {TOTAL_KEY: 1}},
+        "2025": {TOTAL_KEY: 4, "01": {TOTAL_KEY: 4}},
+    }
+
+    year_tree = build_counts_tree_from_years({2022: 5, 2023: 0, 2024: 6})
+    assert year_tree == {
+        "2022": {TOTAL_KEY: 5},
+        "2024": {TOTAL_KEY: 6},
+    }
 
     props: dict = {"h": "abc"}
-    apply_period_counts(props, {20240115: 3, 20240116: 0}, TimeGroupBy.DATE)
-    assert props == {"h": "abc", "d20240115": 3}
+    apply_counts_tree(props, day_tree)
+    assert props["h"] == "abc"
+    assert json.loads(props[COUNTS_PROPERTY]) == day_tree
 
-    year_props: dict = {"h": "abc"}
-    apply_period_counts(year_props, {2022: 5, 2023: 0}, TimeGroupBy.YEAR)
-    assert year_props == {"h": "abc", "y2022": 5}
-
-    rolled = rollup_day_counts({20240115: 3, 20240116: 2, 20240201: 1, 20250101: 4})
-    assert rolled[TimeGroupBy.DATE] == {
-        20240115: 3,
-        20240116: 2,
-        20240201: 1,
-        20250101: 4,
-    }
-    assert rolled[TimeGroupBy.MONTH] == {202401: 5, 202402: 1, 202501: 4}
-    assert rolled[TimeGroupBy.YEAR] == {2024: 6, 2025: 4}
-
-    all_props: dict = {"h": "abc"}
-    apply_all_period_counts(all_props, {20240115: 3, 20240116: 2})
-    assert all_props == {
-        "h": "abc",
-        "d20240115": 3,
-        "d20240116": 2,
-        "m202401": 5,
-        "y2024": 5,
-    }
+    cell = h3.latlng_to_cell(-42.0, 147.0, 8)
+    feature = build_hex_feature(
+        cell=cell,
+        period_counts={20240115: 3, 20240116: 2},
+        layer_name="hex_z10",
+        minzoom=0,
+        maxzoom=10,
+        include_tippecanoe_metadata=False,
+        grain=TimeGroupBy.ALL,
+    )
+    assert set(feature["properties"].keys()) == {"h", COUNTS_PROPERTY}
+    assert feature["properties"]["h"] == cell
+    parsed = json.loads(feature["properties"][COUNTS_PROPERTY])
+    assert parsed == counts_tree_for_grain({20240115: 3, 20240116: 2}, TimeGroupBy.ALL)
+    assert parsed["2024"][TOTAL_KEY] == 5
+    assert parsed["2024"]["01"][TOTAL_KEY] == 5
 
 
 def test_sidecar_metadata_has_time_roundtrip():

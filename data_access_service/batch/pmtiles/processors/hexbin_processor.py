@@ -29,15 +29,16 @@ class HexbinProcessor(AbstractProcessor):
         self._has_time: bool = True
 
     def _staged_period_column(self) -> str:
-        """Staging column alias for the active time grain (``d``, ``ym``, or ``y``).
+        """Staging column alias for the active time grain (``d``, ``ym``, or ``yr``).
 
         ``all`` stages at day grain (``d``) so month/year can be rolled up later.
+        Year uses ``yr`` (not ``y``) to avoid DuckDB binder issues with bare ``y``.
         """
         group_by = self.pmtiles_config.time_group_by
         if group_by in (TimeGroupBy.DATE, TimeGroupBy.ALL):
             return "d"
         if group_by == TimeGroupBy.YEAR:
-            return "y"
+            return "yr"
         return "ym"
 
     def _synthetic_period(self) -> int:
@@ -67,7 +68,7 @@ class HexbinProcessor(AbstractProcessor):
                 PmTileDuckDBClient.build_year_key_expression(
                     time_col=time_col_name, time_type=time_type
                 ),
-                "y",
+                "yr",
             )
         # Default / month
         return (
@@ -200,9 +201,7 @@ class HexbinProcessor(AbstractProcessor):
             else:
                 # Narrow preview to one calendar month when possible so daily
                 # keys can be compared to monthly buckets; year grain uses one year.
-                if time_col == "ym":
-                    period_filter = f"{time_col} = {int(min_period)}"
-                elif time_col == "y":
+                if time_col in ("ym", "yr"):
                     period_filter = f"{time_col} = {int(min_period)}"
                 else:
                     first_month = int(min_period) // 100  # YYYYMM from YYYYMMDD

@@ -7,12 +7,12 @@ from typing import Any
 class TimeGroupBy(str, Enum):
     """Temporal bucket for hexbin count aggregation.
 
-    Feature property prefixes (see ``period_property_key``):
-    - DATE  → ``dYYYYMMDD``
-    - MONTH → ``mYYYYMM``
-    - YEAR  → ``yYYYY``
-    - ALL   → day + month + year properties on the same feature
-              (staged at day grain; month/year rolled up from day counts)
+    Feature counts are stored as a nested map-of-map under property ``c``
+    (JSON string; see ``COUNTS_PROPERTY``):
+
+    - DATE / ALL → year → month → ``d`` → day, with ``t`` totals on year/month
+    - MONTH → year → month with ``t`` only (no day map)
+    - YEAR → year with ``t`` only
     """
 
     MONTH = "month"
@@ -21,7 +21,7 @@ class TimeGroupBy(str, Enum):
     ALL = "all"
 
 
-# Single-grain modes that map 1:1 to a property prefix (not ALL).
+# Single-grain modes that stage one period column (not ALL).
 SINGLE_TIME_GROUP_BY: tuple[TimeGroupBy, ...] = (
     TimeGroupBy.DATE,
     TimeGroupBy.MONTH,
@@ -31,17 +31,16 @@ SINGLE_TIME_GROUP_BY: tuple[TimeGroupBy, ...] = (
 
 # Synthetic calendar periods for datasets with no TIME column.
 # Stable (not generation-time "today"); not real observation times.
-TIMELESS_DATE_PERIOD = 19700101  # → property d19700101
-TIMELESS_MONTH_PERIOD = 197001  # → property m197001
-TIMELESS_YEAR_PERIOD = 1970  # → property y1970
+TIMELESS_DATE_PERIOD = 19700101  # → c tree 1970/01/01
+TIMELESS_MONTH_PERIOD = 197001  # → c tree 1970/01
+TIMELESS_YEAR_PERIOD = 1970  # → c tree 1970
 
-# Prefix for each grain's count properties on vector-tile features.
-# ALL is multi-grain and has no single prefix.
-PERIOD_PROPERTY_PREFIX: dict[TimeGroupBy, str] = {
-    TimeGroupBy.DATE: "d",
-    TimeGroupBy.MONTH: "m",
-    TimeGroupBy.YEAR: "y",
-}
+# Feature property holding the nested counts tree (JSON string for MVT).
+COUNTS_PROPERTY = "c"
+# Year/month total key inside the nested tree (not a calendar key).
+TOTAL_KEY = "t"
+# Day map key under each month node.
+DAYS_KEY = "d"
 
 
 @dataclass(frozen=True)
@@ -102,7 +101,7 @@ class PmtilesGenerationConfig:
     threads: int
     fetch_size: int
     show_progress: bool
-    # "month" (YYYYMM), "date" (YYYYMMDD), "year" (YYYY), or "all" (d+m+y);
+    # "month" (YYYYMM), "date" (YYYYMMDD), "year" (YYYY), or "all" (nested tree);
     # default month.
     time_group_by: TimeGroupBy = TimeGroupBy.MONTH
     # When True (default), batch generation forks one short-lived child per
