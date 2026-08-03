@@ -501,6 +501,11 @@ class PmTileDuckDBClient(DuckDBClient):
         ts = PmTileDuckDBClient._timestamp_sql(time_col, time_type)
         return f"CAST(strftime({ts}, '%Y%m%d') AS INTEGER)"
 
+    @staticmethod
+    def build_year_key_expression(time_col: str, time_type: str) -> str:
+        ts = PmTileDuckDBClient._timestamp_sql(time_col, time_type)
+        return f"CAST(strftime({ts}, '%Y') AS INTEGER)"
+
 
 class ParquetDuckDBClient(DuckDBClient):
     """Owns a DuckDB connection and its extension/region configuration.

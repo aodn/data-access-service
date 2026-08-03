@@ -21,6 +21,7 @@ from data_access_service.core.duckdbclient import PmTileDuckDBClient
 from data_access_service.models.pmtiles_types import (
     TIMELESS_DATE_PERIOD,
     TIMELESS_MONTH_PERIOD,
+    TIMELESS_YEAR_PERIOD,
     TimeGroupBy,
 )
 from data_access_service.utils.pmtiles_utils import open_pmtiles
@@ -47,15 +48,17 @@ def _expected_staged_aggregates_from_input(
 ) -> Dict[Tuple[str, int], int]:
     """
     Independently aggregate the canned input parquet the same way staging does:
-    H3 cell at max res + year-month (YYYYMM) or full date (YYYYMMDD) key.
+    H3 cell at max res + year (YYYY), year-month (YYYYMM), or date (YYYYMMDD) key.
     """
-    if period not in ("month", "date"):
-        raise ValueError(f"period must be 'month' or 'date', got {period!r}")
+    fmt_by_period = {"year": "%Y", "month": "%Y%m", "date": "%Y%m%d"}
+    if period not in fmt_by_period:
+        raise ValueError(
+            f"period must be one of {sorted(fmt_by_period)}, got {period!r}"
+        )
 
     df = pandas.read_parquet(ANIMAL_ACOUSTIC_CANNED_DIR)
     ts = pandas.to_datetime(df[TIME_COL], utc=False)
-    fmt = "%Y%m" if period == "month" else "%Y%m%d"
-    period_key = ts.dt.strftime(fmt).astype(int)
+    period_key = ts.dt.strftime(fmt_by_period[period]).astype(int)
     cells = [
         h3.latlng_to_cell(float(lat), float(lon), HEX_MAX_RES)
         for lat, lon in zip(df[LAT_COL], df[LON_COL])
@@ -354,6 +357,183 @@ class TestHexbinProcessor(TestWithS3):
                     shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_animal_acoustic_aggregates_by_year(
+        self,
+        aws_clients,
+        upload_test_case_to_s3,
+        mock_get_fs_token_paths,
+        localstack,
+    ):
+        """
+        Verify year-level (YYYY) count aggregation when time_group_by=year
+        for animal_acoustic_tracking_delayed_qc.parquet from s3_sample2.
+        """
+        config = Config.get_config()
+        api = API()
+        api.initialize_metadata()
+
+        with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
+            with tempfile.TemporaryDirectory() as tempdirname:
+                try:
+                    hex_processor = self._configure_hex_processor(
+                        tempdirname,
+                        api,
+                        localstack,
+                        time_group_by=TimeGroupBy.YEAR,
+                    )
+                    hex_processor.build_staging_parquet()
+
+                    df = pandas.read_parquet(hex_processor.get_staged_path())
+                    assert list(df.columns) == ["h_high", "y", "c"]
+                    assert ((df["y"] >= 1000) & (df["y"] <= 9999)).all()
+
+                    expected_year = _expected_staged_aggregates_from_input("year")
+                    actual = {
+                        (str(row.h_high), int(row.y)): int(row.c)
+                        for row in df.itertuples(index=False)
+                    }
+                    assert actual == expected_year, (
+                        f"staged (h_high, y) counts do not match input parquet.\n"
+                        f"expected={expected_year}\n"
+                        f"actual={actual}"
+                    )
+                    assert sum(actual.values()) == len(
+                        pandas.read_parquet(ANIMAL_ACOUSTIC_CANNED_DIR)
+                    )
+
+                    geojsonseq_paths = hex_processor.generate_geojsonseq_files()
+                    high_res_path = next(
+                        p
+                        for p in geojsonseq_paths
+                        if p.endswith("hex_z10.geojsonseq.gz")
+                    )
+                    year_counts_by_cell = {}
+                    with gzip.open(high_res_path, "rt", encoding="utf-8") as f:
+                        for line in f:
+                            feature = json.loads(line)
+                            props = feature["properties"]
+                            cell = props["h"]
+                            year_counts_by_cell[cell] = {
+                                int(k[1:]): int(v)
+                                for k, v in props.items()
+                                if k.startswith("y") and k[1:].isdigit()
+                            }
+
+                    expected_by_cell = {}
+                    for (h_high, y), c in expected_year.items():
+                        expected_by_cell.setdefault(h_high, {})[y] = c
+
+                    assert year_counts_by_cell == expected_by_cell, (
+                        f"geojsonseq year properties mismatch.\n"
+                        f"expected={expected_by_cell}\n"
+                        f"actual={year_counts_by_cell}"
+                    )
+
+                    metadata_path = hex_processor.generate_metadata_json()
+                    with open(metadata_path, encoding="utf-8") as f:
+                        metadata = json.load(f)
+                    period_keys = [p for (_, p) in expected_year.keys()]
+                    assert metadata["min_date"] == min(period_keys)
+                    assert metadata["max_date"] == max(period_keys)
+                    assert metadata["time_group_by"] == "year"
+                    assert metadata["has_time"] is True
+                finally:
+                    shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_animal_acoustic_aggregates_by_all(
+        self,
+        aws_clients,
+        upload_test_case_to_s3,
+        mock_get_fs_token_paths,
+        localstack,
+    ):
+        """time_group_by=all → day staging with d/m/y properties on each feature."""
+        config = Config.get_config()
+        api = API()
+        api.initialize_metadata()
+
+        with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
+            with tempfile.TemporaryDirectory() as tempdirname:
+                try:
+                    hex_processor = self._configure_hex_processor(
+                        tempdirname,
+                        api,
+                        localstack,
+                        time_group_by=TimeGroupBy.ALL,
+                    )
+                    hex_processor.build_staging_parquet()
+
+                    df = pandas.read_parquet(hex_processor.get_staged_path())
+                    assert list(df.columns) == ["h_high", "d", "c"]
+
+                    expected_date = _expected_staged_aggregates_from_input("date")
+                    expected_month = _expected_staged_aggregates_from_input("month")
+                    expected_year = _expected_staged_aggregates_from_input("year")
+                    actual = {
+                        (str(row.h_high), int(row.d)): int(row.c)
+                        for row in df.itertuples(index=False)
+                    }
+                    assert actual == expected_date
+
+                    geojsonseq_paths = hex_processor.generate_geojsonseq_files()
+                    high_res_path = next(
+                        p
+                        for p in geojsonseq_paths
+                        if p.endswith("hex_z10.geojsonseq.gz")
+                    )
+
+                    def _props_by_prefix(props, prefix):
+                        return {
+                            int(k[len(prefix) :]): int(v)
+                            for k, v in props.items()
+                            if k.startswith(prefix) and k[len(prefix) :].isdigit()
+                        }
+
+                    date_by_cell: Dict[str, Dict[int, int]] = {}
+                    month_by_cell: Dict[str, Dict[int, int]] = {}
+                    year_by_cell: Dict[str, Dict[int, int]] = {}
+                    with gzip.open(high_res_path, "rt", encoding="utf-8") as f:
+                        for line in f:
+                            feature = json.loads(line)
+                            props = feature["properties"]
+                            cell = props["h"]
+                            date_by_cell[cell] = _props_by_prefix(props, "d")
+                            month_by_cell[cell] = _props_by_prefix(props, "m")
+                            year_by_cell[cell] = _props_by_prefix(props, "y")
+                            # Each feature must carry all three grains.
+                            assert date_by_cell[cell]
+                            assert month_by_cell[cell]
+                            assert year_by_cell[cell]
+
+                    def _by_cell(expected):
+                        out: Dict[str, Dict[int, int]] = {}
+                        for (h, p), c in expected.items():
+                            out.setdefault(h, {})[p] = c
+                        return out
+
+                    assert date_by_cell == _by_cell(expected_date)
+                    assert month_by_cell == _by_cell(expected_month)
+                    assert year_by_cell == _by_cell(expected_year)
+
+                    # Per-cell totals must match across grains.
+                    for cell in date_by_cell:
+                        day_total = sum(date_by_cell[cell].values())
+                        assert day_total == sum(month_by_cell[cell].values())
+                        assert day_total == sum(year_by_cell[cell].values())
+
+                    metadata_path = hex_processor.generate_metadata_json()
+                    with open(metadata_path, encoding="utf-8") as f:
+                        metadata = json.load(f)
+                    period_keys = [p for (_, p) in expected_date.keys()]
+                    assert metadata["min_date"] == min(period_keys)
+                    assert metadata["max_date"] == max(period_keys)
+                    assert metadata["time_group_by"] == "all"
+                    assert metadata["has_time"] is True
+                finally:
+                    shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_timeless_dataset_uses_synthetic_period(
         self,
         aws_clients,
@@ -369,9 +549,16 @@ class TestHexbinProcessor(TestWithS3):
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
             with tempfile.TemporaryDirectory() as tempdirname:
                 try:
-                    for grain, synthetic, prop_key in (
-                        (TimeGroupBy.MONTH, TIMELESS_MONTH_PERIOD, "m197001"),
-                        (TimeGroupBy.DATE, TIMELESS_DATE_PERIOD, "d19700101"),
+                    for grain, synthetic, prop_keys, period_col in (
+                        (TimeGroupBy.MONTH, TIMELESS_MONTH_PERIOD, ["m197001"], "ym"),
+                        (TimeGroupBy.DATE, TIMELESS_DATE_PERIOD, ["d19700101"], "d"),
+                        (TimeGroupBy.YEAR, TIMELESS_YEAR_PERIOD, ["y1970"], "y"),
+                        (
+                            TimeGroupBy.ALL,
+                            TIMELESS_DATE_PERIOD,
+                            ["d19700101", "m197001", "y1970"],
+                            "d",
+                        ),
                     ):
                         hex_processor = self._configure_hex_processor(
                             tempdirname,
@@ -386,7 +573,6 @@ class TestHexbinProcessor(TestWithS3):
                             staged = pandas.read_parquet(
                                 hex_processor.get_staged_path()
                             )
-                            period_col = "ym" if grain == TimeGroupBy.MONTH else "d"
                             assert list(staged.columns) == [
                                 "h_high",
                                 period_col,
@@ -409,15 +595,15 @@ class TestHexbinProcessor(TestWithS3):
                             assert features
                             for feature in features:
                                 props = feature["properties"]
-                                assert prop_key in props
-                                assert props[prop_key] > 0
-                                # Only the synthetic key for this grain
-                                period_props = [
+                                for prop_key in prop_keys:
+                                    assert prop_key in props
+                                    assert props[prop_key] > 0
+                                period_props = sorted(
                                     k
                                     for k in props
                                     if k != "h" and len(k) > 1 and k[1:].isdigit()
-                                ]
-                                assert period_props == [prop_key]
+                                )
+                                assert period_props == sorted(prop_keys)
 
                             metadata_path = hex_processor.generate_metadata_json()
                             with open(metadata_path, encoding="utf-8") as f:
@@ -453,22 +639,51 @@ def test_time_group_by_default_and_invalid():
 
 def test_period_property_key_prefixes():
     from data_access_service.batch.pmtiles.helpers.features_help import (
+        apply_all_period_counts,
         apply_period_counts,
         period_property_key,
+        rollup_day_counts,
     )
     from data_access_service.models.pmtiles_types import (
         TIMELESS_DATE_PERIOD,
         TIMELESS_MONTH_PERIOD,
+        TIMELESS_YEAR_PERIOD,
     )
 
     assert period_property_key(20240115, TimeGroupBy.DATE) == "d20240115"
     assert period_property_key(202401, TimeGroupBy.MONTH) == "m202401"
+    assert period_property_key(2022, TimeGroupBy.YEAR) == "y2022"
     assert period_property_key(TIMELESS_DATE_PERIOD, TimeGroupBy.DATE) == "d19700101"
     assert period_property_key(TIMELESS_MONTH_PERIOD, TimeGroupBy.MONTH) == "m197001"
+    assert period_property_key(TIMELESS_YEAR_PERIOD, TimeGroupBy.YEAR) == "y1970"
 
     props: dict = {"h": "abc"}
     apply_period_counts(props, {20240115: 3, 20240116: 0}, TimeGroupBy.DATE)
     assert props == {"h": "abc", "d20240115": 3}
+
+    year_props: dict = {"h": "abc"}
+    apply_period_counts(year_props, {2022: 5, 2023: 0}, TimeGroupBy.YEAR)
+    assert year_props == {"h": "abc", "y2022": 5}
+
+    rolled = rollup_day_counts({20240115: 3, 20240116: 2, 20240201: 1, 20250101: 4})
+    assert rolled[TimeGroupBy.DATE] == {
+        20240115: 3,
+        20240116: 2,
+        20240201: 1,
+        20250101: 4,
+    }
+    assert rolled[TimeGroupBy.MONTH] == {202401: 5, 202402: 1, 202501: 4}
+    assert rolled[TimeGroupBy.YEAR] == {2024: 6, 2025: 4}
+
+    all_props: dict = {"h": "abc"}
+    apply_all_period_counts(all_props, {20240115: 3, 20240116: 2})
+    assert all_props == {
+        "h": "abc",
+        "d20240115": 3,
+        "d20240116": 2,
+        "m202401": 5,
+        "y2024": 5,
+    }
 
 
 def test_sidecar_metadata_has_time_roundtrip():
@@ -513,3 +728,8 @@ def test_build_time_key_expressions():
 
     d = PmTileDuckDBClient.build_date_key_expression("TIMESTAMP", "timestamp")
     assert "%Y%m%d" in d
+
+    y = PmTileDuckDBClient.build_year_key_expression("TIMESTAMP", "timestamp")
+    assert "%Y" in y
+    assert "%Y%m" not in y
+    assert "%Y%m%d" not in y

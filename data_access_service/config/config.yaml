@@ -47,7 +47,7 @@ pmtiles:
     # Periodic DuckDB query progress logs (via query_progress + Python logger)
     show_progress: True
     # Temporal bucket for hexbin counts: "month" (YYYYMM) or "date" (YYYYMMDD).
-    time_group_by: date
+    time_group_by: all
     # True: batch PMTiles generation forks one child process per parquet
     # dataset (reclaims DuckDB/tippecanoe memory on exit). False: run each
     # dataset in the main app process.

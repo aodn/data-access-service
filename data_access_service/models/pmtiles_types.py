@@ -10,22 +10,37 @@ class TimeGroupBy(str, Enum):
     Feature property prefixes (see ``period_property_key``):
     - DATE  → ``dYYYYMMDD``
     - MONTH → ``mYYYYMM``
-    - YEAR (future) → ``yYYYY``
+    - YEAR  → ``yYYYY``
+    - ALL   → day + month + year properties on the same feature
+              (staged at day grain; month/year rolled up from day counts)
     """
 
     MONTH = "month"
     DATE = "date"
+    YEAR = "year"
+    ALL = "all"
+
+
+# Single-grain modes that map 1:1 to a property prefix (not ALL).
+SINGLE_TIME_GROUP_BY: tuple[TimeGroupBy, ...] = (
+    TimeGroupBy.DATE,
+    TimeGroupBy.MONTH,
+    TimeGroupBy.YEAR,
+)
 
 
 # Synthetic calendar periods for datasets with no TIME column.
 # Stable (not generation-time "today"); not real observation times.
 TIMELESS_DATE_PERIOD = 19700101  # → property d19700101
 TIMELESS_MONTH_PERIOD = 197001  # → property m197001
+TIMELESS_YEAR_PERIOD = 1970  # → property y1970
 
 # Prefix for each grain's count properties on vector-tile features.
+# ALL is multi-grain and has no single prefix.
 PERIOD_PROPERTY_PREFIX: dict[TimeGroupBy, str] = {
     TimeGroupBy.DATE: "d",
     TimeGroupBy.MONTH: "m",
+    TimeGroupBy.YEAR: "y",
 }
 
 
@@ -87,7 +102,8 @@ class PmtilesGenerationConfig:
     threads: int
     fetch_size: int
     show_progress: bool
-    # "month" (YYYYMM) or "date" (YYYYMMDD); default month preserves existing behavior.
+    # "month" (YYYYMM), "date" (YYYYMMDD), "year" (YYYY), or "all" (d+m+y);
+    # default month.
     time_group_by: TimeGroupBy = TimeGroupBy.MONTH
     # When True (default), batch generation forks one short-lived child per
     # parquet dataset so DuckDB/tippecanoe memory returns to the OS on exit.
