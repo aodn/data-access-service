@@ -5,7 +5,7 @@ import pandas as pd
 import xarray
 
 from data_access_service.models.value_count import ValueCount
-from data_access_service.utils.routes_helper import (
+from data_access_service.core.routes.helpers import (
     round_coordinate_list,
     generate_feature_collection,
     generate_rect_features,

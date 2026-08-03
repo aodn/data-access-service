@@ -2,7 +2,7 @@ import os
 
 from http import HTTPStatus
 from fastapi import APIRouter, Request
-from data_access_service.utils.routes_helper import (
+from data_access_service.core.routes.helpers import (
     HealthCheckResponse,
     get_api_instance,
 )

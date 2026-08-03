@@ -6,9 +6,11 @@ import pytest
 from unittest.mock import MagicMock
 
 from data_access_service.core.constants import WHOLE_GLOBE_BBOX
+from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
 from data_access_service.utils.subset_request_resolver import (
     resolve_bboxes,
     resolve_date_range,
+    resolve_geometry,
     resolve_subset_request,
 )
 
@@ -135,6 +137,19 @@ class TestResolveBboxes:
     def test_non_specified_means_no_spatial_filter(self):
         assert resolve_bboxes("non-specified") == []
 
+    def test_agrees_with_the_helper_it_delegates_to(self):
+        # The defect this guards: MultiPolygonHelper defaulted to
+        # [WHOLE_GLOBE_BBOX] while resolve_bboxes returned [], so the batch
+        # download (request_helper) and the size estimate (this resolver)
+        # disagreed about identical input. Defaulting belongs to
+        # ResolvedSubsetRequest.effective_bboxes alone - re-adding one to the
+        # parse layer must fail here.
+        for raw in (None, "non-specified"):
+            assert resolve_bboxes(raw) == []
+            assert MultiPolygonHelper(multi_polygon=raw).bboxes == []
+            assert resolve_geometry(raw) is None
+            assert MultiPolygonHelper(multi_polygon=raw).geometry is None
+
     def test_geojson_string(self):
         bboxes = resolve_bboxes(_SINGLE_POLYGON)
         assert len(bboxes) == 1
@@ -153,6 +168,58 @@ class TestResolveBboxes:
     def test_non_multipolygon_geometry_raises(self):
         with pytest.raises(TypeError):
             resolve_bboxes('{"type": "Point", "coordinates": [10, 20]}')
+
+
+class TestResolveGeometry:
+    def test_none_means_no_shape_to_mask_with(self):
+        assert resolve_geometry(None) is None
+        assert resolve_geometry("non-specified") is None
+
+    def test_single_polygon_is_its_own_shape(self):
+        geometry = resolve_geometry(_SINGLE_POLYGON)
+
+        assert geometry.geom_type == "Polygon"
+        assert geometry.bounds == (10, 20, 30, 40)
+
+    def test_overlapping_polygons_become_one_shape(self):
+        overlapping = (
+            '{"type":"MultiPolygon","coordinates":'
+            "[[[[0,0],[4,0],[4,2],[0,2],[0,0]]],"
+            "[[[0,0],[2,0],[2,4],[0,4],[0,0]]]]}"
+        )
+        geometry = resolve_geometry(overlapping)
+
+        # dissolved into one L-shaped outline: 8 + 8 - the 2x2 overlap
+        assert geometry.geom_type == "Polygon"
+        assert geometry.area == pytest.approx(12)
+
+    def test_resolved_request_carries_bboxes_and_geometry_from_one_polygon(self):
+        api = _mock_api(known_keys=["a.zarr"])
+
+        resolved = resolve_subset_request(
+            api, UUID, ["a.zarr"], "2024-01-01", "2024-12-31", _SINGLE_POLYGON
+        )
+
+        assert len(resolved.bboxes) == 1
+        bbox = resolved.bboxes[0]
+        assert resolved.geometry.bounds == (
+            bbox.min_lon,
+            bbox.min_lat,
+            bbox.max_lon,
+            bbox.max_lat,
+        )
+
+    def test_resolved_request_has_no_geometry_without_a_polygon(self):
+        api = _mock_api(known_keys=["a.zarr"])
+
+        resolved = resolve_subset_request(
+            api, UUID, ["a.zarr"], "2024-01-01", "2024-12-31", None
+        )
+
+        assert resolved.geometry is None
+        # the raw field records "no filter"; only the property substitutes
+        assert resolved.bboxes == []
+        assert resolved.effective_bboxes == [WHOLE_GLOBE_BBOX]
 
 
 def test_whole_globe_bbox_bounds():

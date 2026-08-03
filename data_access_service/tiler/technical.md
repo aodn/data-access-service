@@ -361,7 +361,7 @@ There is no per-LOD zoom-threshold field in the manifest today — the client is
 
 `z`/`x`/`y` mean different things in each tile API — see [§5](#5-tile-coordinate-systems-and-projection-pipeline).
 
-**Mount path and auth.** Every path below is relative to the actual mount point: `{Config.BASE_URL}/tiler/data_tiles/...` and `{Config.BASE_URL}/tiler/visual_tiles/...` (`core/tiler_routes/__init__.py`), where `BASE_URL = "/api/v1/das"` today — e.g. the data-tile endpoint's real path is `GET /api/v1/das/tiler/data_tiles/{product_id}/{date}/{z}/{x}/{y}.png`. This doc uses the shorthand `/data_tiles/...` / `/visual_tiles/...` throughout to keep examples readable. **Every tiler route also requires an `X-API-Key` header** — the whole `tiler_router` carries `dependencies=[Depends(api_key_auth), Depends(require_tiler_ready)]`, so a request is rejected with `401` (wrong/missing key, `utils/api_utils.py`) or `503` (tiler still starting up, [§11.3](#113-readiness-gate)) before it ever reaches a route handler.
+**Mount path and auth.** Every path below is relative to the actual mount point: `{Config.BASE_URL}/tiler/data_tiles/...` and `{Config.BASE_URL}/tiler/visual_tiles/...` (`core/tiler_routes/__init__.py`), where `BASE_URL = "/api/v1/das"` today — e.g. the data-tile endpoint's real path is `GET /api/v1/das/tiler/data_tiles/{product_id}/{date}/{z}/{x}/{y}.png`. This doc uses the shorthand `/data_tiles/...` / `/visual_tiles/...` throughout to keep examples readable. **Every tiler route also requires an `X-API-Key` header** — the whole `tiler_router` carries `dependencies=[Depends(api_key_auth), Depends(require_tiler_ready)]`, so a request is rejected with `401` (wrong/missing key, `core/routes/auth.py`) or `503` (tiler still starting up, [§11.3](#113-readiness-gate)) before it ever reaches a route handler.
 
 **HTTP caching.** All tile-shaped bytes (`.png`/`.webp`/`.gif`/`.apng`, manifest, point) are served with `IMMUTABLE_CACHE_HEADERS` (`config/http_cache.py`): `Cache-Control: public, s-maxage=31536000, max-age=0, must-revalidate` — a year at the CDN, `must-revalidate` on the browser (relying on `s-maxage` so CloudFront still serves cached bytes for a year). This works because every such URL is fully determined by its path — the date is in the URL, so once a date's data exists the URL → bytes mapping never changes; there is no separate cache-busting version constant. Listing endpoints whose body can change without the URL changing (`/products`, `/manifest`, `/colormaps`, and the sites `/data/feature-collection/*` endpoints) instead use `REVALIDATE_CACHE_HEADERS` (`max-age=300, must-revalidate`): a short CDN/browser TTL with no ETag — the payloads are small enough that revalidation-by-freshness beats the upkeep of a conditional-request round trip.
 
@@ -820,7 +820,7 @@ The tiler shares a single FastAPI `lifespan` with the rest of `data-access-servi
 
 ```python
 async def run_tiler_warmup(api: API) -> None:
-    await wait_until_api_ready(api)     # let the non-tiler API's metadata init finish first
+    await api.wait_until_ready()     # let the non-tiler API's metadata init finish first
     load_products()                      # sync: read products.json into PRODUCTS — raises if missing
     load_colormaps()                     # sync: read colormaps.json into the colormap registry
     await anyio.to_thread.run_sync(warmup_resample)   # numba JIT warmup, see §7.4
@@ -835,7 +835,7 @@ It deliberately waits for the non-tiler API's own startup before doing tiler wor
 
 ### 11.3 Readiness gate
 
-`mark_tiler_ready()` / `require_tiler_ready()` (`core/tiler_routes/shared.py`) back a `503 Service Unavailable` FastAPI dependency, applied router-wide (`core/tiler_routes/__init__.py`): every tiler route returns 503 with a clear message until `run_tiler_warmup` has finished, instead of quietly serving from an empty product/colormap registry during the startup window. It's applied alongside `api_key_auth` (`utils/api_utils.py`) on the same router — `dependencies=[Depends(api_key_auth), Depends(require_tiler_ready)]` — so every tiler request is checked for a valid `X-API-Key` header (401 on failure) before the readiness gate even runs.
+`mark_tiler_ready()` / `require_tiler_ready()` (`core/tiler_routes/shared.py`) back a `503 Service Unavailable` FastAPI dependency, applied router-wide (`core/tiler_routes/__init__.py`): every tiler route returns 503 with a clear message until `run_tiler_warmup` has finished, instead of quietly serving from an empty product/colormap registry during the startup window. It's applied alongside `api_key_auth` (`core/routes/auth.py`) on the same router — `dependencies=[Depends(api_key_auth), Depends(require_tiler_ready)]` — so every tiler request is checked for a valid `X-API-Key` header (401 on failure) before the readiness gate even runs.
 
 ### 11.4 What prewarm does and doesn't do
 

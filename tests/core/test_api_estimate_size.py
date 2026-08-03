@@ -33,6 +33,7 @@ from data_access_service.core.constants import (
 from data_access_service.utils.subset_request_resolver import (
     ResolvedSubsetRequest,
     resolve_bboxes,
+    resolve_geometry,
 )
 
 
@@ -74,6 +75,7 @@ def _resolved(
     end=pd.Timestamp("2020-01-05 23:59:59", tz="UTC"),
     bboxes=(),
     columns=None,
+    geometry=None,
 ) -> ResolvedSubsetRequest:
     """A ResolvedSubsetRequest as resolve_subset_request would produce for these tests."""
     return ResolvedSubsetRequest(
@@ -83,6 +85,7 @@ def _resolved(
         end_date=end,
         bboxes=list(bboxes),
         columns=columns,
+        geometry=geometry,
     )
 
 
@@ -260,8 +263,12 @@ def test_zarr_curvilinear_netcdf_skips_mask_but_matches_download_nbytes():
     )
     api, _ = _api_with_zarr(ds)
 
+    # A real drawn area, NOT the whole globe: the whole-globe default means "no
+    # spatial filter" and area_to_keep returns None for it, so no mask would run
+    # and there would be no promotion to mirror (see
+    # test_whole_globe_default_is_not_a_mask_on_a_curvilinear_grid).
     bboxes = resolve_bboxes(
-        _single_polygon_geojson(lon_min=-180, lat_min=-90, lon_max=180, lat_max=90)
+        _single_polygon_geojson(lon_min=-5, lat_min=-5, lon_max=5, lat_max=5)
     )
     result = estimate_single_key_size(
         api, KEY, _resolved(bboxes=bboxes), output_format="netcdf"
@@ -269,12 +276,11 @@ def test_zarr_curvilinear_netcdf_skips_mask_but_matches_download_nbytes():
 
     download_slice = subset_zarr(
         ds,
-        api,
-        UUID,
         KEY,
+        *api.resolve_dim_names(UUID, KEY),
         pd.Timestamp("2020-01-01", tz="UTC"),
         pd.Timestamp("2020-01-05 23:59:59", tz="UTC"),
-        bboxes[0],
+        bboxes,
         apply_mask=True,
     )
     assert result["estimated_uncompressed_bytes"] == int(download_slice.nbytes)
@@ -352,10 +358,9 @@ def test_multi_polygon_single_slices_to_bbox():
     assert result["estimated_uncompressed_bytes"] < dataset.nbytes
 
 
-def test_no_spatial_filter_uses_whole_globe_bbox():
-    # When there are no bboxes (no multi_polygon given), the whole-globe bbox is
-    # used - the same slice the batch download uses
-    # (ResolvedSubsetRequest.effective_bboxes) - so the whole dataset is counted.
+def test_no_spatial_filter_counts_the_whole_dataset():
+    # With no bboxes (no multi_polygon given) subset_zarr slices by time only -
+    # the same slice the batch download takes - so the whole dataset is counted.
     dataset = _make_dataset()
     api, _ = _api_with_zarr(dataset)
 
@@ -364,9 +369,10 @@ def test_no_spatial_filter_uses_whole_globe_bbox():
     assert result["estimated_uncompressed_bytes"] == dataset.nbytes
 
 
-def test_multi_polygon_multiple_bboxes_summed():
-    # Two polygons (both covering the tiny dataset) -> sliced per bbox and the
-    # per-bbox .nbytes are SUMMED (overlaps counted twice = upper bound).
+def test_multi_polygon_overlapping_bboxes_counted_once():
+    # Two overlapping polygons (both covering the tiny dataset) are dissolved
+    # into ONE polygon at resolve time (multi_polygon_helper.merge_polygons), so
+    # the overlap is counted once and there is no second bbox to union.
     dataset = _make_dataset()
     api, _ = _api_with_zarr(dataset)
 
@@ -382,13 +388,146 @@ def test_multi_polygon_multiple_bboxes_summed():
         + "]]}"
     )
 
+    bboxes = resolve_bboxes(polygon)
+    assert len(bboxes) == 1, "overlapping polygons must merge into one outline"
+
     result = estimate_single_key_size(
-        api, KEY, _resolved(bboxes=resolve_bboxes(polygon)), output_format="netcdf"
+        api, KEY, _resolved(bboxes=bboxes), output_format="netcdf"
     )
 
-    assert "summed 2 polygon bboxes" in result["notes"]
-    # each bbox covers the whole dataset -> bytes are summed (2x)
-    assert result["estimated_uncompressed_bytes"] == 2 * dataset.nbytes
+    assert "union grid of" not in result["notes"]
+    # the merged bbox covers the whole dataset -> the dataset, counted once
+    assert result["estimated_uncompressed_bytes"] == dataset.nbytes
+
+
+def test_multi_polygon_disjoint_bboxes_estimate_matches_download_region():
+    # Two disjoint boxes -> the estimate must measure the SAME union grid the
+    # download writes: every lat/lon position covered by either box (with NaN
+    # cross cells), NOT the sum of the two boxes and NOT the full envelope.
+    from data_access_service.utils.subset_zarr_helper import subset_zarr
+
+    times = pd.date_range("2020-01-01", periods=3)
+    # all data vars gridded on (TIME, LAT, LON), so download .where() promotes
+    # nothing new and nbytes is directly comparable
+    dataset = xr.Dataset(
+        {
+            "sst": (
+                ("TIME", "LATITUDE", "LONGITUDE"),
+                np.zeros((3, 4, 5), dtype="float32"),
+            )
+        },
+        coords={
+            "TIME": times,
+            "LATITUDE": np.arange(4, dtype="float64"),  # [0, 1, 2, 3]
+            "LONGITUDE": np.arange(5, dtype="float64"),  # [0, 1, 2, 3, 4]
+        },
+    )
+    api, _ = _api_with_zarr(dataset)
+
+    # box A: lat [0,1] x lon [0,1]; box B: lat [2.5,3.5] x lon [3,4] - disjoint
+    ring_a = [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]
+    ring_b = [[3, 2.5], [4, 2.5], [4, 3.5], [3, 3.5], [3, 2.5]]
+    polygon = (
+        '{"type": "MultiPolygon", "coordinates": ['
+        + "["
+        + str(ring_a).replace("'", "")
+        + "],"
+        + "["
+        + str(ring_b).replace("'", "")
+        + "]]}"
+    )
+    # both come from the same polygon, exactly as resolve_subset_request does it
+    bboxes = resolve_bboxes(polygon)
+    geometry = resolve_geometry(polygon)
+
+    result = estimate_single_key_size(
+        api, KEY, _resolved(bboxes=bboxes, geometry=geometry), output_format="netcdf"
+    )
+
+    # Oracle: the union grid = lat positions {0,1,3} x lon positions {0,1,3,4}.
+    union_grid = dataset.isel(LATITUDE=[0, 1, 3], LONGITUDE=[0, 1, 3, 4])
+    assert result["estimated_uncompressed_bytes"] == union_grid.nbytes
+    # smaller than the envelope (4 lat x 5 lon), bigger than the sum of the
+    # two solid boxes (2x2 + 2x2 = 8 cells < 3x4 = 12 cells)
+    assert result["estimated_uncompressed_bytes"] < dataset.nbytes
+
+    # And it is exactly what the download slices (mask keeps shape, drop=False).
+    download_slice = subset_zarr(
+        dataset,
+        KEY,
+        *api.resolve_dim_names(UUID, KEY),
+        pd.Timestamp("2020-01-01", tz="UTC"),
+        pd.Timestamp("2020-01-05 23:59:59", tz="UTC"),
+        bboxes,
+        apply_mask=True,
+        geometry=geometry,
+    )
+    assert result["estimated_uncompressed_bytes"] == int(download_slice.nbytes)
+
+
+def test_polygon_shape_estimate_matches_download_region():
+    # A polygon that is NOT its bbox: the download crops the bbox and NaN-fills
+    # the cells outside the shape. The estimate skips that mask, so it must still
+    # measure the same grid - and say so in its notes.
+    from data_access_service.utils.subset_zarr_helper import subset_zarr
+
+    dataset = xr.Dataset(
+        {
+            "sst": (
+                ("TIME", "LATITUDE", "LONGITUDE"),
+                np.zeros((3, 5, 5), dtype="float32"),
+            )
+        },
+        coords={
+            "TIME": pd.date_range("2020-01-01", periods=3),
+            "LATITUDE": np.arange(5, dtype="float64"),
+            "LONGITUDE": np.arange(5, dtype="float64"),
+        },
+    )
+    api, _ = _api_with_zarr(dataset)
+
+    # a triangle over lat/lon [0, 4]: same bbox as a full rectangle, half the area
+    triangle = (
+        '{"type": "MultiPolygon", "coordinates": [[[[0, 0], [4, 0], [0, 4], [0, 0]]]]}'
+    )
+    bboxes = resolve_bboxes(triangle)
+    geometry = resolve_geometry(triangle)
+
+    result = estimate_single_key_size(
+        api, KEY, _resolved(bboxes=bboxes, geometry=geometry), output_format="netcdf"
+    )
+
+    download_slice = subset_zarr(
+        dataset,
+        KEY,
+        *api.resolve_dim_names(UUID, KEY),
+        pd.Timestamp("2020-01-01", tz="UTC"),
+        pd.Timestamp("2020-01-05 23:59:59", tz="UTC"),
+        bboxes,
+        apply_mask=True,
+        geometry=geometry,
+    )
+    assert result["estimated_uncompressed_bytes"] == int(download_slice.nbytes)
+    # the blanked cells are real: the download did not just keep the rectangle
+    assert np.isnan(download_slice.sst.isel(TIME=0).values).any()
+    assert "come out as NaN" in result["notes"]
+
+
+def test_rectangular_polygon_estimate_has_no_nan_note():
+    # The common case - one drawn rectangle - blanks nothing, so the estimate must
+    # not claim it is an upper bound because of NaN filler.
+    dataset = _make_dataset()
+    api, _ = _api_with_zarr(dataset)
+
+    polygon = _single_polygon_geojson(lon_min=10, lat_min=30, lon_max=30, lat_max=40)
+    result = estimate_single_key_size(
+        api,
+        KEY,
+        _resolved(bboxes=resolve_bboxes(polygon), geometry=resolve_geometry(polygon)),
+        output_format="netcdf",
+    )
+
+    assert "come out as NaN" not in result["notes"]
 
 
 def test_invalid_multi_polygon_raises():

@@ -9,11 +9,14 @@ from datetime import timezone
 import pytz
 
 from data_access_service.core.api import BaseAPI
+from data_access_service.batch.subsetting.helpers.parquet_date_ranges import (
+    check_rows_with_date_range,
+    trim_date_range,
+)
 from data_access_service.utils.date_time_utils import (
     parse_date,
     get_final_day_of_month_,
     next_month_first_day,
-    trim_date_range,
     get_monthly_utc_date_range_array_from_,
     get_boundary_of_year_month,
     transfer_date_range_into_yearmonth,
@@ -21,7 +24,6 @@ from data_access_service.utils.date_time_utils import (
     ensure_timezone,
     split_date_range,
     split_date_range_binary,
-    check_rows_with_date_range,
     supply_day_with_nano_precision,
     resolve_non_specified_dates,
     to_naive_utc,
@@ -1158,11 +1160,21 @@ class TestDateTimeUtils(unittest.TestCase):
             (expected_split_start, expected_split_mid, expected_split_end),
         )
 
-    @patch("data_access_service.utils.date_time_utils.PARQUET_SUBSET_ROW_NUMBER", 1000)
-    @patch("data_access_service.utils.date_time_utils.MAX_PARQUET_SPLIT", 10)
-    @patch("data_access_service.utils.date_time_utils.create_time_filter")
-    @patch("data_access_service.utils.date_time_utils.split_date_range_binary")
-    @patch("data_access_service.utils.date_time_utils.log")
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
+        1000,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.MAX_PARQUET_SPLIT",
+        10,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_time_filter"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.split_date_range_binary"
+    )
+    @patch("data_access_service.batch.subsetting.helpers.parquet_date_ranges.log")
     def test_check_rows_with_date_range(self, mock_log, mock_split, mock_create_filter):
         mock_ds = Mock()
         mock_ds.dname = "test_data.parquet"

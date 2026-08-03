@@ -5,15 +5,22 @@ keys, which date range, which area. This module is the single owner of that
 interpretation, so the consumers cannot drift apart.
 """
 
-import json
 from dataclasses import dataclass, replace
 from typing import List, Optional, Tuple, Union
 
 import pandas as pd
+from shapely.geometry.base import BaseGeometry
 
 from data_access_service.core.constants import UNIX_EPOCH_UTC, WHOLE_GLOBE_BBOX
 from data_access_service.models.bounding_box import BoundingBox
-from data_access_service.models.subset_request import NON_SPECIFIED, SubsetRequest
+from data_access_service.models.subset_request import SubsetRequest
+from data_access_service.utils.date_time_utils import (
+    end_of_day_nano,
+    ensure_timezone,
+    resolve_non_specified_dates,
+    start_of_day_nano,
+    supply_day_with_nano_precision,
+)
 from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
 
 
@@ -31,6 +38,10 @@ class ResolvedSubsetRequest:
     end_date: Optional[pd.Timestamp]
     bboxes: List[BoundingBox]
     columns: Optional[List[str]] = None
+    # the drawn area itself, the shape `bboxes` are the bounding boxes of. The
+    # zarr path crops by bbox then blanks the cells outside this
+    # (subset_zarr_helper.area_to_keep). None means no area was given.
+    geometry: Optional[BaseGeometry] = None
 
     @property
     def has_data(self) -> bool:
@@ -40,11 +51,9 @@ class ResolvedSubsetRequest:
 
     @property
     def effective_bboxes(self) -> List[BoundingBox]:
-        """The bboxes to slice with: empty means "no spatial filter", which
-        becomes one whole-globe bbox. Explicit bounds (not open/None slices)
-        because the batch mask path compares values against them
-        (subset_zarr_helper.form_mask). Both the batch download and the size
-        estimate must slice from THIS list so they select the same region.
+        """The bboxes to slice with when a consumer needs an explicit box:
+        empty means "no spatial filter", which becomes one whole-globe bbox.
+        This is the SINGLE place [] becomes [WHOLE_GLOBE_BBOX].
         """
         return self.bboxes or [WHOLE_GLOBE_BBOX]
 
@@ -70,6 +79,8 @@ def resolve_subset_request(
        parse the GeoJSON MultiPolygon here (the estimation path, which only
        has the raw string). Passing them through keeps SubsetRequest.bboxes
        and ResolvedSubsetRequest.bboxes the same list - they cannot drift.
+    4. resolve geometry: the merged drawn shape the bboxes came from, always
+       from the MultiPolygon (both paths carry it), so the zarr subset can blank the cells its bbox crop had to include.
 
     :raises ValueError/TypeError: on unparseable dates or a bad multi_polygon
     """
@@ -78,6 +89,7 @@ def resolve_subset_request(
         start_date_str, end_date_str, api=api, uuid=uuid, keys=resolved_keys
     )
     resolved_bboxes = bboxes if bboxes is not None else resolve_bboxes(multi_polygon)
+    resolved_geometry = resolve_geometry(multi_polygon)
 
     return ResolvedSubsetRequest(
         uuid=uuid,
@@ -86,6 +98,7 @@ def resolve_subset_request(
         end_date=end_date,
         bboxes=resolved_bboxes,
         columns=columns,
+        geometry=resolved_geometry,
     )
 
 
@@ -94,8 +107,6 @@ def normalize_request(api, subset_request: SubsetRequest) -> SubsetRequest:
     resolved to defaults, so every later reader (child jobs, result emails)
     sees the actual values instead of the raw user input.
     """
-    from data_access_service.utils.date_time_utils import resolve_non_specified_dates
-
     start_date, end_date = resolve_non_specified_dates(
         subset_request.start_date, subset_request.end_date
     )
@@ -134,11 +145,6 @@ def resolve_date_range(
 
     Without api/keys it is a pure string-to-Timestamp conversion (steps 1-2).
     """
-    from data_access_service.utils.date_time_utils import (
-        resolve_non_specified_dates,
-        supply_day_with_nano_precision,
-    )
-
     start_str, end_str = resolve_non_specified_dates(start_date_str, end_date_str)
     start_date, end_date = supply_day_with_nano_precision(start_str, end_str)
 
@@ -155,12 +161,17 @@ def resolve_date_range(
 
 def resolve_bboxes(multi_polygon: Union[str, dict, None]) -> List[BoundingBox]:
     """Parse a GeoJSON MultiPolygon (string or already-parsed dict) into
-    bounding boxes. Returns [] when there is no spatial filter."""
-    if multi_polygon is None or multi_polygon == NON_SPECIFIED:
-        return []
-    if isinstance(multi_polygon, dict):
-        multi_polygon = json.dumps(multi_polygon)
+    bounding boxes, one per merged polygon (overlapping polygons are dissolved first,
+    so their overlap is counted once). Returns [] when there is no spatial filter.
+    """
     return MultiPolygonHelper(multi_polygon=multi_polygon).bboxes
+
+
+def resolve_geometry(multi_polygon: Union[str, dict, None]) -> Optional[BaseGeometry]:
+    """Parse a GeoJSON MultiPolygon into the merged shape (overlapping polygons dissolved
+    into one outline). Returns None when there is no spatial filter.
+    """
+    return MultiPolygonHelper(multi_polygon=multi_polygon).geometry
 
 
 def trim_date_range_for_keys(
@@ -172,12 +183,6 @@ def trim_date_range_for_keys(
 ) -> Tuple[pd.Timestamp, pd.Timestamp] | Tuple[None, None]:
     """Trim the requested date range to the union temporal extent of the given
     keys. Returns (None, None) when the request is entirely outside it."""
-    from data_access_service.utils.date_time_utils import (
-        end_of_day_nano,
-        ensure_timezone,
-        start_of_day_nano,
-    )
-
     # convert into utc:
     requested_start_date = ensure_timezone(requested_start_date)
     requested_end_date = ensure_timezone(requested_end_date)

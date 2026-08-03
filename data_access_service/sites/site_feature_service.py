@@ -7,7 +7,7 @@ The repository stays a pure data-access object; the column-metadata-to-GeoJSON
 plumbing lives here rather than leaking into the handlers.
 
 One instance wraps one repository (i.e. one product); construct it per request from
-the resolved repo (see ``get_site_service`` in :mod:`data_access_service.utils.routes_helper`).
+the resolved repo (see ``get_site_service`` in :mod:`data_access_service.core.routes.helpers`).
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from data_access_service.sites.geojson import (
     site_details_feature_collection,
     site_feature_collection,
 )
-from data_access_service.utils.routes_helper import parse_utc_datetime
+from data_access_service.core.routes.helpers import parse_utc_datetime
 
 
 class SiteFeatureService:

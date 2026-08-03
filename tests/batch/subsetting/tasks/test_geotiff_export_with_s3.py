@@ -46,12 +46,16 @@ JOB_ID = "job_id_888"
 
 
 def _bbox_polygon(west, south, east, north):
-    """GeoJSON MultiPolygon string (lon/lat ring) for a bounding box."""
+    """GeoJSON MultiPolygon string (lon/lat ring) for a bounding box.
+
+    Nesting is coordinates -> polygon -> ring -> [lon, lat]; an extra level here
+    is not a MultiPolygon and shapely rejects it.
+    """
     return (
-        '{"type":"MultiPolygon","coordinates":[[[['
+        '{"type":"MultiPolygon","coordinates":[[['
         f"[{west},{north}],[{west},{south}],[{east},{south}],"
         f"[{east},{north}],[{west},{north}]"
-        "]]]]}"
+        "]]]}"
     )
 
 

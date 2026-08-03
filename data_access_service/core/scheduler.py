@@ -9,7 +9,6 @@ from data_access_service import API
 from data_access_service import Config
 from data_access_service.config.config import EnvType
 from data_access_service.sites.sites_repository import ParquetRepository
-from data_access_service.utils.api_utils import wait_until_api_ready
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +127,7 @@ class TaskScheduler:
 
     async def start_with_initial_run(self):
         # API init is memory intensive, so do not refresh until the init is done
-        await wait_until_api_ready(self.api)
+        await self.api.wait_until_ready()
 
         """Start the scheduler and run the refresh task immediately."""
         loop = asyncio.get_running_loop()

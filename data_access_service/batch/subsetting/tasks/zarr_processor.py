@@ -1,4 +1,3 @@
-import math
 import os
 import tempfile
 from pathlib import Path
@@ -10,9 +9,6 @@ import dask
 import psutil
 import xarray
 
-import numpy as np
-import dask.array as da
-
 from data_access_service import init_log, Config, API
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.constants import STR_TIME_UPPER_CASE
@@ -20,7 +16,6 @@ from data_access_service.utils.subset_request_resolver import (
     ResolvedSubsetRequest,
     resolve_subset_request,
 )
-from data_access_service.utils.dim_names_utils import resolve_dim_names
 from data_access_service.utils.subset_zarr_helper import subset_zarr
 from data_access_service.utils.email_templates.download_email import (
     get_download_email_html_body,
@@ -28,6 +23,14 @@ from data_access_service.utils.email_templates.download_email import (
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils import geotiff_export
 from data_access_service.utils.process_logger import ProcessLogger
+from data_access_service.batch.subsetting.helpers.zarr_chunking import (
+    get_available_thread_count,
+    get_time_steps_per_chunk,
+)
+from data_access_service.batch.subsetting.helpers.netcdf_compat import (
+    convert_object_dtype_variables,
+    ignore_invalid_unicode_in_attrs,
+)
 
 
 class ZarrProcessor:
@@ -66,7 +69,8 @@ class ZarrProcessor:
         self.keys = resolved.keys
         self.start_date = resolved.start_date
         self.end_date = resolved.end_date
-        self.bboxes = resolved.effective_bboxes
+        self.bboxes = resolved.bboxes
+        self.geometry = resolved.geometry
 
     # Read-through views onto subset_request — single source of truth, no drift.
     @property
@@ -132,7 +136,7 @@ class ZarrProcessor:
         """GeoTIFF needs 1D axes, so reduce a regular grid (curvilinear stays 2D)."""
         if not geotiff_export.has_ij_dims(zarr_store):
             return zarr_store
-        lat_name, lon_name, _ = self.__get_dim_names(key)
+        lat_name, lon_name, _ = self.api.resolve_dim_names(self.uuid, key)
         return geotiff_export.prepare_grid_for_geotiff(
             zarr_store, lat_name, lon_name, self.log
         )
@@ -147,43 +151,31 @@ class ZarrProcessor:
         time_dim = self.api.map_column_names(
             uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
         )[0]
-        time_per_chunk = self.__get_time_steps_per_chunk(zarr_store, time_dim)
+        time_per_chunk = get_time_steps_per_chunk(zarr_store, time_dim, self.log)
         self.log.info("Chunking dataset with %d time steps per chunk", time_per_chunk)
         zarr_store = zarr_store.chunk({time_dim: time_per_chunk})
 
-        # Apply the subset per bbox and merge. subset_zarr is the single owner
-        # of the slicing, shared with the size estimate so both select the same
-        # region (utils.subset_zarr_helper).
-        merged_dataset: xarray.Dataset | None = None
-        for bbox in self.bboxes:
-            subset = subset_zarr(
-                zarr_store,
-                self.api,
-                self.uuid,
-                key,
-                self.start_date,
-                self.end_date,
-                bbox,
+        # Apply ALL bboxes in one pass, then blank what falls outside the drawn
+        # polygons. subset_zarr is the single owner of the slicing, shared with
+        # the size estimate so both select the same region.
+        lat_name, lon_name, time_name = self.api.resolve_dim_names(self.uuid, key)
+        subset = subset_zarr(
+            zarr_store,
+            key,
+            lat_name,
+            lon_name,
+            time_name,
+            self.start_date,
+            self.end_date,
+            self.bboxes,
+            geometry=self.geometry,
+        )
+
+        if not isinstance(subset, xarray.Dataset):
+            raise TypeError(
+                f"Data for key: {key} is not an xarray.Dataset. This only support zarr format."
             )
-
-            if not isinstance(subset, xarray.Dataset):
-                raise TypeError(
-                    f"Data for key: {key} is not an xarray.Dataset. This only support zarr format."
-                )
-
-            if merged_dataset is None:
-                merged_dataset = subset
-            else:
-                merged_dataset = xarray.merge(
-                    [merged_dataset, subset], compat="override"
-                )
-
-        if merged_dataset is None:
-            self.log.warning(
-                f"No data found for key: {key} in the specified conditions."
-            )
-            return None
-        return merged_dataset
+        return subset
 
     def __write_to_s3_as_netcdf(self, dataset: xarray.Dataset, key: str):
         dataset = ignore_invalid_unicode_in_attrs(dataset)
@@ -194,7 +186,7 @@ class ZarrProcessor:
         time_dim = self.api.map_column_names(
             uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
         )[0]
-        time_per_chunk = self.__get_time_steps_per_chunk(dataset, time_dim)
+        time_per_chunk = get_time_steps_per_chunk(dataset, time_dim, self.log)
         self.log.info("Chunking dataset with %d time steps per chunk", time_per_chunk)
         dataset = dataset.chunk({time_dim: time_per_chunk})
         netcdf_compression = {
@@ -202,7 +194,7 @@ class ZarrProcessor:
             for var, da in dataset.data_vars.items()
             if da.dtype.kind in {"i", "u", "f"}  # integer, unsigned, float
         }
-        thread_count = self.__get_available_thread_count()
+        thread_count = get_available_thread_count(self.log)
 
         # set the thread count for dask, for the to_netcdf operation later
         dask.config.set(num_workers=thread_count)
@@ -309,7 +301,7 @@ class ZarrProcessor:
 
     def __write_to_s3_as_geotiff(self, dataset: xarray.Dataset, key: str) -> List[str]:
         """Build the GeoTIFF ZIP for the dataset and upload it to S3."""
-        lat_name, lon_name, time_name = self.__get_dim_names(key)
+        lat_name, lon_name, time_name = self.api.resolve_dim_names(self.uuid, key)
         dataset_base = key.replace(".zarr", "")
         zip_name = f"{dataset_base}_geotiff.zip"
 
@@ -323,10 +315,6 @@ class ZarrProcessor:
         self.log.info(f"Exported GeoTIFF ZIP for {key}")
         return [url]
 
-    def __get_dim_names(self, key: str):
-        """Resolve the actual lat, lon, and time dimension names for a dataset."""
-        return resolve_dim_names(self.api, self.uuid, key)
-
     def __upload_zip_to_s3(self, zip_path: Path, zip_name: str) -> str:
         """Upload a ZIP file to S3 and return the download URL."""
         bucket_name = self.config.get_subsetting_bucket_name()
@@ -337,161 +325,3 @@ class ZarrProcessor:
         self.log.info(f"Uploaded: {s3_key}")
         zip_path.unlink(missing_ok=True)
         return url
-
-    def __get_available_thread_count(self):
-        if os.getenv("PROFILE") in (None, "dev", "testing"):
-            self.log.info("Running in dev or testing mode, using 1 thread")
-            return 1
-
-        cpu_count = psutil.cpu_count(logical=True)
-        self.log.info(f"Available thread count: {cpu_count}")
-        return cpu_count
-
-    def __get_time_steps_per_chunk(
-        self, dataset: xarray.Dataset, time_dim: str, memory_fraction: float = 0.1
-    ) -> int:
-        """
-        Calculate the number of time steps per chunk based on available memory and dataset size.
-        This helps to optimize memory usage during processing.
-        the memory_fraction is the fraction of available memory to use for processing. The
-        value is only for safety. Can be adjusted based on the experience.
-        """
-        available_memory = psutil.virtual_memory().available
-        self.log.info(
-            "total memory in MB: %d", psutil.virtual_memory().total / (1024 * 1024)
-        )
-        self.log.info(f"Available memory in MB: {available_memory / (1024 * 1024):.2f}")
-        safe_memory_per_thread = int(
-            available_memory * memory_fraction / self.__get_available_thread_count()
-        )
-        self.log.info(
-            "Chunk size: %d MB per thread", safe_memory_per_thread / (1024**2)
-        )
-
-        # var.nbytes forces computation - use size * itemsize instead
-        estimated_size = 0
-        for var_name, var_data in dataset.data_vars.items():
-            if hasattr(var_data, "dtype") and hasattr(var_data, "size"):
-                estimated_size += var_data.size * var_data.dtype.itemsize
-
-        # Fallback: use conservative estimate based on dimensions
-        if estimated_size == 0:
-            total_elements = 1
-            for dim_size in dataset.sizes.values():
-                total_elements *= dim_size
-            # Assume average 8 bytes per element (float64)
-            estimated_size = total_elements * 8
-
-        self.log.info(f"Estimated dataset size: {estimated_size / (1024**3):.2f} GB")
-        chunk_count = max(1, math.ceil(estimated_size / safe_memory_per_thread))
-        self.log.info("Chunk count: %d", chunk_count)
-        total_time_count = dataset.sizes[time_dim]
-        return math.ceil(total_time_count / chunk_count)
-
-
-def convert_object_dtype_variables(dataset: xarray.Dataset, logger) -> xarray.Dataset:
-    """
-    Convert object dtype variables to fixed-size string dtype by:
-    1. Loading data in chunks to determine max string length (memory-safe)
-    2. Converting to appropriate fixed-size dtype (e.g., S64, S128)
-
-    This avoids the SerializationWarning and prevents sudden memory allocation
-    when saving to NetCDF.
-    """
-
-    for var_name in list(dataset.variables.keys()):
-        var = dataset[var_name]
-
-        # Check if variable has object dtype
-        if var.dtype != np.dtype("object"):
-            continue
-
-        logger.info(f"Processing object dtype variable: {var_name}")
-        logger.info(f"  Shape: {var.shape}, Size: {var.size}")
-
-        # Determine max string length by processing in chunks
-        max_length = 0
-
-        if isinstance(var.data, da.Array):
-            # Dask array - process chunk by chunk
-            logger.info(
-                f"  Finding max length for var: {var_name} using Dask chunks..."
-            )
-
-            # Process each chunk to find max length
-            for chunk_idx in range(
-                var.data.npartitions if hasattr(var.data, "npartitions") else 1
-            ):
-                try:
-                    # Get chunk and compute it
-                    chunk = (
-                        var.data.blocks[chunk_idx]
-                        if hasattr(var.data, "blocks")
-                        else var.data
-                    )
-                    chunk_data = chunk.compute()
-
-                    # Find max length in this chunk
-                    chunk_lengths = [
-                        len(str(item)) if item is not None else 0
-                        for item in chunk_data.flat
-                    ]
-                    chunk_max = max(chunk_lengths) if chunk_lengths else 0
-                    max_length = max(max_length, chunk_max)
-
-                except Exception as e:
-                    logger.warning(f"    Error processing chunk {chunk_idx}: {e}")
-                    # If we can't process chunks individually, fall back to computing all
-                    break
-
-            # If chunk processing failed or max_length is still 0, compute the whole array
-            if max_length == 0:
-                logger.info(f"  Computing entire array to find max length...")
-                computed_data = var.compute()
-                all_lengths = [
-                    len(str(item)) if item is not None else 0
-                    for item in computed_data.values.flat
-                ]
-                max_length = max(all_lengths) if all_lengths else 0
-        else:
-            # Already a numpy array - process directly
-            logger.info(f"  Processing numpy array...")
-            all_lengths = [
-                len(str(item)) if item is not None else 0 for item in var.values.flat
-            ]
-            max_length = max(all_lengths) if all_lengths else 0
-
-        # Add buffer to max_length (20% extra or at least 16 bytes)
-        safe_length = max(16, int(max_length * 1.2))
-
-        # Choose appropriate dtype based on length
-        if safe_length <= 32:
-            dtype = "S32"
-        elif safe_length <= 64:
-            dtype = "S64"
-        elif safe_length <= 128:
-            dtype = "S128"
-        elif safe_length <= 256:
-            dtype = "S256"
-        else:
-            logger.warning(
-                f"  Very long strings detected in variable {var_name} (length: {safe_length}). "
-                f"Using dtype S{safe_length}, which may increase file size."
-            )
-            dtype = f"S{safe_length}"
-
-        logger.info(f"  Max length found: {max_length}, using dtype: {dtype}")
-
-        # Convert the variable to fixed-size string
-        dataset[var_name] = var.astype(dtype)
-        logger.info(f"  Converted {var_name} to {dtype}")
-
-    return dataset
-
-
-def ignore_invalid_unicode_in_attrs(dataset: xarray.Dataset) -> xarray.Dataset:
-    for k, v in dataset.attrs.items():
-        if isinstance(v, str):
-            dataset.attrs[k] = v.encode("utf-8", errors="ignore").decode("utf-8")
-
-    return dataset

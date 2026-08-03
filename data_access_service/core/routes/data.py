@@ -27,13 +27,13 @@ from data_access_service.sites.sites import (
     SiteDetailsFeature,
     SiteFeatureCollection,
 )
-from data_access_service.utils.api_utils import api_key_auth
+from data_access_service.core.routes.auth import api_key_auth
 from data_access_service.utils.date_time_utils import (
     DATE_FORMAT,
     MIN_DATE,
     ensure_timezone,
 )
-from data_access_service.utils.routes_helper import (
+from data_access_service.core.routes.helpers import (
     async_response_json,
     fetch_data,
     generate_feature_collection,

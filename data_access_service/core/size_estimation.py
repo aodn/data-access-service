@@ -17,6 +17,7 @@ from typing import Optional
 
 import pandas as pd
 import xarray
+from shapely.geometry.base import BaseGeometry
 from xarray.core import dtypes as xr_dtypes
 
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, ZarrDataSource
@@ -28,7 +29,6 @@ from data_access_service.core.constants import (
     GEOTIFF_INT_PIXEL_BYTES,
     GEOTIFF_CURVILINEAR_INFLATION,
 )
-from data_access_service.utils.dim_names_utils import resolve_dim_names
 from data_access_service.utils.geotiff_export import geotiff_eligible_vars, has_ij_dims
 from data_access_service.utils.subset_request_resolver import (
     ResolvedSubsetRequest,
@@ -80,9 +80,6 @@ def estimate_single_key_size(
         return _empty_estimate(uuid, key, output_format)
 
     if isinstance(ds, ZarrDataSource):
-        # effective_bboxes is shared with the batch download: empty -> whole
-        # globe, lons used raw (no [0, 360] shift). ds.zarr_store is the raw
-        # lazy dataset (opened in ZarrDataSource.__init__)
         return _estimate_zarr_size(
             api,
             ds.zarr_store,
@@ -90,9 +87,10 @@ def estimate_single_key_size(
             key,
             date_start,
             date_end,
-            resolved_subset_request.effective_bboxes,
+            resolved_subset_request.bboxes,
             resolved_subset_request.columns,
             output_format,
+            resolved_subset_request.geometry,
         )
     elif isinstance(ds, ParquetDataSource):
         raise NotImplementedError("Parquet size estimate is not implemented yet")
@@ -105,31 +103,46 @@ def _estimate_zarr_size(
     zarr_store: xarray.Dataset,
     uuid: str,
     key: str,
-    date_start: pd.Timestamp | None,
-    date_end: pd.Timestamp | None,
+    date_start: pd.Timestamp,
+    date_end: pd.Timestamp,
     bboxes: list,
     columns: list[str] | None,
     output_format: str,
+    geometry: BaseGeometry | None = None,
 ) -> dict:
-    """Estimate the download size of one zarr key, summed over its bboxes.
+    """Estimate the download size of one zarr key.
 
-    Overlapping bboxes are summed (counted once per box), so a multi-polygon
-    estimate is an upper bound.
+    All bboxes are applied in ONE subset_zarr call - the same union grid the
+    batch download writes - so the estimate measures the download's region, not
+    a per-bbox sum (which under-counted the NaN cells between disjoint boxes
+    and double-counted overlaps).
 
     :param zarr_store: the raw, unsliced lazy dataset for this key
-    :param bboxes: effective bboxes to slice
+    :param bboxes: bboxes to slice; empty means no spatial filter
     :param columns: requested columns; currently ignored
     :param output_format: "netcdf" or "geotiff"
+    :param geometry: the drawn area the bboxes came from; the download blanks the
+        cells outside it, which is what makes the output figure an upper bound
     :return: dict with uuid, key, format, estimated_uncompressed_bytes,
         estimated_output_bytes, and human-readable notes
     """
-    from data_access_service.utils.subset_zarr_helper import subset_zarr
+    from data_access_service.utils.subset_zarr_helper import area_to_keep, subset_zarr
 
     notes: list[str] = []
     if len(bboxes) > 1:
+        notes.append(f"union grid of {len(bboxes)} polygon bboxes")
+
+    lat_name, lon_name, time_name = api.resolve_dim_names(uuid, key)
+    # Whether the download's .where() will actually run. It decides both the note
+    # and the dtype promotion in _nbytes_by_compressibility - when no mask runs,
+    # an int var stays int and must NOT be sized as the promoted float64.
+    will_mask = (
+        area_to_keep(zarr_store, lat_name, lon_name, bboxes, geometry) is not None
+    )
+    if will_mask:
         notes.append(
-            f"summed {len(bboxes)} polygon bboxes "
-            "(overlapping regions counted once per box -> upper bound)"
+            "cells outside the requested area come out as NaN (they compress to "
+            "almost nothing in the real file -> output estimate is an upper bound)"
         )
     if columns:
         # Column subsetting isn't implemented yet; once it is, it will be applied
@@ -137,9 +150,6 @@ def _estimate_zarr_size(
         # For now the estimate covers ALL columns
         log.info("column subsetting not implemented yet; ignoring columns %s", columns)
         notes.append(f"column subsetting not supported yet; columns skipped: {columns}")
-
-    total_uncompressed = 0
-    total_output = 0
 
     log.debug(
         "_estimate_zarr_size: uuid=%s key=%s slice=[%s..%s] bboxes=%d format=%s",
@@ -151,21 +161,32 @@ def _estimate_zarr_size(
         output_format,
     )
 
-    for bbox in bboxes:
-        # subset_zarr returns a lazily-sliced xarray.Dataset - the SAME dim
-        # slicing the batch download uses. apply_mask=False skips the eager
-        # .where() (OOM on the non-dask store); it never changed nbytes anyway.
-        dataset: xarray.Dataset = subset_zarr(
-            zarr_store, api, uuid, key, date_start, date_end, bbox, apply_mask=False
-        )
+    # subset_zarr returns a lazily-sliced xarray.Dataset - the SAME region the
+    # batch download writes (all bboxes in one pass). apply_mask=False skips the
+    # eager .where() (OOM on the non-dask store); the mask uses drop=False, so it
+    # only NaN-fills cells, never changes the shape/nbytes.
+    dataset: xarray.Dataset = subset_zarr(
+        zarr_store,
+        key,
+        lat_name,
+        lon_name,
+        time_name,
+        date_start,
+        date_end,
+        bboxes,
+        apply_mask=False,
+        geometry=geometry,
+    )
 
-        # Measure the uncompressed and output sizes for this slice, per format.
-        if output_format == "geotiff":
-            uncompressed, output = _measure_geotiff(api, dataset, uuid, key, notes)
-        elif output_format == "netcdf":
-            uncompressed, output = _measure_netcdf(dataset, output_format, notes)
-        total_uncompressed += uncompressed
-        total_output += output
+    # Measure the uncompressed and output sizes of the union grid, per format.
+    if output_format == "geotiff":
+        total_uncompressed, total_output = _measure_geotiff(
+            api, dataset, uuid, key, notes
+        )
+    elif output_format == "netcdf":
+        total_uncompressed, total_output = _measure_netcdf(
+            dataset, output_format, notes, will_mask
+        )
 
     # Human-readable size summary (applies to every output format).
     notes.append(
@@ -192,7 +213,7 @@ def _estimate_zarr_size(
 
 
 def _measure_netcdf(
-    dataset: xarray.Dataset, output_format: str, notes: list[str]
+    dataset: xarray.Dataset, output_format: str, notes: list[str], will_mask: bool
 ) -> tuple[int, int]:
     """(uncompressed, output) for netcdf.
 
@@ -201,7 +222,7 @@ def _measure_netcdf(
     string/object vars are written uncompressed and pass through at 1.0.
     Applying one flat ratio to the whole nbytes would over-count compression
     on the coords (which never shrink)."""
-    compressible, incompressible = _nbytes_by_compressibility(dataset)
+    compressible, incompressible = _nbytes_by_compressibility(dataset, will_mask)
     uncompressed = compressible + incompressible
     ratio = OUTPUT_FORMAT_COMPRESSION_RATIO[output_format]
     output = int(compressible * ratio) + incompressible
@@ -238,7 +259,7 @@ def _measure_geotiff(
     Raises ValueError when no gridded variable is found at all (genuinely
     non-gridded data, e.g. point/timeseries).
     """
-    lat_name, lon_name, time_name = resolve_dim_names(api, uuid, key)
+    lat_name, lon_name, time_name = api.resolve_dim_names(uuid, key)
 
     # curvilinear grids index by integer I/J instead of lon/lat; the real
     # exporter warps I/J -> lat/lon before writing (geotiff_export.py). A size
@@ -303,10 +324,17 @@ def _estimated_string_width(dtype) -> int:
     return ASSUMED_STRING_BYTES
 
 
-def _nbytes_by_compressibility(dataset: xarray.Dataset) -> tuple[int, int]:
+def _nbytes_by_compressibility(
+    dataset: xarray.Dataset, will_mask: bool
+) -> tuple[int, int]:
     """
     The download zlib-compresses only numeric data vars (dtype.kind in {i, u, f});
-    coords and string/object vars are written uncompressed. dtypes are taken after .where() promotion (via the same maybe_promote), so the split matches the download.
+    coords and string/object vars are written uncompressed.
+
+    `will_mask` says whether the download's .where() actually runs (i.e. whether
+    area_to_keep returned an area). Only then does it NaN-fill, which promotes
+    int/uint vars to float64 - so only then may we size them as promoted. Sizing
+    an unmasked int16 var as float64 over-estimates it 4x.
 
     String-like data vars promote to object (8-byte pointer) under maybe_promote,
     but the download stores them as fixed-width S{N}, so we size them by
@@ -316,9 +344,11 @@ def _nbytes_by_compressibility(dataset: xarray.Dataset) -> tuple[int, int]:
     incompressible = 0
     for name, var in dataset.variables.items():
         if name in dataset.data_vars:
-            promoted_dtype, _ = xr_dtypes.maybe_promote(var.dtype)
-            if promoted_dtype.kind in {"i", "u", "f"}:
-                compressible += int(var.size) * promoted_dtype.itemsize
+            dtype = var.dtype
+            if will_mask:
+                dtype, _ = xr_dtypes.maybe_promote(dtype)
+            if dtype.kind in {"i", "u", "f"}:
+                compressible += int(var.size) * dtype.itemsize
             else:
                 # object/string/bool -> stored as fixed-width S{N}, uncompressed
                 incompressible += int(var.size) * _estimated_string_width(var.dtype)

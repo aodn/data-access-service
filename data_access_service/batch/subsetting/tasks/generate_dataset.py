@@ -6,8 +6,6 @@ import pandas as pd
 import xarray
 
 from shapely.geometry import Polygon as ShapelyPolygon
-from shapely.ops import unary_union
-from shapely.geometry import MultiPolygon as ShapelyMultiPolygon
 
 from numcodecs import Zlib
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
@@ -25,11 +23,14 @@ from data_access_service.models.subset_request import NON_SPECIFIED, SubsetReque
 from data_access_service.batch.subsetting.helpers.data_file_upload import (
     upload_all_files_in_folder_to_temp_s3,
 )
+from data_access_service.batch.subsetting.helpers.parquet_date_ranges import (
+    check_rows_with_date_range,
+    trim_date_range,
+)
 from data_access_service.utils.date_time_utils import (
     get_monthly_utc_date_range_array_from_,
-    trim_date_range,
-    check_rows_with_date_range,
 )
+from data_access_service.utils.multi_polygon_helper import merge_polygons
 
 efs_mount_point = "/mount/efs/"
 
@@ -273,30 +274,10 @@ def _generate_partition_output_with_polygon(
 
     had_data = False
     if multi_polygon is not None:
-        # The mutliple polygon may have overlap, merge those overlap into non-overlapping polygons
-        shapely_polys = []
-        for poly in multi_polygon.coordinates:
-            shapely_polys.append(ShapelyPolygon(poly[0], poly[1:]))
-
-        merged_geom = unary_union(shapely_polys)
-
-        if isinstance(merged_geom, ShapelyPolygon):
-            merged_polygons = [merged_geom]
-        elif isinstance(merged_geom, ShapelyMultiPolygon):
-            merged_polygons = list(merged_geom.geoms)
-        else:
-            # Fallback for GeometryCollection or empty/other geometries
-            if hasattr(merged_geom, "geoms"):
-                merged_polygons = [
-                    g for g in merged_geom.geoms if isinstance(g, ShapelyPolygon)
-                ]
-            elif isinstance(merged_geom, ShapelyPolygon):
-                merged_polygons = [merged_geom]
-            else:
-                merged_polygons = []
-
-        for shapely_poly in merged_polygons:
-            had_data = had_data or _generate_partition_output(
+        # The multiple polygons may overlap, merge those overlaps into
+        # non-overlapping polygons
+        for shapely_poly in merge_polygons(multi_polygon):
+            polygon_had_data = _generate_partition_output(
                 api,
                 folder_path,
                 array_index,
@@ -306,6 +287,7 @@ def _generate_partition_output_with_polygon(
                 end_date,
                 shapely_poly,
             )
+            had_data = had_data or polygon_had_data
     else:
         had_data = _generate_partition_output(
             api,
