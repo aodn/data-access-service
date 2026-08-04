@@ -1,7 +1,7 @@
 """loader.load_slice + date-index resolution.
 
 Existing tests in test_loader.py cover get_store + get_lod_grids. These cover
-the L2 cache interaction and the multi-timestamp resolution path.
+the L1 cache interaction and the multi-timestamp resolution path.
 """
 
 import threading

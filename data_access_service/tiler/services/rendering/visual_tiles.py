@@ -21,9 +21,6 @@ from rio_tiler.models import ImageData
 from rioxarray.exceptions import NoDataInBounds
 
 from data_access_service.tiler.services.caching.deduper import Deduper
-from data_access_service.tiler.services.caching.processed_cache import (
-    visual_processed_memo,
-)
 from data_access_service.tiler.services.colormap.categorical import (
     RGBA,
     is_categorical_variable,
@@ -50,11 +47,12 @@ from data_access_service.tiler.utils.image import (
 
 logger = logging.getLogger(__name__)
 
-# Always in-process, independent of CACHE_BACKEND — see Deduper's docstring
-# for why this matters even (especially) under CACHE_BACKEND=none: it coalesces
-# a burst of concurrent tile requests for the same (product, date) — the common
-# case when a map viewport loads many tiles at once — onto one inpaint + land-cut
-# compute instead of one per tile.
+# No persistent cache for the fill step — every call recomputes the inpaint +
+# land-cut fill. This dedup is still worth it on its own: it coalesces a
+# burst of concurrent tile requests for the same (product, date) — the
+# common case when a map viewport loads many tiles at once — onto one
+# compute instead of one per tile. See Deduper's docstring for why this
+# matters regardless of CACHE_BACKEND.
 _fill_dedup = Deduper()
 
 
@@ -67,27 +65,23 @@ def _get_filled_values(
     lons: np.ndarray,
     lats: np.ndarray,
 ) -> np.ndarray:
-    """Inpaint + land-cut ``values``, cached per (source_path, date, variable,
-    coastal_fill) so every tile/bbox/animation-frame request for the same date
-    shares one compute instead of redoing distance_transform_edt + the land
-    lookup per request (see caching.processed_cache).
+    """Inpaint + land-cut ``values``, deduped per (source_path, date, variable,
+    coastal_fill) so concurrent tile/bbox/animation-frame requests for the same
+    date share one compute instead of each redoing distance_transform_edt + the
+    land lookup.
 
-    The returned array is shared across every caller for this key (in-process,
-    and cross-instance under a real CacheBackend) — marked read-only so an
-    accidental downstream mutation fails loudly instead of corrupting it for
-    every other caller.
+    The returned array is shared across every concurrent caller for this key —
+    marked read-only so an accidental downstream mutation fails loudly instead
+    of corrupting it for every other caller.
     """
     key = (source_path, date, variable, coastal_fill.max_dist_px)
 
-    def factory() -> np.ndarray:
+    def compute() -> np.ndarray:
         filled = inpaint_nearest(values, coastal_fill.max_dist_px).copy()
         land = land_mask_for_coords(lons, lats)
         filled[land] = np.nan
         filled.setflags(write=False)
         return filled
-
-    def compute() -> np.ndarray:
-        return visual_processed_memo.get_or_compute(key, factory)
 
     return _fill_dedup.dedupe(key, compute)
 

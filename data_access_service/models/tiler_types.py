@@ -14,7 +14,6 @@ class TilerConfig:
     animation_workers: int
     cache_backend: str
     slice_cache_ttl_seconds: int
-    processed_cache_ttl_seconds: int
     s3_anon: bool
     s3_connect_timeout: int
     s3_read_timeout: int

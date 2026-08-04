@@ -67,7 +67,7 @@ Zarr eliminates this: metadata is one `.zmetadata`-style HTTP request, and varia
 
 ## 3. System architecture
 
-Two pipelines — `/data_tiles/*` and `/visual_tiles/*` — serve the same underlying Zarr stores through mostly-shared machinery (product registry, store registry, L2 slice cache), diverging only at the renderer:
+Two pipelines — `/data_tiles/*` and `/visual_tiles/*` — serve the same underlying Zarr stores through mostly-shared machinery (product registry, store registry, L1 slice cache), diverging only at the renderer:
 
 ```mermaid
 flowchart TD
@@ -92,26 +92,26 @@ flowchart TD
     storeReg["Store registry<br/>open zarr handles · TTL store_ttl_seconds"]
     registry --> storeReg
 
-    sliceCache["L2 · Slice cache + dedup<br/>ns l2 · slice_memo / _slice_dedup<br/>key: store_url, date, variables"]
+    sliceCache["L1 · Slice cache + dedup<br/>ns l1 · slice_memo / _slice_dedup<br/>key: store_url, date, variables"]
     storeReg --> sliceCache
     oceanMask["apply_ocean_mask<br/>opt-in per product (Product.ocean_masked)"]
     sliceCache --> oceanMask
 
     subgraph DT["Data-tile pipeline  ·  rendering/data_tiles.py"]
-        dtCache["L1 · Processed-grid cache + dedup<br/>ns l1_data · data_processed_memo / _processed_dedup<br/>key: source_path, date, variables, lod"]
+        dtDedup["Processed-grid dedup (no persistent cache)<br/>_processed_dedup · key: source_path, date, variables, lod"]
         dtCompute["resample (numba) → inpaint → land-cut → normalise"]
         dtPng["pack RGBA → PNG (24-bit or U/V channels)"]
-        dtCache --> dtCompute --> dtPng
+        dtDedup --> dtCompute --> dtPng
     end
-    oceanMask --> dtCache
+    oceanMask --> dtDedup
 
     subgraph VT["Visual-tile pipeline  ·  rendering/visual_tiles.py"]
         vtReqDedup["Request dedup (no cache)<br/>_tile_dedup / _bbox_dedup · key: full request"]
-        vtFillCache["L1 · Fill cache + dedup<br/>ns l1_visual · visual_processed_memo / _fill_dedup<br/>key: source_path, date, variable, max_dist_px"]
+        vtFillDedup["Fill dedup (no persistent cache)<br/>_fill_dedup · key: source_path, date, variable, max_dist_px"]
         vtCompute["inpaint → land-cut → reproject (rio-tiler XarrayReader)"]
         vtColor["apply colormap<br/>resolve_colormap"]
         vtEncode["composite → PNG / WebP / GIF / APNG"]
-        vtReqDedup --> vtFillCache --> vtCompute --> vtColor --> vtEncode
+        vtReqDedup --> vtFillDedup --> vtCompute --> vtColor --> vtEncode
     end
     oceanMask --> vtReqDedup
 
@@ -124,7 +124,7 @@ flowchart TD
 
     s3[("AWS S3 — Zarr stores")]
     storeReg -. "metadata (xr.open_zarr)" .-> s3
-    sliceCache -. "L2 miss → .compute()" .-> s3
+    sliceCache -. "L1 miss → .compute()" .-> s3
 
     classDef router fill:#DCE7EF,stroke:#2E6E96,color:#0F2942,stroke-width:1px;
     classDef staticNode fill:#F1E1D0,stroke:#B0672E,color:#432810,stroke-width:1px;
@@ -133,36 +133,36 @@ flowchart TD
 
     class dtRouter,vtRouter,prodRouter router
     class registry,storeReg,landMask,colormapReg,s3 staticNode
-    class sliceCache,dtCache,vtFillCache,vtReqDedup cacheNode
+    class sliceCache,dtDedup,vtFillDedup,vtReqDedup cacheNode
     class oceanMask,dtCompute,dtPng,vtCompute,vtColor,vtEncode processNode
 ```
 
 Solid arrows: request/data flow. Dotted arrows: read a shared static asset or fall through to S3, not part of the in-process cache chain.
 
-With the default `cache_backend: none` ([§10](#10-caching-strategy)), every green (cache) node above is a `NullMemoizer` — it never actually retains anything between calls, so every request recomputes past that point. The dedup nodes (`_slice_dedup`, `_processed_dedup`, `_fill_dedup`, `_tile_dedup`/`_bbox_dedup`) still coalesce concurrent identical in-flight requests regardless of backend — see [§10.4](#104-stampede-protection).
+`sliceCache` (L1) is the only persisted cache node above — under the default `cache_backend: none` ([§10](#10-caching-strategy)) it's a `NullMemoizer` and never actually retains anything between calls, so every request recomputes past that point. The data-tile and visual-tile pipelines have no persistent cache of their own; their dedup nodes (`_processed_dedup`, `_fill_dedup`, `_tile_dedup`/`_bbox_dedup`, alongside L1's own `_slice_dedup`) coalesce concurrent identical in-flight requests regardless of backend — see [§10.3](#103-stampede-protection).
 
 ### Request flow
 
 **Data tiles** (`/data_tiles/{product_id}/{date}/{z}/{x}/{y}.png`)
 
-`load_slice` is lazy — the route handler passes a callable to `render_tile`, which only invokes it when `_get_processed` misses. On a processed-cache hit, no slice I/O occurs.
+`load_slice` is lazy — the route handler passes a callable to `render_tile`, which only invokes it when `_get_processed`'s in-flight dedup doesn't already have a concurrent compute running for the same key.
 
 ```
-processed warm → get_lod_grids (already set) → _get_processed (L1 hit)                                → _extract_chunk → PNG encode
-slice warm     → get_lod_grids (already set) → _get_processed miss → load_slice (L2 hit)              → resample → L1 populate → _extract_chunk → PNG encode
-S3 cold        → get_lod_grids (already set) → _get_processed miss → load_slice (S3 .compute())       → resample → L1 populate → _extract_chunk → PNG encode
+concurrent hit → get_lod_grids (already set) → _get_processed (shares in-flight compute via _processed_dedup) → _extract_chunk → PNG encode
+slice warm     → get_lod_grids (already set) → _get_processed computes → load_slice (L1 hit)              → resample → _extract_chunk → PNG encode
+S3 cold        → get_lod_grids (already set) → _get_processed computes → load_slice (S3 .compute())       → resample → _extract_chunk → PNG encode
 ```
 
 **Visual tiles** (`/visual_tiles/{product_id}/{date}/{z}/{x}/{y}.{ext}` or `/bbox.{ext}` — `ext ∈ {png, webp}`)
 
-No full-render cache. Every request calls `load_slice`, optionally hits the fill cache if `coastal_fill` is set, then `XarrayReader` reprojects to Web Mercator.
+No processed-grid cache. Every request calls `load_slice`, optionally shares an in-flight fill compute via `_fill_dedup` if `coastal_fill` is set, then `XarrayReader` reprojects to Web Mercator.
 
 ```
-mem warm  → load_slice (L2 hit)         → fill cache hit or compute (only if coastal_fill set) → _to_scalar_parts (antimeridian split if needed) → XarrayReader.tile/part → colormap + encode
-S3 cold   → load_slice (S3 .compute())  → fill cache hit or compute (only if coastal_fill set) → _to_scalar_parts → XarrayReader.tile/part → colormap + encode
+mem warm  → load_slice (L1 hit)         → fill compute (dedup'd if concurrent; only if coastal_fill set) → _to_scalar_parts (antimeridian split if needed) → XarrayReader.tile/part → colormap + encode
+S3 cold   → load_slice (S3 .compute())  → fill compute (dedup'd if concurrent; only if coastal_fill set) → _to_scalar_parts → XarrayReader.tile/part → colormap + encode
 ```
 
-With the default `cache_backend: none`, "processed warm", "slice warm", and "fill cache hit" describe what _would_ happen with a cache backend implemented — today every request recomputes past L2, since `NullMemoizer` retains nothing. See [§10](#10-caching-strategy) for the full cache-layer breakdown and [§12.6](#126-a-real-cold-path-finding-chunk-over-read) for a documented cold-path slowness on one production store.
+With the default `cache_backend: none`, "slice warm" describes what _would_ happen with a cache backend implemented for L1 — today every request recomputes past L1, since `NullMemoizer` retains nothing. See [§10](#10-caching-strategy) for the full cache-layer breakdown and [§12.6](#126-a-real-cold-path-finding-chunk-over-read) for a documented cold-path slowness on one production store.
 
 ---
 
@@ -197,8 +197,7 @@ data_access_service/
       visual_tiles.py              ← ColormapListResponse
     services/
       caching/
-        slice_cache.py             ← L2 CacheBackend wiring (slice_memo, ns "l2") — see §10.3
-        processed_cache.py         ← L1 CacheBackend wiring (data_processed_memo ns "l1_data", visual_processed_memo ns "l1_visual") — see §10.2
+        slice_cache.py             ← L1 CacheBackend wiring (slice_memo, ns "l1") — see §10.2
         deduper.py                 ← Deduper — in-process in-flight dedup, always on regardless of CACHE_BACKEND
         memoizer.py                ← CacheBackend interface + NullMemoizer + create_memoizer() backend selection
       colormap/
@@ -483,7 +482,7 @@ GET /visual_tiles/{product_id}/{from_date}/{to_date}/animation.{ext}
 
 **Frame cap** — 30 frames per request, hard-coded as `_MAX_ANIMATION_FRAMES`. Requests beyond that are rejected with 400 so a wide date range can't produce a multi-hundred-megabyte response, and so worst-case transient RAM and cold-S3 latency for a single animation stay bounded.
 
-**Caching design** — this endpoint deliberately differs from the other tile endpoints: it calls `load_slice_uncached` (`services/store/slice_loader.py`), which bypasses the L2 slice cache entirely, so a rare 30-frame request can't evict hot slices serving the steady-state `/visual_tiles` and `/data_tiles` endpoints.
+**Caching design** — this endpoint deliberately differs from the other tile endpoints: it calls `load_slice_uncached` (`services/store/slice_loader.py`), which bypasses the L1 slice cache entirely, so a rare 30-frame request can't evict hot slices serving the steady-state `/visual_tiles` and `/data_tiles` endpoints.
 
 **Frame loading** — the handler is `async def`. Per-frame `load_slice_uncached` calls are dispatched in parallel via `asyncio.gather(*(anyio.to_thread.run_sync(..., limiter=_ANIMATION_LIMITER) for ...))`, so a cold N-frame request blocks on roughly the slowest single-frame S3 read rather than the serial sum. Frame order is preserved because `gather` returns results in input order. This runs under `_ANIMATION_LIMITER` (`animation_workers`, default 10) — a budget independent of the default tile-handler limiter, so a 30-frame fan-out can't starve tile-handler slots. See [§12.3](#123-one-pool-two-named-budgets).
 
@@ -756,7 +755,9 @@ If `lat`/`lon` are still missing after renaming, `_open_store` raises `ValueErro
 
 ## 10. Caching strategy
 
-Two-tier cache stack ordered tile → S3: **L1 (processed grid) → L2 (slice) → S3**. Both tiers are backed by a `CacheBackend` implementation (`services/caching/memoizer.py`) selected via `tiler.cache_backend` in `config/config.yaml` (default, and today the **only implemented**, value: `"none"`). There is no on-disk cache tier — an L2 miss falls straight through to a live Zarr read on S3.
+Single persisted cache tier ordered tile → S3: **L1 (slice) → S3**. Backed by a `CacheBackend` implementation (`services/caching/memoizer.py`) selected via `tiler.cache_backend` in `config/config.yaml` (default, and today the **only implemented**, value: `"none"`). There is no on-disk cache tier — an L1 miss falls straight through to a live Zarr read on S3.
+
+The processed-grid step above L1 (resample/normalise for data tiles, inpaint+land-cut for visual tiles) has no persistent cache of its own — only in-process `Deduper` coalescing (see [§10.3](#103-stampede-protection)). It was dropped deliberately: once L1 is backed by a real `CacheBackend`, the expensive part of a miss (the S3/Zarr fetch) is already covered there, and the remaining resample/inpaint recompute is comparatively cheap (numba-JIT'd, ~5× the `xr.interp` baseline — see [§7.4](#74-resample-and-normalize-numba-jit)) and only lost between non-concurrent requests, not within a burst. Keeping it out of the cache stack also avoids storing large per-(product, date, lod) processed grids in a future distributed backend.
 
 `CacheBackend` is a one-method interface (`get_or_compute(key, factory)`); `NullMemoizer` is the only concrete implementation today — every call recomputes, nothing is cached or deduplicated across requests. The interface exists so a distributed backend (e.g. Redis-backed, for sharing cache state across horizontally-scaled instances) can be added later by implementing `CacheBackend` and wiring it into `create_memoizer()` — no such backend exists in the code today; treat any doc or comment claiming otherwise as aspirational, not current behaviour.
 
@@ -777,31 +778,23 @@ Re-opening is cheap — `xr.open_zarr` reads only metadata and coordinate arrays
 
 Alongside the dataset, the registry builds a per-URL `{local_date: [timestamps]}` index so `load_slice` / `get_available_dates` can resolve a local date in O(1).
 
-### 10.2 L1 — Processed grid cache (`services/caching/processed_cache.py`)
+### 10.2 L1 — Slice cache (`services/caching/slice_cache.py` wiring, `services/store/slice_loader.py` fetch logic)
 
-Two independent namespaces, one per pipeline: `data_processed_memo` (ns `l1_data`) for data tiles, `visual_processed_memo` (ns `l1_visual`) for visual tiles' coastal-fill step. Data-tile keying is `(source_path, date, str(variables), lod)`; a hit reduces per-tile work to `_extract_chunk` + PNG encode only — no S3 I/O, no resampling.
+`slice_memo` (ns `l1`). Keyed `(store_url, date, variables_tuple)`. Stores a fully-computed (`.compute()`) 2-D lat×lon `xr.Dataset` slice. `slice_cache.py` owns only the `CacheBackend` wiring; `slice_loader.py` owns the actual Zarr-fetch logic, the public `load_slice`/`load_slice_uncached` API, and its own `_slice_dedup` (`Deduper`).
 
-Visual tiles do not use L1 for the full render — `XarrayReader` renders per request from the L2 slice; `visual_processed_memo` only caches the (optional) inpaint+land-cut step, keyed `(source_path, date, variable, max_dist_px)`.
+Primary consumers are **visual_tiles** (every tile request calls `load_slice`) and **data_tiles** (every tile request calls `load_slice` unless `_processed_dedup` already has a concurrent compute in flight for the same grid) and **data_tiles manifest/point** (always need `ds` directly).
 
-Under the default `cache_backend: none`, this cache never actually retains anything between calls — every request recomputes the processed grid from the L2 slice (or, if L2 also misses, from a fresh S3 fetch).
+Under `cache_backend: none`, every request is an L1 miss by design — there is no on-disk fallback either, so a subsequent request for the same key pays a full cold S3 fetch identical to a first-ever cold request.
 
-### 10.3 L2 — Slice cache (`services/caching/slice_cache.py` wiring, `services/store/slice_loader.py` fetch logic)
-
-`slice_memo` (ns `l2`). Keyed `(store_url, date, variables_tuple)`. Stores a fully-computed (`.compute()`) 2-D lat×lon `xr.Dataset` slice. `slice_cache.py` owns only the `CacheBackend` wiring; `slice_loader.py` owns the actual Zarr-fetch logic, the public `load_slice`/`load_slice_uncached` API, and its own `_slice_dedup` (`Deduper`).
-
-Primary consumers are **visual_tiles** (no L1 above it — every tile request calls `load_slice`) and **data_tiles manifest/point** (always need `ds` directly). For data_tiles tile requests, the slice is only loaded on an L1 miss.
-
-Under `cache_backend: none`, every request is an L2 miss by design — there is no on-disk fallback either, so a subsequent request for the same key pays a full cold S3 fetch identical to a first-ever cold request.
-
-### 10.4 Stampede protection
+### 10.3 Stampede protection
 
 Every dedup point in this server is **in-process `Deduper`**, independent of `CACHE_BACKEND` (`services/caching/deduper.py`): the first thread to see a key creates a `concurrent.futures.Future` and computes; all other threads arriving for the same key block on `future.result()` and receive the same result. Errors propagate to all waiting threads, and the in-flight entry is cleared in `finally` so a failed compute doesn't permanently block subsequent attempts.
 
 Each `Deduper` instance lives with its one consumer:
 
-- `_processed_dedup` (`services/rendering/data_tiles.py`) wraps `data_processed_memo` — processed grid computation (`_get_processed`).
+- `_processed_dedup` (`services/rendering/data_tiles.py`) — processed grid computation (`_get_processed`), no persistent cache behind it.
 - `_slice_dedup` (`services/store/slice_loader.py`) wraps `slice_memo` — slice loads (`load_slice`).
-- `_fill_dedup` (`services/rendering/visual_tiles.py`) wraps `visual_processed_memo` — the coastal-fill step.
+- `_fill_dedup` (`services/rendering/visual_tiles.py`) — the coastal-fill step (`_get_filled_values`), no persistent cache behind it.
 - `_tile_dedup` / `_bbox_dedup` (`core/tiler_routes/visual_tiles.py`) — `Deduper`-only, no `CacheBackend` behind them (coalesce concurrent identical tile/bbox renders; there's no reusable artifact to cache beyond that, only concurrent duplicates to coalesce).
 
 Outside this pairing, `StoreRegistry._in_flight` deduplicates store opens with its own per-URL Future map, layering TTL + stale-while-revalidate on top, which `Deduper` deliberately does not model.
@@ -839,7 +832,7 @@ It deliberately waits for the non-tiler API's own startup before doing tiler wor
 
 ### 11.4 What prewarm does and doesn't do
 
-`prewarm_stores` opens each unique Zarr store's **metadata only** (`xr.open_zarr`, no data chunks) via `services/store/registry.py` — it does not populate the L2 slice cache with any actual data. Since `cache_backend` defaults to `none`, L2 population wouldn't help anyway (nothing survives between requests); the value of prewarming is purely to avoid the first request to each store paying the metadata-open cost.
+`prewarm_stores` opens each unique Zarr store's **metadata only** (`xr.open_zarr`, no data chunks) via `services/store/registry.py` — it does not populate the L1 slice cache with any actual data. Since `cache_backend` defaults to `none`, L1 population wouldn't help anyway (nothing survives between requests); the value of prewarming is purely to avoid the first request to each store paying the metadata-open cost.
 
 ### 11.5 Other background actions
 
@@ -898,7 +891,7 @@ The pool has `thread_pool_size` slots (default **20** — see [§14](#14-configu
 - **I/O releases the GIL** — the S3 fetch is mostly `urllib3`/`botocore` socket I/O. While one thread waits on S3, others can run.
 - **numpy/PIL release the GIL during their C-level work** — resampling, normalisation, and PNG/WebP encoding all benefit from real parallelism (modulo the numba parallel-kernel lock, [§7.4](#74-resample-and-normalize-numba-jit)).
 
-Stampede protection (`_slice_dedup`, `_processed_dedup`, `StoreRegistry._in_flight` — [§10.4](#104-stampede-protection)) means that if several requests arrive for the same cold key, only one thread does the work; the others hold their slots blocked on the Future. This caps peak unique work but the held slots still count toward `thread_pool_size`.
+Stampede protection (`_slice_dedup`, `_processed_dedup`, `StoreRegistry._in_flight` — [§10.3](#103-stampede-protection)) means that if several requests arrive for the same cold key, only one thread does the work; the others hold their slots blocked on the Future. This caps peak unique work but the held slots still count toward `thread_pool_size`.
 
 ### 12.3 One pool, two named budgets
 
@@ -924,10 +917,10 @@ A store-prewarm burst saturating its budget does not reduce the tile-handler bud
 
 ### 12.5 Per-request paths
 
-**Data tile paths.** `load_slice` is lazy — the route handler passes a callable to `render_tile`, invoked only if `_get_processed` misses:
+**Data tile paths.** `load_slice` is lazy — the route handler passes a callable to `render_tile`, invoked only if `_get_processed`'s in-flight dedup doesn't already have a concurrent compute running for the same (product, date, lod):
 
 - **Cold** (always the case under the default `cache_backend: none`) — fetches Zarr chunks from S3 (`.compute()`), resamples, encodes.
-- **Slice/processed warm** (only meaningful with a real cache backend implemented — not the case today) — would skip resample and/or S3 I/O respectively.
+- **Slice warm** (only meaningful with a real L1 cache backend implemented — not the case today) — would skip the S3 fetch; resample still runs (no persistent processed-grid cache — see [§10](#10-caching-strategy)).
 
 **Visual tile paths.** No processed-grid cache; each request calls `load_slice` unconditionally, then renders via `XarrayReader`.
 
@@ -937,7 +930,7 @@ A known, investigated slowness on one production product (a satellite SST-class 
 
 ### 12.7 Capacity, in outline
 
-Sustained throughput is bound by real resources — CPU cores and the S3 connection pool — that don't scale with `thread_pool_size`. Raising the pool only changes how many concurrent in-flight requests can be _absorbed_ in a burst, at the cost of proportional transient RAM (roughly `min(thread_pool_size, unique_concurrent_cold_keys) × slice_size`, since `Deduper` collapses duplicate keys to one in-flight compute — see [§10.4](#104-stampede-protection)); it does not raise the sustained ceiling once CPU or S3 bandwidth saturates. In production, CloudFront in front of this server absorbs the large majority of repeat tile traffic — most tile URLs are fully deterministic, so a high cache-hit rate at the edge means the origin's thread pool and stampede protection are a backstop for cache misses, not the steady-state load path.
+Sustained throughput is bound by real resources — CPU cores and the S3 connection pool — that don't scale with `thread_pool_size`. Raising the pool only changes how many concurrent in-flight requests can be _absorbed_ in a burst, at the cost of proportional transient RAM (roughly `min(thread_pool_size, unique_concurrent_cold_keys) × slice_size`, since `Deduper` collapses duplicate keys to one in-flight compute — see [§10.3](#103-stampede-protection)); it does not raise the sustained ceiling once CPU or S3 bandwidth saturates. In production, CloudFront in front of this server absorbs the large majority of repeat tile traffic — most tile URLs are fully deterministic, so a high cache-hit rate at the edge means the origin's thread pool and stampede protection are a backstop for cache misses, not the steady-state load path.
 
 ---
 
@@ -986,7 +979,7 @@ On startup:
 
 ### 13.2 Removing a product
 
-Delete its entry from `config/tiler/products.json` and redeploy. There is no cache eviction step to worry about — every deploy is a fresh process, so L1/L2 start empty regardless.
+Delete its entry from `config/tiler/products.json` and redeploy. There is no cache eviction step to worry about — every deploy is a fresh process, so L1 starts empty regardless.
 
 ### 13.3 Requirements for the Zarr store
 
@@ -1037,9 +1030,8 @@ A wrong-layer choice has real costs: making `LOD.max_lods` a freely-edited opera
 | `store_prewarm_workers`       | `6`                | Capacity-limiter cap for concurrent `xr.open_zarr` opens during startup store prewarm. Sized to the S3 connection pool.                                                      |
 | `thread_pool_size`            | `20`               | Anyio thread-pool size, shared with the rest of `data-access-service`. Each in-flight sync tiler request uses one slot. See [§12](#12-concurrency-event-loop-and-threading). |
 | `animation_workers`           | `10`               | Capacity-limiter cap for `/animation` per-frame S3 fan-out. Sized to the aiobotocore S3 connection pool.                                                                     |
-| `cache_backend`               | `"none"`           | Selects the L1/L2 `CacheBackend` implementation. `"none"` is the only one implemented today — see [§10](#10-caching-strategy).                                               |
-| `slice_cache_ttl_seconds`     | `600`              | Per-entry TTL for the L2 slice cache. Unused while `cache_backend` is `"none"` (no cache backend reads it).                                                                  |
-| `processed_cache_ttl_seconds` | `600`              | Per-entry TTL for the L1 processed-grid cache. Same unused-while-`none` scope.                                                                                               |
+| `cache_backend`               | `"none"`           | Selects the L1 `CacheBackend` implementation. `"none"` is the only one implemented today — see [§10](#10-caching-strategy).                                                  |
+| `slice_cache_ttl_seconds`     | `600`              | Per-entry TTL for the L1 slice cache. Unused while `cache_backend` is `"none"` (no cache backend reads it).                                                                  |
 | `s3_anon`                     | `true`             | Anonymous S3 access — correct for the public AODN buckets. `false` lets `fsspec` discover AWS credentials for private buckets.                                               |
 | `s3_connect_timeout`          | `5`                | Seconds for DNS + TCP/TLS handshake.                                                                                                                                         |
 | `s3_read_timeout`             | `30`               | Seconds of socket inactivity before a read fails (per-read, not per-request).                                                                                                |
