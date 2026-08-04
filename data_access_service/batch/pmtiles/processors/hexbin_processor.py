@@ -15,6 +15,7 @@ from data_access_service.models.pmtiles_types import (
     PmtilesSidecarMetadata,
     TIMELESS_DATE_PERIOD,
     TIMELESS_MONTH_PERIOD,
+    TIMELESS_YEAR_PERIOD,
     TimeGroupBy,
 )
 from data_access_service.utils.memory_utils import log_memory_usage
@@ -28,13 +29,26 @@ class HexbinProcessor(AbstractProcessor):
         self._has_time: bool = True
 
     def _staged_period_column(self) -> str:
-        """Staging column alias for the active time grain (``d`` or ``ym``)."""
-        return "d" if self.pmtiles_config.time_group_by == TimeGroupBy.DATE else "ym"
+        """Staging column alias for the active time grain (``d``, ``ym``, or ``yr``).
+
+        ``all`` stages at day grain (``d``) so month/year can be rolled up later.
+        Year uses ``yr`` (not ``y``) to avoid DuckDB binder issues with bare ``y``.
+        """
+        group_by = self.pmtiles_config.time_group_by
+        if group_by in (TimeGroupBy.DATE, TimeGroupBy.ALL):
+            return "d"
+        if group_by == TimeGroupBy.YEAR:
+            return "yr"
+        return "ym"
 
     def _synthetic_period(self) -> int:
         """Stable period int for datasets with no TIME column."""
-        if self.pmtiles_config.time_group_by == TimeGroupBy.DATE:
+        group_by = self.pmtiles_config.time_group_by
+        if group_by in (TimeGroupBy.DATE, TimeGroupBy.ALL):
+            # ALL rolls up day → month/year, so store the day synthetic key.
             return TIMELESS_DATE_PERIOD
+        if group_by == TimeGroupBy.YEAR:
+            return TIMELESS_YEAR_PERIOD
         return TIMELESS_MONTH_PERIOD
 
     def _time_key_sql_and_column(
@@ -42,12 +56,19 @@ class HexbinProcessor(AbstractProcessor):
     ) -> Tuple[str, str]:
         """Return (sql_expression, staged_column_alias) for the configured time bucket."""
         group_by = self.pmtiles_config.time_group_by
-        if group_by == TimeGroupBy.DATE:
+        if group_by in (TimeGroupBy.DATE, TimeGroupBy.ALL):
             return (
                 PmTileDuckDBClient.build_date_key_expression(
                     time_col=time_col_name, time_type=time_type
                 ),
                 "d",
+            )
+        if group_by == TimeGroupBy.YEAR:
+            return (
+                PmTileDuckDBClient.build_year_key_expression(
+                    time_col=time_col_name, time_type=time_type
+                ),
+                "yr",
             )
         # Default / month
         return (
@@ -178,9 +199,9 @@ class HexbinProcessor(AbstractProcessor):
                     ORDER BY {time_col}, h_high
                 """
             else:
-                # Take the first calendar month present (YYYYMM for month mode;
-                # for date mode YYYYMMDD, filter keys sharing the first YYYYMM).
-                if time_col == "ym":
+                # Narrow preview to one calendar month when possible so daily
+                # keys can be compared to monthly buckets; year grain uses one year.
+                if time_col in ("ym", "yr"):
                     period_filter = f"{time_col} = {int(min_period)}"
                 else:
                     first_month = int(min_period) // 100  # YYYYMM from YYYYMMDD
@@ -291,7 +312,13 @@ class HexbinProcessor(AbstractProcessor):
     def __generate_hex_geojsonseq_file(self, layer: HexLayerSpec, max_res: int) -> str:
         time_col = self._staged_period_column()
         grain = self.pmtiles_config.time_group_by
-        period_label = "day" if grain == TimeGroupBy.DATE else "month"
+        if grain in (TimeGroupBy.DATE, TimeGroupBy.ALL):
+            # ALL is staged at day grain; feature builder adds month/year rollups.
+            period_label = "day"
+        elif grain == TimeGroupBy.YEAR:
+            period_label = "year"
+        else:
+            period_label = "month"
 
         self.pm_client.execute("DROP TABLE IF EXISTS period_counts")
 
