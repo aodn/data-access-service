@@ -30,7 +30,7 @@ def _compute_slice_from_store(
 ) -> xr.Dataset:
     """Fetch a 2-D slice from the Zarr store. Both `load_slice` and
     `load_slice_uncached` delegate here; they differ only in whether the
-    result lands in L2.
+    result lands in L1.
 
     When ``ocean_masked`` is set, anomalous values outside the model's valid ocean
     domain are nulled here (masks.apply_ocean_mask) so every downstream consumer
@@ -73,7 +73,7 @@ def load_slice(
     ``ocean_masked`` (from ``Product.ocean_masked``) nulls anomalous values outside
     the valid model domain. It's a deterministic function of the cache key (a store
     + variable set maps to one product), so it stays out of the key; the masked
-    slice is what L2 caches.
+    slice is what L1 caches.
     """
     cache_key = (store_url, date, tuple(sorted(variables)))
 
@@ -89,10 +89,10 @@ def load_slice(
 def load_slice_uncached(
     store_url: str, date: str, variables: list[str], ocean_masked: bool = False
 ) -> xr.Dataset:
-    """Return a 2-D slice without touching L2.
+    """Return a 2-D slice without touching L1.
 
     Pulls directly from the Zarr store. Used by the animation endpoint so a
     rare multi-date request doesn't evict another product's hot slices from
-    the shared L2 cache (CACHE_BACKEND=redis).
+    the shared L1 cache (CACHE_BACKEND=redis).
     """
     return _compute_slice_from_store(store_url, date, variables, ocean_masked)

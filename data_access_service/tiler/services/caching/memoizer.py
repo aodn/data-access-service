@@ -1,4 +1,4 @@
-"""Cross-request dedup + caching for the L1/L2 cache stack, plus backend selection.
+"""Cross-request dedup + caching for the L1 slice cache, plus backend selection.
 
 ``CacheBackend`` is the shared contract; ``NullMemoizer`` is currently the
 only implementation (see ``create_memoizer`` below, chosen via
@@ -51,7 +51,7 @@ class NullMemoizer(CacheBackend):
 
 
 def create_memoizer(*, namespace: str, ttl_seconds: int) -> CacheBackend:
-    """Selects the L1/L2 cache backend via the CACHE_BACKEND setting.
+    """Selects the L1 cache backend via the CACHE_BACKEND setting.
 
     - "none" (default): bypass caching entirely — every call recomputes.
     - Any other backend (e.g. a shared cache for deployments running more than

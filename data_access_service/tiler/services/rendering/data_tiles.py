@@ -1,9 +1,10 @@
 """Data-tile rendering pipeline.
 
 End-to-end path for a single ``/data_tiles/{product}/{date}/{z}/{x}/{y}.png``
-request: pull the processed grid for (product, date, lod) from L1 (or compute
-it via the kernels), extract the chunk for (x, y) with edge padding, pack into
-RGBA, encode PNG.
+request: compute the processed grid for (product, date, lod) via the kernels
+(deduped in-process across concurrent tiles sharing the same grid — see
+``_processed_dedup``), extract the chunk for (x, y) with edge padding, pack
+into RGBA, encode PNG.
 
 Scalar products use a 24-bit normalised uint spread across R/G/B (alpha carries
 the ocean mask). Multi-variable products (e.g. UV currents) put one variable in
@@ -18,9 +19,6 @@ import numpy as np
 import xarray as xr
 
 from data_access_service.tiler.services.caching.deduper import Deduper
-from data_access_service.tiler.services.caching.processed_cache import (
-    data_processed_memo,
-)
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.rendering.kernels import (
     normalize,
@@ -32,8 +30,12 @@ from data_access_service.tiler.services.rendering.masks import (
 )
 from data_access_service.tiler.utils.image import encode_rgba
 
-# Always in-process, independent of CACHE_BACKEND — see Deduper's docstring
-# for why this matters even (especially) under CACHE_BACKEND=none.
+# No persistent cache for the processed grid — every call recomputes it from
+# the L1 slice. This dedup is still worth it on its own: it coalesces a burst
+# of concurrent tile requests for the same (product, date, lod) — the common
+# case when a map viewport loads many tiles at once — onto one compute
+# instead of one per tile. See Deduper's docstring for why this matters
+# regardless of CACHE_BACKEND.
 _processed_dedup = Deduper()
 
 
@@ -113,20 +115,13 @@ def _compute_processed(
 def _get_processed(
     product: Product, load_ds: Callable[[], xr.Dataset], lod: int, date: str
 ) -> tuple[list[np.ndarray], np.ndarray]:
-    """load_ds only called once per (product, date) when the processed grid is not cached yet.
-
-    Concurrent identical requests always share one compute in-process via
-    ``_processed_dedup`` (independent of ``CACHE_BACKEND``); when
-    ``CACHE_BACKEND=redis``, ``data_processed_memo`` additionally coalesces across
-    instances and caches the result.
+    """load_ds only called once per (product, date, lod); concurrent identical
+    requests always share one compute in-process via ``_processed_dedup``.
     """
     key = (product.source_path, date, tuple(product.variables), lod)
 
-    def factory() -> tuple[list[np.ndarray], np.ndarray]:
-        return _compute_processed(product, load_ds(), lod)
-
     def compute() -> tuple[list[np.ndarray], np.ndarray]:
-        return data_processed_memo.get_or_compute(key, factory)
+        return _compute_processed(product, load_ds(), lod)
 
     return _processed_dedup.dedupe(key, compute)
 

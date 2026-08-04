@@ -1,22 +1,23 @@
 import asyncio
 import logging
 import os
-import uvicorn
-
-import anyio
-from fastapi import FastAPI
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+
+import anyio
+import uvicorn
+from fastapi import FastAPI
+
 from data_access_service import Config
 from data_access_service.config.config import IntTestConfig
 from data_access_service.core.api import API
+from data_access_service.core.duckdbclient import ParquetDuckDBClient
 from data_access_service.core.middleware import configure_gzip_middleware
 from data_access_service.core.routes import router as api_router
 from data_access_service.core.scheduler import TaskScheduler
 from data_access_service.core.tiler_routes import router as tiler_router
 from data_access_service.core.tiler_routes.startup import run_tiler_warmup
 from data_access_service.sites.sites_repository import build_repositories
-from data_access_service.core.duckdbclient import ParquetDuckDBClient
 
 logger = logging.getLogger(__name__)
 
