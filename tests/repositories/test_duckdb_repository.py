@@ -21,7 +21,6 @@ class _GroupedRepo(ParquetRepository):
 
     table = "test_mooring"
     bucket = "test-bucket"
-    co_bucket = "aodn-cloud-optimised"
     backup_bucket = "test-backup"
     dataset = "s3://test-bucket/test_mooring.parquet"
     backup_dataset = "s3://test-backup/test_mooring.parquet"
@@ -39,7 +38,6 @@ class _UngroupedRepo(ParquetRepository):
     table = "test_buoy"
     bucket = "test-bucket"
     backup_bucket = "test-backup"
-    co_bucket = "aodn-cloud-optimised"
     dataset = "s3://test-bucket/test_buoy.parquet"
     backup_dataset = "s3://test-backup/test_buoy.parquet"
     time_column = "TIME"
@@ -54,7 +52,6 @@ class _QcRepo(ParquetRepository):
 
     table = "test_qc"
     bucket = "test-bucket"
-    co_bucket = "aodn-cloud-optimised"
     backup_bucket = "test-backup"
     dataset = "s3://test-bucket/test_qc.parquet"
     backup_dataset = "s3://test-backup/test_qc.parquet"

@@ -15,6 +15,7 @@ def memory_parquets_config(monkeypatch):
     """
     cfg = ParquetsGenerationConfig(
         duckdb_database=":memory:",
+        co_bucket="aodn-cloud-optimised",
         memory_limit="800M",
         threads=8,
         duckdb_temp_dir="/tmp",
