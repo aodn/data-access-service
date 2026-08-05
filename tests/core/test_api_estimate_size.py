@@ -538,15 +538,6 @@ def test_invalid_multi_polygon_raises():
         resolve_bboxes(bad)
 
 
-def test_parquet_path_not_implemented_yet():
-    from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
-
-    api = API()
-    api.get_datasource = MagicMock(return_value=MagicMock(spec=ParquetDataSource))
-    with pytest.raises(NotImplementedError):
-        estimate_single_key_size(api, KEY, _resolved(), output_format="netcdf")
-
-
 def test_date_range_clamped_to_extent_then_estimated():
     # With both bounds given, the request is clamped to the dataset's temporal
     # extent (trim_date_range_for_keys) before slicing, so the estimate reflects

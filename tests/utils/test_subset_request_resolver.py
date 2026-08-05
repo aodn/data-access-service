@@ -141,9 +141,9 @@ class TestResolveBboxes:
         # The defect this guards: MultiPolygonHelper defaulted to
         # [WHOLE_GLOBE_BBOX] while resolve_bboxes returned [], so the batch
         # download (request_helper) and the size estimate (this resolver)
-        # disagreed about identical input. Defaulting belongs to
-        # ResolvedSubsetRequest.effective_bboxes alone - re-adding one to the
-        # parse layer must fail here.
+        # disagreed about identical input. No layer defaults any more - [] is
+        # carried through as "no spatial filter" and every consumer reads it
+        # that way, so re-adding a default anywhere must fail here.
         for raw in (None, "non-specified"):
             assert resolve_bboxes(raw) == []
             assert MultiPolygonHelper(multi_polygon=raw).bboxes == []
@@ -217,9 +217,10 @@ class TestResolveGeometry:
         )
 
         assert resolved.geometry is None
-        # the raw field records "no filter"; only the property substitutes
+        # [] IS the answer - "no spatial filter", never a whole-globe stand-in.
+        # Both consumers (zarr subset, parquet partition pruning) skip spatial
+        # filtering entirely on an empty list.
         assert resolved.bboxes == []
-        assert resolved.effective_bboxes == [WHOLE_GLOBE_BBOX]
 
 
 def test_whole_globe_bbox_bounds():
