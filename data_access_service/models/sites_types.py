@@ -13,6 +13,7 @@ class ParquetsGenerationConfig:
     """
 
     duckdb_database: str
+    co_bucket: str
     memory_limit: str
     threads: int
     duckdb_temp_dir: str

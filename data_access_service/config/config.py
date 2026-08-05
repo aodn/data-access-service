@@ -234,6 +234,7 @@ class Config:
             bucket_name = self.config["aws"]["s3"]["bucket_name"]["portal_data"]
 
         return PmtilesGenerationConfig(
+            co_bucket=pmconfig.get("co_bucket", "aodn-cloud-optimised"),
             output_pmtiles_dir=pmconfig["output_pmtiles_dir"],
             staged_parquet_dir=pmconfig["staged_parquet_dir"],
             geojsonseq_dir=pmconfig["geojsonseq_dir"],
@@ -263,9 +264,10 @@ class Config:
         temp_dir = tempfile.mkdtemp(prefix=pqconfig["duckdb_temp_dir"])
         return ParquetsGenerationConfig(
             duckdb_database=os.path.join(temp_dir, pqconfig["duckdb_database"]),
+            co_bucket=pqconfig.get("co_bucket", "aodn-cloud-optimised"),
             memory_limit=pqconfig["memory_limit"],
             threads=pqconfig["threads"],
-            duckdb_temp_dir=temp_dir,
+            duckdb_temp_dir=str(temp_dir),
             region=pqconfig["region"],
             extensions=tuple(pqconfig["extensions"]),
         )

@@ -91,6 +91,7 @@ class PmtilesSidecarMetadata:
 
 @dataclass(frozen=True)
 class PmtilesGenerationConfig:
+    co_bucket: str
     output_pmtiles_dir: str
     staged_parquet_dir: str
     geojsonseq_dir: str
