@@ -13,15 +13,17 @@ instead of converting every timestamp on the hot path.
 import asyncio
 import concurrent.futures
 import logging
+import random
 import threading
 import time
 
 import anyio
+import pandas as pd
 import xarray as xr
 
 from data_access_service.config.config import Config
 from data_access_service.config.tiler.constants import COORD_NAMES
-from data_access_service.tiler.utils.dates import ts_to_local_date
+from data_access_service.tiler.utils.dates import DATE_FMT, LOCAL_TZ
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,20 @@ _STORE_TTL = float(_tiler_config.store_ttl_seconds)
 # connection ceiling, not CPU. Runs on the shared anyio pool but a separate
 # budget so a many-product startup can't transiently consume tile-handler slots.
 _STORE_PREWARM_LIMITER = anyio.CapacityLimiter(_tiler_config.store_prewarm_workers)
+
+# Bounded pool for TTL-triggered background refreshes. Previously one raw thread
+# was spawned per expired store, which was fine at two stores and a stampede at
+# sixty — every one of them reopening from S3 at once, uncapped, competing with
+# live tile requests for the same connection pool.
+_REFRESH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=_tiler_config.store_refresh_workers,
+    thread_name_prefix="store-refresh",
+)
+
+# Fraction of the TTL used as per-store random jitter. Stores opened together at
+# startup would otherwise share a deadline and all expire in the same instant,
+# converting a smooth refresh trickle into a periodic spike.
+_REFRESH_JITTER_FRACTION = 0.1
 
 # Per-syscall timeouts on every S3 connection. Without these, a stuck socket can
 # pin a worker thread indefinitely (Python threads can't be cancelled, so a
@@ -130,12 +146,32 @@ def _open_store(store_url: str) -> xr.Dataset:
 
 
 def _build_date_index(ds: xr.Dataset) -> dict[str, list]:
-    """Return {local_date: [timestamps]} for the dataset's time coord, or {} if missing."""
+    """Return {local_date: [timestamps]} for the dataset's time coord, or {} if missing.
+
+    The conversion is vectorised through a single DatetimeIndex rather than one
+    ``ts_to_local_date`` call per timestamp. Same arithmetic — localise to UTC,
+    convert to the tile timezone, format — but done once for the whole coord,
+    which is what makes building sixty of these at startup affordable. An
+    HF-radar store carries tens of thousands of hourly timestamps.
+
+    The stored values stay the raw coord elements, not the converted ones:
+    ``_fetch_slice_from_store`` selects with them.
+    """
     if "time" not in ds.dims:
         return {}
+    times = ds.coords["time"].values
+    if len(times) == 0:
+        return {}
+
+    local_dates = (
+        pd.DatetimeIndex(times)
+        .tz_localize("UTC")
+        .tz_convert(LOCAL_TZ)
+        .strftime(DATE_FMT)
+    )
     index: dict[str, list] = {}
-    for ts in ds.coords["time"].values:
-        index.setdefault(ts_to_local_date(ts), []).append(ts)
+    for local_date, ts in zip(local_dates, times):
+        index.setdefault(local_date, []).append(ts)
     return index
 
 
@@ -152,6 +188,9 @@ class StoreRegistry:
         self._ttl = ttl
         self._stores: dict[str, xr.Dataset] = {}
         self._opened_at: dict[str, float] = {}
+        # Per-store TTL jitter, redrawn on every publish so stores opened in the
+        # same startup burst drift apart rather than expiring in lockstep.
+        self._ttl_jitter: dict[str, float] = {}
         self._refreshing: set[str] = set()
         self._in_flight: dict[str, concurrent.futures.Future] = {}
         self._date_index: dict[str, dict[str, list]] = {}
@@ -162,17 +201,18 @@ class StoreRegistry:
         should_open = False
         with self._lock:
             if store_url in self._stores:
-                if time.monotonic() - self._opened_at[store_url] < self._ttl:
+                deadline = self._ttl + self._ttl_jitter.get(store_url, 0.0)
+                if time.monotonic() - self._opened_at[store_url] < deadline:
                     return self._stores[store_url]
-                # TTL expired — return stale store and trigger a background refresh.
+                # TTL expired — return stale store and trigger a background
+                # refresh on the bounded pool. The _refreshing guard keeps one
+                # store from queueing a refresh per concurrent request.
                 if store_url not in self._refreshing:
                     self._refreshing.add(store_url)
                     logger.info(
                         f"Store TTL expired, refreshing in background: {store_url}"
                     )
-                    threading.Thread(
-                        target=self._refresh_background, args=(store_url,), daemon=True
-                    ).start()
+                    _REFRESH_EXECUTOR.submit(self._refresh_background, store_url)
                 return self._stores[store_url]
             if store_url in self._in_flight:
                 future = self._in_flight[store_url]
@@ -293,6 +333,7 @@ class StoreRegistry:
         with self._lock:
             self._stores.clear()
             self._opened_at.clear()
+            self._ttl_jitter.clear()
             self._refreshing.clear()
             self._in_flight.clear()
             self._date_index.clear()
@@ -302,6 +343,9 @@ class StoreRegistry:
         with self._lock:
             self._stores[store_url] = ds
             self._opened_at[store_url] = time.monotonic()
+            self._ttl_jitter[store_url] = random.uniform(
+                0.0, self._ttl * _REFRESH_JITTER_FRACTION
+            )
             self._date_index[store_url] = index
 
     def _refresh_background(self, store_url: str) -> None:
