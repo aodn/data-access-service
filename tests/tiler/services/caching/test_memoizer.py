@@ -6,6 +6,7 @@ from data_access_service.config.config import Config
 from data_access_service.tiler.services.caching.memoizer import (
     CacheBackend,
     NullMemoizer,
+    ValkeyMemoizer,
     create_memoizer,
 )
 
@@ -46,6 +47,14 @@ def test_none_backend(monkeypatch):
     _patch_cache_backend(monkeypatch, "none")
     memo = create_memoizer(namespace="l1", ttl_seconds=60)
     assert isinstance(memo, NullMemoizer)
+
+
+def test_valkey_backend(monkeypatch):
+    # redis.Redis(...) is lazy — it doesn't connect until the first command,
+    # so this doesn't need a live server.
+    _patch_cache_backend(monkeypatch, "valkey")
+    memo = create_memoizer(namespace="l1", ttl_seconds=60)
+    assert isinstance(memo, ValkeyMemoizer)
 
 
 def test_unknown_backend_raises(monkeypatch):

@@ -6,3 +6,11 @@ services:
       - .env
     ports:
       - "8000:8000"
+
+  # Local Valkey for CACHE_BACKEND=valkey (see config/config.yaml's
+  # tiler.valkey_host/valkey_port). No persistence — it's a cache.
+  valkey:
+    image: valkey/valkey:8
+    container_name: data-access-service-valkey
+    ports:
+      - "6379:6379"

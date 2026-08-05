@@ -280,6 +280,8 @@ class Config:
             animation_workers=tconfig["animation_workers"],
             cache_backend=tconfig["cache_backend"],
             slice_cache_ttl_seconds=tconfig["slice_cache_ttl_seconds"],
+            valkey_host=tconfig["valkey_host"],
+            valkey_port=tconfig["valkey_port"],
             s3_anon=tconfig["s3_anon"],
             s3_connect_timeout=tconfig["s3_connect_timeout"],
             s3_read_timeout=tconfig["s3_read_timeout"],

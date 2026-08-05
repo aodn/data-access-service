@@ -92,12 +92,18 @@ tiler:
   # Capacity gate for /animation per-frame S3 fan-out. Sized to the aiobotocore
   # S3 connection-pool ceiling (~10/host).
   animation_workers: 10
-  # Cache backend for L1 (slice cache): "none" disables caching entirely. Any
-  # other value needs a CacheBackend implementation wired into
-  # memoizer.create_memoizer.
-  cache_backend: "none"
+  # Cache backend for L1 (slice cache): "none" disables caching entirely.
+  # "valkey" shares the cache + cross-instance dedup through the Valkey store
+  # at valkey_host/valkey_port below (see docker-compose.yml's `valkey`
+  # service for local dev) — see memoizer.create_memoizer.
+  cache_backend: "valkey"
   # Per-entry TTL in seconds — unused while cache_backend is "none".
   slice_cache_ttl_seconds: 600
+  # Valkey connection — unused while cache_backend is "none". Currently a
+  # local-only container; pointing this at a real AWS ElastiCache for Valkey
+  # cluster (auth, TLS, cluster topology) is a follow-up.
+  valkey_host: "localhost"
+  valkey_port: 6379
   # True uses anonymous access for s3:// URLs — correct for IMOS's public AODN
   # buckets. False lets fsspec discover AWS credentials for private buckets.
   s3_anon: true
