@@ -107,21 +107,35 @@ class BaseAPI:
     def get_api_status(self) -> bool:
         return False
 
-    async def wait_until_ready(self, timeout: float = 300) -> None:
+    async def wait_until_ready(self, timeout: float | None = 300) -> bool:
         """Poll get_api_status() until it's ready or timeout elapses.
 
         Used to hold off other CPU/memory-heavy startup work (repository refresh,
         tiler startup) until metadata init has finished, so it isn't competing
         with them for resources.
+
+        ``timeout=None`` waits indefinitely. Tiler warmup uses that: it derives
+        its entire product catalogue from the metadata index, so continuing from
+        a half-populated one would publish a silently incomplete catalogue —
+        strictly worse than taking longer to become ready.
+
+        Returns whether the API actually became ready, so a caller that cannot
+        proceed without metadata can tell the difference. The 300-second default
+        and the give-up-and-return behaviour are unchanged for callers that
+        ignore the result (core/scheduler.py).
         """
         waited = 0.0
         while not self.get_api_status():
-            if waited >= timeout:
+            if timeout is not None and waited >= timeout:
                 log.warning("Timed out waiting for API to become ready")
-                break
+                return False
             await asyncio.sleep(0.5)
             waited += 0.5
+            # An indefinite wait still has to be observable.
+            if timeout is None and waited % 60 == 0:
+                log.info(f"Still waiting for API metadata init ({waited:.0f}s)")
         log.info(f"API ready status = {self.get_api_status()} (waited {waited}s)")
+        return True
 
     def map_column_names(
         self, uuid: str, key: str, columns: list[str] | None
