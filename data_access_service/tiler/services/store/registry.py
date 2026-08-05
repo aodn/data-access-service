@@ -198,6 +198,17 @@ class StoreRegistry:
                 self._in_flight.pop(store_url, None)
         return ds
 
+    def cached(self, store_url: str) -> xr.Dataset | None:
+        """Return the already-open dataset for ``store_url``, or None.
+
+        Pure lookup: unlike ``get`` it never opens the store and never triggers a
+        TTL refresh. Startup verification uses it to inspect the schema of a
+        store prewarm just opened, without paying for a second open or racing
+        the refresh machinery.
+        """
+        with self._lock:
+            return self._stores.get(store_url)
+
     def date_index(self, store_url: str) -> dict[str, list]:
         """Return the {local_date: [timestamps]} map for ``store_url`` (or empty dict)."""
         with self._lock:
@@ -311,6 +322,11 @@ store_registry = StoreRegistry(_STORE_TTL)
 
 def get_store(store_url: str) -> xr.Dataset:
     return store_registry.get(store_url)
+
+
+def cached_store(store_url: str) -> xr.Dataset | None:
+    """Already-open dataset for ``store_url``, without opening it. See ``cached``."""
+    return store_registry.cached(store_url)
 
 
 def get_available_dates(store_url: str) -> list[str]:
