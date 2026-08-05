@@ -77,6 +77,11 @@ class ProductConfig(BaseModel):
     # Links this product to its GeoNetwork/STAC collection UUID. Null when absent.
     metadata_uuid: str | None = None
     ocean_masked: bool
+    # Whether /visual_tiles can render this product. Required rather than
+    # defaulted: ogcapi-java keys its published tile_types on this field, so
+    # GET /products must never omit it and leave the consumer guessing from
+    # variable arity. from_product supplies it from the resolved Product.
+    visual: bool
     data_tile: DataTileConfig = Field(default_factory=DataTileConfig)
     visual_tile: VisualTileConfig = Field(default_factory=VisualTileConfig)
 
@@ -88,6 +93,7 @@ class ProductConfig(BaseModel):
             variable=product.variable,
             metadata_uuid=product.metadata_uuid,
             ocean_masked=product.ocean_masked,
+            visual=product.visual,
             data_tile=DataTileConfig(
                 chunk_px=product.data_tile.chunk_px,
                 padding=product.data_tile.padding,
