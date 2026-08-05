@@ -39,7 +39,20 @@ OUTPUT_FORMAT_COMPRESSION_RATIO: dict[str, float] = {
 
 ASSUMED_STRING_BYTES: int = 64
 
-PARQUET_UNCOMPRESSED_TO_CSV_RATIO: float = 2.0
+# Bytes one value of each type occupies once written as CSV
+# Integers are keyed by bit width because the spread is large (4 bytes vs 20)
+# and QC-flag columns are commonly int8. Anything not listed falls back to
+# ASSUMED_STRING_BYTES.
+CSV_BYTES_PER_FLOAT64: int = 24
+CSV_BYTES_PER_FLOAT32: int = 15
+CSV_BYTES_PER_INT: dict[int, int] = {8: 4, 16: 6, 32: 11, 64: 20}
+CSV_BYTES_PER_BOOL: int = 5
+CSV_BYTES_PER_TIMESTAMP: int = 29
+CSV_BYTES_PER_DATE: int = 10
+CSV_BYTES_PER_NULL: int = 2
+
+# One separator (or the line terminator on the last column) per column.
+CSV_SEPARATOR_BYTES: int = 1
 
 MAX_FRAGMENT_FOOTER_READS: int = 256
 

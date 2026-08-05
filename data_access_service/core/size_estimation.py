@@ -1,16 +1,15 @@
 """Download size estimation workers.
 
-API.estimate_datasets_size (core/api.py) resolves the request via
-resolve_subset_request, then calls estimate_single_key_size here for each key.
+API.estimate_datasets_size (core/api.py) resolves the request, then calls
+estimate_single_key_size here for each key.
 
-The workers only measure metadata, never load the data:
+The workers only read metadata, never the data itself:
 
-- zarr (netcdf/csv output): xarray .nbytes of the lazy selection, scaled by
-  a per-format compression ratio
-- zarr (geotiff output): dimension-based - one raster per (gridded variable
-  x time step), sized lat x lon, scaled by a zip ratio
-- parquet: partition pruning + row-group statistics read from the file
-  FOOTERS, converted to CSV text bytes and scaled by a zip ratio
+- zarr (netcdf): xarray .nbytes of the lazy selection x a compression ratio
+- zarr (geotiff): one raster per (gridded variable x time step), sized
+  lat x lon, x a zip ratio
+- parquet: partition pruning + row-group statistics give a row count, x the
+  CSV width of one row, x a zip ratio
 """
 
 import logging
@@ -39,13 +38,20 @@ from aodn_cloud_optimised.lib.DataQuery import (
 
 from data_access_service.core.constants import (
     COMPRESSION_RATIO_CSV_GZIP,
+    CSV_BYTES_PER_BOOL,
+    CSV_BYTES_PER_DATE,
+    CSV_BYTES_PER_FLOAT32,
+    CSV_BYTES_PER_FLOAT64,
+    CSV_BYTES_PER_INT,
+    CSV_BYTES_PER_NULL,
+    CSV_BYTES_PER_TIMESTAMP,
+    CSV_SEPARATOR_BYTES,
     OUTPUT_FORMAT_COMPRESSION_RATIO,
     ASSUMED_STRING_BYTES,
     GEOTIFF_ZIP_RATIO,
     GEOTIFF_INT_PIXEL_BYTES,
     GEOTIFF_CURVILINEAR_INFLATION,
     MAX_FRAGMENT_FOOTER_READS,
-    PARQUET_UNCOMPRESSED_TO_CSV_RATIO,
 )
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.utils.date_time_utils import ensure_timezone
@@ -59,8 +65,8 @@ log = logging.getLogger(__name__)
 
 
 def _bytes_to_mb(num_bytes: int) -> float:
-    """Bytes -> decimal MB (1 MB = 1,000,000 bytes), matching how browsers and
-    download tools report file sizes. Rounded to 1 decimal place for readability."""
+    """Bytes -> decimal MB (1 MB = 1,000,000 bytes), the way browsers report
+    file sizes. Rounded to 1 decimal place."""
     return round(num_bytes / 1_000_000, 1)
 
 
@@ -73,12 +79,12 @@ def estimate_single_key_size(
     """
     Estimate the download size of ONE key.
 
-    :param key: Dataset key
-    :param resolved_subset_request: The resolved subset request (dates already defaulted
-        and trimmed to the union extent of all keys, "*" expanded, bboxes
-        parsed); this function re-trims the dates to THIS key's own extent
-    :param output_format: One of SUPPORTED_OUTPUT_FORMATS (netcdf/geotiff/csv)
-    :return: A dict with the estimate, or None if the key is not found
+    :param key: dataset key
+    :param resolved_subset_request: the resolved request (dates defaulted, "*"
+        expanded, bboxes parsed); this function re-trims the dates to THIS key's
+        own extent
+    :param output_format: one of SUPPORTED_OUTPUT_FORMATS (netcdf/geotiff/csv)
+    :return: dict with the estimate, or None if the key is not found
     """
     uuid = resolved_subset_request.uuid
     ds = api.get_datasource(uuid, key)
@@ -142,20 +148,19 @@ def _estimate_zarr_size(
 ) -> dict:
     """Estimate the download size of one zarr key.
 
-    All bboxes are applied in ONE subset_zarr call - the same union grid the
-    batch download writes - so the estimate measures the download's region, not
-    a per-bbox sum (which under-counted the NaN cells between disjoint boxes
-    and double-counted overlaps).
+    All bboxes go through ONE subset_zarr call - the same union grid the batch
+    download writes - so the estimate measures the download's region, not a
+    per-bbox sum (which mis-counted the gaps and overlaps between boxes).
 
     :param zarr_store: the raw, unsliced lazy dataset for this key
     :param bboxes: bboxes to slice; empty means no spatial filter
     :param columns: requested columns; currently ignored
     :param output_format: "netcdf" or "geotiff"
-    :param geometry: the drawn area the bboxes came from; the download blanks the
-        cells outside it, which is what makes the output figure an upper bound
+    :param geometry: the drawn area the bboxes came from; the download blanks
+        the cells outside it, which is why the output figure is an upper bound
     :return: dict with uuid, key, format, estimated_uncompressed_bytes,
-        estimated_output_bytes, and human-readable notes
-    :raises ValueError: if output_format is one a zarr key cannot download as
+        estimated_output_bytes and notes
+    :raises ValueError: if a zarr key cannot download as output_format
     """
     from data_access_service.utils.subset_zarr_helper import area_to_keep, subset_zarr
 
@@ -256,11 +261,9 @@ def _measure_netcdf(
 ) -> tuple[int, int]:
     """(uncompressed, output) for netcdf.
 
-    Piecewise compression: the download zlib-compresses only numeric data
-    variables, so the ratio applies to those bytes alone; coords and
-    string/object vars are written uncompressed and pass through at 1.0.
-    Applying one flat ratio to the whole nbytes would over-count compression
-    on the coords (which never shrink)."""
+    The download zlib-compresses only numeric data vars, so the ratio applies to
+    those bytes alone; coords and string vars are written uncompressed. One flat
+    ratio over the whole nbytes would over-count compression on the coords."""
     compressible, incompressible = _nbytes_by_compressibility(dataset, will_mask)
     uncompressed = compressible + incompressible
     ratio = OUTPUT_FORMAT_COMPRESSION_RATIO[output_format]
@@ -282,18 +285,16 @@ def _measure_geotiff(
 ) -> tuple[int, int]:
     """(uncompressed, output) for GeoTIFF.
 
-    GeoTIFF export writes one .tif per eligible gridded variable - only numeric
-    variables that have BOTH the lat and lon dimensions are exported; everything
-    else is dropped.
-    We see dataset with dim I/J as a curvilinear grid, else lat/lon as a regular grid.
-    The exporter warps curvilinear grids to a regular lat/lon grid before writing,
-    so the real raster is larger than the raw I x J cell count. A size estimate can't
-    know the warped dimensions without reprojecting, so it multiplies the I x J
-    estimate by a conservative inflation factor (GEOTIFF_CURVILINEAR_INFLATION).
+    The export writes one .tif per eligible variable - numeric and on BOTH the
+    lat and lon dims - for every time step:
 
         uncompressed ~= sum_over_vars(n_time x lat x lon x bytes_per_pixel)
             if curvilinear, uncompressed *= GEOTIFF_CURVILINEAR_INFLATION
         output       ~= uncompressed x zip_ratio
+
+    A dataset on I/J dims is curvilinear. The exporter warps it to a regular
+    lat/lon grid, so the real raster is bigger than I x J; the warped size is
+    unknowable without reprojecting, hence the inflation factor.
 
     Raises ValueError when no gridded variable is found at all (genuinely
     non-gridded data, e.g. point/timeseries).
@@ -353,10 +354,12 @@ def _measure_geotiff(
 
 def _estimated_string_width(dtype) -> int:
     """
-    The download writes strings as fixed-width S{N} in convert_object_dtype_variables.
+    Byte width of one string value, as the download stores it (fixed-width S{N},
+    see convert_object_dtype_variables).
 
-    A fixed-width numpy string ('S'/'U') already carries its real byte width; an
-    object dtype only carries an 8-byte pointer (the string body lives on the heap), so we fall back to a nominal width.
+    An 'S'/'U' dtype already carries its real width; an object dtype only
+    carries an 8-byte pointer (the string body lives on the heap), so it falls
+    back to a nominal width.
     """
     if dtype.kind in {"S", "U"} and dtype.itemsize > 0:
         return dtype.itemsize
@@ -367,17 +370,17 @@ def _nbytes_by_compressibility(
     dataset: xarray.Dataset, will_mask: bool
 ) -> tuple[int, int]:
     """
-    The download zlib-compresses only numeric data vars (dtype.kind in {i, u, f});
-    coords and string/object vars are written uncompressed.
+    (compressible, incompressible) nbytes: the download zlib-compresses only
+    numeric data vars (kind i/u/f), everything else is written uncompressed.
 
-    `will_mask` says whether the download's .where() actually runs (i.e. whether
-    area_to_keep returned an area). Only then does it NaN-fill, which promotes
-    int/uint vars to float64 - so only then may we size them as promoted. Sizing
-    an unmasked int16 var as float64 over-estimates it 4x.
+    `will_mask` says whether the download's .where() actually runs. Only then
+    does it NaN-fill, which promotes int vars to float64, so only then may we
+    size them as promoted - sizing an unmasked int16 as float64 over-estimates
+    it 4x.
 
-    String-like data vars promote to object (8-byte pointer) under maybe_promote,
-    but the download stores them as fixed-width S{N}, so we size them by
-    _estimated_string_width instead of the 8-byte pointer.
+    String data vars are sized by _estimated_string_width, not the 8-byte
+    pointer maybe_promote would give, because the download stores them
+    fixed-width.
     """
     compressible = 0
     incompressible = 0
@@ -409,30 +412,24 @@ def _estimate_parquet_size(
 ) -> dict:
     """Estimate the download size of one parquet key, from metadata only.
 
-    Nothing here reads a data page. Two levels of pruning narrow the dataset
-    down to the request, both off metadata the download itself prunes on:
+    Nothing here reads a data page. Two levels of pruning narrow the dataset to
+    the request, both on metadata the download prunes on too:
 
-    1. partitions (free, path-based): the `timestamp` buckets bracketing the
-       date range, and the `polygon` partitions intersecting any bbox
-    2. row groups (one footer read per surviving file): keep only row groups
-       whose TIME/LATITUDE/LONGITUDE statistics overlap the request
+    1. partitions (free, path-based): the `timestamp` buckets covering the date
+       range, and the `polygon` partitions intersecting any bbox
+    2. row groups (one footer read per surviving file): keep only those whose
+       TIME/LATITUDE/LONGITUDE statistics overlap the request
 
-    The surviving row groups give a row count and the UNCOMPRESSED parquet
-    bytes, which become CSV text bytes and then the ZIP.
+    The surviving row groups give a ROW COUNT; the CSV width of one row comes
+    from the schema (_csv_bytes_per_row). rows x width is the CSV text, then
+    scaled to the ZIP.
 
-    Note the different meaning of `estimated_uncompressed_bytes` here: for zarr
-    it is the in-memory nbytes, for parquet it is the size of the CSV text you
-    get after unzipping. Both answer "how big once uncompressed".
-
-    :param parquet_ds: the datasource; only its cached `.dataset` is touched,
-        never get_data
+    :param parquet_ds: the datasource
     :param bboxes: bboxes to prune with; empty means no spatial filter
-    :param columns: requested columns; ignored, and the CSV download ignores
-        them too
-    :param output_format: the requested format - a parquet key always downloads
-        as a CSV zip, so this only decides a note
+    :param columns: requested columns; ignored
+    :param output_format: the requested format
     :return: dict with uuid, key, format, estimated_uncompressed_bytes,
-        estimated_output_bytes, and human-readable notes
+        estimated_output_bytes and notes
     """
     notes: list[str] = []
     if len(bboxes) > 1:
@@ -499,7 +496,6 @@ def _estimate_parquet_size(
         notes.append(f"sampled {len(fragments)} of {surviving} files, extrapolated")
 
     rows = 0
-    parquet_uncompressed = 0
     for fragment in fragments:
         # .metadata reads the file FOOTER only. It is re-read per access, so it
         # is not retained beyond this iteration.
@@ -511,16 +507,14 @@ def _estimate_parquet_size(
             ):
                 continue
             rows += row_group.num_rows
-            for c in range(row_group.num_columns):
-                parquet_uncompressed += row_group.column(c).total_uncompressed_size
 
     rows = int(rows * scale)
-    parquet_uncompressed = int(parquet_uncompressed * scale)
 
-    # Binary parquet bytes -> CSV text -> the ZIP that is actually downloaded.
-    csv_text_bytes = int(parquet_uncompressed * PARQUET_UNCOMPRESSED_TO_CSV_RATIO)
-    total_uncompressed = csv_text_bytes
-    total_output = int(csv_text_bytes * COMPRESSION_RATIO_CSV_GZIP)
+    # Row count -> CSV text -> the ZIP that is actually downloaded. The width
+    # comes from the schema, NOT from the row groups' uncompressed bytes
+    bytes_per_row = _csv_bytes_per_row(dataset)
+    total_uncompressed = rows * bytes_per_row
+    total_output = int(total_uncompressed * COMPRESSION_RATIO_CSV_GZIP)
 
     if bboxes:
         notes.append(
@@ -531,7 +525,10 @@ def _estimate_parquet_size(
         "row-group granularity: partially-matching row groups are counted "
         "whole (upper bound)"
     )
-    notes.append(f"~{rows:,} rows across {surviving} file(s)")
+    notes.append(
+        f"~{rows:,} rows across {surviving} file(s), ~{bytes_per_row:,} CSV "
+        "bytes per row"
+    )
     notes.append(
         f"estimated download size ~{_bytes_to_mb(total_output)} MB "
         f"(uncompressed ~{_bytes_to_mb(total_uncompressed)} MB)"
@@ -540,8 +537,10 @@ def _estimate_parquet_size(
     deduped_notes = list(dict.fromkeys(notes))
 
     log.debug(
-        "_estimate_parquet_size: totals rows=%d uncompressed=%d output=%d",
+        "_estimate_parquet_size: totals rows=%d bytes_per_row=%d uncompressed=%d "
+        "output=%d",
         rows,
+        bytes_per_row,
         total_uncompressed,
         total_output,
     )
@@ -556,6 +555,67 @@ def _estimate_parquet_size(
     }
 
 
+def _csv_bytes_per_row(dataset: pa_ds.Dataset) -> int:
+    """Bytes one CSV row of `dataset` occupies, summed over every column.
+
+    Uses the schema, not the files, so it costs no IO and still counts
+    partition columns - their values live in the directory names, not in the
+    parquet data, but they do end up in the CSV.
+
+    Partition columns are measured from the paths; other columns use the
+    per-type width, which assumes the widest value the type can print, so the
+    result is an upper bound.
+    """
+    partition_widths = _partition_value_widths(dataset)
+    return sum(
+        partition_widths.get(field.name, _csv_value_bytes(field.type))
+        + CSV_SEPARATOR_BYTES
+        for field in dataset.schema
+    )
+
+
+def _partition_value_widths(dataset: pa_ds.Dataset) -> dict[str, int]:
+    """{partition column: widest value length}, read off the fragment paths.
+
+    Free - `query_unique_value` parses the paths of the already-listed
+    fragments and caches per dataset. A column whose values cannot be read is
+    simply absent, so the caller falls back to the per-type width."""
+    partitioning = getattr(dataset, "partitioning", None)
+    if partitioning is None:
+        return {}
+
+    widths = {}
+    for name in partitioning.schema.names:
+        try:
+            values = query_unique_value(dataset, name)
+        except Exception as e:
+            log.warning("partition values for %s unreadable: %s", name, e)
+            continue
+        if values:
+            widths[name] = max(len(str(value)) for value in values)
+    return widths
+
+
+def _csv_value_bytes(pa_type: pa.DataType) -> int:
+    """Bytes one value of `pa_type` occupies once printed into a CSV cell.
+    Anything not recognised is charged ASSUMED_STRING_BYTES."""
+    if pa.types.is_floating(pa_type):
+        return (
+            CSV_BYTES_PER_FLOAT64 if pa_type.bit_width == 64 else CSV_BYTES_PER_FLOAT32
+        )
+    if pa.types.is_integer(pa_type):
+        return CSV_BYTES_PER_INT.get(pa_type.bit_width, CSV_BYTES_PER_INT[64])
+    if pa.types.is_boolean(pa_type):
+        return CSV_BYTES_PER_BOOL
+    if pa.types.is_timestamp(pa_type):
+        return CSV_BYTES_PER_TIMESTAMP
+    if pa.types.is_date(pa_type):
+        return CSV_BYTES_PER_DATE
+    if pa.types.is_null(pa_type):
+        return CSV_BYTES_PER_NULL
+    return ASSUMED_STRING_BYTES
+
+
 def _partition_filter(
     dataset: pa_ds.Dataset,
     date_start: pd.Timestamp,
@@ -565,9 +625,9 @@ def _partition_filter(
 ) -> Optional[pc.Expression]:
     """Build a PARTITION-ONLY expression for get_fragments.
 
-    Only `timestamp` and `polygon` appear in it - row-level predicates would
-    make get_fragments open files, and the row-level work is done off the
-    footers instead (_row_group_overlaps).
+    Only `timestamp` and `polygon` belong here - a row-level predicate would
+    make get_fragments open the files; row-level pruning happens off the footers
+    instead (_row_group_overlaps).
 
     :return: the expression, or None when neither dimension can be pruned
     :raises PolygonNotIntersectingError: no polygon partition intersects any bbox
@@ -592,10 +652,10 @@ def _timestamp_partition_expr(
     date_end: pd.Timestamp,
     notes: list[str],
 ) -> Optional[pc.Expression]:
-    """Restrict to the `timestamp` partition buckets bracketing the date range,
+    """Restrict to the `timestamp` partition buckets covering the date range,
     using the same boundary helper the download's time filter uses.
 
-    Returns None (no time pruning, an upper bound) when the dataset has no
+    Returns None (no time pruning, so an upper bound) when the dataset has no
     timestamp partitions or the boundaries cannot be worked out."""
     try:
         if not query_unique_value(dataset, "timestamp"):
@@ -617,10 +677,10 @@ def _timestamp_partition_expr(
 def _timestamp_partition_scalar(dataset: pa_ds.Dataset, value) -> pa.Scalar:
     """Cast a partition boundary to the dataset's own `timestamp` field type.
 
-    Hive partition columns are inferred from directory names, so the same
-    logical value is int32 in one dataset and a string in another; comparing an
-    int64 literal against a string field raises ArrowNotImplementedError.
-    (Mirrors DataQuery._timestamp_scalar, which is private to the library.)"""
+    Hive partition types are inferred from directory names, so the same value is
+    int32 in one dataset and a string in another; comparing an int64 literal
+    against a string field raises ArrowNotImplementedError. (Mirrors
+    DataQuery._timestamp_scalar, which is private to the library.)"""
     try:
         ts_type = dataset.schema.field("timestamp").type
     except KeyError:
@@ -634,8 +694,8 @@ def _timestamp_partition_scalar(dataset: pa_ds.Dataset, value) -> pa.Scalar:
 def _polygon_partition_expr(
     dataset: pa_ds.Dataset, bboxes: list[BoundingBox], notes: list[str]
 ) -> Optional[pc.Expression]:
-    """Restrict to the `polygon` partitions intersecting ANY requested bbox -
-    the union, so a partition shared by two bboxes appears once.
+    """Restrict to the `polygon` partitions intersecting ANY requested bbox, so
+    a partition shared by two bboxes is counted once.
 
     Returns None (no spatial pruning) when there is no spatial filter at all or
     the dataset is not partitioned by polygon.
@@ -674,8 +734,8 @@ def _polygon_partition_expr(
 
 def _partition_intersects_any(hex_wkb: str, requested: list) -> bool:
     """Whether one `polygon` partition value (WKB hex) intersects any requested
-    shape. An unparseable partition value counts as intersecting, so a bad
-    directory name can only over-estimate, never drop real data."""
+    shape. An unreadable value counts as intersecting, so a bad directory name
+    can only over-estimate, never drop real data."""
     try:
         partition_shape = wkb.loads(bytes.fromhex(hex_wkb))
     except Exception as e:
@@ -693,10 +753,10 @@ def _row_group_overlaps(
     date_end: pd.Timestamp,
     bboxes: list[BoundingBox],
 ) -> bool:
-    """Whether one row group can hold rows the download would keep, judged
-    purely on the min/max statistics in the footer.
+    """Whether one row group can hold rows the download would keep, judged only
+    on the min/max statistics in the footer.
 
-    Missing statistics mean "cannot rule it out", so the row group is kept -
+    Missing statistics mean "cannot rule it out", so the row group is kept and
     the estimate stays an upper bound."""
     ranges = _row_group_column_ranges(row_group)
 
@@ -738,21 +798,15 @@ def _row_group_column_ranges(row_group) -> dict:
 
 
 def _as_utc_timestamp(value) -> Optional[pd.Timestamp]:
-    """A time statistic as a UTC-aware Timestamp, or None when it is not a
-    date at all.
+    """A time statistic as a UTC-aware Timestamp, or None when it is not a date.
 
-    pyarrow hands back a NAIVE Timestamp for a timestamp column, which cannot
-    be compared with the request's UTC bounds. A time column stored as a plain
-    number (epoch seconds) is ambiguous, so we return None and let the caller
-    keep the row group rather than guess a unit and prune wrongly."""
+    pyarrow returns a NAIVE Timestamp for a timestamp column, which cannot be
+    compared with the request's UTC bounds - ensure_timezone assumes UTC. A time
+    column stored as a plain number (epoch seconds) is ambiguous, so we return
+    None and let the caller keep the row group rather than guess the unit."""
     if not isinstance(value, (pd.Timestamp, datetime, np.datetime64)):
         return None
-    timestamp = pd.Timestamp(value)
-    return (
-        timestamp.tz_localize("UTC")
-        if timestamp.tz is None
-        else timestamp.tz_convert("UTC")
-    )
+    return ensure_timezone(pd.Timestamp(value))
 
 
 def _empty_estimate(
@@ -761,9 +815,8 @@ def _empty_estimate(
     output_format: str,
     note: str = "requested date range is outside the dataset's temporal extent",
 ) -> dict:
-    """Zero-size estimate, returned when the request cannot match any data (by
-    default because the requested range is outside the dataset's temporal
-    extent - the batch download produces no data here)."""
+    """Zero-size estimate, returned when the request cannot match any data.
+    `note` says why."""
     return {
         "uuid": uuid,
         "key": key,
