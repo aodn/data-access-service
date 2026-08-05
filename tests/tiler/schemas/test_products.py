@@ -34,6 +34,25 @@ def test_product_config_fields_match_product():
     assert product_fields == config_fields
 
 
+def test_from_product_carries_visual_capability():
+    """Parity above proves the field exists on both models; this proves
+    from_product actually maps it. ogcapi-java keys tile_types on it, so a
+    dropped mapping would silently downgrade every product to the arity rule.
+    """
+    scalar = Product(id="s", source_path="s3://b/x.zarr", variable="V")
+    assert ProductConfig.from_product(scalar).visual is True
+
+    non_visual = Product(
+        id="n", source_path="s3://b/x.zarr", variable="WDIR", visual=False
+    )
+    assert ProductConfig.from_product(non_visual).visual is False
+
+    pair = Product(
+        id="p", source_path="s3://b/x.zarr", variable=["U", "V"], visual=False
+    )
+    assert ProductConfig.from_product(pair).visual is False
+
+
 def test_data_tile_config_fields_match_product_data_tile_except_computed():
     """Product.data_tile and ProductConfig.data_tile mirror each other except
     for lod_grids — same exception as the top-level parity check, just scoped

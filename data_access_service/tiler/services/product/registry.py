@@ -113,12 +113,19 @@ def _from_dict(entry: dict) -> Product:
     payload = dict(entry)
     if payload.get("ocean_masked") is None:
         payload["ocean_masked"] = entry["id"] in _OCEAN_MASKED_BY_DEFAULT
+    if payload.get("visual") is None:
+        # products.json predates the explicit capability field, so derive it from
+        # arity — exactly what the visual routes have always enforced implicitly
+        # (every scalar accepted, every list rejected). Transitional: this whole
+        # module is replaced by discovery-driven publication.
+        payload["visual"] = not isinstance(payload.get("variable"), list)
     parsed = ProductConfig(**payload)
     return Product(
         id=parsed.id,
         source_path=parsed.source_path,
         variable=parsed.variable,
         ocean_masked=parsed.ocean_masked,
+        visual=parsed.visual,
         metadata_uuid=parsed.metadata_uuid,
         data_tile=DataTileConfig(
             chunk_px=parsed.data_tile.chunk_px,
