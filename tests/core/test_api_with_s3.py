@@ -259,10 +259,12 @@ class TestApiWithS3(TestWithS3):
             try:
                 parsed = json.loads(response.content.decode("utf-8"))
                 assert len(parsed) == 93, "Number of record is incorrect"
+                # aodn_cloud_optimised sorts parquet rows by the time column
+                # (eventDate here); first/last follow that temporal order.
                 assert parsed[0] == {
-                    "latitude": -39.9,
-                    "longitude": 146.2,
-                    "time": "2025-03-11",
+                    "latitude": -39.0,
+                    "longitude": 149.0,
+                    "time": "2025-03-10",
                 }, f"Unexpected JSON content: {parsed[0]}"
                 assert parsed[92] == {
                     "latitude": -40.8,
