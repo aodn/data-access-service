@@ -48,6 +48,26 @@ _S3_CONFIG_KWARGS = {
 }
 
 
+# How hard prewarm tries before giving an operational failure back to its
+# caller. Deliberately small: at 60 stores the point is to ride out a transient
+# S3 blip, not to stall startup behind a genuinely unreachable bucket. A store
+# that is still unresolved after this is handled by the caller's graded policy,
+# and StoreRegistry.get does not cache the failure, so it re-attempts on the
+# first real request either way.
+_PREWARM_MAX_ATTEMPTS = 3
+_PREWARM_BACKOFF_SECONDS = 1.0
+
+
+class NotGriddedStoreError(ValueError):
+    """The store opened, but is not a lat/lon grid the tiler can render.
+
+    A *confirmed* answer rather than an operational one: retrying will not
+    change it, and every candidate product on the store is dropped rather than
+    degraded. Subclasses ValueError because that is what ``_open_store`` has
+    always raised and callers catch.
+    """
+
+
 def _storage_options(store_url: str) -> dict:
     """Storage-backend options for fsspec/zarr, derived from the URL scheme.
 
@@ -101,7 +121,7 @@ def _open_store(store_url: str) -> xr.Dataset:
     if rename:
         ds = ds.rename(rename)
     if "lat" not in ds.dims or "lon" not in ds.dims:
-        raise ValueError(
+        raise NotGriddedStoreError(
             f"Store {store_url!r} missing lat/lon dims after rename (found: {list(ds.dims)})"
         )
     if "time" in ds.dims:
@@ -178,29 +198,95 @@ class StoreRegistry:
                 self._in_flight.pop(store_url, None)
         return ds
 
+    def cached(self, store_url: str) -> xr.Dataset | None:
+        """Return the already-open dataset for ``store_url``, or None.
+
+        Pure lookup: unlike ``get`` it never opens the store and never triggers a
+        TTL refresh. Startup verification uses it to inspect the schema of a
+        store prewarm just opened, without paying for a second open or racing
+        the refresh machinery.
+        """
+        with self._lock:
+            return self._stores.get(store_url)
+
     def date_index(self, store_url: str) -> dict[str, list]:
         """Return the {local_date: [timestamps]} map for ``store_url`` (or empty dict)."""
         with self._lock:
             return self._date_index.get(store_url, {})
 
-    async def prewarm(self, store_urls: list[str]) -> None:
-        """Open every URL in parallel via the anyio thread pool.
+    async def _prewarm_one(self, store_url: str) -> BaseException | None:
+        """Open one URL, retrying operational failures. Returns None on success.
+
+        A NotGriddedStoreError is returned immediately: the store answered, and
+        the answer will not change on a retry. Anything else is treated as
+        operational — a slow bucket, a dropped socket, throttling — and gets a
+        bounded number of attempts with exponential backoff before being handed
+        back to the caller to grade.
+        """
+        last_error: BaseException | None = None
+        for attempt in range(1, _PREWARM_MAX_ATTEMPTS + 1):
+            try:
+                await anyio.to_thread.run_sync(
+                    self.get, store_url, limiter=_STORE_PREWARM_LIMITER
+                )
+                return None
+            except NotGriddedStoreError as e:
+                # Intentional exclusion, not a fault: INFO and no traceback, or
+                # 60 stores' worth of legitimate skips look like an incident.
+                logger.info(f"Store is not a lat/lon grid, skipping: {store_url} ({e})")
+                return e
+            except Exception as e:
+                last_error = e
+                if attempt < _PREWARM_MAX_ATTEMPTS:
+                    delay = _PREWARM_BACKOFF_SECONDS * 2 ** (attempt - 1)
+                    logger.warning(
+                        f"Store open failed (attempt {attempt}/{_PREWARM_MAX_ATTEMPTS}), "
+                        f"retrying in {delay:.1f}s: {store_url} ({e!r})"
+                    )
+                    await anyio.sleep(delay)
+                else:
+                    logger.error(
+                        f"Store open failed after {_PREWARM_MAX_ATTEMPTS} attempts: "
+                        f"{store_url}",
+                        exc_info=e,
+                    )
+        return last_error
+
+    async def prewarm(self, store_urls: list[str]) -> dict[str, BaseException | None]:
+        """Open every URL in parallel and report the per-URL outcome.
 
         Moves the one-time S3 metadata cost from the first user request to server
         startup, and lets get_products_availability respond fast on first call.
-        Per-URL failures are logged and swallowed so a single bad URL doesn't
-        block the others.
+
+        Returns ``{url: None on success, else the exception}`` rather than
+        swallowing failures. The caller needs the distinction: a confirmed
+        non-grid store drops its products, while an operational failure is graded
+        against whether the store backs a product already in production use.
         """
+        outcomes: dict[str, BaseException | None] = {}
 
         async def _one(url: str) -> None:
-            try:
-                await anyio.to_thread.run_sync(
-                    self.get, url, limiter=_STORE_PREWARM_LIMITER
-                )
-            except Exception:
-                logger.exception(f"Store prewarm failed: {url}")
+            outcomes[url] = await self._prewarm_one(url)
 
         await asyncio.gather(*(_one(url) for url in store_urls))
+
+        not_gridded = sum(
+            1 for e in outcomes.values() if isinstance(e, NotGriddedStoreError)
+        )
+        unresolved = sum(
+            1
+            for e in outcomes.values()
+            if e is not None and not isinstance(e, NotGriddedStoreError)
+        )
+        logger.info(
+            "Store prewarm complete: %d opened, %d not gridded, %d unresolved "
+            "(of %d)",
+            len(outcomes) - not_gridded - unresolved,
+            not_gridded,
+            unresolved,
+            len(outcomes),
+        )
+        return outcomes
 
     def clear(self) -> None:
         """Drop all cached state. Intended for tests."""
@@ -238,14 +324,22 @@ def get_store(store_url: str) -> xr.Dataset:
     return store_registry.get(store_url)
 
 
+def cached_store(store_url: str) -> xr.Dataset | None:
+    """Already-open dataset for ``store_url``, without opening it. See ``cached``."""
+    return store_registry.cached(store_url)
+
+
 def get_available_dates(store_url: str) -> list[str]:
     get_store(store_url)  # ensures the date index for this URL is populated
     index = store_registry.date_index(store_url)
     return sorted(index) if index else []
 
 
-async def prewarm_stores(store_urls: list[str]) -> None:
-    try:
-        await store_registry.prewarm(store_urls)
-    except Exception:
-        logger.exception("Store prewarm task exited with error")
+async def prewarm_stores(store_urls: list[str]) -> dict[str, BaseException | None]:
+    """Prewarm every URL and return the per-URL outcome map.
+
+    Deliberately does not catch: startup grades these outcomes and decides what
+    is fatal, so swallowing an error here would leave it deciding from an
+    incomplete map.
+    """
+    return await store_registry.prewarm(store_urls)
