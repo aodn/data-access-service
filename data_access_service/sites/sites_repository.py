@@ -13,6 +13,7 @@ from typing import ClassVar
 
 from data_access_service.config.config import Config
 from data_access_service.core.duckdbclient import ParquetDuckDBClient
+from data_access_service.models.sites_types import ParquetsGenerationConfig
 
 
 def quote_ident(name: str) -> str:
@@ -305,9 +306,11 @@ class ParquetRepository(ABC):
 class MooringRepository(ParquetRepository):
     """Reads over the mooring-timeseries realtime-QC dataset."""
 
+    config: Config = Config.get_config()
+
     table: ClassVar[str] = "mooring_timeseries_realtime_qc"
-    bucket: ClassVar[str] = "aodn-cloud-optimised"
-    backup_bucket: ClassVar[str] = Config.get_config().get_mooring_backup_bucket_name()
+    bucket: ClassVar[str] = config.get_parquets_config().co_bucket
+    backup_bucket: ClassVar[str] = config.get_mooring_backup_bucket_name()
     dataset: ClassVar[str] = f"s3://{bucket}/{table}.parquet"
     backup_dataset: ClassVar[str] = (
         f"s3://{backup_bucket}/imoslive/MOORING/{table}.parquet"
@@ -328,11 +331,11 @@ class MooringRepository(ParquetRepository):
 class WaveBuoyRepository(ParquetRepository):
     """Reads over the realtime (non-QC) wave-buoy dataset."""
 
+    config: Config = Config.get_config()
+
     table: ClassVar[str] = "wave_buoy_realtime_nonqc"
-    bucket: ClassVar[str] = "aodn-cloud-optimised"
-    backup_bucket: ClassVar[str] = (
-        Config.get_config().get_wave_buoy_backup_bucket_name()
-    )
+    bucket: ClassVar[str] = config.get_parquets_config().co_bucket
+    backup_bucket: ClassVar[str] = config.get_wave_buoy_backup_bucket_name()
     dataset: ClassVar[str] = f"s3://{bucket}/{table}.parquet"
     backup_dataset: ClassVar[str] = (
         f"s3://{backup_bucket}/imoslive/BUOY/{table}.parquet"

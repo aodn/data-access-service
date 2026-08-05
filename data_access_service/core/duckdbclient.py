@@ -179,7 +179,7 @@ class PmTileDuckDBClient(DuckDBClient):
                     cursor.execute(f"SET enable_progress_bar_print = {show};")
                     self._duckdb_client = cursor
                     # Avoid NewRelic capture the log which is too huge and unless
-                    self.create_s3_secret(self._config.bucket_name)
+                    self.create_s3_secret(self._config.co_bucket)
         return self._duckdb_client
 
     def close(self):
