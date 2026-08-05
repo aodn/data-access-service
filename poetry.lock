@@ -270,7 +270,7 @@ trio = ["trio (>=0.26.1)"]
 
 [[package]]
 name = "aodn-cloud-optimised"
-version = "1.2.2"
+version = "1.3.14"
 description = "Cloud optimised data formats for IMOS NetCDF files and CSVs."
 optional = false
 python-versions = ">=3.11,<3.13"
@@ -282,6 +282,7 @@ develop = false
 boto3 = ">=1.34.162"
 cftime = ">=1.6.3"
 cfunits = ">=3.3.0"
+cloudpathlib = {version = ">=0.24.0,<0.25.0", extras = ["s3"]}
 coiled = ">=1.90.4"
 colorama = ">=0.4.6"
 dask = ">=2025.12.0"
@@ -297,7 +298,7 @@ numcodecs = "<0.16"
 numpy = "<2.0.0"
 pandas = ">=2.2.3"
 polars = ">=1.35.1"
-pyarrow = "22.0.0"
+pyarrow = "*"
 pydantic = ">=2.12.5"
 python-dateutil = ">=2.9.0"
 rechunker = ">=0.5.2"
@@ -312,14 +313,14 @@ zarr = "2.18.7"
 dev = ["ipdb (>=0.13)", "poetry (==2.3.3)", "poetry-plugin-freeze (>=1.2.0)", "poetry-pre-commit-plugin (>=0.2.1)", "pre-commit (==4.5.1)", "virtualenv (==20.30.0)"]
 docs = ["asciinema (>=2.4.0)", "sphinx (>=7.3.7)", "sphinx-rtd-theme (>=3.0.2)", "sphinxcontrib-asciinema (>=0.4.2)"]
 mcp = ["mcp (>=1.26.0,<2.0.0)", "nbconvert (>=7.0.0)", "nbformat (>=5.0.0)"]
-notebooks = ["cartopy (>=0.23.0)", "folium (>=0.20.0)", "fuzzywuzzy (>=0.18.0)", "gsw (>=3.6.19)", "ipython (>=7.5.3)", "matplotlib (>=3.9.1)", "nbformat (>=5.10.4)", "notebook (>=7.5.5)", "papermill (>=2.7.0)", "python-levenshtein (>=0.25.1)", "seaborn (>=0.13.2)", "tabulate (>=0.9.0)", "tqdm (>=4.67.1)", "windrose (>=1.9.2)"]
+notebooks = ["cartopy (>=0.23.0)", "folium (>=0.20.0)", "fuzzywuzzy (>=0.18.0)", "gsw (>=3.6.19)", "ipython (>=7.5.3)", "matplotlib (>=3.9.1)", "nbformat (>=5.10.4)", "notebook (>=7.5.5)", "papermill (>=2.7.0)", "polars-h3 (>=0.6.1)", "pydeck (>=0.9.1)", "python-levenshtein (>=0.25.1)", "seaborn (>=0.13.2)", "tabulate (>=0.9.0)", "tqdm (>=4.67.1)", "windrose (>=1.9.2)"]
 tests = ["coverage (>=7.5.3)", "moto[all,ec2,s3,server] (==5.1.1)", "pytest (>=8.2.1)", "termcolor (>=2.4.0)"]
 
 [package.source]
 type = "git"
 url = "https://github.com/aodn/aodn_cloud_optimised.git"
-reference = "v1.2.2"
-resolved_reference = "f55b9f39dab9036666ab6df0c6c8770328d1c2d7"
+reference = "v1.3.14"
+resolved_reference = "902339d200784eee76ea31352c7beb816bdae822"
 
 [[package]]
 name = "apscheduler"
@@ -1091,6 +1092,27 @@ click = ">=4.0"
 
 [package.extras]
 test = ["pytest-cov"]
+
+[[package]]
+name = "cloudpathlib"
+version = "0.24.0"
+description = "pathlib-style classes for cloud storage services."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "cloudpathlib-0.24.0-py3-none-any.whl", hash = "sha256:b1c51e2d2ec7dc4fed6538991f4aea849d6cf11a7e6b9069f86e461aa1f9b5b4"},
+    {file = "cloudpathlib-0.24.0.tar.gz", hash = "sha256:c521a984e77b47e656fe78e20a7e3e260e0ab45fc69e33ac01094227c979e34a"},
+]
+
+[package.dependencies]
+boto3 = {version = ">=1.34.0", optional = true, markers = "extra == \"s3\""}
+
+[package.extras]
+all = ["cloudpathlib[azure]", "cloudpathlib[gs]", "cloudpathlib[s3]"]
+azure = ["azure-storage-blob (>=12)", "azure-storage-file-datalake (>=12)"]
+gs = ["google-cloud-storage"]
+s3 = ["boto3 (>=1.34.0)"]
 
 [[package]]
 name = "cloudpickle"
@@ -4930,6 +4952,26 @@ files = [
 typing-extensions = ">=4.14.1"
 
 [[package]]
+name = "pydeck"
+version = "0.9.3"
+description = "Widget for deck.gl maps"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "pydeck-0.9.3-py2.py3-none-any.whl", hash = "sha256:d8a47c11c81fb12d51b1feb42427ff4f0e13cb599e48931021b2cba98b6849a6"},
+    {file = "pydeck-0.9.3.tar.gz", hash = "sha256:695775cbfe51f5fdffbd9735ba469987fdc5efc96bc40a0ee4808170509c78b2"},
+]
+
+[package.dependencies]
+jinja2 = ">=2.10.1"
+numpy = ">=1.16.4"
+
+[package.extras]
+carto = ["pydeck-carto"]
+jupyter = ["ipykernel (>=5.1.2)", "ipywidgets (>=7,<8)", "traitlets (>=4.3.2)"]
+
+[[package]]
 name = "pygments"
 version = "2.20.0"
 description = "Pygments is a syntax highlighting package written in Python."
@@ -7410,4 +7452,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11.0,<3.13"
-content-hash = "c69768a367344dd17784cfdffe6fbf4235f371d24f10c5683fae8fee05a50838"
+content-hash = "a8b5c414a454ce908220e6fc2880d20bd4db40e1b4e1af634ddbe81bd1714ae0"

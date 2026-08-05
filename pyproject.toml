@@ -1,18 +1,18 @@
 [tool.poetry]
 name = "data-access-service"
-version = "0.0.18"
+version = "0.0.40"
 description = ""
 authors = ["utas-raymondng <manfai.ng@utas.edu.au>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
 # Dependency from a GitHub repository, use tag = "v0.1.32" or branch = "xxx"
-aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", tag = "v1.2.2" }
+aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", tag = "v1.3.14" }
 black = "26.5.1"
 blosc = "^1.11.3"
 boto3 = "^1.28.0"
 cartopy = "^0.24.1"
-cryptography = "<44.0.2"
+cryptography = "<48.0.1"
 dask = {extras = ["dataframe"], version = ">=2024.9.1"}
 fastapi = "0.139.0"
 fuzzywuzzy = "^0.18.0"
@@ -25,6 +25,7 @@ jsonify = "^0.5"
 logging = "^0.4.9.6"
 matplotlib = "3.10.0"
 pandas = "^2.2.3"
+pydeck=">=0.9.1"
 pyarrow = "22.0.0"
 python = ">=3.11.0,<3.13"
 python-levenshtein = "^0.25.1"
