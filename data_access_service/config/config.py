@@ -276,6 +276,7 @@ class Config:
         tconfig = self.config.get("tiler", {})
         return TilerConfig(
             tile_timezone=tconfig["tile_timezone"],
+            zarr_store_base_url=tconfig["zarr_store_base_url"],
             store_ttl_seconds=tconfig["store_ttl_seconds"],
             store_prewarm_workers=tconfig["store_prewarm_workers"],
             thread_pool_size=tconfig["thread_pool_size"],
