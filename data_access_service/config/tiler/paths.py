@@ -7,14 +7,14 @@ path doesn't risk silently corrupting tile output.
 
 from pathlib import Path
 
-# Products and colormaps are static config committed with the package (edit +
-# redeploy to change) — same static-asset rationale as the mask paths below,
-# so they're resolved relative to the package rather than the CWD.
-PRODUCTS_CONFIG_PATH = str(Path(__file__).resolve().parent / "products.json")
+# Tiler config is static and committed with the package (edit + redeploy to
+# change) — same static-asset rationale as the mask paths below, so it's
+# resolved relative to the package rather than the CWD.
 COLORMAPS_CONFIG_PATH = str(Path(__file__).resolve().parent / "colormaps.json")
 # Variable specifications that startup fans out across the metadata catalogue to
-# derive the product set (see tiler/schemas/gridded_variables.py). Replaces the
-# hand-maintained per-product products.json.
+# derive the product set (see tiler/schemas/gridded_variables.py). Replaced the
+# hand-maintained per-product products.json, which could not keep dataset names
+# and metadata UUIDs in step with the catalogue.
 GRIDDED_VARIABLES_CONFIG_PATH = str(
     Path(__file__).resolve().parent / "gridded_variables.json"
 )

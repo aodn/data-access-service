@@ -364,7 +364,7 @@ LEGACY_INDEX = {
 # Pinned literals, not derived from the formula — these IDs are cached by the
 # frontend and opaque to ogcapi-java, so the point is to catch the formula
 # changing, which a derived expectation would not.
-LEGACY_PRODUCT_IDS = [
+LEGACY_PRODUCT_IDS_PINNED = [
     "satellite_austemp_heatwave_8day:sst_mosaic",
     "satellite_austemp_heatwave_8day:ssta_mosaic",
     "satellite_austemp_heatwave_8day:mcs_category",
@@ -391,9 +391,19 @@ LEGACY_CONFIG = [
 ]
 
 
+def test_pinned_ids_match_the_constant_the_startup_gate_uses():
+    """The literals above are an independent pin on the derivation formula; the
+    constant is what fails a boot. They only stay honest if they agree."""
+    from data_access_service.tiler.services.product.verification import (
+        LEGACY_PRODUCT_IDS,
+    )
+
+    assert set(LEGACY_PRODUCT_IDS) == set(LEGACY_PRODUCT_IDS_PINNED)
+
+
 def test_five_existing_product_ids_reproduce_byte_for_byte():
     candidates = _build(LEGACY_INDEX, LEGACY_CONFIG)
-    for pid in LEGACY_PRODUCT_IDS:
+    for pid in LEGACY_PRODUCT_IDS_PINNED:
         assert pid in candidates, f"legacy product id {pid} was not derived"
 
 

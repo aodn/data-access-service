@@ -1,172 +1,70 @@
-"""product/registry: JSON load + the no-empty-state guarantee from the docstring.
+"""product/registry: publication semantics and the slice-cache invariant.
 
-load_products documents that concurrent readers never see an empty PRODUCTS
-dict during reload — additions happen before removals. We pin that ordering
-along with basic load behavior. Products are static config now (no admin
-API), so these tests write products.json directly rather than going through
-a registration call.
+The registry no longer parses anything — products arrive already derived and
+verified. What is left to pin is how state is swapped (readers never see an
+empty dict), and the one cross-product invariant that has to hold before
+publication because the slice cache cannot express it.
 """
 
-import json
-
 import pytest
-from pydantic import ValidationError
 
 import data_access_service.tiler.services.product.registry as registry
 from data_access_service.tiler.services.product.product import Product
-from data_access_service.tiler.services.product.registry import PRODUCTS
+from data_access_service.tiler.services.product.registry import (
+    PRODUCTS,
+    get_product,
+    iter_product_items,
+    iter_products,
+    publish_products,
+)
 
 
 @pytest.fixture
-def isolated_products(tmp_path, monkeypatch):
-    """Redirect registry at a tmp file and snapshot PRODUCTS."""
-    cfg = tmp_path / "products.json"
-    monkeypatch.setattr(registry, "_config_path", cfg)
+def isolated_products():
+    """Snapshot PRODUCTS so a publish in one test can't leak into the next."""
     saved = dict(PRODUCTS)
     PRODUCTS.clear()
-    yield cfg
+    yield
     PRODUCTS.clear()
     PRODUCTS.update(saved)
 
 
-def _entry(product_id="p1", source="s3://bucket/x.zarr", variable="V", **kwargs):
-    return {"id": product_id, "source_path": source, "variable": variable, **kwargs}
+def _product(product_id="p1", source="s3://bucket/x.zarr", variable="V", **kwargs):
+    return Product(id=product_id, source_path=source, variable=variable, **kwargs)
 
 
-def _write(cfg, entries):
-    cfg.write_text(json.dumps(entries))
+# --- publication ------------------------------------------------------------
 
 
-def test_load_products_no_file_raises(isolated_products):
-    with pytest.raises(FileNotFoundError):
-        registry.load_products()
-
-
-def test_load_populates_products(isolated_products):
-    _write(isolated_products, [_entry("p1")])
-    registry.load_products()
+def test_publish_populates_products(isolated_products):
+    publish_products({"p1": _product("p1")})
     assert PRODUCTS["p1"].source_path == "s3://bucket/x.zarr"
 
 
-def test_load_with_multi_variable(isolated_products):
-    """variable can be a list — exercised by the ocean_current fixture."""
-    _write(isolated_products, [_entry("multi", variable=["U", "V"])])
-    registry.load_products()
-    assert PRODUCTS["multi"].variables == ["U", "V"]
+def test_publish_replaces_the_previous_set(isolated_products):
+    publish_products({"old": _product("old")})
+    publish_products({"new": _product("new", source="s3://bucket/y.zarr")})
+    assert set(PRODUCTS) == {"new"}
 
 
-def test_load_with_chunk_px_and_padding(isolated_products):
-    _write(
-        isolated_products,
-        [
-            {
-                "id": "tuned",
-                "source_path": "s3://bucket/x.zarr",
-                "variable": "V",
-                "data_tile": {"chunk_px": [128, 96], "padding": 4},
-            }
-        ],
-    )
-    registry.load_products()
-    p = PRODUCTS["tuned"]
-    assert p.data_tile.chunk_px == (128, 96)
-    assert p.data_tile.padding == 4
+def test_publish_preserves_dict_identity(isolated_products):
+    """Test fixtures and the prewarm race-guard both rely on the same Python
+    object being mutated in place rather than rebound."""
+    before = registry.PRODUCTS
+    publish_products({"p1": _product("p1")})
+    assert registry.PRODUCTS is before
+    assert PRODUCTS is before
 
 
-def test_load_rejects_unknown_field(isolated_products):
-    """max_lods/min_coarsest are global-only (see DataTileLodConfig) — not a per-product key."""
-    _write(isolated_products, [_entry("bad", max_lods=6)])
-    with pytest.raises(ValidationError):
-        registry.load_products()
+def test_publish_rejects_an_empty_set(isolated_products):
+    publish_products({"p1": _product("p1")})
+    with pytest.raises(ValueError, match="empty product set"):
+        publish_products({})
+    # The previous set is untouched by the refusal.
+    assert set(PRODUCTS) == {"p1"}
 
 
-def test_load_with_coastal_fill(isolated_products):
-    _write(
-        isolated_products,
-        [
-            {
-                "id": "sparse",
-                "source_path": "s3://bucket/x.zarr",
-                "variable": "V",
-                "data_tile": {"coastal_fill": {"max_dist_px": 4}},
-            }
-        ],
-    )
-    registry.load_products()
-    p = PRODUCTS["sparse"]
-    assert p.data_tile.coastal_fill is not None
-    assert p.data_tile.coastal_fill.max_dist_px == 4
-
-
-def test_coastal_fill_absent_defaults_to_none(isolated_products):
-    _write(isolated_products, [_entry("plain")])
-    registry.load_products()
-    assert PRODUCTS["plain"].data_tile.coastal_fill is None
-
-
-def test_load_with_visual_tile_coastal_fill(isolated_products):
-    """visual_tile.coastal_fill is independent of data_tile.coastal_fill —
-    a product can set one, both, or neither."""
-    _write(
-        isolated_products,
-        [
-            {
-                "id": "sparse",
-                "source_path": "s3://bucket/x.zarr",
-                "variable": "V",
-                "data_tile": {"coastal_fill": {"max_dist_px": 4}},
-                "visual_tile": {"coastal_fill": {"max_dist_px": 8}},
-            }
-        ],
-    )
-    registry.load_products()
-    p = PRODUCTS["sparse"]
-    assert p.data_tile.coastal_fill.max_dist_px == 4
-    assert p.visual_tile.coastal_fill.max_dist_px == 8
-
-
-def test_visual_tile_coastal_fill_absent_defaults_to_none(isolated_products):
-    _write(isolated_products, [_entry("plain")])
-    registry.load_products()
-    assert PRODUCTS["plain"].visual_tile.coastal_fill is None
-
-
-def test_ocean_masked_absent_defaults_to_false(isolated_products):
-    _write(isolated_products, [_entry("plain")])
-    registry.load_products()
-    assert PRODUCTS["plain"].ocean_masked is False
-
-
-def test_ocean_masked_defaults_true_for_listed_product(isolated_products):
-    # The currents product is masked by default even without the config flag.
-    pid = "model_sea_level_anomaly_gridded_realtime:ucur+vcur"
-    _write(isolated_products, [_entry(pid, variable=["UCUR", "VCUR"])])
-    registry.load_products()
-    assert PRODUCTS[pid].ocean_masked is True
-
-
-def test_metadata_uuid_absent_defaults_to_none(isolated_products):
-    _write(isolated_products, [_entry("plain")])
-    registry.load_products()
-    assert PRODUCTS["plain"].metadata_uuid is None
-
-
-def test_metadata_uuid_set_from_entry(isolated_products):
-    _write(isolated_products, [_entry("linked", metadata_uuid="uuid-123")])
-    registry.load_products()
-    assert PRODUCTS["linked"].metadata_uuid == "uuid-123"
-
-
-def test_ocean_masked_explicit_false_overrides_default(isolated_products):
-    pid = "model_sea_level_anomaly_gridded_realtime:ucur+vcur"
-    _write(
-        isolated_products, [_entry(pid, variable=["UCUR", "VCUR"], ocean_masked=False)]
-    )
-    registry.load_products()
-    assert PRODUCTS[pid].ocean_masked is False
-
-
-def test_load_products_never_exposes_empty_state(isolated_products, monkeypatch):
+def test_publish_never_exposes_empty_state(isolated_products, monkeypatch):
     """Documented invariant: additions first, then removals — readers never see {}.
 
     Strategy: replace PRODUCTS with a subclass that snapshots keys on every
@@ -181,38 +79,101 @@ def test_load_products_never_exposes_empty_state(isolated_products, monkeypatch)
             super().__delitem__(key)
 
     spy = SpyDict()
-    spy["a"] = registry._from_dict(_entry("a"))
-    spy["b"] = registry._from_dict(_entry("b", source="s3://bucket/y.zarr"))
-
-    # Replace the module-level PRODUCTS dict so load_products mutates the spy.
+    spy["a"] = _product("a")
+    spy["b"] = _product("b", source="s3://bucket/y.zarr")
     monkeypatch.setattr(registry, "PRODUCTS", spy)
 
-    # On-disk replaces both with 'c'.
-    isolated_products.write_text(json.dumps([_entry("c", source="s3://bucket/z.zarr")]))
-    registry.load_products()
+    publish_products({"c": _product("c", source="s3://bucket/z.zarr")})
 
-    # By the time a stale key is removed, the new entry must already be present.
-    assert observed_snapshots, "expected at least one removal during reload"
+    assert observed_snapshots, "expected at least one removal during publish"
     for snapshot in observed_snapshots:
         assert "c" in snapshot, (
             "PRODUCTS exposed a state without the new entry — "
             "remove-before-add ordering breaks the no-empty-state invariant"
         )
-
     assert set(spy.keys()) == {"c"}
 
 
-def test_load_malformed_json_raises(isolated_products):
-    isolated_products.write_text("not json at all")
-    with pytest.raises(json.JSONDecodeError):
-        registry.load_products()
+# --- slice-cache identity invariant ----------------------------------------
 
 
-def test_from_dict_returns_frozen_product():
-    from dataclasses import FrozenInstanceError
+def test_conflicting_ocean_masked_on_one_cache_identity_fails(isolated_products):
+    """L1 is keyed on (source_path, sorted(variables)) and ocean_masked is
+    applied before caching, so two products sharing that identity but
+    disagreeing would poison each other's slices in request order."""
+    conflicting = {
+        "a": _product("a", variable="GSLA", ocean_masked=True),
+        "b": _product("b", variable="GSLA", ocean_masked=False),
+    }
+    with pytest.raises(ValueError, match="ocean_masked"):
+        publish_products(conflicting)
 
-    p = registry._from_dict(_entry("frozen"))
-    assert isinstance(p, Product)
-    # Frozen dataclass: assignment must raise.
-    with pytest.raises(FrozenInstanceError):
-        p.id = "changed"  # type: ignore[misc]
+
+def test_reversed_pair_shares_the_cache_identity(isolated_products):
+    """The sort in the L1 key is correct, not an oversight: consumers read the
+    cached Dataset by name, so a reversed pair genuinely shares an entry. The
+    invariant is keyed on the sorted identity precisely so that case is caught."""
+    with pytest.raises(ValueError, match="ocean_masked"):
+        publish_products(
+            {
+                "uv": _product("uv", variable=["UCUR", "VCUR"], ocean_masked=True),
+                "vu": _product("vu", variable=["VCUR", "UCUR"], ocean_masked=False),
+            }
+        )
+
+
+def test_same_store_different_variables_is_not_a_conflict(isolated_products):
+    """GSL and GSLA both live on the SLA store. Different variable sets are
+    different cache entries, so they may differ freely."""
+    publish_products(
+        {
+            "sla:gsla": _product("sla:gsla", variable="GSLA", ocean_masked=False),
+            "sla:gsl": _product("sla:gsl", variable="GSL", ocean_masked=True),
+        }
+    )
+    assert set(PRODUCTS) == {"sla:gsla", "sla:gsl"}
+
+
+def test_same_identity_with_agreeing_settings_is_allowed(isolated_products):
+    publish_products(
+        {
+            "a": _product("a", variable="GSLA", ocean_masked=True),
+            "b": _product("b", variable="GSLA", ocean_masked=True),
+        }
+    )
+    assert set(PRODUCTS) == {"a", "b"}
+
+
+def test_different_stores_never_conflict(isolated_products):
+    publish_products(
+        {
+            "a": _product("a", source="s3://b/x.zarr", ocean_masked=True),
+            "b": _product("b", source="s3://b/y.zarr", ocean_masked=False),
+        }
+    )
+    assert set(PRODUCTS) == {"a", "b"}
+
+
+# --- read facades -----------------------------------------------------------
+
+
+def test_read_facades_reflect_published_state(isolated_products):
+    publish_products({"p1": _product("p1"), "p2": _product("p2")})
+
+    assert get_product("p1").id == "p1"
+    assert get_product("absent") is None
+    assert {p.id for p in iter_products()} == {"p1", "p2"}
+    assert dict(iter_product_items()).keys() == {"p1", "p2"}
+
+
+def test_iter_facades_return_snapshots_not_views(isolated_products):
+    """A concurrent publish must not raise "dictionary changed size during
+    iteration" in a caller's loop."""
+    publish_products({"p1": _product("p1")})
+    products = iter_products()
+    items = iter_product_items()
+
+    publish_products({"p2": _product("p2")})
+
+    assert [p.id for p in products] == ["p1"]
+    assert [pid for pid, _ in items] == ["p1"]
