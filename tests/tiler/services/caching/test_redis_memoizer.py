@@ -9,33 +9,34 @@ import redis
 import xarray as xr
 from testcontainers.redis import RedisContainer
 
-from data_access_service.tiler.services.caching.memoizer import ValkeyMemoizer
+from data_access_service.tiler.services.caching.memoizer import RedisMemoizer
 
 log = logging.getLogger(__name__)
 
 
-class TestValkeyMemoizer:
+class TestRedisMemoizer:
     @pytest.fixture(scope="class")
-    def valkey_container(self) -> Generator[RedisContainer, Any, None]:
-        """Start a Valkey container matching docker-compose.yml's local dev
-        service. Context manager already starts the container; do not call
+    def redis_container(self) -> Generator[RedisContainer, Any, None]:
+        """Start a container matching docker-compose.yml's local dev `redis`
+        service (runs the Valkey image for parity with AWS ElastiCache for
+        Valkey). Context manager already starts the container; do not call
         start() again."""
-        with RedisContainer(image="valkey/valkey:8") as valkey:
+        with RedisContainer(image="valkey/valkey:8") as container:
             log.info(
-                f"Started Valkey test container on port "
-                f"{valkey.get_exposed_port(valkey.port)}"
+                f"Started Redis-protocol test container on port "
+                f"{container.get_exposed_port(container.port)}"
             )
-            yield valkey
+            yield container
 
     @pytest.fixture
-    def client(self, valkey_container) -> Generator[redis.Redis, Any, None]:
-        client = valkey_container.get_client()
+    def client(self, redis_container) -> Generator[redis.Redis, Any, None]:
+        client = redis_container.get_client()
         client.flushall()
         yield client
         client.flushall()
 
     def test_cache_miss_then_hit(self, client):
-        memo = ValkeyMemoizer(namespace="test", ttl_seconds=60, client=client)
+        memo = RedisMemoizer(namespace="test", ttl_seconds=60, client=client)
         calls = 0
 
         def factory():
@@ -48,7 +49,7 @@ class TestValkeyMemoizer:
         assert calls == 1
 
     def test_xarray_dataset_round_trips_through_pickle(self, client):
-        memo = ValkeyMemoizer(namespace="test", ttl_seconds=60, client=client)
+        memo = RedisMemoizer(namespace="test", ttl_seconds=60, client=client)
         ds = xr.Dataset(
             {"sst": (("lat", "lon"), np.array([[1.0, 2.0], [3.0, 4.0]]))},
             coords={"lat": [10.0, 20.0], "lon": [100.0, 110.0]},
@@ -65,7 +66,7 @@ class TestValkeyMemoizer:
         xr.testing.assert_identical(cached_result, ds)
 
     def test_ttl_expiry_triggers_recompute(self, client):
-        memo = ValkeyMemoizer(namespace="test", ttl_seconds=1, client=client)
+        memo = RedisMemoizer(namespace="test", ttl_seconds=1, client=client)
         calls = 0
 
         def factory():
@@ -78,15 +79,15 @@ class TestValkeyMemoizer:
         assert memo.get_or_compute("ttl-key", factory) == 2
 
     def test_concurrent_get_or_compute_dedups_across_instances(
-        self, valkey_container
+        self, redis_container
     ):
-        # Two separate ValkeyMemoizer instances (own clients) simulate two app
+        # Two separate RedisMemoizer instances (own clients) simulate two app
         # instances racing the same cold key.
-        client_a = valkey_container.get_client()
-        client_b = valkey_container.get_client()
+        client_a = redis_container.get_client()
+        client_b = redis_container.get_client()
         client_a.flushall()
-        memo_a = ValkeyMemoizer(namespace="test", ttl_seconds=60, client=client_a)
-        memo_b = ValkeyMemoizer(namespace="test", ttl_seconds=60, client=client_b)
+        memo_a = RedisMemoizer(namespace="test", ttl_seconds=60, client=client_a)
+        memo_b = RedisMemoizer(namespace="test", ttl_seconds=60, client=client_b)
 
         calls = 0
         calls_lock = threading.Lock()
@@ -114,11 +115,11 @@ class TestValkeyMemoizer:
         assert calls == 1
         assert results == {"a": "computed-value", "b": "computed-value"}
 
-    def test_fails_open_when_valkey_unreachable(self):
+    def test_fails_open_when_redis_unreachable(self):
         unreachable_client = redis.Redis(
             host="localhost", port=1, socket_connect_timeout=1, socket_timeout=1
         )
-        memo = ValkeyMemoizer(namespace="test", ttl_seconds=60, client=unreachable_client)
+        memo = RedisMemoizer(namespace="test", ttl_seconds=60, client=unreachable_client)
         calls = 0
 
         def factory():

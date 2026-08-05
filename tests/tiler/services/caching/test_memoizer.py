@@ -6,7 +6,7 @@ from data_access_service.config.config import Config
 from data_access_service.tiler.services.caching.memoizer import (
     CacheBackend,
     NullMemoizer,
-    ValkeyMemoizer,
+    RedisMemoizer,
     create_memoizer,
 )
 
@@ -38,9 +38,11 @@ def test_null_memoizer_is_a_cache_backend():
     assert isinstance(NullMemoizer(), CacheBackend)
 
 
-def test_defaults_to_none_backend():
+def test_uses_configured_backend_without_patching():
+    # config.yaml's tiler.cache_backend default is "redis"; this checks
+    # create_memoizer honors it without needing _patch_cache_backend.
     memo = create_memoizer(namespace="l1", ttl_seconds=60)
-    assert isinstance(memo, NullMemoizer)
+    assert isinstance(memo, RedisMemoizer)
 
 
 def test_none_backend(monkeypatch):
@@ -49,12 +51,12 @@ def test_none_backend(monkeypatch):
     assert isinstance(memo, NullMemoizer)
 
 
-def test_valkey_backend(monkeypatch):
+def test_redis_backend(monkeypatch):
     # redis.Redis(...) is lazy — it doesn't connect until the first command,
     # so this doesn't need a live server.
-    _patch_cache_backend(monkeypatch, "valkey")
+    _patch_cache_backend(monkeypatch, "redis")
     memo = create_memoizer(namespace="l1", ttl_seconds=60)
-    assert isinstance(memo, ValkeyMemoizer)
+    assert isinstance(memo, RedisMemoizer)
 
 
 def test_unknown_backend_raises(monkeypatch):

@@ -1,10 +1,11 @@
 """Cross-request dedup + caching for the L1 slice cache, plus backend selection.
 
-``CacheBackend`` is the shared contract; ``NullMemoizer`` and ``ValkeyMemoizer``
+``CacheBackend`` is the shared contract; ``NullMemoizer`` and ``RedisMemoizer``
 are the current implementations (see ``create_memoizer`` below, chosen via
-``CACHE_BACKEND``). ``ValkeyMemoizer`` talks to a Valkey/Redis-protocol store —
-today that's a local container only (see docker-compose.yml's ``valkey``
-service); pointing it at a real AWS ElastiCache for Valkey cluster (auth, TLS,
+``CACHE_BACKEND``). ``RedisMemoizer`` talks to a Redis-protocol store — today
+that's a local container only (see docker-compose.yml's ``redis`` service,
+which actually runs the Valkey image for parity with AWS ElastiCache for
+Valkey); pointing it at a real ElastiCache for Valkey cluster (auth, TLS,
 cluster topology) is a deliberate follow-up, not covered here.
 
 In-process dedup-only coalescing (``services.caching.deduper.Deduper``) is a
@@ -56,9 +57,6 @@ class NullMemoizer(CacheBackend):
         return factory()
 
 
-# Only delete the lock if it still holds the token we set, so a slow caller
-# never deletes a lock that already expired and was re-acquired by someone
-# else (classic Redis "safe unlock" pattern).
 _UNLOCK_SCRIPT = """
 if redis.call("get", KEYS[1]) == ARGV[1] then
     return redis.call("del", KEYS[1])
@@ -68,9 +66,9 @@ end
 """
 
 
-class ValkeyMemoizer(CacheBackend):
-    """Distributed cache + cross-instance dedup backed by a Valkey (or any
-    Redis-protocol-compatible) store. Values are pickled — safe here because
+class RedisMemoizer(CacheBackend):
+    """Distributed cache + cross-instance dedup backed by a Redis-protocol-
+    compatible store (Redis or Valkey). Values are pickled — safe here because
     the store is only reachable from this service's own instances, the same
     trust boundary the in-process ``Deduper`` already relies on.
 
@@ -106,7 +104,7 @@ class ValkeyMemoizer(CacheBackend):
             cached = self._client.get(redis_key)
         except redis.exceptions.RedisError:
             log.warning(
-                "Valkey GET failed for %s; falling back to factory()",
+                "Redis GET failed for %s; falling back to factory()",
                 redis_key,
                 exc_info=True,
             )
@@ -123,7 +121,7 @@ class ValkeyMemoizer(CacheBackend):
             )
         except redis.exceptions.RedisError:
             log.warning(
-                "Valkey lock acquire failed for %s; falling back to factory()",
+                "Redis lock acquire failed for %s; falling back to factory()",
                 redis_key,
                 exc_info=True,
             )
@@ -138,7 +136,7 @@ class ValkeyMemoizer(CacheBackend):
                     )
                 except redis.exceptions.RedisError:
                     log.warning(
-                        "Valkey SET failed for %s; result computed but not cached",
+                        "Redis SET failed for %s; result computed but not cached",
                         redis_key,
                         exc_info=True,
                     )
@@ -147,7 +145,7 @@ class ValkeyMemoizer(CacheBackend):
                     self._unlock_script(keys=[lock_key], args=[token])
                 except redis.exceptions.RedisError:
                     log.warning(
-                        "Valkey unlock failed for %s; lock will expire via TTL",
+                        "Redis unlock failed for %s; lock will expire via TTL",
                         lock_key,
                         exc_info=True,
                     )
@@ -163,7 +161,7 @@ class ValkeyMemoizer(CacheBackend):
                 cached = self._client.get(redis_key)
             except redis.exceptions.RedisError:
                 log.warning(
-                    "Valkey poll failed for %s; falling back to factory()",
+                    "Redis poll failed for %s; falling back to factory()",
                     redis_key,
                     exc_info=True,
                 )
@@ -181,20 +179,17 @@ def create_memoizer(*, namespace: str, ttl_seconds: int) -> CacheBackend:
     """Selects the L1 cache backend via the CACHE_BACKEND setting.
 
     - "none" (default): bypass caching entirely — every call recomputes.
-    - "valkey": share cache + cross-instance dedup through a Valkey/Redis-
-      protocol store, connected via ``tiler.valkey_host``/``tiler.valkey_port``
-      in config.yaml. Currently targets a local container only (see
-      docker-compose.yml) — pointing this at a real AWS ElastiCache for Valkey
-      cluster (auth, TLS, cluster topology) is a follow-up, not implemented
-      here.
+    - "redis": share cache + cross-instance dedup through a Redis-protocol
+      store, connected via ``tiler.redis_host``/``tiler.redis_port`` in
+      config.yaml.
     """
     tiler_config = Config.get_config().get_tiler_config()
     backend = tiler_config.cache_backend
     if backend == "none":
         return NullMemoizer()
-    if backend == "valkey":
-        client = redis.Redis(
-            host=tiler_config.valkey_host, port=tiler_config.valkey_port
+    if backend == "redis":
+        client = redis.Redis(host=tiler_config.redis_host, port=tiler_config.redis_port)
+        return RedisMemoizer(
+            namespace=namespace, ttl_seconds=ttl_seconds, client=client
         )
-        return ValkeyMemoizer(namespace=namespace, ttl_seconds=ttl_seconds, client=client)
-    raise ValueError(f"Unknown CACHE_BACKEND: {backend!r} (expected none or valkey)")
+    raise ValueError(f"Unknown CACHE_BACKEND: {backend!r} (expected none or redis)")
