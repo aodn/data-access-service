@@ -15,6 +15,7 @@ class TilerConfig:
     zarr_store_base_url: str
     store_ttl_seconds: int
     store_prewarm_workers: int
+    store_refresh_workers: int
     thread_pool_size: int
     animation_workers: int
     cache_backend: str

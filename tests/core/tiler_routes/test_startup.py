@@ -148,7 +148,9 @@ def warmup_env(monkeypatch):
     """Stub every step around discovery so ordering can be observed directly."""
     calls: list[str] = []
     state = {
-        "candidates": {"a:v": Product(id="a:v", source_path="s3://b/a.zarr", variable="v")},
+        "candidates": {
+            "a:v": Product(id="a:v", source_path="s3://b/a.zarr", variable="v")
+        },
         "outcomes": {"s3://b/a.zarr": None},
         "result": None,
         "published": None,
@@ -265,7 +267,9 @@ async def test_verification_dropping_everything_leaves_the_tiler_unready(
 
 
 @pytest.mark.asyncio
-async def test_legacy_gate_failure_prevents_publication(warmup_env, monkeypatch, caplog):
+async def test_legacy_gate_failure_prevents_publication(
+    warmup_env, monkeypatch, caplog
+):
     calls, state = warmup_env
 
     def boom(products):

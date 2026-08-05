@@ -67,7 +67,9 @@ async def test_indefinite_wait_logs_progress_periodically(caplog):
     with caplog.at_level("INFO"):
         await _Api(ready_after=200).wait_until_ready(timeout=None)
 
-    progress = [r for r in caplog.records if "Still waiting for API metadata" in r.message]
+    progress = [
+        r for r in caplog.records if "Still waiting for API metadata" in r.message
+    ]
     # 200 polls is 100 simulated seconds — one report at the 60s mark.
     assert len(progress) == 1
 
