@@ -85,11 +85,14 @@ def estimate_single_key_size(
         own extent
     :param output_format: one of SUPPORTED_OUTPUT_FORMATS (netcdf/geotiff/csv)
     :return: dict with the estimate, or None if the key is not found
+    :raises ValueError: if the key can never produce output_format
     """
     uuid = resolved_subset_request.uuid
     ds = api.get_datasource(uuid, key)
     if ds is None:
         return None
+
+    _check_format_supported(api, ds, uuid, key, output_format)
 
     if not resolved_subset_request.has_data:
         return _empty_estimate(uuid, key, output_format)
@@ -132,6 +135,39 @@ def estimate_single_key_size(
         )
     else:
         return None
+
+
+def _check_format_supported(api, ds, uuid: str, key: str, output_format: str) -> None:
+    """Fail fast when this key can never produce output_format, before any
+    metadata or slicing work is spent on it.
+
+    The frontend only offers csv for parquet keys and netcdf/geotiff for zarr
+    keys, so a mismatch is a malformed request, not something to estimate
+    around. The deeper raises in _estimate_zarr_size and _measure_geotiff stay
+    as backstops.
+
+    :raises ValueError: on any key-format mismatch
+    """
+    if isinstance(ds, ParquetDataSource) and output_format != "csv":
+        raise ValueError(
+            f"'{output_format}' export not possible for {key}: a parquet key "
+            "downloads as csv only."
+        )
+    if isinstance(ds, ZarrDataSource):
+        if output_format == "csv":
+            raise ValueError(
+                f"'csv' export not possible for {key}: a zarr key downloads as "
+                "netcdf or geotiff only."
+            )
+        if output_format == "geotiff":
+            lat_name, lon_name, _ = api.resolve_dim_names(uuid, key)
+            # Dims and dtypes never change under slicing, so the raw store
+            # answers this without any subsetting work.
+            if not geotiff_eligible_vars(ds.zarr_store, lat_name, lon_name):
+                raise ValueError(
+                    f"GeoTIFF export not possible for {key}: no gridded numeric "
+                    "variables (a variable must be on both the lat and lon axes)."
+                )
 
 
 def _estimate_zarr_size(
@@ -439,14 +475,6 @@ def _estimate_parquet_size(
         # columns either, so the CSV always carries every column.
         log.info("column subsetting not implemented yet; ignoring columns %s", columns)
         notes.append(f"column subsetting not supported yet; columns skipped: {columns}")
-    if output_format != "csv":
-        # data_collection.py picks the output by STORAGE type, not by the
-        # requested format: a .parquet key is always written out as a CSV zip.
-        notes.append(
-            f"parquet keys always download as a CSV zip; '{output_format}' "
-            "estimated as CSV"
-        )
-
     date_start = ensure_timezone(date_start)
     date_end = ensure_timezone(date_end)
     lat_name, lon_name, time_name = api.resolve_dim_names(uuid, key)

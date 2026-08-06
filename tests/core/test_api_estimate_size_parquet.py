@@ -39,8 +39,10 @@ from data_access_service.core.size_estimation import (
     _csv_value_bytes,
     _estimate_parquet_size,
     _partition_value_widths,
+    estimate_single_key_size,
 )
 from data_access_service.models.bounding_box import BoundingBox
+from data_access_service.utils.subset_request_resolver import ResolvedSubsetRequest
 
 CANNED = {
     "argo": "tests/canned/s3_sample_edge_cases/argo.parquet",
@@ -329,19 +331,26 @@ def test_columns_ignored_and_noted():
     assert "column subsetting not supported yet" in with_columns["notes"]
 
 
-def test_non_csv_format_estimated_as_csv_and_noted():
-    """A parquet key always downloads as a CSV zip - data_collection.py picks by
-    storage type, not by the requested format."""
-    dataset = _canned("mooring")
-
-    as_netcdf = _estimate(dataset, output_format="netcdf")
-
-    assert as_netcdf["format"] == "netcdf"
-    assert (
-        as_netcdf["estimated_uncompressed_bytes"]
-        == _estimate(dataset)["estimated_uncompressed_bytes"]
+def test_non_csv_format_raises_fast():
+    """The frontend only requests csv for a parquet key; any other format is a
+    malformed request and fails fast, before the date trim or any pruning."""
+    api = _api()
+    api.get_datasource = MagicMock(return_value=_parquet_datasource(_canned("mooring")))
+    api.get_temporal_extent = MagicMock()
+    resolved = ResolvedSubsetRequest(
+        uuid=UUID,
+        keys=[KEY],
+        start_date=pd.Timestamp("2000-01-01", tz="UTC"),
+        end_date=pd.Timestamp("2030-01-01", tz="UTC"),
+        bboxes=[],
+        columns=None,
+        geometry=None,
     )
-    assert "always download as a CSV zip" in as_netcdf["notes"]
+
+    with pytest.raises(ValueError, match="downloads as csv only"):
+        estimate_single_key_size(api, KEY, resolved, output_format="netcdf")
+
+    api.get_temporal_extent.assert_not_called()
 
 
 def test_multiple_bboxes_noted_as_a_union():

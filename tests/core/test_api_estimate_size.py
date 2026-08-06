@@ -179,12 +179,28 @@ def test_zarr_netcdf_object_string_var_sized_as_fixed_width():
 def test_geotiff_non_gridded_raises():
     # No variable is gridded on lat+lon, so the export can't produce a GeoTIFF
     # (build_geotiff_zip raises). The estimate mirrors that and stops instead of
-    # promising a size for a download that would fail.
+    # promising a size for a download that would fail. It must also fail FAST:
+    # before the date trim (get_temporal_extent) and the slicing.
     dataset = _make_dataset()  # vars on TIME only -> no var gridded on lat+lon
     api, _ = _api_with_zarr(dataset)
+    api.get_temporal_extent = MagicMock()
 
     with pytest.raises(ValueError, match="no gridded numeric variables"):
         estimate_single_key_size(api, KEY, _resolved(), output_format="geotiff")
+
+    api.get_temporal_extent.assert_not_called()
+
+
+def test_csv_on_zarr_raises_fast():
+    # csv is only for parquet keys. The mismatch must fail before any
+    # metadata/slicing work - the date trim (get_temporal_extent) never runs.
+    api, _ = _api_with_zarr(_make_dataset())
+    api.get_temporal_extent = MagicMock()
+
+    with pytest.raises(ValueError, match="netcdf or geotiff only"):
+        estimate_single_key_size(api, KEY, _resolved(), output_format="csv")
+
+    api.get_temporal_extent.assert_not_called()
 
 
 def test_geotiff_gridded_dimension_based():
