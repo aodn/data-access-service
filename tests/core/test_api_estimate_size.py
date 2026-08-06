@@ -704,3 +704,43 @@ def test_all_keys_missing_returns_none(monkeypatch):
         api.estimate_datasets_size(UUID, keys=["nope.zarr"], output_format="netcdf")
         is None
     )
+
+
+def test_unsupported_key_skipped_and_noted(monkeypatch):
+    # A key that cannot produce the format (worker raises ValueError) is skipped;
+    # the other keys still get estimated. Bad key FIRST to prove the loop goes on.
+    api = API()
+    monkeypatch.setattr(
+        core_api,
+        "estimate_single_key_size",
+        MagicMock(
+            side_effect=[
+                ValueError("GeoTIFF export not possible for a.parquet"),
+                _single_result("b.zarr", 200, 80),
+            ]
+        ),
+    )
+
+    result = api.estimate_datasets_size(
+        UUID, keys=["a.parquet", "b.zarr"], output_format="geotiff"
+    )
+
+    assert result["keys"] == ["b.zarr"]
+    assert result["estimated_uncompressed_bytes"] == 200
+    assert "keys skipped ('geotiff' not possible): ['a.parquet']" in result["notes"]
+
+
+def test_all_keys_unsupported_raises(monkeypatch):
+    # Every key raises -> a request-level ValueError, NOT None (None would 404
+    # as "key not found", but the keys do exist).
+    api = API()
+    monkeypatch.setattr(
+        core_api,
+        "estimate_single_key_size",
+        MagicMock(side_effect=ValueError("no gridded numeric variables")),
+    )
+
+    with pytest.raises(ValueError, match="not possible for any requested key"):
+        api.estimate_datasets_size(
+            UUID, keys=["a.parquet", "b.parquet"], output_format="geotiff"
+        )

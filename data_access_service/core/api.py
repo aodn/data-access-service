@@ -890,9 +890,13 @@ class API(BaseAPI):
         The request is interpreted by the same resolve_subset_request the batch
         download uses (key expansion, date defaults + extent trim, bboxes)
 
+        A key that cannot produce output_format (e.g. geotiff on non-gridded
+        data, csv on a zarr key) is skipped and reported in the notes instead
+        of failing the whole request.
+
         :return: aggregated estimate dict, or None if no requested key exists
-        :raises ValueError: if output_format is none or not supported, or the
-            dates are unparseable
+        :raises ValueError: if output_format is none or not supported, the
+            dates are unparseable, or NO requested key can produce the format
         """
         if output_format is None or output_format not in SUPPORTED_OUTPUT_FORMATS:
             raise ValueError(
@@ -912,22 +916,40 @@ class API(BaseAPI):
 
         per_key: list[dict] = []
         missing: list[str] = []
+        unsupported: list[str] = []
         for key in resolved_subset_request.keys:
-            single = estimate_single_key_size(
-                self, key, resolved_subset_request, output_format=output_format
-            )
+            try:
+                single = estimate_single_key_size(
+                    self, key, resolved_subset_request, output_format=output_format
+                )
+            except ValueError as e:
+                # This key cannot download as output_format; skip it so the
+                # other keys still get an estimate. Only ValueError - real
+                # failures (S3, network) must still fail the request.
+                log.warning("size estimate skipped for %s/%s: %s", uuid, key, e)
+                unsupported.append(key)
+                continue
             if single is None:
                 missing.append(key)
                 continue
             per_key.append(single)
 
         if not per_key:
+            if unsupported:
+                raise ValueError(
+                    f"'{output_format}' export not possible for any requested "
+                    f"key of {uuid}: {unsupported}"
+                )
             # No requested key exists in this dataset -> 404 at the route.
             return None
 
         notes: list[str] = []
         if missing:
             notes.append(f"keys not found and skipped: {missing}")
+        if unsupported:
+            notes.append(
+                f"keys skipped ('{output_format}' not possible): {unsupported}"
+            )
         if len(per_key) > 1:
             notes.append(f"summed {len(per_key)} keys")
 
