@@ -63,6 +63,18 @@ def test_load_slice_unknown_date_raises_file_not_found(monkeypatch):
         loader.load_slice("s3://b/x.zarr", "1999-01-01", ["v"])
 
 
+def test_load_slice_unknown_variable_names_the_variable_not_the_date(monkeypatch):
+    """A variable absent from the store (e.g. a stale/misconfigured products.json
+    entry) must be reported as such, not misattributed to the date — store[variables]
+    and .sel(time=...) both raise plain KeyError, so the missing-variable case has
+    to be told apart from a genuine missing-timestamp case before that catch-all."""
+    ds = _ds_with_time(["2024-01-15T13:00:00"])
+    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: ds)
+
+    with pytest.raises(FileNotFoundError, match=r"NOT_A_REAL_VAR"):
+        loader.load_slice("s3://b/x.zarr", "2024-01-16", ["NOT_A_REAL_VAR"])
+
+
 def test_load_slice_uses_first_timestamp_when_multiple_map_to_same_date(monkeypatch):
     """Two UTC timestamps mapping to the same local date should still serve,
     using the first (index-order) timestamp's data."""
