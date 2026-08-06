@@ -863,8 +863,19 @@ It deliberately waits for the non-tiler API's own startup before doing tiler wor
 | -------------------------------------------- | ------------------------------------------------------------------- |
 | Opened successfully                          | Run the two guards; a failure drops **only** that product           |
 | `NotGriddedStoreError` (no lat/lon dims)     | Drop every candidate on that store, logged at INFO                  |
+| `FileNotFoundError` (store is not there)     | Drop every candidate on that store, logged at WARNING               |
 | Unresolved, backing a legacy product id      | Fatal — warmup fails and the tiler stays at 503                     |
 | Unresolved, any other store                  | Keep its candidates, log at ERROR; recovers on the first request    |
+
+Absence is graded with the *confirmed* answers rather than the operational ones,
+and is not retried: the bucket said "not there", which will not change on a
+second attempt. It is logged at WARNING rather than INFO because, unlike a
+non-grid store, it is never an intentional exclusion — the usual cause is an
+upstream rename the metadata catalogue has not caught up with, leaving the
+catalogue advertising a store that no longer exists. Dropping its candidates
+rather than keeping them degraded means a *legacy* product on such a store is
+reported by name at the legacy gate below, instead of as a vaguer "store could
+not be opened".
 
 Uniformly fatal was right at 2 stores and wrong at 60: one flaky S3 endpoint would take the whole tiler — including the five products that work today — to a permanent 503. Keeping unresolved-store products registered is only safe because the availability manifest is fault-isolated per store (see [§6.1](#61-shared-endpoints-mounted-under-both-data_tiles-and-visual_tiles)); otherwise one bad store would fail `/manifest`, and ogcapi-java fetches that on every collection-products call.
 

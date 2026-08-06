@@ -153,6 +153,46 @@ async def test_non_grid_store_logs_at_info_without_traceback(monkeypatch, caplog
     assert all(r.exc_info is None for r in skip_records)
 
 
+# --- stores that do not exist ----------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_missing_store_yields_file_not_found(monkeypatch):
+    opener, _ = _open_zarr({"s3://b/gone.zarr": FileNotFoundError("No such file")})
+    monkeypatch.setattr(xr, "open_zarr", opener)
+
+    outcomes = await prewarm_stores(["s3://b/gone.zarr"])
+
+    assert isinstance(outcomes["s3://b/gone.zarr"], FileNotFoundError)
+
+
+@pytest.mark.asyncio
+async def test_missing_store_is_not_retried(monkeypatch):
+    """The bucket answered "not there", which is as final as a non-grid answer.
+    Retrying it three times per missing store is pure startup cost."""
+    opener, calls = _open_zarr({"s3://b/gone.zarr": FileNotFoundError("No such file")})
+    monkeypatch.setattr(xr, "open_zarr", opener)
+
+    await prewarm_stores(["s3://b/gone.zarr"])
+
+    assert calls == ["s3://b/gone.zarr"]
+
+
+@pytest.mark.asyncio
+async def test_missing_store_logs_at_warning(monkeypatch, caplog):
+    """Unlike a non-grid store, an absent one is never intentional — usually an
+    upstream rename the catalogue has not caught up with."""
+    opener, _ = _open_zarr({"s3://b/gone.zarr": FileNotFoundError("No such file")})
+    monkeypatch.setattr(xr, "open_zarr", opener)
+
+    with caplog.at_level("INFO"):
+        await prewarm_stores(["s3://b/gone.zarr"])
+
+    records = [r for r in caplog.records if "does not exist" in r.message]
+    assert records
+    assert all(r.levelname == "WARNING" for r in records)
+
+
 # --- bounded retry ----------------------------------------------------------
 
 
