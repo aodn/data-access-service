@@ -92,9 +92,7 @@ def test_one_failing_store_still_yields_200(client, catalogue, monkeypatch):
     assert response.status_code == 200
 
 
-def test_only_the_failing_stores_products_are_degraded(
-    client, catalogue, monkeypatch
-):
+def test_only_the_failing_stores_products_are_degraded(client, catalogue, monkeypatch):
     _patch_dates(
         monkeypatch,
         {STORE_A: RuntimeError("s3 unreachable"), STORE_B: ["2024-02-01"]},
@@ -167,6 +165,8 @@ def test_failure_is_logged_once_per_failing_store(
     with caplog.at_level("WARNING"):
         client.get(MANIFEST)
 
-    summaries = [r for r in caplog.records if "failed to resolve availability" in r.message]
+    summaries = [
+        r for r in caplog.records if "failed to resolve availability" in r.message
+    ]
     assert len(summaries) == 1
     assert "1 of 2 stores" in summaries[0].getMessage()

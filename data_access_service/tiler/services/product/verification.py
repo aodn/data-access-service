@@ -25,16 +25,24 @@ from data_access_service.tiler.services.store.registry import (
 
 logger = logging.getLogger(__name__)
 
-# The five products that predate derivation and are already in production use.
-# They are load-bearing in two places: a store failure affecting one is fatal
-# rather than a degradation, and startup asserts all five survived derivation
-# before publishing anything. Kept here, next to both consumers, so the two
-# cannot drift apart.
+# The five products that predate derivation and are in production use. They are
+# load-bearing in two places: a store failure affecting one is fatal rather than
+# a degradation, and startup asserts all five survived derivation before
+# publishing anything. Kept here, next to both consumers, so the two cannot
+# drift apart.
+#
+# The three heatwave ids name `_14day`, not the `_8day` they had when the tiler
+# first shipped. Upstream renamed the store (same five variables, same data),
+# which broke the hand-written products.json entries that hard-coded the old
+# path -- those three products 404 in production today. That rename is exactly
+# the failure deriving products from live metadata exists to prevent, and it is
+# why these ids are pinned to what the catalogue currently says rather than to
+# what the frontend once cached.
 LEGACY_PRODUCT_IDS = frozenset(
     {
-        "satellite_austemp_heatwave_8day:sst_mosaic",
-        "satellite_austemp_heatwave_8day:ssta_mosaic",
-        "satellite_austemp_heatwave_8day:mcs_category",
+        "satellite_austemp_heatwave_14day:sst_mosaic",
+        "satellite_austemp_heatwave_14day:ssta_mosaic",
+        "satellite_austemp_heatwave_14day:mcs_category",
         "model_sea_level_anomaly_gridded_realtime:gsla",
         "model_sea_level_anomaly_gridded_realtime:ucur+vcur",
     }

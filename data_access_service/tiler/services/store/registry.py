@@ -314,6 +314,7 @@ class StoreRegistry:
         against whether the store backs a product already in production use.
         """
         outcomes: dict[str, BaseException | None] = {}
+        logger.debug("Prewarming %d stores: %s", len(store_urls), store_urls)
 
         async def _one(url: str) -> None:
             outcomes[url] = await self._prewarm_one(url)
