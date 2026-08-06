@@ -17,6 +17,7 @@ from data_access_service.tiler.services.product.verification import (
     LEGACY_PRODUCT_IDS,
     NO_TIME_DIMENSION,
     NOT_GRIDDED,
+    STORE_ABSENT,
     VARIABLE_ABSENT,
     verify_candidate_products,
 )
@@ -96,6 +97,44 @@ def test_not_gridded_store_drops_every_candidate_on_it(stores):
     assert set(result.products) == {"grid:sst"}
     assert {r.product_id for r in result.rejections} == {"flat:sst", "flat:ssta"}
     assert {r.category for r in result.rejections} == {NOT_GRIDDED}
+
+
+# --- stores that do not exist ----------------------------------------------
+
+
+def test_absent_store_drops_every_candidate_on_it(stores):
+    """A confirmed absence, so its candidates are dropped rather than kept
+    degraded — there is nothing to recover on a later request."""
+    stores[GRID] = _dataset(("sst",))
+    candidates = {
+        "gone:sst": _product("gone:sst", source_path=OTHER),
+        "gone:ssta": _product("gone:ssta", source_path=OTHER, variable="ssta"),
+        "grid:sst": _product("grid:sst"),
+    }
+
+    result = verify_candidate_products(
+        candidates, {GRID: None, OTHER: FileNotFoundError("No such file")}
+    )
+
+    assert set(result.products) == {"grid:sst"}
+    assert {r.product_id for r in result.rejections} == {"gone:sst", "gone:ssta"}
+    assert {r.category for r in result.rejections} == {STORE_ABSENT}
+    # Not counted as operationally unknown — there is no uncertainty here.
+    assert result.unresolved_stores == []
+
+
+def test_absent_store_backing_a_legacy_product_is_not_fatal_here(stores):
+    """Verification drops it; the boot still fails, but at the legacy gate,
+    which names the product that went missing rather than just its store."""
+    legacy_id = "model_sea_level_anomaly_gridded_realtime:gsla"
+    candidates = {legacy_id: _product(legacy_id, variable="GSLA")}
+
+    result = verify_candidate_products(
+        candidates, {GRID: FileNotFoundError("No such file")}
+    )
+
+    assert result.products == {}
+    assert result.rejections[0].category == STORE_ABSENT
 
 
 # --- guard 1: variable presence --------------------------------------------
@@ -249,7 +288,10 @@ def test_log_rejections_breaks_counts_down_by_cause(stores, caplog):
     summary = [r.getMessage() for r in caplog.records if "Verification:" in r.message]
     assert len(summary) == 1
     assert "1 products kept, 2 rejected" in summary[0]
-    assert "store not gridded 1, variable absent 1, no time dimension 0" in summary[0]
+    assert (
+        "store not gridded 1, store absent 0, variable absent 1, no time dimension 0"
+        in summary[0]
+    )
     # One line per dropped product, naming it.
     assert any("a:gone" in r.getMessage() for r in caplog.records)
 

@@ -257,11 +257,12 @@ class StoreRegistry:
     async def _prewarm_one(self, store_url: str) -> BaseException | None:
         """Open one URL, retrying operational failures. Returns None on success.
 
-        A NotGriddedStoreError is returned immediately: the store answered, and
-        the answer will not change on a retry. Anything else is treated as
-        operational — a slow bucket, a dropped socket, throttling — and gets a
-        bounded number of attempts with exponential backoff before being handed
-        back to the caller to grade.
+        Two outcomes are *confirmed* and returned immediately, because retrying
+        cannot change them: the store opened but is not a grid, and the store is
+        not there at all. Anything else is treated as operational — a slow
+        bucket, a dropped socket, throttling — and gets a bounded number of
+        attempts with exponential backoff before being handed back to the caller
+        to grade.
         """
         last_error: BaseException | None = None
         for attempt in range(1, _PREWARM_MAX_ATTEMPTS + 1):
@@ -274,6 +275,15 @@ class StoreRegistry:
                 # Intentional exclusion, not a fault: INFO and no traceback, or
                 # 60 stores' worth of legitimate skips look like an incident.
                 logger.info(f"Store is not a lat/lon grid, skipping: {store_url} ({e})")
+                return e
+            except FileNotFoundError as e:
+                # The bucket answered "not there". That is as final as a
+                # non-grid answer, so it is not retried — but unlike a non-grid
+                # store it is never intentional, so it is logged at WARNING. The
+                # usual cause is an upstream rename the catalogue has not caught
+                # up with, which leaves metadata advertising a store that no
+                # longer exists.
+                logger.warning(f"Store does not exist: {store_url} ({e})")
                 return e
             except Exception as e:
                 last_error = e

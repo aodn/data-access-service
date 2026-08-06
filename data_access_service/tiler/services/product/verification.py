@@ -44,6 +44,7 @@ LEGACY_PRODUCT_IDS = frozenset(
 # non-zero VARIABLE_ABSENT count is the one worth stopping on: it means the
 # catalogue metadata and the real store schema disagree.
 NOT_GRIDDED = "store_not_gridded"
+STORE_ABSENT = "store_absent"
 VARIABLE_ABSENT = "variable_absent"
 NO_TIME_DIMENSION = "no_time_dimension"
 
@@ -78,11 +79,12 @@ class VerificationResult:
         counts = Counter(r.category for r in self.rejections)
         logger.info(
             "Verification: %d products kept, %d rejected "
-            "(store not gridded %d, variable absent %d, no time dimension %d), "
-            "%d store(s) unresolved",
+            "(store not gridded %d, store absent %d, variable absent %d, "
+            "no time dimension %d), %d store(s) unresolved",
             len(self.products),
             len(self.rejections),
             counts[NOT_GRIDDED],
+            counts[STORE_ABSENT],
             counts[VARIABLE_ABSENT],
             counts[NO_TIME_DIMENSION],
             len(self.unresolved_stores),
@@ -126,6 +128,7 @@ def verify_candidate_products(
     that work today — to a permanent 503.
 
       * confirmed non-grid store -> drop every candidate on it;
+      * store that does not exist -> drop every candidate on it;
       * unresolved store backing a legacy product -> fatal;
       * any other unresolved store -> keep its candidates, log at ERROR;
       * opened store -> run the two per-candidate guards.
@@ -153,6 +156,22 @@ def verify_candidate_products(
                     source_path=url,
                     category=NOT_GRIDDED,
                     reason="store is not a lat/lon grid",
+                )
+            )
+            continue
+
+        if isinstance(outcome, FileNotFoundError):
+            # A confirmed absence, not operational uncertainty. Dropping the
+            # candidates rather than keeping them degraded means a legacy
+            # product on this store is reported by the name it lost, via
+            # assert_legacy_products_intact, instead of as a vaguer "store could
+            # not be opened".
+            rejections.append(
+                Rejection(
+                    product_id=product_id,
+                    source_path=url,
+                    category=STORE_ABSENT,
+                    reason="store does not exist; the catalogue still advertises it",
                 )
             )
             continue
