@@ -30,8 +30,8 @@ def _build(index, config, base_url=BASE_URL):
 
 
 def test_product_id_lowercases_variables_only():
-    assert product_id("satellite_austemp_heatwave_8day.zarr", ["MCS_category"]) == (
-        "satellite_austemp_heatwave_8day:mcs_category"
+    assert product_id("satellite_austemp_heatwave_14day.zarr", ["MCS_category"]) == (
+        "satellite_austemp_heatwave_14day:mcs_category"
     )
 
 
@@ -350,7 +350,7 @@ def test_override_matching_is_per_specification_not_global():
 
 LEGACY_INDEX = {
     "2ffccdad-1197-4e41-b412-a9033517cfb2": {
-        "satellite_austemp_heatwave_8day.zarr": frozenset(
+        "satellite_austemp_heatwave_14day.zarr": frozenset(
             {"sst_mosaic", "ssta_mosaic", "MCS_category"}
         )
     },
@@ -361,13 +361,15 @@ LEGACY_INDEX = {
     },
 }
 
-# Pinned literals, not derived from the formula — these IDs are cached by the
-# frontend and opaque to ogcapi-java, so the point is to catch the formula
-# changing, which a derived expectation would not.
+# Pinned literals, not derived from the formula — these IDs are opaque to
+# ogcapi-java, so the point is to catch the formula changing, which a derived
+# expectation would not. The heatwave ids track the store's current name: it was
+# renamed upstream from _8day to _14day, which is what broke the hand-written
+# config these products used to come from.
 LEGACY_PRODUCT_IDS_PINNED = [
-    "satellite_austemp_heatwave_8day:sst_mosaic",
-    "satellite_austemp_heatwave_8day:ssta_mosaic",
-    "satellite_austemp_heatwave_8day:mcs_category",
+    "satellite_austemp_heatwave_14day:sst_mosaic",
+    "satellite_austemp_heatwave_14day:ssta_mosaic",
+    "satellite_austemp_heatwave_14day:mcs_category",
     "model_sea_level_anomaly_gridded_realtime:gsla",
     "model_sea_level_anomaly_gridded_realtime:ucur+vcur",
 ]
@@ -423,7 +425,7 @@ def test_legacy_products_keep_their_correctness_settings():
 def test_legacy_products_keep_their_metadata_uuids():
     candidates = _build(LEGACY_INDEX, LEGACY_CONFIG)
     assert (
-        candidates["satellite_austemp_heatwave_8day:sst_mosaic"].metadata_uuid
+        candidates["satellite_austemp_heatwave_14day:sst_mosaic"].metadata_uuid
         == "2ffccdad-1197-4e41-b412-a9033517cfb2"
     )
     assert (
@@ -441,6 +443,6 @@ def test_legacy_source_paths_are_canonicalised():
         == f"{BASE_URL}/model_sea_level_anomaly_gridded_realtime.zarr"
     )
     assert (
-        candidates["satellite_austemp_heatwave_8day:sst_mosaic"].source_path
-        == f"{BASE_URL}/satellite_austemp_heatwave_8day.zarr"
+        candidates["satellite_austemp_heatwave_14day:sst_mosaic"].source_path
+        == f"{BASE_URL}/satellite_austemp_heatwave_14day.zarr"
     )

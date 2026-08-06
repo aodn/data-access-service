@@ -10,7 +10,7 @@ they are *derived* from the metadata catalogue and the gridded-variable config
     where the dict's identity matters; production callers should go through
     the facades (``get_product``, ``iter_products``, ``iter_product_items``).
   * ``id`` convention: ``{zarr_name}:{variable}``, e.g.
-    ``satellite_austemp_heatwave_8day:sst_mosaic`` — the colon separates the
+    ``satellite_austemp_heatwave_14day:sst_mosaic`` — the colon separates the
     Zarr store name (from ``source_path``) from the variable it exposes,
     since both may themselves contain underscores. Multi-variable products
     join variables with ``+`` in ``variable`` array order, e.g.

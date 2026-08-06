@@ -298,9 +298,9 @@ def test_log_rejections_breaks_counts_down_by_cause(stores, caplog):
 
 def test_legacy_product_ids_are_the_five_in_production_use():
     assert LEGACY_PRODUCT_IDS == {
-        "satellite_austemp_heatwave_8day:sst_mosaic",
-        "satellite_austemp_heatwave_8day:ssta_mosaic",
-        "satellite_austemp_heatwave_8day:mcs_category",
+        "satellite_austemp_heatwave_14day:sst_mosaic",
+        "satellite_austemp_heatwave_14day:ssta_mosaic",
+        "satellite_austemp_heatwave_14day:mcs_category",
         "model_sea_level_anomaly_gridded_realtime:gsla",
         "model_sea_level_anomaly_gridded_realtime:ucur+vcur",
     }
