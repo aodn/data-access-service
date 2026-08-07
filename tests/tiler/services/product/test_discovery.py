@@ -346,9 +346,9 @@ def test_override_matching_is_per_specification_not_global():
     assert unmatched_overrides(candidates, entries) == [("['UCUR', 'VCUR']", "a.zarr")]
 
 
-# --- the five existing public product IDs -----------------------------------
+# --- the five product IDs that predate derivation ---------------------------
 
-LEGACY_INDEX = {
+ORIGINAL_INDEX = {
     "2ffccdad-1197-4e41-b412-a9033517cfb2": {
         "satellite_austemp_heatwave_14day.zarr": frozenset(
             {"sst_mosaic", "ssta_mosaic", "MCS_category"}
@@ -366,7 +366,7 @@ LEGACY_INDEX = {
 # expectation would not. The heatwave ids track the store's current name: it was
 # renamed upstream from _8day to _14day, which is what broke the hand-written
 # config these products used to come from.
-LEGACY_PRODUCT_IDS_PINNED = [
+ORIGINAL_PRODUCT_IDS = [
     "satellite_austemp_heatwave_14day:sst_mosaic",
     "satellite_austemp_heatwave_14day:ssta_mosaic",
     "satellite_austemp_heatwave_14day:mcs_category",
@@ -374,7 +374,7 @@ LEGACY_PRODUCT_IDS_PINNED = [
     "model_sea_level_anomaly_gridded_realtime:ucur+vcur",
 ]
 
-LEGACY_CONFIG = [
+ORIGINAL_CONFIG = [
     {
         "variable": "GSLA",
         "defaults": {"data_tile": {"coastal_fill": {"max_dist_px": 4}}},
@@ -393,24 +393,14 @@ LEGACY_CONFIG = [
 ]
 
 
-def test_pinned_ids_match_the_constant_the_startup_gate_uses():
-    """The literals above are an independent pin on the derivation formula; the
-    constant is what fails a boot. They only stay honest if they agree."""
-    from data_access_service.tiler.services.product.verification import (
-        LEGACY_PRODUCT_IDS,
-    )
-
-    assert set(LEGACY_PRODUCT_IDS) == set(LEGACY_PRODUCT_IDS_PINNED)
-
-
 def test_five_existing_product_ids_reproduce_byte_for_byte():
-    candidates = _build(LEGACY_INDEX, LEGACY_CONFIG)
-    for pid in LEGACY_PRODUCT_IDS_PINNED:
-        assert pid in candidates, f"legacy product id {pid} was not derived"
+    candidates = _build(ORIGINAL_INDEX, ORIGINAL_CONFIG)
+    for pid in ORIGINAL_PRODUCT_IDS:
+        assert pid in candidates, f"original product id {pid} was not derived"
 
 
-def test_legacy_products_keep_their_correctness_settings():
-    candidates = _build(LEGACY_INDEX, LEGACY_CONFIG)
+def test_original_products_keep_their_correctness_settings():
+    candidates = _build(ORIGINAL_INDEX, ORIGINAL_CONFIG)
 
     gsla = candidates["model_sea_level_anomaly_gridded_realtime:gsla"]
     assert gsla.data_tile.coastal_fill.max_dist_px == 4
@@ -422,8 +412,8 @@ def test_legacy_products_keep_their_correctness_settings():
     assert currents.visual is False
 
 
-def test_legacy_products_keep_their_metadata_uuids():
-    candidates = _build(LEGACY_INDEX, LEGACY_CONFIG)
+def test_original_products_keep_their_metadata_uuids():
+    candidates = _build(ORIGINAL_INDEX, ORIGINAL_CONFIG)
     assert (
         candidates["satellite_austemp_heatwave_14day:sst_mosaic"].metadata_uuid
         == "2ffccdad-1197-4e41-b412-a9033517cfb2"
@@ -434,10 +424,10 @@ def test_legacy_products_keep_their_metadata_uuids():
     )
 
 
-def test_legacy_source_paths_are_canonicalised():
+def test_original_source_paths_are_canonicalised():
     """Intended change: today's two SLA entries carry a trailing slash. The IDs
     are what clients key on and those are unchanged."""
-    candidates = _build(LEGACY_INDEX, LEGACY_CONFIG)
+    candidates = _build(ORIGINAL_INDEX, ORIGINAL_CONFIG)
     assert (
         candidates["model_sea_level_anomaly_gridded_realtime:gsla"].source_path
         == f"{BASE_URL}/model_sea_level_anomaly_gridded_realtime.zarr"

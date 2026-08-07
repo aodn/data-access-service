@@ -1,10 +1,9 @@
 """Candidate verification against the stores that actually opened.
 
 Two things are being pinned here. The guards are per *product*, so one bad
-variable must not take out its siblings on the same store. And the store-level
-policy is graded, because uniformly fatal is right at two stores and wrong at
-sixty — one flaky S3 endpoint would otherwise take the five products that work
-today to a permanent 503.
+variable must not take out its siblings on the same store. And a store failure
+is classified by what the store said, never by which products sit on it — no
+product is privileged, so nothing here can take the whole tiler down.
 """
 
 import numpy as np
@@ -14,7 +13,6 @@ import xarray as xr
 from data_access_service.tiler.services.product import verification
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.product.verification import (
-    LEGACY_PRODUCT_IDS,
     NO_TIME_DIMENSION,
     NOT_GRIDDED,
     STORE_ABSENT,
@@ -123,11 +121,11 @@ def test_absent_store_drops_every_candidate_on_it(stores):
     assert result.unresolved_stores == []
 
 
-def test_absent_store_backing_a_legacy_product_is_not_fatal_here(stores):
-    """Verification drops it; the boot still fails, but at the legacy gate,
-    which names the product that went missing rather than just its store."""
-    legacy_id = "model_sea_level_anomaly_gridded_realtime:gsla"
-    candidates = {legacy_id: _product(legacy_id, variable="GSLA")}
+def test_absent_store_is_dropped_whatever_the_product_id(stores):
+    """A long-standing product id gets no special treatment: its store is gone,
+    so the product is dropped and named like any other."""
+    pid = "model_sea_level_anomaly_gridded_realtime:gsla"
+    candidates = {pid: _product(pid, variable="GSLA")}
 
     result = verify_candidate_products(
         candidates, {GRID: FileNotFoundError("No such file")}
@@ -135,6 +133,7 @@ def test_absent_store_backing_a_legacy_product_is_not_fatal_here(stores):
 
     assert result.products == {}
     assert result.rejections[0].category == STORE_ABSENT
+    assert result.rejections[0].product_id == pid
 
 
 # --- guard 1: variable presence --------------------------------------------
@@ -222,23 +221,24 @@ def test_unresolved_store_keeps_its_candidates_and_logs_at_error(stores, caplog)
     assert any(r.levelname == "ERROR" for r in caplog.records)
 
 
-def test_unresolved_store_backing_a_legacy_product_is_fatal(stores):
-    legacy_id = "model_sea_level_anomaly_gridded_realtime:gsla"
-    candidates = {
-        legacy_id: _product(legacy_id, variable="GSLA"),
-    }
+def test_no_product_id_makes_an_unresolved_store_fatal(stores):
+    """Verification never raises on a store failure. An unresolved store degrades
+    its own products and nothing else, however long-standing they are."""
+    pid = "model_sea_level_anomaly_gridded_realtime:gsla"
+    candidates = {pid: _product(pid, variable="GSLA")}
 
-    with pytest.raises(RuntimeError, match=legacy_id):
-        verify_candidate_products(candidates, {GRID: RuntimeError("s3 down")})
+    result = verify_candidate_products(candidates, {GRID: RuntimeError("s3 down")})
+
+    assert set(result.products) == {pid}
+    assert result.unresolved_stores == [GRID]
 
 
-def test_a_legacy_product_elsewhere_does_not_make_another_store_fatal(stores):
-    """Only the store that failed matters. A healthy legacy product on a
-    different store must not turn an unrelated degradation into an outage."""
-    legacy_id = "model_sea_level_anomaly_gridded_realtime:gsla"
+def test_degradation_is_scoped_to_the_store_that_failed(stores):
+    """Only the store that failed matters; a healthy store's products are
+    untouched by an unrelated degradation."""
     stores[GRID] = _dataset(("GSLA",))
     candidates = {
-        legacy_id: _product(legacy_id, variable="GSLA"),
+        "sla:gsla": _product("sla:gsla", variable="GSLA"),
         "radar:sst": _product("radar:sst", source_path=OTHER),
     }
 
@@ -246,7 +246,7 @@ def test_a_legacy_product_elsewhere_does_not_make_another_store_fatal(stores):
         candidates, {GRID: None, OTHER: RuntimeError("s3 down")}
     )
 
-    assert set(result.products) == {legacy_id, "radar:sst"}
+    assert set(result.products) == {"sla:gsla", "radar:sst"}
     assert result.unresolved_stores == [OTHER]
 
 
@@ -294,13 +294,3 @@ def test_log_rejections_breaks_counts_down_by_cause(stores, caplog):
     )
     # One line per dropped product, naming it.
     assert any("a:gone" in r.getMessage() for r in caplog.records)
-
-
-def test_legacy_product_ids_are_the_five_in_production_use():
-    assert LEGACY_PRODUCT_IDS == {
-        "satellite_austemp_heatwave_14day:sst_mosaic",
-        "satellite_austemp_heatwave_14day:ssta_mosaic",
-        "satellite_austemp_heatwave_14day:mcs_category",
-        "model_sea_level_anomaly_gridded_realtime:gsla",
-        "model_sea_level_anomaly_gridded_realtime:ucur+vcur",
-    }

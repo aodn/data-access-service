@@ -1,130 +1,19 @@
-"""Tiler warmup sequencing, readiness, and the legacy-product startup gate.
+"""Tiler warmup sequencing and readiness.
 
 The shape being defended: nothing is published before it is verified, and every
 fatal path leaves the tiler unready rather than serving a catalogue that is
-quietly wrong. A tiler that boots ready with a live product silently missing is
-the failure this whole design exists to make loud.
+quietly wrong. No product is privileged here — that the original five ids still
+derive correctly is pinned against the derivation formula in test_discovery.
 """
 
 import asyncio
-import re
 
 import pytest
 
 from data_access_service.core.tiler_routes import shared, startup
-from data_access_service.core.tiler_routes.startup import (
-    assert_legacy_products_intact,
-    run_tiler_warmup,
-)
-from data_access_service.tiler.services.product.product import (
-    CoastalFill,
-    DataTileConfig,
-    Product,
-)
-from data_access_service.tiler.services.product.verification import (
-    LEGACY_PRODUCT_IDS,
-    VerificationResult,
-)
-
-GSLA_ID = "model_sea_level_anomaly_gridded_realtime:gsla"
-CURRENTS_ID = "model_sea_level_anomaly_gridded_realtime:ucur+vcur"
-
-
-def _legacy_catalogue() -> dict[str, Product]:
-    """All five legacy products, intact, as a healthy boot would produce them."""
-    products = {
-        pid: Product(
-            id=pid,
-            source_path=f"s3://b/{pid.split(':')[0]}.zarr",
-            variable=pid.split(":")[1],
-        )
-        for pid in LEGACY_PRODUCT_IDS
-    }
-    products[GSLA_ID] = Product(
-        id=GSLA_ID,
-        source_path="s3://b/model_sea_level_anomaly_gridded_realtime.zarr",
-        variable="GSLA",
-        data_tile=DataTileConfig(coastal_fill=CoastalFill(max_dist_px=4)),
-    )
-    products[CURRENTS_ID] = Product(
-        id=CURRENTS_ID,
-        source_path="s3://b/model_sea_level_anomaly_gridded_realtime.zarr",
-        variable=["UCUR", "VCUR"],
-        ocean_masked=True,
-        visual=False,
-    )
-    return products
-
-
-# --- assert_legacy_products_intact ------------------------------------------
-
-
-def test_passes_on_a_catalogue_with_all_five_intact():
-    assert_legacy_products_intact(_legacy_catalogue())
-
-
-def test_extra_derived_products_do_not_disturb_the_gate():
-    catalogue = _legacy_catalogue()
-    catalogue["radar_site:ucur+vcur"] = Product(
-        id="radar_site:ucur+vcur",
-        source_path="s3://b/radar_site.zarr",
-        variable=["UCUR", "VCUR"],
-    )
-    assert_legacy_products_intact(catalogue)
-
-
-@pytest.mark.parametrize("missing_id", sorted(LEGACY_PRODUCT_IDS))
-def test_raises_when_any_legacy_id_is_missing(missing_id):
-    """A variable can still match other datasets while its original dataset is
-    dropped, leaving a large, healthy-looking catalogue with a live product
-    silently gone from the portal."""
-    catalogue = _legacy_catalogue()
-    del catalogue[missing_id]
-
-    # re.escape: the vector product's id contains a literal '+'.
-    with pytest.raises(RuntimeError, match=re.escape(missing_id)):
-        assert_legacy_products_intact(catalogue)
-
-
-def test_raises_when_gsla_lost_its_coastal_fill():
-    catalogue = _legacy_catalogue()
-    catalogue[GSLA_ID] = Product(
-        id=GSLA_ID,
-        source_path="s3://b/model_sea_level_anomaly_gridded_realtime.zarr",
-        variable="GSLA",
-    )
-
-    with pytest.raises(RuntimeError, match="coastal_fill"):
-        assert_legacy_products_intact(catalogue)
-
-
-def test_raises_when_gsla_coastal_fill_distance_changed():
-    catalogue = _legacy_catalogue()
-    catalogue[GSLA_ID] = Product(
-        id=GSLA_ID,
-        source_path="s3://b/model_sea_level_anomaly_gridded_realtime.zarr",
-        variable="GSLA",
-        data_tile=DataTileConfig(coastal_fill=CoastalFill(max_dist_px=9)),
-    )
-
-    with pytest.raises(RuntimeError, match="coastal_fill"):
-        assert_legacy_products_intact(catalogue)
-
-
-def test_raises_when_currents_lost_ocean_masked():
-    """The dataset override is the only thing applying the mask; if its key
-    stops matching, the product renders wrong rather than failing."""
-    catalogue = _legacy_catalogue()
-    catalogue[CURRENTS_ID] = Product(
-        id=CURRENTS_ID,
-        source_path="s3://b/model_sea_level_anomaly_gridded_realtime.zarr",
-        variable=["UCUR", "VCUR"],
-        ocean_masked=False,
-    )
-
-    with pytest.raises(RuntimeError, match="ocean_masked"):
-        assert_legacy_products_intact(catalogue)
-
+from data_access_service.core.tiler_routes.startup import run_tiler_warmup
+from data_access_service.tiler.services.product.product import Product
+from data_access_service.tiler.services.product.verification import VerificationResult
 
 # --- warmup sequencing ------------------------------------------------------
 
@@ -196,7 +85,6 @@ def warmup_env(monkeypatch):
     monkeypatch.setattr(startup, "verify_candidate_products", fake_verify)
     monkeypatch.setattr(startup, "publish_products", fake_publish)
     monkeypatch.setattr(startup, "mark_tiler_ready", fake_mark_ready)
-    monkeypatch.setattr(startup, "assert_legacy_products_intact", record("legacy_gate"))
 
     return calls, state
 
@@ -211,7 +99,6 @@ async def test_happy_path_publishes_then_marks_ready(warmup_env):
     # Verification precedes publication precedes readiness.
     assert calls.index("prewarm") < calls.index("verify")
     assert calls.index("verify") < calls.index("publish")
-    assert calls.index("legacy_gate") < calls.index("publish")
     assert calls.index("publish") < calls.index("mark_ready")
 
 
@@ -264,25 +151,6 @@ async def test_verification_dropping_everything_leaves_the_tiler_unready(
     assert state["ready"] is False
     assert state["published"] is None
     assert "publish" not in calls
-
-
-@pytest.mark.asyncio
-async def test_legacy_gate_failure_prevents_publication(
-    warmup_env, monkeypatch, caplog
-):
-    calls, state = warmup_env
-
-    def boom(products):
-        raise RuntimeError("legacy product missing")
-
-    monkeypatch.setattr(startup, "assert_legacy_products_intact", boom)
-
-    with caplog.at_level("CRITICAL"):
-        await run_tiler_warmup(FakeAPI())
-
-    assert state["ready"] is False
-    assert "publish" not in calls
-    assert any("Tiler warmup failed" in r.message for r in caplog.records)
 
 
 @pytest.mark.asyncio

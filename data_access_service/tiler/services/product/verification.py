@@ -2,7 +2,8 @@
 
 Discovery matches configured variables against *catalogue* metadata. This module
 is where those candidates meet the real store schema, and where a store that
-failed to open gets graded rather than uniformly treated as fatal.
+failed to open is classified: confirmed answers drop their candidates, while
+operational uncertainty degrades them without taking the tiler down.
 
 Phase 1 runs two O(1) guards per candidate — the variable exists, the store is
 time-indexed — plus the store-level lat/lon grid check ``_open_store`` already
@@ -24,29 +25,6 @@ from data_access_service.tiler.services.store.registry import (
 )
 
 logger = logging.getLogger(__name__)
-
-# The five products that predate derivation and are in production use. They are
-# load-bearing in two places: a store failure affecting one is fatal rather than
-# a degradation, and startup asserts all five survived derivation before
-# publishing anything. Kept here, next to both consumers, so the two cannot
-# drift apart.
-#
-# The three heatwave ids name `_14day`, not the `_8day` they had when the tiler
-# first shipped. Upstream renamed the store (same five variables, same data),
-# which broke the hand-written products.json entries that hard-coded the old
-# path -- those three products 404 in production today. That rename is exactly
-# the failure deriving products from live metadata exists to prevent, and it is
-# why these ids are pinned to what the catalogue currently says rather than to
-# what the frontend once cached.
-LEGACY_PRODUCT_IDS = frozenset(
-    {
-        "satellite_austemp_heatwave_14day:sst_mosaic",
-        "satellite_austemp_heatwave_14day:ssta_mosaic",
-        "satellite_austemp_heatwave_14day:mcs_category",
-        "model_sea_level_anomaly_gridded_realtime:gsla",
-        "model_sea_level_anomaly_gridded_realtime:ucur+vcur",
-    }
-)
 
 # Rejection categories, so the startup log can break counts down by cause. A
 # non-zero VARIABLE_ABSENT count is the one worth stopping on: it means the
@@ -130,16 +108,18 @@ def verify_candidate_products(
 ) -> VerificationResult:
     """Drop candidates their store cannot support; grade stores that never opened.
 
-    Store-level outcomes are graded rather than uniformly fatal. Treating any
-    unresolved store as fatal is right at two stores and wrong at sixty: one
-    flaky S3 endpoint would take the whole tiler — including the five products
-    that work today — to a permanent 503.
+    No store is special. A store failure is classified by what the store said,
+    never by which products happen to sit on it:
 
       * confirmed non-grid store -> drop every candidate on it;
       * store that does not exist -> drop every candidate on it;
-      * unresolved store backing a legacy product -> fatal;
-      * any other unresolved store -> keep its candidates, log at ERROR;
+      * unresolved store -> keep its candidates, log at ERROR;
       * opened store -> run the two per-candidate guards.
+
+    Treating any unresolved store as fatal is right at two stores and wrong at
+    sixty: one flaky S3 endpoint would take the whole tiler to a permanent 503.
+    Unresolved candidates stay registered because StoreRegistry.get does not
+    cache the failure, so the first real request re-attempts the open.
 
     Rejections are per product, so a bad variable on one product leaves its
     siblings on the same store published.
@@ -169,11 +149,10 @@ def verify_candidate_products(
             continue
 
         if isinstance(outcome, FileNotFoundError):
-            # A confirmed absence, not operational uncertainty. Dropping the
-            # candidates rather than keeping them degraded means a legacy
-            # product on this store is reported by the name it lost, via
-            # assert_legacy_products_intact, instead of as a vaguer "store could
-            # not be opened".
+            # A confirmed absence, not operational uncertainty: there is
+            # nothing to recover on a later request, so the candidates are
+            # dropped and named rather than kept in a degraded state that would
+            # never resolve.
             rejections.append(
                 Rejection(
                     product_id=product_id,
@@ -217,22 +196,15 @@ def verify_candidate_products(
 
 
 def _grade_unresolved_stores(unresolved: Mapping[str, list[str]]) -> None:
-    """Fatal if a legacy product's store is unresolved; degrade otherwise."""
+    """Report stores that stayed operationally unknown after prewarm's retries.
+
+    Never fatal. The products stay registered: ``StoreRegistry.get`` discards the
+    per-URL future in ``finally``, so it does not cache the failure and the first
+    real request re-attempts the open. Reporting it at ERROR with a count is what
+    makes the degradation monitorable rather than silent.
+    """
     if not unresolved:
         return
-
-    blocked_legacy = sorted(
-        product_id
-        for product_ids in unresolved.values()
-        for product_id in product_ids
-        if product_id in LEGACY_PRODUCT_IDS
-    )
-    if blocked_legacy:
-        raise RuntimeError(
-            "Store(s) backing product(s) already in production use could not be "
-            f"opened: {', '.join(blocked_legacy)}. Refusing to mark the tiler "
-            "ready without them."
-        )
 
     degraded = sum(len(ids) for ids in unresolved.values())
     logger.error(

@@ -138,6 +138,61 @@ def test_route_fails_only_when_no_store_resolves(client, catalogue, monkeypatch)
     assert response.status_code == 503
 
 
+def test_total_failure_of_absent_stores_is_a_404_naming_them(
+    client, catalogue, monkeypatch
+):
+    """A store that is *absent* is a different answer from one that could not be
+    reached. When every store is absent the app's FileNotFoundError handler
+    answers 404 with the path, rather than a generic "try again later"."""
+    _patch_dates(
+        monkeypatch,
+        {
+            STORE_A: FileNotFoundError(f"No such file or directory: '{STORE_A}'"),
+            STORE_B: FileNotFoundError(f"No such file or directory: '{STORE_B}'"),
+        },
+    )
+
+    response = client.get(MANIFEST)
+
+    assert response.status_code == 404
+    assert STORE_A in response.json()["detail"]
+
+
+def test_mixed_total_failure_prefers_the_retryable_answer(
+    client, catalogue, monkeypatch
+):
+    """One absent store and one unreachable store is not proof the data is gone,
+    so the answer stays 503."""
+    _patch_dates(
+        monkeypatch,
+        {
+            STORE_A: FileNotFoundError(f"No such file or directory: '{STORE_A}'"),
+            STORE_B: RuntimeError("s3 unreachable"),
+        },
+    )
+
+    assert client.get(MANIFEST).status_code == 503
+
+
+def test_one_absent_store_among_healthy_ones_still_yields_200(
+    client, catalogue, monkeypatch
+):
+    """Isolation wins over the 404: the rest of the catalogue is still answerable."""
+    _patch_dates(
+        monkeypatch,
+        {
+            STORE_A: FileNotFoundError(f"No such file or directory: '{STORE_A}'"),
+            STORE_B: ["2024-02-01"],
+        },
+    )
+
+    response = client.get(MANIFEST)
+
+    assert response.status_code == 200
+    assert response.json()["products"]["a:one"]["available_dates"] == []
+    assert response.json()["products"]["b:one"]["available_dates"] == ["2024-02-01"]
+
+
 def test_date_filters_still_apply_to_healthy_stores(client, catalogue, monkeypatch):
     _patch_dates(
         monkeypatch,

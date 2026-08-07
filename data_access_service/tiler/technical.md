@@ -837,7 +837,8 @@ async def run_tiler_warmup(api: API) -> None:
             sorted({p.source_path for p in candidates.values()}))
         result = verify_candidate_products(candidates, outcomes)
         result.log_rejections()
-        assert_legacy_products_intact(result.products)    # raises -> stays unready
+        if not result.products:                           # never publish nothing
+            raise RuntimeError("No tiler-compatible products were discovered")
 
         publish_products(result.products)
         mark_tiler_ready()
@@ -851,10 +852,6 @@ It deliberately waits for the non-tiler API's own startup before doing tiler wor
 
 **Nothing is published before it is verified**, and every fatal branch exits without `mark_tiler_ready()`, so the failure mode is a 503 rather than a catalogue that is quietly wrong. The `CancelledError` re-raise matters because warmup runs as a lifespan task whose result is never awaited — without it, every shutdown would be logged as a warmup failure.
 
-#### The legacy-product startup gate
-
-`assert_legacy_products_intact` checks, immediately before publication, that the five product ids that predate derivation are present and still carry their correctness-bearing settings (`gsla`'s `coastal_fill`, `ucur+vcur`'s `ocean_masked`). Pinning those ids in a unit test proves the derivation *formula* is right; it cannot prove they survived a given boot. A variable can still match other datasets while its original dataset is dropped — by a rename, a metadata gap, a failed store open, a rejected guard — leaving a large, healthy-looking catalogue that boots ready with a live product silently missing from the portal. The list lives in `services/product/verification.py` next to the graded policy that also consumes it.
-
 #### Verification and the graded store-failure policy
 
 `verify_candidate_products` runs two O(1) guards per candidate against the dataset prewarm already opened — the variable exists, and the store has a `time` dimension — and grades store-level failures rather than treating them uniformly:
@@ -864,8 +861,7 @@ It deliberately waits for the non-tiler API's own startup before doing tiler wor
 | Opened successfully                          | Run the two guards; a failure drops **only** that product           |
 | `NotGriddedStoreError` (no lat/lon dims)     | Drop every candidate on that store, logged at INFO                  |
 | `FileNotFoundError` (store is not there)     | Drop every candidate on that store, logged at WARNING               |
-| Unresolved, backing a legacy product id      | Fatal — warmup fails and the tiler stays at 503                     |
-| Unresolved, any other store                  | Keep its candidates, log at ERROR; recovers on the first request    |
+| Unresolved (any store)                       | Keep its candidates, log at ERROR; recovers on the first request    |
 
 Absence is graded with the *confirmed* answers rather than the operational ones,
 and is not retried: the bucket said "not there", which will not change on a
@@ -873,11 +869,10 @@ second attempt. It is logged at WARNING rather than INFO because, unlike a
 non-grid store, it is never an intentional exclusion — the usual cause is an
 upstream rename the metadata catalogue has not caught up with, leaving the
 catalogue advertising a store that no longer exists. Dropping its candidates
-rather than keeping them degraded means a *legacy* product on such a store is
-reported by name at the legacy gate below, instead of as a vaguer "store could
-not be opened".
+rather than keeping them degraded names the affected products in the rejection
+log, instead of leaving them registered in a state that would never resolve.
 
-Uniformly fatal was right at 2 stores and wrong at 60: one flaky S3 endpoint would take the whole tiler — including the five products that work today — to a permanent 503. Keeping unresolved-store products registered is only safe because the availability manifest is fault-isolated per store (see [§6.1](#61-shared-endpoints-mounted-under-both-data_tiles-and-visual_tiles)); otherwise one bad store would fail `/manifest`, and ogcapi-java fetches that on every collection-products call.
+No store is special: the outcome is decided by what the store said, never by which products happen to sit on it. Uniformly fatal would be right at 2 stores and wrong at 60 — one flaky S3 endpoint would take the whole tiler to a permanent 503. Keeping unresolved-store products registered is only safe because the availability manifest is fault-isolated per store (see [§6.1](#61-shared-endpoints-mounted-under-both-data_tiles-and-visual_tiles)); otherwise one bad store would fail `/manifest`, and ogcapi-java fetches that on every collection-products call.
 
 Phase 1 deliberately checks *presence* and *time-indexability* only — not dimensions, dtype, or pair-shape compatibility. The curated variable list in `gridded_variables.json` is the phase-1 authority on renderability; per-variable proof is a later step that slots in behind this same call site.
 

@@ -137,19 +137,26 @@ def _available_dates_per_store(store_urls: set[str]) -> dict[str, list[str]]:
     availability for its own products while every other product is unaffected.
     """
     resolved: dict[str, list[str]] = {}
-    failures: list[str] = []
+    failures: dict[str, Exception] = {}
 
     for store_url in sorted(store_urls):
         try:
             resolved[store_url] = get_available_dates(store_url)
-        except Exception:
+        except Exception as e:
             logger.exception(f"Availability lookup failed for store: {store_url}")
             resolved[store_url] = []
-            failures.append(store_url)
+            failures[store_url] = e
 
-    # Only a total failure is worth a 5xx. Anything less is a partial answer,
-    # and a partial answer is what the isolation above exists to preserve.
+    # Only a total failure is worth an error status. Anything less is a partial
+    # answer, and a partial answer is what the isolation above exists to preserve.
     if failures and len(failures) == len(store_urls):
+        # A store that is *absent* is a different answer from one that could not
+        # be reached, and the difference is worth keeping on the wire. Re-raise
+        # so the app's FileNotFoundError handler answers 404 naming the store,
+        # rather than flattening it into a generic "try again later".
+        first = next(iter(failures.values()))
+        if all(isinstance(e, FileNotFoundError) for e in failures.values()):
+            raise first
         raise HTTPException(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             detail="No product store could be opened; availability is unknown.",
@@ -160,7 +167,7 @@ def _available_dates_per_store(store_urls: set[str]) -> dict[str, list[str]]:
             "empty date ranges: %s",
             len(failures),
             len(store_urls),
-            ", ".join(failures),
+            ", ".join(sorted(failures)),
         )
     return resolved
 
