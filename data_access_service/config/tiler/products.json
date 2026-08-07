@@ -31,7 +31,10 @@
   {
     "id": "model_sea_level_anomaly_gridded_realtime:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/model_sea_level_anomaly_gridded_realtime.zarr/",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "0c9eb39c-9cbe-4c6a-8a10-5867087e703a"
   },
   {
@@ -43,109 +46,163 @@
   {
     "id": "radar_BonneyCoast_velocity_hourly_averaged_delayed_qc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_BonneyCoast_velocity_hourly_averaged_delayed_qc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "38dd003d-2f71-4715-bd3f-4b1cfdce391d"
   },
   {
     "id": "radar_BonneyCoast_velocity_hourly_averaged_realtime_nonqc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_BonneyCoast_velocity_hourly_averaged_realtime_nonqc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "4a1608ab-ebdd-4f98-93c3-15f2da87bfa0"
   },
   {
     "id": "radar_CapricornBunkerGroup_velocity_hourly_averaged_delayed_qc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_CapricornBunkerGroup_velocity_hourly_averaged_delayed_qc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "8a2d2824-0557-4110-a561-01ec35a9583d"
   },
   {
     "id": "radar_CapricornBunkerGroup_velocity_hourly_averaged_realtime_nonqc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_CapricornBunkerGroup_velocity_hourly_averaged_realtime_nonqc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "422db51d-596c-4d1c-86a0-b89413c5187e"
   },
   {
     "id": "radar_CoffsHarbour_velocity_hourly_averaged_delayed_qc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_CoffsHarbour_velocity_hourly_averaged_delayed_qc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "85da1645-2c63-45fa-97b5-4125165b999d"
   },
   {
     "id": "radar_CoffsHarbour_velocity_hourly_averaged_realtime_nonqc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_CoffsHarbour_velocity_hourly_averaged_realtime_nonqc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "82bc6673-c9cb-4afc-8b5d-0e65b097bfdc"
   },
   {
     "id": "radar_CoralCoast_velocity_hourly_averaged_delayed_qc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_CoralCoast_velocity_hourly_averaged_delayed_qc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "f7b36a1c-0936-4da6-b47f-94ed538b367e"
   },
   {
     "id": "radar_CoralCoast_velocity_hourly_averaged_realtime_nonqc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_CoralCoast_velocity_hourly_averaged_realtime_nonqc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "0dd3832a-cf67-4068-a446-a9c91c77273e"
   },
   {
     "id": "radar_Newcastle_velocity_hourly_averaged_delayed_qc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_Newcastle_velocity_hourly_averaged_delayed_qc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "6dca1f8a-8337-4551-ac4b-a2d35ec6f333"
   },
   {
     "id": "radar_Newcastle_velocity_hourly_averaged_realtime_nonqc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_Newcastle_velocity_hourly_averaged_realtime_nonqc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "e952bcee-79e7-4995-91ad-a7e6408d29ce"
   },
   {
     "id": "radar_NorthWestShelf_velocity_hourly_averaged_delayed_qc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_NorthWestShelf_velocity_hourly_averaged_delayed_qc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "23c27e4f-c982-44e9-9ab7-71094d297549"
   },
   {
     "id": "radar_NorthWestShelf_velocity_hourly_averaged_realtime_nonqc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_NorthWestShelf_velocity_hourly_averaged_realtime_nonqc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "ba9110f1-072c-4d15-8328-2091be983991"
   },
   {
     "id": "radar_RottnestShelf_velocity_hourly_averaged_delayed_qc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_RottnestShelf_velocity_hourly_averaged_delayed_qc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "028b9801-279f-427c-964b-0ffcdf310b59"
   },
   {
     "id": "radar_RottnestShelf_velocity_hourly_averaged_realtime_nonqc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_RottnestShelf_velocity_hourly_averaged_realtime_nonqc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "8b469535-eb48-4f1f-9612-bdf2e83cdce8"
   },
   {
     "id": "radar_SouthAustraliaGulfs_velocity_hourly_averaged_delayed_qc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_SouthAustraliaGulfs_velocity_hourly_averaged_delayed_qc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "cb2e22b5-ebb9-460b-8cff-b446fe14ea2f"
   },
   {
     "id": "radar_SouthAustraliaGulfs_velocity_hourly_averaged_realtime_nonqc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_SouthAustraliaGulfs_velocity_hourly_averaged_realtime_nonqc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "d83ef640-827e-4990-8c35-7c1a1aa587a9"
   },
   {
     "id": "radar_TurquoiseCoast_velocity_hourly_averaged_delayed_qc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_TurquoiseCoast_velocity_hourly_averaged_delayed_qc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "055342fc-f970-4be7-a764-8903220d42fb"
   },
   {
     "id": "radar_TurquoiseCoast_velocity_hourly_averaged_realtime_nonqc:ucur+vcur",
     "source_path": "s3://aodn-cloud-optimised/radar_TurquoiseCoast_velocity_hourly_averaged_realtime_nonqc.zarr",
-    "variable": ["UCUR", "VCUR"],
+    "variable": [
+      "UCUR",
+      "VCUR"
+    ],
     "metadata_uuid": "52f09a23-63a2-4c14-8b3b-1fc7c8167281"
   },
   {
