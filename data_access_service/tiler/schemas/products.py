@@ -28,9 +28,9 @@ class DataTileConfig(BaseModel):
     ``product.DataTileConfig`` for the runtime counterpart this mirrors.
 
     One shape serves both directions: validating the optional "data_tile"
-    block in products.json (chunk_px/padding fall back to the same defaults
-    Product itself uses when omitted — see registry._from_dict) and
-    serializing it for GET /products. extra="forbid" catches config typos.
+    block of a gridded_variables.json entry (chunk_px/padding fall back to the
+    same defaults Product itself uses when omitted) and serializing it for
+    GET /products. extra="forbid" catches config typos.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -52,12 +52,11 @@ class VisualTileConfig(BaseModel):
 
 
 class ProductConfig(BaseModel):
-    """The resolved configuration of a product: validated straight from a
-    products.json entry on load (see registry._from_dict — id-dependent
-    defaults like ocean_masked are resolved just before validation, everything
-    else defaults on the model itself), and serialized for GET /products from
-    a live Product (see from_product). One shape, two directions —
-    extra="forbid" catches config typos on the way in.
+    """The resolved configuration of a product, serialized for GET /products
+    from a live Product (see from_product). Products themselves are derived at
+    startup from the metadata catalogue and gridded_variables.json rather than
+    written out one by one, so this is now a wire model first — extra="forbid"
+    still guards it against drifting from Product.
 
     Served identically at both /tiler/data_tiles/products and
     /tiler/visual_tiles/products — data_tile/visual_tile are nested (rather
@@ -77,6 +76,11 @@ class ProductConfig(BaseModel):
     # Links this product to its GeoNetwork/STAC collection UUID. Null when absent.
     metadata_uuid: str | None = None
     ocean_masked: bool
+    # Whether /visual_tiles can render this product. Required rather than
+    # defaulted: ogcapi-java keys its published tile_types on this field, so
+    # GET /products must never omit it and leave the consumer guessing from
+    # variable arity. from_product supplies it from the resolved Product.
+    visual: bool
     data_tile: DataTileConfig = Field(default_factory=DataTileConfig)
     visual_tile: VisualTileConfig = Field(default_factory=VisualTileConfig)
 
@@ -88,6 +92,7 @@ class ProductConfig(BaseModel):
             variable=product.variable,
             metadata_uuid=product.metadata_uuid,
             ocean_masked=product.ocean_masked,
+            visual=product.visual,
             data_tile=DataTileConfig(
                 chunk_px=product.data_tile.chunk_px,
                 padding=product.data_tile.padding,

@@ -40,12 +40,12 @@ from .products import router as products_router
 from .shared import (
     DATE_EX,
     PRODUCT_EX,
-    get_product_or_404,
     load_slice_or_404,
     parse_rescale,
     resolve_colormap_or_error,
     single_variable_or_400,
     validate_date,
+    visual_product_or_400,
 )
 
 _MAX_ANIMATION_FRAMES = 30
@@ -159,7 +159,7 @@ def get_tile(
 ):
     if colormap_name is not None:
         resolve_colormap_or_error(colormap_name)
-    product = get_product_or_404(product_id)
+    product = visual_product_or_400(product_id)
     validate_date(date)
     variable = single_variable_or_400(product, context="visual tiles")
 
@@ -423,7 +423,7 @@ def get_bbox(
 ):
     if colormap_name is not None:
         resolve_colormap_or_error(colormap_name)
-    product = get_product_or_404(product_id)
+    product = visual_product_or_400(product_id)
     validate_date(date)
     variable = single_variable_or_400(product, context="visual tiles")
 
@@ -575,7 +575,7 @@ async def get_animation(
 
     if colormap_name is not None:
         resolve_colormap_or_error(colormap_name)
-    product = get_product_or_404(product_id)
+    product = visual_product_or_400(product_id)
     variable = single_variable_or_400(product, context="animation")
 
     # Offloaded: each may call get_store, which can block on xr.open_zarr on

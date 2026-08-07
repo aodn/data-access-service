@@ -13,15 +13,17 @@ instead of converting every timestamp on the hot path.
 import asyncio
 import concurrent.futures
 import logging
+import random
 import threading
 import time
 
 import anyio
+import pandas as pd
 import xarray as xr
 
 from data_access_service.config.config import Config
 from data_access_service.config.tiler.constants import COORD_NAMES
-from data_access_service.tiler.utils.dates import ts_to_local_date
+from data_access_service.tiler.utils.dates import DATE_FMT, LOCAL_TZ
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,20 @@ _STORE_TTL = float(_tiler_config.store_ttl_seconds)
 # connection ceiling, not CPU. Runs on the shared anyio pool but a separate
 # budget so a many-product startup can't transiently consume tile-handler slots.
 _STORE_PREWARM_LIMITER = anyio.CapacityLimiter(_tiler_config.store_prewarm_workers)
+
+# Bounded pool for TTL-triggered background refreshes. Previously one raw thread
+# was spawned per expired store, which was fine at two stores and a stampede at
+# sixty — every one of them reopening from S3 at once, uncapped, competing with
+# live tile requests for the same connection pool.
+_REFRESH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=_tiler_config.store_refresh_workers,
+    thread_name_prefix="store-refresh",
+)
+
+# Fraction of the TTL used as per-store random jitter. Stores opened together at
+# startup would otherwise share a deadline and all expire in the same instant,
+# converting a smooth refresh trickle into a periodic spike.
+_REFRESH_JITTER_FRACTION = 0.1
 
 # Per-syscall timeouts on every S3 connection. Without these, a stuck socket can
 # pin a worker thread indefinitely (Python threads can't be cancelled, so a
@@ -46,6 +62,26 @@ _S3_CONFIG_KWARGS = {
     "read_timeout": _tiler_config.s3_read_timeout,
     "retries": {"max_attempts": _tiler_config.s3_max_attempts, "mode": "standard"},
 }
+
+
+# How hard prewarm tries before giving an operational failure back to its
+# caller. Deliberately small: at 60 stores the point is to ride out a transient
+# S3 blip, not to stall startup behind a genuinely unreachable bucket. A store
+# that is still unresolved after this is handled by the caller's graded policy,
+# and StoreRegistry.get does not cache the failure, so it re-attempts on the
+# first real request either way.
+_PREWARM_MAX_ATTEMPTS = 3
+_PREWARM_BACKOFF_SECONDS = 1.0
+
+
+class NotGriddedStoreError(ValueError):
+    """The store opened, but is not a lat/lon grid the tiler can render.
+
+    A *confirmed* answer rather than an operational one: retrying will not
+    change it, and every candidate product on the store is dropped rather than
+    degraded. Subclasses ValueError because that is what ``_open_store`` has
+    always raised and callers catch.
+    """
 
 
 def _storage_options(store_url: str) -> dict:
@@ -101,7 +137,7 @@ def _open_store(store_url: str) -> xr.Dataset:
     if rename:
         ds = ds.rename(rename)
     if "lat" not in ds.dims or "lon" not in ds.dims:
-        raise ValueError(
+        raise NotGriddedStoreError(
             f"Store {store_url!r} missing lat/lon dims after rename (found: {list(ds.dims)})"
         )
     if "time" in ds.dims:
@@ -110,12 +146,32 @@ def _open_store(store_url: str) -> xr.Dataset:
 
 
 def _build_date_index(ds: xr.Dataset) -> dict[str, list]:
-    """Return {local_date: [timestamps]} for the dataset's time coord, or {} if missing."""
+    """Return {local_date: [timestamps]} for the dataset's time coord, or {} if missing.
+
+    The conversion is vectorised through a single DatetimeIndex rather than one
+    ``ts_to_local_date`` call per timestamp. Same arithmetic — localise to UTC,
+    convert to the tile timezone, format — but done once for the whole coord,
+    which is what makes building sixty of these at startup affordable. An
+    HF-radar store carries tens of thousands of hourly timestamps.
+
+    The stored values stay the raw coord elements, not the converted ones:
+    ``_fetch_slice_from_store`` selects with them.
+    """
     if "time" not in ds.dims:
         return {}
+    times = ds.coords["time"].values
+    if len(times) == 0:
+        return {}
+
+    local_dates = (
+        pd.DatetimeIndex(times)
+        .tz_localize("UTC")
+        .tz_convert(LOCAL_TZ)
+        .strftime(DATE_FMT)
+    )
     index: dict[str, list] = {}
-    for ts in ds.coords["time"].values:
-        index.setdefault(ts_to_local_date(ts), []).append(ts)
+    for local_date, ts in zip(local_dates, times):
+        index.setdefault(local_date, []).append(ts)
     return index
 
 
@@ -132,6 +188,9 @@ class StoreRegistry:
         self._ttl = ttl
         self._stores: dict[str, xr.Dataset] = {}
         self._opened_at: dict[str, float] = {}
+        # Per-store TTL jitter, redrawn on every publish so stores opened in the
+        # same startup burst drift apart rather than expiring in lockstep.
+        self._ttl_jitter: dict[str, float] = {}
         self._refreshing: set[str] = set()
         self._in_flight: dict[str, concurrent.futures.Future] = {}
         self._date_index: dict[str, dict[str, list]] = {}
@@ -142,17 +201,18 @@ class StoreRegistry:
         should_open = False
         with self._lock:
             if store_url in self._stores:
-                if time.monotonic() - self._opened_at[store_url] < self._ttl:
+                deadline = self._ttl + self._ttl_jitter.get(store_url, 0.0)
+                if time.monotonic() - self._opened_at[store_url] < deadline:
                     return self._stores[store_url]
-                # TTL expired — return stale store and trigger a background refresh.
+                # TTL expired — return stale store and trigger a background
+                # refresh on the bounded pool. The _refreshing guard keeps one
+                # store from queueing a refresh per concurrent request.
                 if store_url not in self._refreshing:
                     self._refreshing.add(store_url)
                     logger.info(
                         f"Store TTL expired, refreshing in background: {store_url}"
                     )
-                    threading.Thread(
-                        target=self._refresh_background, args=(store_url,), daemon=True
-                    ).start()
+                    _REFRESH_EXECUTOR.submit(self._refresh_background, store_url)
                 return self._stores[store_url]
             if store_url in self._in_flight:
                 future = self._in_flight[store_url]
@@ -178,35 +238,113 @@ class StoreRegistry:
                 self._in_flight.pop(store_url, None)
         return ds
 
+    def cached(self, store_url: str) -> xr.Dataset | None:
+        """Return the already-open dataset for ``store_url``, or None.
+
+        Pure lookup: unlike ``get`` it never opens the store and never triggers a
+        TTL refresh. Startup verification uses it to inspect the schema of a
+        store prewarm just opened, without paying for a second open or racing
+        the refresh machinery.
+        """
+        with self._lock:
+            return self._stores.get(store_url)
+
     def date_index(self, store_url: str) -> dict[str, list]:
         """Return the {local_date: [timestamps]} map for ``store_url`` (or empty dict)."""
         with self._lock:
             return self._date_index.get(store_url, {})
 
-    async def prewarm(self, store_urls: list[str]) -> None:
-        """Open every URL in parallel via the anyio thread pool.
+    async def _prewarm_one(self, store_url: str) -> BaseException | None:
+        """Open one URL, retrying operational failures. Returns None on success.
+
+        Two outcomes are *confirmed* and returned immediately, because retrying
+        cannot change them: the store opened but is not a grid, and the store is
+        not there at all. Anything else is treated as operational — a slow
+        bucket, a dropped socket, throttling — and gets a bounded number of
+        attempts with exponential backoff before being handed back to the caller
+        to grade.
+        """
+        last_error: BaseException | None = None
+        for attempt in range(1, _PREWARM_MAX_ATTEMPTS + 1):
+            try:
+                await anyio.to_thread.run_sync(
+                    self.get, store_url, limiter=_STORE_PREWARM_LIMITER
+                )
+                return None
+            except NotGriddedStoreError as e:
+                # Intentional exclusion, not a fault: INFO and no traceback, or
+                # 60 stores' worth of legitimate skips look like an incident.
+                logger.info(f"Store is not a lat/lon grid, skipping: {store_url} ({e})")
+                return e
+            except FileNotFoundError as e:
+                # The bucket answered "not there". That is as final as a
+                # non-grid answer, so it is not retried — but unlike a non-grid
+                # store it is never intentional, so it is logged at WARNING. The
+                # usual cause is an upstream rename the catalogue has not caught
+                # up with, which leaves metadata advertising a store that no
+                # longer exists.
+                logger.warning(f"Store does not exist: {store_url} ({e})")
+                return e
+            except Exception as e:
+                last_error = e
+                if attempt < _PREWARM_MAX_ATTEMPTS:
+                    delay = _PREWARM_BACKOFF_SECONDS * 2 ** (attempt - 1)
+                    logger.warning(
+                        f"Store open failed (attempt {attempt}/{_PREWARM_MAX_ATTEMPTS}), "
+                        f"retrying in {delay:.1f}s: {store_url} ({e!r})"
+                    )
+                    await anyio.sleep(delay)
+                else:
+                    logger.error(
+                        f"Store open failed after {_PREWARM_MAX_ATTEMPTS} attempts: "
+                        f"{store_url}",
+                        exc_info=e,
+                    )
+        return last_error
+
+    async def prewarm(self, store_urls: list[str]) -> dict[str, BaseException | None]:
+        """Open every URL in parallel and report the per-URL outcome.
 
         Moves the one-time S3 metadata cost from the first user request to server
         startup, and lets get_products_availability respond fast on first call.
-        Per-URL failures are logged and swallowed so a single bad URL doesn't
-        block the others.
+
+        Returns ``{url: None on success, else the exception}`` rather than
+        swallowing failures. The caller needs the distinction: a confirmed
+        non-grid store drops its products, while an operational failure is graded
+        against whether the store backs a product already in production use.
         """
+        outcomes: dict[str, BaseException | None] = {}
+        logger.debug("Prewarming %d stores: %s", len(store_urls), store_urls)
 
         async def _one(url: str) -> None:
-            try:
-                await anyio.to_thread.run_sync(
-                    self.get, url, limiter=_STORE_PREWARM_LIMITER
-                )
-            except Exception:
-                logger.exception(f"Store prewarm failed: {url}")
+            outcomes[url] = await self._prewarm_one(url)
 
         await asyncio.gather(*(_one(url) for url in store_urls))
+
+        not_gridded = sum(
+            1 for e in outcomes.values() if isinstance(e, NotGriddedStoreError)
+        )
+        unresolved = sum(
+            1
+            for e in outcomes.values()
+            if e is not None and not isinstance(e, NotGriddedStoreError)
+        )
+        logger.info(
+            "Store prewarm complete: %d opened, %d not gridded, %d unresolved "
+            "(of %d)",
+            len(outcomes) - not_gridded - unresolved,
+            not_gridded,
+            unresolved,
+            len(outcomes),
+        )
+        return outcomes
 
     def clear(self) -> None:
         """Drop all cached state. Intended for tests."""
         with self._lock:
             self._stores.clear()
             self._opened_at.clear()
+            self._ttl_jitter.clear()
             self._refreshing.clear()
             self._in_flight.clear()
             self._date_index.clear()
@@ -216,6 +354,9 @@ class StoreRegistry:
         with self._lock:
             self._stores[store_url] = ds
             self._opened_at[store_url] = time.monotonic()
+            self._ttl_jitter[store_url] = random.uniform(
+                0.0, self._ttl * _REFRESH_JITTER_FRACTION
+            )
             self._date_index[store_url] = index
 
     def _refresh_background(self, store_url: str) -> None:
@@ -238,14 +379,22 @@ def get_store(store_url: str) -> xr.Dataset:
     return store_registry.get(store_url)
 
 
+def cached_store(store_url: str) -> xr.Dataset | None:
+    """Already-open dataset for ``store_url``, without opening it. See ``cached``."""
+    return store_registry.cached(store_url)
+
+
 def get_available_dates(store_url: str) -> list[str]:
     get_store(store_url)  # ensures the date index for this URL is populated
     index = store_registry.date_index(store_url)
     return sorted(index) if index else []
 
 
-async def prewarm_stores(store_urls: list[str]) -> None:
-    try:
-        await store_registry.prewarm(store_urls)
-    except Exception:
-        logger.exception("Store prewarm task exited with error")
+async def prewarm_stores(store_urls: list[str]) -> dict[str, BaseException | None]:
+    """Prewarm every URL and return the per-URL outcome map.
+
+    Deliberately does not catch: startup grades these outcomes and decides what
+    is fatal, so swallowing an error here would leave it deciding from an
+    incomplete map.
+    """
+    return await store_registry.prewarm(store_urls)

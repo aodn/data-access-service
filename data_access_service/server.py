@@ -114,11 +114,12 @@ async def file_not_found_handler(request: Request, exc: FileNotFoundError):
 if __name__ == "__main__":
     # Turn off reload by default, else production will pick set reload true
     reload_mode = os.getenv("FASTAPI_RELOAD", "false").lower() == "true"
+    port = int(os.getenv("FASTAPI_PORT", "5000"))
     log_config_path = str(Path(__file__).parent.parent / "log_config.yaml")
     uvicorn.run(
         "data_access_service.server:app",
         host="0.0.0.0",
-        port=5000,
+        port=port,
         reload=reload_mode,
         workers=1,
         log_config=log_config_path,
