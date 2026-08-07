@@ -54,6 +54,10 @@ from data_access_service.core.constants import (
     MAX_FRAGMENT_FOOTER_READS,
 )
 from data_access_service.models.bounding_box import BoundingBox
+from data_access_service.utils.format_utils import (
+    OUTPUT_FORMAT_GEOTIFF,
+    check_datasource_supports_format,
+)
 from data_access_service.utils.date_time_utils import ensure_timezone
 from data_access_service.utils.geotiff_export import geotiff_eligible_vars, has_ij_dims
 from data_access_service.utils.subset_request_resolver import (
@@ -92,7 +96,7 @@ def estimate_single_key_size(
     if ds is None:
         return None
 
-    _check_format_supported(api, ds, uuid, key, output_format)
+    check_datasource_supports_format(api, ds, uuid, key, output_format)
 
     if not resolved_subset_request.has_data:
         return _empty_estimate(uuid, key, output_format)
@@ -137,39 +141,6 @@ def estimate_single_key_size(
         return None
 
 
-def _check_format_supported(api, ds, uuid: str, key: str, output_format: str) -> None:
-    """Fail fast when this key can never produce output_format, before any
-    metadata or slicing work is spent on it.
-
-    The frontend only offers csv for parquet keys and netcdf/geotiff for zarr
-    keys, so a mismatch is a malformed request, not something to estimate
-    around. The deeper raises in _estimate_zarr_size and _measure_geotiff stay
-    as backstops.
-
-    :raises ValueError: on any key-format mismatch
-    """
-    if isinstance(ds, ParquetDataSource) and output_format != "csv":
-        raise ValueError(
-            f"'{output_format}' export not possible for {key}: a parquet key "
-            "downloads as csv only."
-        )
-    if isinstance(ds, ZarrDataSource):
-        if output_format == "csv":
-            raise ValueError(
-                f"'csv' export not possible for {key}: a zarr key downloads as "
-                "netcdf or geotiff only."
-            )
-        if output_format == "geotiff":
-            lat_name, lon_name, _ = api.resolve_dim_names(uuid, key)
-            # Dims and dtypes never change under slicing, so the raw store
-            # answers this without any subsetting work.
-            if not geotiff_eligible_vars(ds.zarr_store, lat_name, lon_name):
-                raise ValueError(
-                    f"GeoTIFF export not possible for {key}: no gridded numeric "
-                    "variables (a variable must be on both the lat and lon axes)."
-                )
-
-
 def _estimate_zarr_size(
     api,
     zarr_store: xarray.Dataset,
@@ -196,7 +167,7 @@ def _estimate_zarr_size(
         the cells outside it, which is why the output figure is an upper bound
     :return: dict with uuid, key, format, estimated_uncompressed_bytes,
         estimated_output_bytes and notes
-    :raises ValueError: if a zarr key cannot download as output_format
+    :raises ValueError: if geotiff is requested and no variable is gridded
     """
     from data_access_service.utils.subset_zarr_helper import area_to_keep, subset_zarr
 
@@ -251,21 +222,14 @@ def _estimate_zarr_size(
     )
 
     # Measure the uncompressed and output sizes of the union grid, per format.
-    if output_format == "geotiff":
+    # csv cannot reach here - check_datasource_supports_format rejects it first.
+    if output_format == OUTPUT_FORMAT_GEOTIFF:
         total_uncompressed, total_output = _measure_geotiff(
             api, dataset, uuid, key, notes
         )
-    elif output_format == "netcdf":
+    else:
         total_uncompressed, total_output = _measure_netcdf(
             dataset, output_format, notes, will_mask
-        )
-    else:
-        # "csv" is a valid request format, but only for parquet keys - the
-        # download's zarr_processor.__format_handler has no csv handler and
-        # raises the same way, so there is no size to promise here.
-        raise ValueError(
-            f"'{output_format}' export not possible for {key}: a zarr key "
-            "downloads as netcdf or geotiff only."
         )
 
     # Human-readable size summary (applies to every output format).

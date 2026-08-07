@@ -11,10 +11,10 @@ from data_access_service.utils.subset_request_resolver import (
     normalize_request,
     resolve_subset_request,
 )
-from data_access_service.models.subset_request import (
-    KEY_SUFFIX_FOR_FORMAT,
-    KNOWN_KEY_SUFFIXES,
-    SubsetRequest,
+from data_access_service.models.subset_request import SubsetRequest
+from data_access_service.utils.format_utils import (
+    KEY_SUFFIX_ZARR,
+    check_key_supports_format,
 )
 from data_access_service.batch.subsetting.tasks.parquet_collector import (
     collect_parquet_files,
@@ -74,20 +74,11 @@ def init(api: API, job_id_of_init, parameters):
 
     # Step 5: Reject a key whose storage type cannot produce the requested
     # format. For example, a .parquet key cannot produce a netcdf output.
-    expected_suffix = KEY_SUFFIX_FOR_FORMAT[subset_request.output_format]
-    wrong_type = [
-        key
-        for key in resolved_subset_request.keys
-        if key.endswith(KNOWN_KEY_SUFFIXES) and not key.endswith(expected_suffix)
-    ]
-    if wrong_type:
-        raise ValueError(
-            f"'{subset_request.output_format}' export not possible for "
-            f"{wrong_type}: it downloads from {expected_suffix} keys only."
-        )
+    for key in resolved_subset_request.keys:
+        check_key_supports_format(key, subset_request.output_format)
 
     # Step 6: Process zarr sub-setting workflow, for zarr keys.
-    if all(key.endswith(".zarr") for key in resolved_subset_request.keys):
+    if all(key.endswith(KEY_SUFFIX_ZARR) for key in resolved_subset_request.keys):
         run_zarr_subset(api, job_id_of_init, subset_request, resolved_subset_request)
         return
 

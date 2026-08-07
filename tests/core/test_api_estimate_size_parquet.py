@@ -347,7 +347,7 @@ def test_non_csv_format_raises_fast():
         geometry=None,
     )
 
-    with pytest.raises(ValueError, match="downloads as csv only"):
+    with pytest.raises(ValueError, match=r"downloads from \.zarr keys only"):
         estimate_single_key_size(api, KEY, resolved, output_format="netcdf")
 
     api.get_temporal_extent.assert_not_called()

@@ -29,10 +29,8 @@ from data_access_service.core.constants import (
     STR_LONGITUDE_UPPER_CASE,
     STR_TIME_UPPER_CASE,
 )
-from data_access_service.models.subset_request import (
-    NON_SPECIFIED,
-    SUPPORTED_OUTPUT_FORMATS,
-)
+from data_access_service.models.subset_request import NON_SPECIFIED
+from data_access_service.utils.format_utils import SUPPORTED_OUTPUT_FORMATS
 from data_access_service.core.size_estimation import estimate_single_key_size
 from data_access_service.utils.subset_request_resolver import resolve_subset_request
 from data_access_service.core.descriptor import Depth, Descriptor, Coordinate

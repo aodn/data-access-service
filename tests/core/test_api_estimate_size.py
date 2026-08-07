@@ -194,10 +194,12 @@ def test_geotiff_non_gridded_raises():
 def test_csv_on_zarr_raises_fast():
     # csv is only for parquet keys. The mismatch must fail before any
     # metadata/slicing work - the date trim (get_temporal_extent) never runs.
+    # KEY carries no ".zarr" suffix on purpose: the estimate judges the storage
+    # type from the resolved datasource, not the key name.
     api, _ = _api_with_zarr(_make_dataset())
     api.get_temporal_extent = MagicMock()
 
-    with pytest.raises(ValueError, match="netcdf or geotiff only"):
+    with pytest.raises(ValueError, match=r"downloads from \.parquet keys only"):
         estimate_single_key_size(api, KEY, _resolved(), output_format="csv")
 
     api.get_temporal_extent.assert_not_called()
