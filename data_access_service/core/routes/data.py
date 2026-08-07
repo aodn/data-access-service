@@ -18,9 +18,6 @@ from data_access_service.core.constants import (
     STR_TIME_UPPER_CASE,
 )
 from data_access_service.models.estimate_size_request import EstimateSizeRequest
-from data_access_service.models.ExtendedFeatureCollection import (
-    ExtendedFeatureCollection,
-)
 from data_access_service.sites.site_feature_service import SiteFeatureService
 from data_access_service.sites.sites import (
     LatestTime,
@@ -37,7 +34,6 @@ from data_access_service.core.routes.helpers import (
     async_response_json,
     fetch_data,
     generate_feature_collection,
-    generate_rect_features,
     get_site_service,
     require_api_ready,
     verify_datatime_param,
@@ -168,98 +164,6 @@ async def get_indexing_values(
     )
     return Response(
         content=json.dumps(feature_collection), media_type="application/json"
-    )
-
-
-@router.get("/data/{uuid}/{key}/zarr_rect", dependencies=[Depends(api_key_auth)])
-async def get_zarr_rectangles(
-    request: Request,
-    uuid: str,
-    key: str,
-    start_date: str,
-    end_date: str,
-    api: API = Depends(require_api_ready),  # noqa: B008
-):
-    logger.info(
-        "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
-    )
-    if not all([uuid, key, start_date, end_date]):
-        logger.error("Missing required parameters")
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail="Missing required parameters",
-        )
-    if not key.endswith(".zarr"):
-        logger.error(f"Invalid file format. Key {key} must end with .zarr")
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail="This endpoint only supports zarr data format",
-        )
-
-    data_source = api.get_dataset(
-        uuid=uuid,
-        key=key,
-        date_start=verify_datatime_param("start_date", start_date),
-        date_end=verify_datatime_param("end_date", end_date),
-    )
-
-    if data_source is None:
-        logger.error(
-            f"No data found with provided params for dataset {uuid} with key {key}"
-        )
-        raise HTTPException(
-            status_code=HTTPStatus.NOT_FOUND,
-            detail=f"No data found with provided params for dataset {uuid} with key {key}",
-        )
-    if not isinstance(data_source, Dataset):
-        logger.error(f"Dataset {uuid} with key {key} is not a Zarr dataset")
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail=f"Dataset {uuid} with key {key} is not a Zarr dataset. Please doublecheck or contact AODN",
-        )
-
-    lat_key = api.map_column_names(
-        uuid=uuid, key=key, columns=[STR_LATITUDE_UPPER_CASE]
-    )[0]
-    lon_key = api.map_column_names(
-        uuid=uuid, key=key, columns=[STR_LONGITUDE_UPPER_CASE]
-    )[0]
-    time_key = api.map_column_names(uuid=uuid, key=key, columns=[STR_TIME_UPPER_CASE])[
-        0
-    ]
-
-    if (
-        lat_key not in data_source.coords
-        or lon_key not in data_source.coords
-        or time_key not in data_source.coords
-    ):
-        logger.error(
-            f"Dataset {uuid} with key {key} does not contain required coordinates: {lat_key}, {lon_key}, {time_key}"
-        )
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail=f"Dataset {uuid} with key {key} does not contain required coordinates: {lat_key}, {lon_key}, {time_key}",
-        )
-
-    features = generate_rect_features(
-        dataset=data_source, lat_key=lat_key, lon_key=lon_key, time_key=time_key
-    )
-
-    if not features or len(features) == 0:
-        logger.warning(f"No rectangle features found for dataset {uuid} with key {key}")
-        return Response(content=json.dumps(None), media_type="application/json")
-    properties = {
-        "date": features[0].get("properties").get("date"),
-        "collection": uuid,
-        "key": key,
-    }
-
-    rect_feature_collection = ExtendedFeatureCollection(
-        features=features, properties=properties
-    )
-    logger.info(f"Rect Feature Collection: {rect_feature_collection}")
-    return Response(
-        content=json.dumps(rect_feature_collection), media_type="application/json"
     )
 
 
