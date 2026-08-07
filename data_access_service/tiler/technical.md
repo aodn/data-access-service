@@ -210,7 +210,7 @@ data_access_service/
         product.py                  ← Product dataclass (+ DataTileConfig/VisualTileConfig/CoastalFill) + LOD algorithm + get_lod_grids lazy-init
         registry.py                  ← PRODUCTS dict + publish_products + get_product / iter_products / iter_product_items facades
         discovery.py                 ← build_candidate_products — fans variable specs out across the metadata schema index
-        verification.py              ← verify_candidate_products + the graded store-failure policy + LEGACY_PRODUCT_IDS
+        verification.py              ← verify_candidate_products + the store-failure classification
         manifest.py                  ← render_manifest() — bounds + per-variable ranges + LOD meta for manifest.json
       rendering/
         kernels.py                   ← numba JIT bilinear/nearest resample + normalize kernels + xr.interp fallback + warmup_resample
