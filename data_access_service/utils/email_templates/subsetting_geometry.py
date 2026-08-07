@@ -1,9 +1,5 @@
-"""Classify a subset request's geometry for email rendering.
-
-Splits a GeoJSON MultiPolygon into bounding boxes and freeform polygons so the
-download email can show each with the right layout. ogcapi-java EmailUtils has
-a similar split, but still classifies by vertex count.
-"""
+"""Split a subset request's GeoJSON MultiPolygon into bounding boxes and
+freeform polygons so the email can render each with the right layout."""
 
 import geojson
 
@@ -16,9 +12,7 @@ from data_access_service.utils.multi_polygon_helper import get_bbox_from
 
 
 def _is_axis_aligned_rectangle(vertices: list) -> bool:
-    """True when the ring is exactly the axis-aligned rectangle of its own
-    bounding box. Vertices may carry an elevation (a 3rd value); only lon/lat
-    are compared."""
+    """True when the ring is an axis-aligned rectangle (2 lons x 2 lats)."""
     unique_corners = {(vertex[0], vertex[1]) for vertex in vertices}
     unique_lons = {lon for lon, _ in unique_corners}
     unique_lats = {lat for _, lat in unique_corners}
@@ -29,8 +23,7 @@ def _is_axis_aligned_rectangle(vertices: list) -> bool:
 
 
 def _remove_closing_point(ring: list) -> list:
-    """Return a ring's unique vertices, dropping the GeoJSON closing point
-    (the last vertex, which repeats the first)."""
+    """Drop the GeoJSON closing point (the last vertex repeats the first)."""
     vertices = list(ring)
     if len(vertices) > 1 and vertices[0] == vertices[-1]:
         vertices = vertices[:-1]
@@ -50,13 +43,8 @@ def _is_global_extent(bbox: BoundingBox) -> bool:
 def split_bboxes_and_polygons(
     multi_polygon: Union[str, MultiPolygon, None],
 ) -> Tuple[List[BoundingBox], List[list]]:
-    """Split a GeoJSON MultiPolygon into bounding boxes and freeform polygons.
-
-    Each ring is classified by shape: an axis-aligned rectangle is a bounding
-    box, anything else (triangle, freeform quad, pentagon...) is a freeform
-    polygon (kept as its [lon, lat] vertices). Whole-globe bounding boxes are
-    dropped since they mean "no area filter".
-    """
+    """Split each ring by shape: axis-aligned rectangles become bounding boxes,
+    any other shape stays a polygon; whole-globe boxes (no area filter) are dropped."""
     bboxes: List[BoundingBox] = []
     polygons: List[list] = []
 

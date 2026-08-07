@@ -23,6 +23,9 @@ from data_access_service.utils.date_time_utils import (
     split_date_range,
     parse_date,
 )
+from data_access_service.utils.email_templates.no_data_email import (
+    get_no_data_email_html_body,
+)
 
 
 # The only purpose is to create suitable number of child job, we can fine tune the value
@@ -55,16 +58,10 @@ def init(api: API, job_id_of_init, parameters):
 
     # Step 4: If the requested data not available, email the user and stop here.
     if not resolved_subset_request.has_data:
-        text_body = (
-            f"No data available for your subset request for dataset {subset_request.uuid} "
-            f"with keys {subset_request.keys} "
-            f"and date range from {subset_request.start_date} to {subset_request.end_date}."
-            f"and selected area is {subset_request.multi_polygon}."
-        )
         AWSHelper().send_email(
             recipient=subset_request.recipient,
             subject="No Data Available for Your Subset Request",
-            text_body=text_body,
+            html_body=get_no_data_email_html_body(subset_request),
         )
         return
 
