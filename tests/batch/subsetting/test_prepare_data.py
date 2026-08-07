@@ -12,8 +12,8 @@ from data_access_service.batch.subsetting.enums import Parameters
 from data_access_service.batch.subsetting import prepare_data
 from data_access_service.config.config import Config
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.batch.subsetting.tasks.data_collection import (
-    collect_data_files,
+from data_access_service.batch.subsetting.tasks.parquet_collector import (
+    collect_parquet_files,
 )
 from tests.batch.batch_test_consts import PREPARATION_PARAMETERS, INIT_JOB_ID
 from tests.core.test_with_s3 import TestWithS3, REGION
@@ -111,7 +111,7 @@ class TestDataGeneration(TestWithS3):
                     recipient="test@example.com",
                 )
 
-                collect_data_files(
+                collect_parquet_files(
                     master_job_id="999",
                     subset_request=subset_request,
                 )
@@ -278,7 +278,7 @@ class TestDataGeneration(TestWithS3):
                     recipient="test@example.com",
                 )
 
-                collect_data_files(
+                collect_parquet_files(
                     master_job_id="994",
                     subset_request=subset_request,
                 )
@@ -450,7 +450,7 @@ class TestDataGeneration(TestWithS3):
                     recipient="test@example.com",
                 )
 
-                collect_data_files(
+                collect_parquet_files(
                     master_job_id="997",
                     subset_request=subset_request,
                 )

@@ -16,11 +16,11 @@ from data_access_service.models.subset_request import (
     KNOWN_KEY_SUFFIXES,
     SubsetRequest,
 )
-from data_access_service.batch.subsetting.tasks.data_collection import (
-    collect_data_files,
+from data_access_service.batch.subsetting.tasks.parquet_collector import (
+    collect_parquet_files,
 )
-from data_access_service.batch.subsetting.tasks.generate_dataset import (
-    process_data_files,
+from data_access_service.batch.subsetting.tasks.parquet_processor import (
+    process_parquet_files,
 )
 from data_access_service.batch.subsetting.tasks.zarr_processor import ZarrProcessor
 from data_access_service.utils.date_time_utils import (
@@ -169,7 +169,7 @@ def prepare_data(api: API, job_index: str | None, parameters) -> str | None:
     """
     )
 
-    return process_data_files(
+    return process_parquet_files(
         api,
         master_job_id,
         job_index,
@@ -183,7 +183,7 @@ def prepare_data(api: API, job_index: str | None, parameters) -> str | None:
 def collect_data(parameters):
     master_job_id = parameters[Parameters.MASTER_JOB_ID.value]
     request = get_subset_request(parameters)
-    collect_data_files(master_job_id=master_job_id, subset_request=request)
+    collect_parquet_files(master_job_id=master_job_id, subset_request=request)
 
 
 def run_zarr_subset(

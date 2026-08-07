@@ -471,7 +471,7 @@ def _estimate_parquet_size(
     if len(bboxes) > 1:
         notes.append(f"union of {len(bboxes)} polygon bboxes")
     if columns:
-        # Aligned with the download: query_data in generate_dataset.py passes no
+        # Aligned with the download: query_data in parquet_processor.py passes no
         # columns either, so the CSV always carries every column.
         log.info("column subsetting not implemented yet; ignoring columns %s", columns)
         notes.append(f"column subsetting not supported yet; columns skipped: {columns}")

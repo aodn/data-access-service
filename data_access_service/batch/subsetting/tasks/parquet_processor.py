@@ -36,7 +36,7 @@ config: Config = Config.get_config()
 log = init_log(config)
 
 
-def process_data_files(
+def process_parquet_files(
     api: API,
     job_id_of_init: str,
     job_index: str,
@@ -341,9 +341,3 @@ def query_data(
     except Exception as e:
         log.error(f"{type(e)}: {e}")
         raise e
-
-
-def generate_zip_name(uuid, start_date, end_date):
-    start_date_str = start_date.strftime("%Y-%m-%d")
-    end_date_str = end_date.strftime("%Y-%m-%d")
-    return f"{uuid}_{start_date_str}_{end_date_str}"
