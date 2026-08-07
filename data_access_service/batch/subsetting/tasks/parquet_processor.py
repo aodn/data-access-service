@@ -3,11 +3,9 @@ import os
 import geojson
 import dask.dataframe as ddf
 import pandas as pd
-import xarray
 
 from shapely.geometry import Polygon as ShapelyPolygon
 
-from numcodecs import Zlib
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
 from pathlib import Path
 from geojson import MultiPolygon
@@ -102,8 +100,8 @@ def process_data_files(
             # in the for loop
             log.error(f"{e}, likely due to malform source file {datum}")
         except MemoryError as e:
-            # If you try to convert a zarr to CSV, it will be too big to fit into memory or file due to multiple dimension
-            # hence it is not something we can support
+            # A parquet dataset too large to fit into memory or a single file
+            # is not something we can support
             raise MemoryError(f"Data file {datum} too big to convert subset : {e}")
         except Exception as e:
             log.error(f"Error: {e}")
@@ -172,9 +170,8 @@ def _generate_partition_output(
                 min_lon = None
                 max_lon = None
 
-            need_append = False
             for date_range in checked_date_ranges:
-                result: Optional[ddf.DataFrame | xarray.Dataset] = query_data(
+                result: Optional[ddf.DataFrame] = query_data(
                     api,
                     uuid,
                     key,
@@ -192,66 +189,41 @@ def _generate_partition_output(
                         columns=[STR_LATITUDE_UPPER_CASE, STR_LONGITUDE_UPPER_CASE],
                     )
 
-                    if key.endswith("parquet"):
-                        # If we have polygon to filter, apply map_partitions lazily
-                        if polygon is not None:
-                            result = result.map_partitions(
-                                _filter_partition_by_polygon,
-                                shapely_poly=polygon,
-                                lat_key=lat_key,
-                                lon_key=lon_key,
-                                meta=result._meta,
-                            )
-
-                        # With parquet we can write on each result because of the partition by TIME
-                        # create different directory
-                        output_path = f"{root_folder_path}/{key}/part-{job_index}/"
-
-                        # Derive partition key without time
-                        time_key = api.map_column_names(
-                            uuid=uuid, key=key, columns=[STR_TIME_UPPER_CASE]
-                        )[0]
-
-                        # 'M' stands for Datetime in NumPy/Pandas dtypes, some dataset return
-                        # time field of different type
-                        if result[time_key].dtype.kind != "M":
-                            result[time_key] = ddf.to_datetime(result[time_key])
-
-                        result[PARTITION_KEY] = result[time_key].dt.strftime("%Y-%m")
-
-                        result.to_parquet(
-                            output_path,
-                            partition_on=[PARTITION_KEY],  # Partition by region column
-                            compression="zstd",  # Use Zstd for small file size
-                            engine="pyarrow",  # Use pyarrow for performance
-                            write_index=False,  # Exclude index to save space
+                    # If we have polygon to filter, apply map_partitions lazily
+                    if polygon is not None:
+                        result = result.map_partitions(
+                            _filter_partition_by_polygon,
+                            shapely_poly=polygon,
+                            lat_key=lat_key,
+                            lon_key=lon_key,
+                            meta=result._meta,
                         )
-                        log.info(f"Saved partition to {output_path}")
-                    else:
-                        # Zarr do not support directory partition hence we need to consolidate
-                        # it before write to disk.
-                        output_path = f"{root_folder_path}/{key}/part-{job_index}.zarr"
-                        if not need_append:
-                            # Get all data variable names
-                            variables = list(result.data_vars)
-                            encoding = {
-                                # Must use Zlib for now as netcdf do not support other compression
-                                var: {"compressor": Zlib(level=9)}
-                                for var in variables
-                            }
-                            result.to_zarr(
-                                output_path, mode="w", encoding=encoding, compute=True
-                            )
-                            need_append = True
-                        else:
-                            time_dim = api.map_column_names(
-                                uuid=uuid, key=key, columns=[STR_TIME_UPPER_CASE]
-                            )[0]
-                            result.to_zarr(
-                                output_path, mode="a", append_dim=time_dim, compute=True
-                            )
 
-                    # Either parquet or zarr save correct and no exception
+                    # With parquet we can write on each result because of the partition by TIME
+                    # create different directory
+                    output_path = f"{root_folder_path}/{key}/part-{job_index}/"
+
+                    # Derive partition key without time
+                    time_key = api.map_column_names(
+                        uuid=uuid, key=key, columns=[STR_TIME_UPPER_CASE]
+                    )[0]
+
+                    # 'M' stands for Datetime in NumPy/Pandas dtypes, some dataset return
+                    # time field of different type
+                    if result[time_key].dtype.kind != "M":
+                        result[time_key] = ddf.to_datetime(result[time_key])
+
+                    result[PARTITION_KEY] = result[time_key].dt.strftime("%Y-%m")
+
+                    result.to_parquet(
+                        output_path,
+                        partition_on=[PARTITION_KEY],  # Partition by region column
+                        compression="zstd",  # Use Zstd for small file size
+                        engine="pyarrow",  # Use pyarrow for performance
+                        write_index=False,  # Exclude index to save space
+                    )
+                    log.info(f"Saved partition to {output_path}")
+
                     has_data = True
                 else:
                     log.info(

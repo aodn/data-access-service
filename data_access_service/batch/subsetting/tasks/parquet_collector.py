@@ -34,15 +34,8 @@ def collect_data_files(master_job_id: str, subset_request: SubsetRequest):
                     p, bucket_name, f"{master_job_id}/{d.replace('.parquet', '')}.zip"
                 )
             )
-        elif d.endswith(".zarr"):
-            p = AWSHelper.read_multipart_zarr_from_s3(
-                f"s3://{bucket_name}/{config.get_s3_temp_folder_name(master_job_id)}{d}/part-*.zarr"
-            )
-            download_urls.append(
-                aws.write_zarr_to_s3(
-                    p, bucket_name, f"{master_job_id}/{d.replace('.zarr', '')}.nc"
-                )
-            )
+        else:
+            log.warning("Skipping unrecognised output folder %s", d)
 
     subject = f"Finish processing data file whose uuid is:  {subset_request.uuid}"
 

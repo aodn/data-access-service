@@ -11,7 +11,11 @@ from data_access_service.utils.subset_request_resolver import (
     normalize_request,
     resolve_subset_request,
 )
-from data_access_service.models.subset_request import SubsetRequest
+from data_access_service.models.subset_request import (
+    KEY_SUFFIX_FOR_FORMAT,
+    KNOWN_KEY_SUFFIXES,
+    SubsetRequest,
+)
 from data_access_service.batch.subsetting.tasks.data_collection import (
     collect_data_files,
 )
@@ -68,14 +72,26 @@ def init(api: API, job_id_of_init, parameters):
         )
         return
 
-    # Step 5: Process zarr sub-setting workflow
-    # use new zarr sub-setting workflow if all keys are zarr. It it works well, then deprecate old zarr sub-setting workflow
+    # Step 5: Reject a key whose storage type cannot produce the requested
+    # format. For example, a .parquet key cannot produce a netcdf output.
+    expected_suffix = KEY_SUFFIX_FOR_FORMAT[subset_request.output_format]
+    wrong_type = [
+        key
+        for key in resolved_subset_request.keys
+        if key.endswith(KNOWN_KEY_SUFFIXES) and not key.endswith(expected_suffix)
+    ]
+    if wrong_type:
+        raise ValueError(
+            f"'{subset_request.output_format}' export not possible for "
+            f"{wrong_type}: it downloads from {expected_suffix} keys only."
+        )
+
+    # Step 6: Process zarr sub-setting workflow, for zarr keys.
     if all(key.endswith(".zarr") for key in resolved_subset_request.keys):
         run_zarr_subset(api, job_id_of_init, subset_request, resolved_subset_request)
         return
 
-    # Step 6: Process legacy sub-setting workflow, for parquet (or mixed
-    # zarr+parquet)
+    # Step 7: Process legacy sub-setting workflow, for parquet keys.
     #  1. Split the date range into chunks
     #  2. Submit the data preparation job
     #  3. Submit the data collection job

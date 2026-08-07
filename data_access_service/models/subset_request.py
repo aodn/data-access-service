@@ -9,7 +9,10 @@ from data_access_service.models.bounding_box import BoundingBox
 # multi_polygon, ...). AWS Batch job parameters are plain strings and cannot
 # carry None, so absent values travel as this literal instead.
 NON_SPECIFIED = "non-specified"
+
 SUPPORTED_OUTPUT_FORMATS = frozenset({"netcdf", "geotiff", "csv"})
+KEY_SUFFIX_FOR_FORMAT = {"csv": ".parquet", "netcdf": ".zarr", "geotiff": ".zarr"}
+KNOWN_KEY_SUFFIXES = (".parquet", ".zarr")
 
 
 @dataclass(frozen=True)
