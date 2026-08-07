@@ -63,16 +63,40 @@ def _storage_options(store_url: str) -> dict:
     return {}
 
 
+# Spatial dims are merged into a single dask chunk per variable, covering both
+# already-canonical names ("lat"/"lon") and the raw names COORD_NAMES renames from
+# ("LATITUDE"/"LONGITUDE") — the rename to canonical names happens *after* open, so
+# open-time chunk keys must match whatever the store calls them natively. "time" is
+# deliberately absent: an unset key falls back to the store's native/preferred chunk
+# size (see xarray.structure.chunks._get_chunk), so native time-chunking is kept
+# without needing to know each store's native time-chunk size in advance.
+_SPATIAL_CHUNK_DIMS = {"lat", "lon"} | {
+    raw for raw, canonical in COORD_NAMES.items() if canonical in ("lat", "lon")
+}
+
+
 def _open_store(store_url: str) -> xr.Dataset:
-    # chunks={} pins dask to the store's *native* on-disk chunking (one dask chunk
-    # per zarr chunk). This is what the no-arg default already resolves to, but we
-    # state it explicitly: the hot path is a single-time .sel(...).compute(), and
-    # native chunks mean that read fetches only the time-block(s) it needs while
-    # still letting dask fetch spatial chunks from S3 in parallel. Do NOT switch to
-    # chunks='auto' — auto merges adjacent time-blocks into one dask chunk, turning
-    # a one-slice read into a multi-slice S3 over-read. (Tests mock open_zarr with
-    # numpy datasets, so such a regression would pass CI but degrade production.)
-    ds = xr.open_zarr(store_url, chunks={}, storage_options=_storage_options(store_url))
+    # slice_loader.py's only read path selects by time and always reads the full
+    # lat/lon extent — native spatial chunking buys zero read-efficiency there,
+    # since a single time-slice request already touches every native spatial chunk
+    # for that time-block. But dask builds one graph task *per native chunk*, and a
+    # handful of production stores are chunked finely enough (e.g. [5, 250, 250] on
+    # a [8153, 2500, 10000] array) to produce 10M+ chunks for one store alone — tens
+    # of GB of real memory just to describe where the data is, before any of it is
+    # fetched (confirmed via macOS `footprint`; `ps`/`psutil` RSS does not surface
+    # this). Merging spatial dims collapses that to one task per native time-chunk,
+    # with no change in bytes fetched per request and no read-latency regression
+    # (verified: identical .compute() results, same wall-clock fetch time) — just
+    # ~165x less memory to open the worst-case store. Do NOT merge "time" too, and
+    # do NOT switch to chunks='auto' for it — either would merge adjacent
+    # time-blocks into one dask chunk, turning a one-slice read into a multi-slice
+    # S3 over-read. (Tests mock open_zarr with numpy datasets, so such a regression
+    # would pass CI but degrade production.)
+    ds = xr.open_zarr(
+        store_url,
+        chunks={dim: -1 for dim in _SPATIAL_CHUNK_DIMS},
+        storage_options=_storage_options(store_url),
+    )
     rename = {k: v for k, v in COORD_NAMES.items() if k in ds.dims or k in ds.coords}
     if rename:
         ds = ds.rename(rename)
