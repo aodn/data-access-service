@@ -17,7 +17,7 @@ if [ "$DOCKER_MODE" = true ]; then
     echo "Starting in Docker mode..."
     docker compose down && docker compose build && docker compose up
 else
-    echo "Starting locally with 12G memory limit via systemd-run..."
+    echo "Starting locally with 3G memory limit via systemd-run..."
     if [ "$RELOAD_MODE" = true ]; then
         echo "Reload mode enabled (auto-reloading on code changes)."
         export FASTAPI_RELOAD=true
@@ -25,5 +25,5 @@ else
         echo "Reload mode disabled (single process, optimized memory footprint)."
         export FASTAPI_RELOAD=false
     fi
-    systemd-run --user --scope -p MemoryMax=12G -p MemorySwapMax=0 python -m data_access_service.server
+    systemd-run --user --scope -p MemoryMax=3G -p MemorySwapMax=0 python -m data_access_service.server
 fi
