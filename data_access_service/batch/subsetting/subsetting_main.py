@@ -12,11 +12,15 @@ from data_access_service.utils.subset_request_resolver import (
     resolve_subset_request,
 )
 from data_access_service.models.subset_request import SubsetRequest
-from data_access_service.batch.subsetting.tasks.data_collection import (
-    collect_data_files,
+from data_access_service.utils.format_utils import (
+    KEY_SUFFIX_ZARR,
+    check_key_supports_format,
 )
-from data_access_service.batch.subsetting.tasks.generate_dataset import (
-    process_data_files,
+from data_access_service.batch.subsetting.tasks.parquet_collector import (
+    collect_parquet_files,
+)
+from data_access_service.batch.subsetting.tasks.parquet_processor import (
+    process_parquet_files,
 )
 from data_access_service.batch.subsetting.tasks.zarr_processor import ZarrProcessor
 from data_access_service.utils.date_time_utils import (
@@ -68,14 +72,17 @@ def init(api: API, job_id_of_init, parameters):
         )
         return
 
-    # Step 5: Process zarr sub-setting workflow
-    # use new zarr sub-setting workflow if all keys are zarr. It it works well, then deprecate old zarr sub-setting workflow
-    if all(key.endswith(".zarr") for key in resolved_subset_request.keys):
+    # Step 5: Reject a key whose storage type cannot produce the requested
+    # format. For example, a .parquet key cannot produce a netcdf output.
+    for key in resolved_subset_request.keys:
+        check_key_supports_format(key, subset_request.output_format)
+
+    # Step 6: Process zarr sub-setting workflow, for zarr keys.
+    if all(key.endswith(KEY_SUFFIX_ZARR) for key in resolved_subset_request.keys):
         run_zarr_subset(api, job_id_of_init, subset_request, resolved_subset_request)
         return
 
-    # Step 6: Process legacy sub-setting workflow, for parquet (or mixed
-    # zarr+parquet)
+    # Step 7: Process legacy sub-setting workflow, for parquet keys.
     #  1. Split the date range into chunks
     #  2. Submit the data preparation job
     #  3. Submit the data collection job
@@ -153,7 +160,7 @@ def prepare_data(api: API, job_index: str | None, parameters) -> str | None:
     """
     )
 
-    return process_data_files(
+    return process_parquet_files(
         api,
         master_job_id,
         job_index,
@@ -167,7 +174,7 @@ def prepare_data(api: API, job_index: str | None, parameters) -> str | None:
 def collect_data(parameters):
     master_job_id = parameters[Parameters.MASTER_JOB_ID.value]
     request = get_subset_request(parameters)
-    collect_data_files(master_job_id=master_job_id, subset_request=request)
+    collect_parquet_files(master_job_id=master_job_id, subset_request=request)
 
 
 def run_zarr_subset(
