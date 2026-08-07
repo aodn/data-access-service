@@ -46,6 +46,14 @@ def _fetch_slice_from_store(
     store_url: str, date: str, variables: list[str]
 ) -> xr.Dataset:
     store = get_store(store_url)
+
+    missing = [v for v in variables if v not in store.data_vars]
+    if missing:
+        raise FileNotFoundError(
+            f"Variable(s) {missing} not found in store {store_url!r} "
+            f"(available: {sorted(store.data_vars)})"
+        )
+
     index = store_registry.date_index(store_url)
     matching = list(index.get(date, ()))
     if not matching:

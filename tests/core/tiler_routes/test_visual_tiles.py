@@ -270,6 +270,23 @@ def test_bbox_webp_ok(client):
     assert response.headers["content-type"] == "image/webp"
 
 
+def test_bbox_missing_store(client):
+    # With no bbox param, default_bbox_from_store opens the store directly
+    # (get_store -> xr.open_zarr) before load_slice_or_404 runs, so a missing
+    # store must still 404 via the app-level FileNotFoundError handler.
+    with patch(
+        "data_access_service.core.tiler_routes.visual_tiles.default_bbox_from_store",
+        side_effect=FileNotFoundError(
+            "No such file or directory: 's3://bucket/missing.zarr'"
+        ),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/bbox.png"
+        )
+    assert response.status_code == 404
+    assert "s3://bucket/missing.zarr" in response.json()["detail"]
+
+
 def test_bbox_epsg4326_latitude_out_of_range_rejected(client):
     # A Web Mercator meter value used as a degree latitude is nowhere near -90..90.
     response = client.get(
@@ -601,6 +618,28 @@ def test_animation_no_data_in_range_returns_404(client):
             "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/2024-01-31/animation.gif"
         )
     assert response.status_code == 404
+
+
+def test_animation_missing_store(client):
+    # get_available_dates opens the store directly, ahead of any
+    # load_slice_or_404 call, so a missing store must still 404.
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.visual_tiles.default_bbox_from_store",
+            return_value=(140.0, -40.0, 150.0, -30.0),
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.visual_tiles.get_available_dates",
+            side_effect=FileNotFoundError(
+                "No such file or directory: 's3://bucket/missing.zarr'"
+            ),
+        ),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/2024-01-31/animation.gif"
+        )
+    assert response.status_code == 404
+    assert "s3://bucket/missing.zarr" in response.json()["detail"]
 
 
 def test_animation_frame_cap_rejected(client):

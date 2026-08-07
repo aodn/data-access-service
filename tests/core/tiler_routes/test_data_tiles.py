@@ -175,6 +175,23 @@ def test_tile_missing_date(client):
     assert response.status_code == 404
 
 
+def test_tile_missing_store(client):
+    # get_lod_grids opens the store directly (get_store -> xr.open_zarr) before
+    # load_slice_or_404 ever runs, so a missing store must still surface as a
+    # 404 via the app-level FileNotFoundError handler, not an unhandled 500.
+    with patch(
+        "data_access_service.core.tiler_routes.data_tiles.get_lod_grids",
+        side_effect=FileNotFoundError(
+            "No such file or directory: 's3://bucket/missing.zarr'"
+        ),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/1/0/0.png"
+        )
+    assert response.status_code == 404
+    assert "s3://bucket/missing.zarr" in response.json()["detail"]
+
+
 def test_tile_ok(client):
     with (
         patch(
@@ -222,6 +239,20 @@ def test_manifest_missing_date(client):
             "/api/v1/das/tiler/data_tiles/sea_level_anomaly/9999-01-01/manifest.json"
         )
     assert response.status_code == 404
+
+
+def test_manifest_missing_store(client):
+    with patch(
+        "data_access_service.core.tiler_routes.data_tiles.get_lod_grids",
+        side_effect=FileNotFoundError(
+            "No such file or directory: 's3://bucket/missing.zarr'"
+        ),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/manifest.json"
+        )
+    assert response.status_code == 404
+    assert "s3://bucket/missing.zarr" in response.json()["detail"]
 
 
 def test_manifest_ok(client):
@@ -413,6 +444,26 @@ def test_availability_default_from_is_dataset_start(client):
     product = response.json()["products"]["product_a"]
     assert product["available_dates"] == ["2020-01-01"]
     assert product["full_date_range"] == {"start": "2020-01-01", "end": "2020-01-01"}
+
+
+def test_availability_missing_store(client):
+    # get_available_dates opens the store directly and is never wrapped by
+    # load_slice_or_404, so a missing store must still 404, not 500.
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.products.iter_product_items",
+            return_value=list(_FAKE_PRODUCTS.items()),
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.products.get_available_dates",
+            side_effect=FileNotFoundError(
+                "No such file or directory: 's3://bucket/missing.zarr'"
+            ),
+        ),
+    ):
+        response = client.get("/api/v1/das/tiler/data_tiles/manifest")
+    assert response.status_code == 404
+    assert "s3://bucket/missing.zarr" in response.json()["detail"]
 
 
 def test_availability_no_dates_in_range(client):

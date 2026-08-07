@@ -6,7 +6,8 @@ from pathlib import Path
 
 import anyio
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from data_access_service import Config
 from data_access_service.config.config import IntTestConfig
@@ -103,6 +104,11 @@ configure_gzip_middleware(app)
 # FastAPI "Duplicate Operation ID" warnings when generating the OpenAPI schema.
 app.include_router(api_router)
 app.include_router(tiler_router)
+
+
+@app.exception_handler(FileNotFoundError)
+async def file_not_found_handler(request: Request, exc: FileNotFoundError):
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
 
 
 if __name__ == "__main__":
