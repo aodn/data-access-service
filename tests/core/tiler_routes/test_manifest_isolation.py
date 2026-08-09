@@ -223,3 +223,63 @@ def test_failure_is_logged_once_per_failing_store(
     ]
     assert len(summaries) == 1
     assert "1 of 2 stores" in summaries[0].getMessage()
+
+
+# --- failure cooldown -------------------------------------------------------
+
+
+def test_a_failed_store_is_not_re_attempted_on_every_request(
+    client, catalogue, monkeypatch
+):
+    """StoreRegistry does not cache a failed open, so without a cooldown every
+    /manifest call would pay the full S3 timeout for every dead store — and
+    ogcapi-java calls this route on every getCollectionProducts."""
+    calls = _patch_dates(
+        monkeypatch,
+        {STORE_A: RuntimeError("s3 unreachable"), STORE_B: ["2024-02-01"]},
+    )
+
+    for _ in range(5):
+        assert client.get(MANIFEST).status_code == 200
+
+    assert calls.count(STORE_A) == 1, "the dead store was re-attempted"
+    assert calls.count(STORE_B) == 5, "healthy stores are still read every time"
+
+
+def test_cooldown_replays_the_same_error_so_the_status_stays_stable(
+    client, catalogue, monkeypatch
+):
+    """An absent-store total failure must keep answering 404, not flip to 503
+    once the cooldown starts short-circuiting the lookup."""
+    _patch_dates(
+        monkeypatch,
+        {
+            STORE_A: FileNotFoundError(f"No such file or directory: '{STORE_A}'"),
+            STORE_B: FileNotFoundError(f"No such file or directory: '{STORE_B}'"),
+        },
+    )
+
+    first = client.get(MANIFEST)
+    second = client.get(MANIFEST)
+
+    assert first.status_code == 404
+    assert second.status_code == 404
+
+
+def test_cooldown_clears_once_the_store_recovers(client, catalogue, monkeypatch):
+    from data_access_service.core.tiler_routes import products
+
+    _patch_dates(
+        monkeypatch,
+        {STORE_A: RuntimeError("s3 unreachable"), STORE_B: ["2024-02-01"]},
+    )
+    client.get(MANIFEST)
+    assert STORE_A in products._recent_store_failures
+
+    monkeypatch.setattr(products, "_STORE_FAILURE_COOLDOWN_SECONDS", 0.0)
+    _patch_dates(monkeypatch, {STORE_A: ["2024-03-01"], STORE_B: ["2024-02-01"]})
+
+    body = client.get(MANIFEST).json()["products"]
+
+    assert body["a:one"]["available_dates"] == ["2024-03-01"]
+    assert STORE_A not in products._recent_store_failures

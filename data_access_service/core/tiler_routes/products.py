@@ -1,5 +1,6 @@
 import logging
 import math
+import time
 from http import HTTPStatus
 
 import xarray as xr
@@ -34,6 +35,13 @@ from .shared import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# StoreRegistry deliberately does not cache a failed open, so without this every
+# /manifest call would re-attempt every broken store — tens of seconds each
+# against the S3 timeouts, on the shared thread pool, and ogcapi-java calls this
+# route on every getCollectionProducts.
+_STORE_FAILURE_COOLDOWN_SECONDS = 60.0
+_recent_store_failures: dict[str, tuple[float, Exception]] = {}
 
 
 def _require_point_in_bounds(ds: xr.Dataset, lat: float, lon: float) -> None:
@@ -128,21 +136,29 @@ def _available_dates_per_store(store_urls: set[str]) -> dict[str, list[str]]:
     """
     resolved: dict[str, list[str]] = {}
     failures: dict[str, Exception] = {}
+    now = time.monotonic()
 
     for store_url in sorted(store_urls):
+        recent = _recent_store_failures.get(store_url)
+        if recent and now - recent[0] < _STORE_FAILURE_COOLDOWN_SECONDS:
+            # Replay the same error, so the answer stays stable across the window.
+            resolved[store_url] = []
+            failures[store_url] = recent[1]
+            continue
         try:
             resolved[store_url] = get_available_dates(store_url)
+            _recent_store_failures.pop(store_url, None)
         except Exception as e:
-            logger.exception(f"Availability lookup failed for store: {store_url}")
+            logger.warning(f"Availability lookup failed for store {store_url}: {e!r}")
+            _recent_store_failures[store_url] = (now, e)
             resolved[store_url] = []
             failures[store_url] = e
 
     if failures and len(failures) == len(store_urls):
         # Absent is a different answer from unreachable: re-raise so the app's
         # FileNotFoundError handler answers 404 naming the store.
-        first = next(iter(failures.values()))
         if all(isinstance(e, FileNotFoundError) for e in failures.values()):
-            raise first
+            raise next(iter(failures.values()))
         raise HTTPException(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             detail="No product store could be opened; availability is unknown.",
