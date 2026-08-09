@@ -133,10 +133,10 @@ def verify_candidate_products(
             )
             continue
 
-        dataset = None if outcome is not None else cached_store(url)
-        if outcome is not None or dataset is None:
-            # Operationally unknown: either the open failed, or it reported
-            # success but nothing is cached (which is the same uncertainty).
+        dataset = cached_store(url) if outcome is None else None
+        if dataset is None:
+            # The open failed, or reported success with nothing cached — same
+            # uncertainty either way.
             unresolved.setdefault(url, []).append(product_id)
             kept[product_id] = product
             continue
@@ -156,7 +156,7 @@ def verify_candidate_products(
 
         kept[product_id] = product
 
-    _grade_unresolved_stores(unresolved)
+    _log_unresolved_stores(unresolved)
 
     return VerificationResult(
         products=kept,
@@ -165,7 +165,7 @@ def verify_candidate_products(
     )
 
 
-def _grade_unresolved_stores(unresolved: Mapping[str, list[str]]) -> None:
+def _log_unresolved_stores(unresolved: Mapping[str, list[str]]) -> None:
     """Report stores still unknown after prewarm's retries. Never fatal."""
     if not unresolved:
         return
