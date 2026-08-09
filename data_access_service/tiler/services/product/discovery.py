@@ -143,17 +143,18 @@ def build_candidate_products(
     return candidates
 
 
-def reject_unmatched_overrides(
+def log_unmatched_overrides(
     candidates: Mapping[str, Product],
     entries: list[GriddedVariableEntry],
 ) -> None:
-    """Fail startup on a dataset override that matched no candidate.
+    """Report dataset overrides that matched no candidate.
 
     An override carries a setting a whole-spec default would get wrong (the SLA
-    ocean mask). If its key stops matching — usually an upstream rename — the
-    setting silently disappears and the product renders wrong rather than
-    failing, so this is fatal. Matching is per spec: an override on the
-    UCUR/VCUR entry is unmatched if *that pair* produced no product there.
+    ocean mask), so a key that stops matching — usually an upstream rename —
+    means that setting silently stops applying. Logged loudly rather than fatal:
+    one stale key should not take the whole catalogue down. Matching is per
+    spec, so an override on the UCUR/VCUR entry is unmatched if *that pair*
+    produced no product there.
     """
     unmatched = [
         f"{entry.variable} -> {dataset_name}"
@@ -162,7 +163,9 @@ def reject_unmatched_overrides(
         if product_id(dataset_name, entry.variables) not in candidates
     ]
     if unmatched:
-        raise ValueError(
-            f"{len(unmatched)} dataset override(s) matched no discovered product: "
-            + "; ".join(unmatched)
+        logger.error(
+            "%d dataset override(s) matched no discovered product, so their "
+            "settings will not apply: %s",
+            len(unmatched),
+            "; ".join(unmatched),
         )

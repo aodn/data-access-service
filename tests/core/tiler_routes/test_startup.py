@@ -77,7 +77,7 @@ def warmup_env(monkeypatch):
         "build_candidate_products",
         lambda *a, **k: (calls.append("discover"), state["candidates"])[1],
     )
-    monkeypatch.setattr(startup, "reject_unmatched_overrides", record("overrides"))
+    monkeypatch.setattr(startup, "log_unmatched_overrides", record("overrides"))
     monkeypatch.setattr(startup, "load_colormaps", record("colormaps"))
     monkeypatch.setattr(startup, "warmup_resample", record("resample"))
     monkeypatch.setattr(startup, "warmup_visual", record("visual"))
@@ -159,7 +159,7 @@ async def test_verification_dropping_everything_leaves_the_tiler_unready(
     [
         "load_gridded_variables",
         "build_candidate_products",
-        "reject_unmatched_overrides",
+        "log_unmatched_overrides",
         "publish_products",
     ],
 )

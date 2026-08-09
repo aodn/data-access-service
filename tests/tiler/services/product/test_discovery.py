@@ -11,7 +11,7 @@ from data_access_service.tiler.schemas.gridded_variables import parse_gridded_va
 from data_access_service.tiler.services.product.discovery import (
     build_candidate_products,
     product_id,
-    reject_unmatched_overrides,
+    log_unmatched_overrides,
     source_path,
 )
 from data_access_service.tiler.services.product.product import get_lod_grids
@@ -303,28 +303,37 @@ def test_index_with_only_parquet_raises():
 # --- override matching ------------------------------------------------------
 
 
-def test_unmatched_override_is_fatal():
+def test_unmatched_override_is_reported_but_not_fatal(caplog):
+    """A stale override key means its setting stops applying, which is loud but
+    must not take the whole catalogue down."""
     index = {"u1": {"a.zarr": frozenset({"GSLA"})}}
     entries = parse_gridded_variables(
         [{"variable": "GSLA", "overrides": {"renamed.zarr": {"ocean_masked": True}}}]
     )
     candidates = build_candidate_products(index, entries, BASE_URL)
 
-    with pytest.raises(ValueError, match="renamed.zarr"):
-        reject_unmatched_overrides(candidates, entries)
+    with caplog.at_level("ERROR"):
+        log_unmatched_overrides(candidates, entries)
+
+    assert "renamed.zarr" in caplog.text
+    assert any(r.levelname == "ERROR" for r in caplog.records)
 
 
-def test_matched_override_passes():
+def test_matched_override_logs_nothing(caplog):
     index = {"u1": {"a.zarr": frozenset({"GSLA"})}}
     entries = parse_gridded_variables(
         [{"variable": "GSLA", "overrides": {"a.zarr": {"ocean_masked": True}}}]
     )
     candidates = build_candidate_products(index, entries, BASE_URL)
 
-    reject_unmatched_overrides(candidates, entries)
+    caplog.clear()
+    with caplog.at_level("ERROR"):
+        log_unmatched_overrides(candidates, entries)
+
+    assert not [r for r in caplog.records if r.levelname == "ERROR"]
 
 
-def test_override_matching_is_per_specification_not_global():
+def test_override_matching_is_per_specification_not_global(caplog):
     """An override on the pair entry is unmatched when the *pair* produced no
     product on that dataset, even though another specification did."""
     index = {"u1": {"a.zarr": frozenset({"GSLA"})}}
@@ -339,8 +348,10 @@ def test_override_matching_is_per_specification_not_global():
     )
     candidates = build_candidate_products(index, entries, BASE_URL)
 
-    with pytest.raises(ValueError, match="a.zarr"):
-        reject_unmatched_overrides(candidates, entries)
+    with caplog.at_level("ERROR"):
+        log_unmatched_overrides(candidates, entries)
+
+    assert "a.zarr" in caplog.text
 
 
 # --- the five product IDs that predate derivation ---------------------------

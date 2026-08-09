@@ -17,7 +17,7 @@ from data_access_service.tiler.schemas.gridded_variables import load_gridded_var
 from data_access_service.tiler.services.colormap.registry import load_colormaps
 from data_access_service.tiler.services.product.discovery import (
     build_candidate_products,
-    reject_unmatched_overrides,
+    log_unmatched_overrides,
 )
 from data_access_service.tiler.services.product.registry import publish_products
 from data_access_service.tiler.services.product.verification import (
@@ -45,7 +45,7 @@ async def run_tiler_warmup(api: API) -> None:
             entries,
             Config.get_config().get_tiler_config().zarr_store_base_url,
         )
-        reject_unmatched_overrides(candidates, entries)
+        log_unmatched_overrides(candidates, entries)
 
         load_colormaps()
         await anyio.to_thread.run_sync(warmup_resample)

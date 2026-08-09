@@ -827,7 +827,7 @@ async def run_tiler_warmup(api: API) -> None:
         entries = load_gridded_variables()                # variable specs, validated
         candidates = build_candidate_products(            # fan out across the catalogue
             api.get_dataset_variables(None), entries, base_url)
-        reject_unmatched_overrides(candidates, entries)   # a stale override key is fatal
+        log_unmatched_overrides(candidates, entries)      # stale key -> loud, not fatal
 
         load_colormaps()
         await anyio.to_thread.run_sync(warmup_resample)   # numba JIT warmup, see §7.4
@@ -1019,7 +1019,7 @@ Shorthand and object entries normalise into one canonical `GriddedVariableEntry`
 - **`variable`** — a `str` for a scalar product, or an **ordered two-element list** for a vector pair. The pair's order is the R/G channel order the data-tile shader decodes and is **never sorted**. A list must hold exactly two distinct names: one is a scalar (use a plain string), and three or more cannot be encoded into a data tile. A one-element list is rejected rather than silently unwrapped — it would turn a scalar product into a broken vector one.
 - **`visual`** — whether `/visual_tiles` can render it. Defaults to `true` for a scalar and `false` for a pair; `true` on a pair is rejected, since visual tiles render one scalar band. Set it to `false` on a scalar whose variable the renderer has no sensible colouring for. ogcapi-java publishes `tile_types` from this field, so it is what stops a non-renderable product advertising visual tiles.
 - **`defaults`** — settings applied to every product the specification fans out to (`ocean_masked`, `data_tile`, `visual_tile`).
-- **`overrides`** — keyed by the exact metadata dataset name *including* `.zarr`, for the cases where one grid genuinely differs. Overrides overlay `defaults` recursively, so naming one nested field does not reset its siblings. **An override key that matches no discovered product is a fatal startup error** — it usually means an upstream rename, which would otherwise silently drop the setting the override exists to carry.
+- **`overrides`** — keyed by the exact metadata dataset name *including* `.zarr`, for the cases where one grid genuinely differs. Overrides overlay `defaults` recursively, so naming one nested field does not reset its siblings. An override key that matches no discovered product is **logged at ERROR** (usually an upstream rename), but is not fatal.
 - `extra="forbid"` applies at every level, so a typo fails at load rather than being ignored.
 
 The live example of why `overrides` exists: `["UCUR", "VCUR"]` matches 19 datasets, 18 of which are HF-radar sites on entirely different grids. The committed ocean mask is built from the SLA grid, so only that dataset may enable `ocean_masked`.
@@ -1031,7 +1031,7 @@ The live example of why `overrides` exists: `["UCUR", "VCUR"]` matches 19 datase
 3. Build a `Product` per match: id `f"{dataset.removesuffix('.zarr')}:{'+'.join(v.lower() for v in variables)}"`, `source_path` as `f"{tiler.zarr_store_base_url}/{dataset}"` (no trailing slash, ever — that string keys the store registry, date index, and both cache layers), `metadata_uuid` from the index key.
 4. Prewarm every unique store, verify every candidate, publish atomically. See [§11.2](#112-run_tiler_warmup-coretiler_routesstartuppy).
 
-A duplicate generated id and a zero-candidate result are both fatal; a specification that matches nothing is a warning.
+A duplicate generated id and a zero-candidate result are both fatal; a specification or override that matches nothing is logged, not fatal.
 
 > **Each product gets its own `DataTileConfig`/`VisualTileConfig` instance.** This is a correctness rule, not a style preference. `lod_grids` is a mutable dict on a frozen dataclass, filled in place on first request from *that product's own* store dimensions and never recomputed ([§7.3](#73-lazy-population-servicesproductproductpy--get_lod_grids)). Sharing one instance across a fan-out would make all 32 `sea_surface_temperature` products — which sit on differently-sized grids — inherit whichever store was requested first, producing wrong LOD grids in both `/manifest` and every data tile, with nothing raised anywhere.
 
