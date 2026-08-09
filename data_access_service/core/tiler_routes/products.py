@@ -122,19 +122,9 @@ def get_products_availability(
 def _available_dates_per_store(store_urls: set[str]) -> dict[str, list[str]]:
     """Resolve available dates once per unique store, isolating per-store failure.
 
-    Two things this fixes, both of which only became problems at fan-out scale.
-
-    Availability is a property of the *store*, not the product, and products
-    share stores heavily — the 19 currents products sit on 19 different grids
-    but the SLA store alone backs three products. Looking dates up per product
-    repeated the work for no new information.
-
-    More importantly, ``get_available_dates`` opens the store, and this route
-    used to let one failure propagate. ogcapi-java fetches this global manifest
-    on *every* ``getCollectionProducts`` call, so a single unreachable store
-    broke the product listing for every collection — a global outage wearing the
-    costume of a local degradation. Each store now fails alone, reporting empty
-    availability for its own products while every other product is unaffected.
+    ogcapi-java fetches this global manifest on *every* getCollectionProducts
+    call, so letting one unreachable store propagate would break the product
+    listing for every collection. Each store fails alone instead.
     """
     resolved: dict[str, list[str]] = {}
     failures: dict[str, Exception] = {}
@@ -147,13 +137,9 @@ def _available_dates_per_store(store_urls: set[str]) -> dict[str, list[str]]:
             resolved[store_url] = []
             failures[store_url] = e
 
-    # Only a total failure is worth an error status. Anything less is a partial
-    # answer, and a partial answer is what the isolation above exists to preserve.
     if failures and len(failures) == len(store_urls):
-        # A store that is *absent* is a different answer from one that could not
-        # be reached, and the difference is worth keeping on the wire. Re-raise
-        # so the app's FileNotFoundError handler answers 404 naming the store,
-        # rather than flattening it into a generic "try again later".
+        # Absent is a different answer from unreachable: re-raise so the app's
+        # FileNotFoundError handler answers 404 naming the store.
         first = next(iter(failures.values()))
         if all(isinstance(e, FileNotFoundError) for e in failures.values()):
             raise first

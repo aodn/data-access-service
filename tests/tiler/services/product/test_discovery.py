@@ -1,10 +1,8 @@
 """Candidate product derivation from the metadata schema index.
 
-Discovery is a pure function of the index, the config entries, and the base
-URL, so everything here runs against a hand-built fake index — no API instance,
-no S3, no registry. That is deliberate: this is the module where a mistake is
-invisible (a product that renders the wrong grid, an ID that changed under a
-frontend cache), so it gets the densest coverage in the change.
+Runs against a hand-built fake index — no API instance, no S3, no registry.
+Mistakes here are invisible at runtime (a wrong grid, an ID that moved under a
+frontend cache), so coverage is deliberately dense.
 """
 
 import pytest
@@ -15,7 +13,6 @@ from data_access_service.tiler.services.product.discovery import (
     product_id,
     reject_unmatched_overrides,
     source_path,
-    unmatched_overrides,
 )
 from data_access_service.tiler.services.product.product import get_lod_grids
 
@@ -306,14 +303,13 @@ def test_index_with_only_parquet_raises():
 # --- override matching ------------------------------------------------------
 
 
-def test_unmatched_override_is_reported_and_fatal():
+def test_unmatched_override_is_fatal():
     index = {"u1": {"a.zarr": frozenset({"GSLA"})}}
     entries = parse_gridded_variables(
         [{"variable": "GSLA", "overrides": {"renamed.zarr": {"ocean_masked": True}}}]
     )
     candidates = build_candidate_products(index, entries, BASE_URL)
 
-    assert unmatched_overrides(candidates, entries) == [("GSLA", "renamed.zarr")]
     with pytest.raises(ValueError, match="renamed.zarr"):
         reject_unmatched_overrides(candidates, entries)
 
@@ -325,7 +321,6 @@ def test_matched_override_passes():
     )
     candidates = build_candidate_products(index, entries, BASE_URL)
 
-    assert unmatched_overrides(candidates, entries) == []
     reject_unmatched_overrides(candidates, entries)
 
 
@@ -343,7 +338,9 @@ def test_override_matching_is_per_specification_not_global():
         ]
     )
     candidates = build_candidate_products(index, entries, BASE_URL)
-    assert unmatched_overrides(candidates, entries) == [("['UCUR', 'VCUR']", "a.zarr")]
+
+    with pytest.raises(ValueError, match="a.zarr"):
+        reject_unmatched_overrides(candidates, entries)
 
 
 # --- the five product IDs that predate derivation ---------------------------

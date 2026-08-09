@@ -1,16 +1,9 @@
 """Verify candidate products against the stores that were actually opened.
 
-Discovery matches configured variables against *catalogue* metadata. This module
-is where those candidates meet the real store schema, and where a store that
-failed to open is classified: confirmed answers drop their candidates, while
-operational uncertainty degrades them without taking the tiler down.
-
-Phase 1 runs two O(1) guards per candidate — the variable exists, the store is
-time-indexed — plus the store-level lat/lon grid check ``_open_store`` already
-performs. It deliberately does not check dimensions, dtype, or pair-shape
-compatibility: the curated variable list is the phase-1 authority on
-renderability, and per-variable proof is a later step that slots in behind this
-same call site.
+Discovery matches against *catalogue* metadata; this is where candidates meet
+the real store schema. Two O(1) guards per candidate — the variable exists, the
+store is time-indexed. Dimensions, dtype and pair shape are deliberately not
+checked: the curated variable list is what vouches for renderability today.
 """
 
 import logging
@@ -26,9 +19,7 @@ from data_access_service.tiler.services.store.registry import (
 
 logger = logging.getLogger(__name__)
 
-# Rejection categories, so the startup log can break counts down by cause. A
-# non-zero VARIABLE_ABSENT count is the one worth stopping on: it means the
-# catalogue metadata and the real store schema disagree.
+# Rejection categories, so the startup log can break counts down by cause.
 NOT_GRIDDED = "store_not_gridded"
 STORE_ABSENT = "store_absent"
 VARIABLE_ABSENT = "variable_absent"
@@ -47,10 +38,8 @@ class Rejection:
 class VerificationResult:
     products: dict[str, Product] = field(default_factory=dict)
     rejections: list[Rejection] = field(default_factory=list)
-    # Stores that stayed operationally unknown after prewarm's bounded retries.
-    # Their products are still published: StoreRegistry.get does not cache the
-    # failure, so the first real request re-attempts the open and the product
-    # recovers on its own.
+    # Still published: StoreRegistry.get does not cache the failure, so the
+    # first real request re-attempts the open.
     unresolved_stores: list[str] = field(default_factory=list)
 
     def log_rejections(self) -> None:
@@ -79,11 +68,8 @@ class VerificationResult:
 
 def _guard_failures(product: Product, dataset) -> tuple[str, str] | None:
     """Run the two phase-1 guards. Returns ``(category, reason)`` or None."""
-    # Guard 1 — variable presence. Discovery matched against catalogue metadata,
-    # not the store's real schema. Unguarded, a drifted product registers
-    # cleanly and fails on the first tile request with "No data found for date
-    # <date>" — which blames the date for a missing variable, so diagnosis
-    # starts from the wrong end.
+    # Unguarded, catalogue/store drift surfaces later as "No data found for
+    # date <date>", which blames the date for a missing variable.
     missing = [name for name in product.variables if name not in dataset]
     if missing:
         return (
@@ -91,9 +77,8 @@ def _guard_failures(product: Product, dataset) -> tuple[str, str] | None:
             f"variable(s) {', '.join(missing)} absent from the opened store",
         )
 
-    # Guard 2 — time dimension. _open_store does not require one, and without it
-    # the date index is empty, so the product would appear in /products and 404
-    # on every single date. The store opens cleanly; the product is just useless.
+    # Without a time dim the date index is empty, so the product would appear
+    # in /products and 404 on every date.
     if "time" not in dataset.dims:
         return (
             NO_TIME_DIMENSION,
@@ -106,23 +91,11 @@ def verify_candidate_products(
     candidates: Mapping[str, Product],
     outcomes: Mapping[str, BaseException | None],
 ) -> VerificationResult:
-    """Drop candidates their store cannot support; grade stores that never opened.
+    """Drop candidates their store cannot support; degrade stores that never opened.
 
-    No store is special. A store failure is classified by what the store said,
-    never by which products happen to sit on it:
-
-      * confirmed non-grid store -> drop every candidate on it;
-      * store that does not exist -> drop every candidate on it;
-      * unresolved store -> keep its candidates, log at ERROR;
-      * opened store -> run the two per-candidate guards.
-
-    Treating any unresolved store as fatal is right at two stores and wrong at
-    sixty: one flaky S3 endpoint would take the whole tiler to a permanent 503.
-    Unresolved candidates stay registered because StoreRegistry.get does not
-    cache the failure, so the first real request re-attempts the open.
-
-    Rejections are per product, so a bad variable on one product leaves its
-    siblings on the same store published.
+    A store failure is classified by what the store said, never by which
+    products sit on it — nothing here takes the tiler down. Rejections are per
+    product, so a bad variable leaves its siblings on the same store published.
     """
     kept: dict[str, Product] = {}
     rejections: list[Rejection] = []
@@ -149,10 +122,7 @@ def verify_candidate_products(
             continue
 
         if isinstance(outcome, FileNotFoundError):
-            # A confirmed absence, not operational uncertainty: there is
-            # nothing to recover on a later request, so the candidates are
-            # dropped and named rather than kept in a degraded state that would
-            # never resolve.
+            # Confirmed absence: nothing to recover on a later request.
             rejections.append(
                 Rejection(
                     product_id=product_id,
@@ -196,13 +166,7 @@ def verify_candidate_products(
 
 
 def _grade_unresolved_stores(unresolved: Mapping[str, list[str]]) -> None:
-    """Report stores that stayed operationally unknown after prewarm's retries.
-
-    Never fatal. The products stay registered: ``StoreRegistry.get`` discards the
-    per-URL future in ``finally``, so it does not cache the failure and the first
-    real request re-attempts the open. Reporting it at ERROR with a count is what
-    makes the degradation monitorable rather than silent.
-    """
+    """Report stores still unknown after prewarm's retries. Never fatal."""
     if not unresolved:
         return
 

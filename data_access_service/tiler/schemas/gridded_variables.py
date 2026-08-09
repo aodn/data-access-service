@@ -1,23 +1,19 @@
 """Source config model for ``gridded_variables.json``.
 
-This is the *input* side of product configuration and is deliberately kept
-separate from [[products]]'s ``ProductConfig``, which is the resolved *wire*
-model served by ``GET /products``. The file lists variable specifications only —
-never datasets — and startup discovery fans each specification out to every
-``.zarr`` dataset in the metadata catalogue that carries the variable(s).
+The input side of product configuration, separate from [[products]]'s
+``ProductConfig`` wire model. The file lists variable specifications only, never
+datasets; startup fans each one out across the metadata catalogue.
 
-Two syntaxes are accepted per entry, and both are normalised into one canonical
-``GriddedVariableEntry`` at load time so discovery and tests only ever see the
-canonical form:
+Two syntaxes per entry, both normalised into one canonical entry at load time:
 
 ```json
-"GSLA"                                     // scalar shorthand, visual defaults true
-["UCUR", "VCUR"]                           // ordered pair shorthand, visual defaults false
-{ "variable": "GSL", "defaults": { ... } } // object form, explicit settings
+"GSLA"                                     // scalar, visual defaults true
+["UCUR", "VCUR"]                           // ordered pair, visual defaults false
+{ "variable": "GSL", "defaults": { ... } } // explicit settings
 ```
 
-Variable spelling and case are preserved verbatim — they are looked up against
-the real store schema, and lower-casing happens only when building a product ID.
+Variable case is preserved verbatim — it is looked up against the real store
+schema; lower-casing happens only when building a product ID.
 """
 
 import json
@@ -43,11 +39,8 @@ class ProductDefaults(BaseModel):
 class ProductDefaultsOverride(BaseModel):
     """Only explicitly supplied fields overlay ProductDefaults, recursively.
 
-    "Explicitly supplied" is Pydantic's ``model_fields_set``, read out via
-    ``model_dump(exclude_unset=True)`` — which recurses into the nested models
-    too. That is what makes ``{"data_tile": {"padding": 8}}`` overlay only the
-    padding instead of resetting ``chunk_px`` and ``coastal_fill`` back to their
-    own model defaults.
+    Read out via ``model_dump(exclude_unset=True)``, which recurses into nested
+    models — so ``{"data_tile": {"padding": 8}}`` overlays only the padding.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -72,10 +65,9 @@ def _deep_merge(base: dict, overlay: dict) -> dict:
 class GriddedVariableEntry(BaseModel):
     """One canonical variable specification.
 
-    ``variable`` keeps the configured representation exactly: a ``str`` for a
-    scalar product, an ordered two-element ``list[str]`` for a vector pair. The
-    pair's order is the shader's R/G channel order — it must never be sorted, and
-    a one-element list must never stand in for a scalar.
+    ``variable`` keeps the configured representation exactly: ``str`` for a
+    scalar, ordered two-element ``list[str]`` for a vector pair. Pair order is
+    the shader's R/G channel order and must never be sorted.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -83,19 +75,16 @@ class GriddedVariableEntry(BaseModel):
     variable: str | list[str]
     visual: bool
     defaults: ProductDefaults = Field(default_factory=ProductDefaults)
-    # Keyed by the exact metadata dataset name, including the .zarr suffix. A key
-    # matching no discovered dataset is fatal at startup (see discovery), because
-    # it usually means an upstream rename silently dropped a correctness setting.
+    # Keyed by the exact metadata dataset name, including .zarr. A key matching
+    # no discovered dataset is fatal at startup (see discovery).
     overrides: dict[str, ProductDefaultsOverride] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
     def _normalise(cls, data: Any) -> Any:
-        """Expand shorthand and resolve the capability default before validation.
+        """Expand shorthand and resolve the capability default.
 
-        Runs before field validation so the declared ``visual: bool`` can stay
-        non-optional: by the time Pydantic looks at the field it is always a
-        resolved boolean, whichever syntax the file used.
+        Runs before field validation so ``visual`` can stay non-optional.
         """
         if isinstance(data, (str, list)):
             data = {"variable": data}
@@ -143,11 +132,7 @@ class GriddedVariableEntry(BaseModel):
         return self.variable if isinstance(self.variable, list) else [self.variable]
 
     def resolve_defaults(self, dataset_name: str) -> ProductDefaults:
-        """Settings for this specification on ``dataset_name``.
-
-        An omitted override field inherits the entry default rather than
-        resetting the whole nested block — see ProductDefaultsOverride.
-        """
+        """Settings for this specification on ``dataset_name``."""
         override = self.overrides.get(dataset_name)
         if override is None:
             return self.defaults
@@ -173,9 +158,7 @@ def load_gridded_variables(
 ) -> list[GriddedVariableEntry]:
     """Read and validate the committed gridded_variables.json.
 
-    The file is static config shipped with the package, so a missing or empty one
-    is a broken deploy rather than a legitimate "no products" state — it raises
-    instead of quietly publishing an empty catalogue.
+    A missing or empty file is a broken deploy, not a legitimate empty state.
     """
     config_path = Path(path)
     if not config_path.exists():

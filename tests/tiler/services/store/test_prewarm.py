@@ -1,9 +1,7 @@
 """Prewarm outcome reporting and bounded retry.
 
-Prewarm used to log and swallow every per-URL failure. At two stores that was
-fine; at sixty it is the difference between "one HF-radar site is unreachable"
-and "the tiler is down", and only the caller has the context to tell those
-apart — so prewarm now reports what happened per URL and decides nothing.
+Prewarm reports what happened per URL and decides nothing; only the caller can
+tell "one site unreachable" from "the tiler is down".
 """
 
 import numpy as np

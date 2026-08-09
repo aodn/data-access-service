@@ -1,9 +1,7 @@
 """The availability manifest is per-store and fails one store at a time.
 
-ogcapi-java fetches this global manifest on *every* getCollectionProducts call.
-Before isolation, one unreachable store made the route raise, which broke the
-product listing for every collection — a global outage wearing the costume of a
-local degradation. At two stores that risk was theoretical; at sixty it is not.
+ogcapi-java fetches this global manifest on every getCollectionProducts call,
+so one unreachable store must not break the listing for every collection.
 """
 
 import pytest

@@ -1,9 +1,8 @@
 """The vectorised date index must match the per-timestamp implementation exactly.
 
-Building sixty of these at startup is why it was vectorised; the date strings it
-produces are matched literally against user-supplied dates on every request, so
-"faster" is only acceptable if it is also byte-identical. DST transitions are
-where a bulk tz conversion is most likely to diverge from a per-value one.
+Its output is matched literally against user-supplied dates, so "faster" is
+only acceptable if byte-identical. DST transitions are where a bulk timezone
+conversion is most likely to diverge from a per-value one.
 """
 
 import numpy as np

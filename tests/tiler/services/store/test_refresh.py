@@ -1,10 +1,7 @@
 """TTL-triggered refresh is bounded and jittered.
 
-Previously one raw thread was spawned per expired store. That was fine at two
-stores; at sixty it is a stampede — every store reopening from S3 at once,
-uncapped, competing with live tile requests for the same connection pool. And
-because prewarm opens them all together they share a deadline, so the stampede
-is periodic rather than incidental.
+A raw thread per expired store is a stampede at 60 stores, and because prewarm
+opens them together they share a deadline, making it periodic.
 """
 
 import threading

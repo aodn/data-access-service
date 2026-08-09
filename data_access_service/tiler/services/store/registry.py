@@ -36,18 +36,15 @@ _STORE_TTL = float(_tiler_config.store_ttl_seconds)
 # budget so a many-product startup can't transiently consume tile-handler slots.
 _STORE_PREWARM_LIMITER = anyio.CapacityLimiter(_tiler_config.store_prewarm_workers)
 
-# Bounded pool for TTL-triggered background refreshes. Previously one raw thread
-# was spawned per expired store, which was fine at two stores and a stampede at
-# sixty — every one of them reopening from S3 at once, uncapped, competing with
-# live tile requests for the same connection pool.
+# Bounded pool for TTL refreshes: a raw thread per expired store is a stampede
+# at 60 stores, all competing with live requests for the same S3 pool.
 _REFRESH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=_tiler_config.store_refresh_workers,
     thread_name_prefix="store-refresh",
 )
 
-# Fraction of the TTL used as per-store random jitter. Stores opened together at
-# startup would otherwise share a deadline and all expire in the same instant,
-# converting a smooth refresh trickle into a periodic spike.
+# Per-store jitter, so stores opened together at startup do not all expire at
+# the same instant. Capped low: it spreads load, it does not extend freshness.
 _REFRESH_JITTER_FRACTION = 0.1
 
 # Per-syscall timeouts on every S3 connection. Without these, a stuck socket can
@@ -64,12 +61,8 @@ _S3_CONFIG_KWARGS = {
 }
 
 
-# How hard prewarm tries before giving an operational failure back to its
-# caller. Deliberately small: at 60 stores the point is to ride out a transient
-# S3 blip, not to stall startup behind a genuinely unreachable bucket. A store
-# that is still unresolved after this is handled by the caller's graded policy,
-# and StoreRegistry.get does not cache the failure, so it re-attempts on the
-# first real request either way.
+# Small on purpose: ride out a transient S3 blip, do not stall startup behind an
+# unreachable bucket.
 _PREWARM_MAX_ATTEMPTS = 3
 _PREWARM_BACKOFF_SECONDS = 1.0
 
@@ -77,10 +70,8 @@ _PREWARM_BACKOFF_SECONDS = 1.0
 class NotGriddedStoreError(ValueError):
     """The store opened, but is not a lat/lon grid the tiler can render.
 
-    A *confirmed* answer rather than an operational one: retrying will not
-    change it, and every candidate product on the store is dropped rather than
-    degraded. Subclasses ValueError because that is what ``_open_store`` has
-    always raised and callers catch.
+    A confirmed answer, not an operational one: retrying will not change it.
+    Subclasses ValueError, which is what callers already catch.
     """
 
 
@@ -146,15 +137,11 @@ def _open_store(store_url: str) -> xr.Dataset:
 
 
 def _build_date_index(ds: xr.Dataset) -> dict[str, list]:
-    """Return {local_date: [timestamps]} for the dataset's time coord, or {} if missing.
+    """Return {local_date: [timestamps]} for the dataset's time coord, or {}.
 
-    The conversion is vectorised through a single DatetimeIndex rather than one
-    ``ts_to_local_date`` call per timestamp. Same arithmetic — localise to UTC,
-    convert to the tile timezone, format — but done once for the whole coord,
-    which is what makes building sixty of these at startup affordable. An
-    HF-radar store carries tens of thousands of hourly timestamps.
-
-    The stored values stay the raw coord elements, not the converted ones:
+    Vectorised through one DatetimeIndex rather than a call per timestamp — 60
+    of these are built at startup and an HF-radar store carries tens of
+    thousands of hourly stamps. Stored values stay the raw coord elements, since
     ``_fetch_slice_from_store`` selects with them.
     """
     if "time" not in ds.dims:
@@ -188,8 +175,8 @@ class StoreRegistry:
         self._ttl = ttl
         self._stores: dict[str, xr.Dataset] = {}
         self._opened_at: dict[str, float] = {}
-        # Per-store TTL jitter, redrawn on every publish so stores opened in the
-        # same startup burst drift apart rather than expiring in lockstep.
+        # Redrawn on every publish so stores drift apart rather than expiring
+        # in lockstep.
         self._ttl_jitter: dict[str, float] = {}
         self._refreshing: set[str] = set()
         self._in_flight: dict[str, concurrent.futures.Future] = {}
@@ -204,9 +191,8 @@ class StoreRegistry:
                 deadline = self._ttl + self._ttl_jitter.get(store_url, 0.0)
                 if time.monotonic() - self._opened_at[store_url] < deadline:
                     return self._stores[store_url]
-                # TTL expired — return stale store and trigger a background
-                # refresh on the bounded pool. The _refreshing guard keeps one
-                # store from queueing a refresh per concurrent request.
+                # Serve stale, refresh in background. The guard stops one store
+                # queueing a refresh per concurrent request.
                 if store_url not in self._refreshing:
                     self._refreshing.add(store_url)
                     logger.info(
@@ -239,12 +225,9 @@ class StoreRegistry:
         return ds
 
     def cached(self, store_url: str) -> xr.Dataset | None:
-        """Return the already-open dataset for ``store_url``, or None.
+        """Already-open dataset for ``store_url``, or None.
 
-        Pure lookup: unlike ``get`` it never opens the store and never triggers a
-        TTL refresh. Startup verification uses it to inspect the schema of a
-        store prewarm just opened, without paying for a second open or racing
-        the refresh machinery.
+        Pure lookup: never opens the store, never triggers a TTL refresh.
         """
         with self._lock:
             return self._stores.get(store_url)
@@ -257,12 +240,9 @@ class StoreRegistry:
     async def _prewarm_one(self, store_url: str) -> BaseException | None:
         """Open one URL, retrying operational failures. Returns None on success.
 
-        Two outcomes are *confirmed* and returned immediately, because retrying
-        cannot change them: the store opened but is not a grid, and the store is
-        not there at all. Anything else is treated as operational — a slow
-        bucket, a dropped socket, throttling — and gets a bounded number of
-        attempts with exponential backoff before being handed back to the caller
-        to grade.
+        Two outcomes are confirmed and returned immediately, because retrying
+        cannot change them: not a grid, and not there. Anything else is
+        operational and gets bounded retries with backoff.
         """
         last_error: BaseException | None = None
         for attempt in range(1, _PREWARM_MAX_ATTEMPTS + 1):
@@ -272,17 +252,13 @@ class StoreRegistry:
                 )
                 return None
             except NotGriddedStoreError as e:
-                # Intentional exclusion, not a fault: INFO and no traceback, or
-                # 60 stores' worth of legitimate skips look like an incident.
+                # Intentional exclusion, not a fault — INFO, no traceback.
                 logger.info(f"Store is not a lat/lon grid, skipping: {store_url} ({e})")
                 return e
             except FileNotFoundError as e:
-                # The bucket answered "not there". That is as final as a
-                # non-grid answer, so it is not retried — but unlike a non-grid
-                # store it is never intentional, so it is logged at WARNING. The
-                # usual cause is an upstream rename the catalogue has not caught
-                # up with, which leaves metadata advertising a store that no
-                # longer exists.
+                # As final as a non-grid answer, so not retried — but never
+                # intentional, so WARNING. Usually an upstream rename the
+                # catalogue has not caught up with.
                 logger.warning(f"Store does not exist: {store_url} ({e})")
                 return e
             except Exception as e:
@@ -309,9 +285,7 @@ class StoreRegistry:
         startup, and lets get_products_availability respond fast on first call.
 
         Returns ``{url: None on success, else the exception}`` rather than
-        swallowing failures. The caller needs the distinction: a confirmed
-        non-grid store drops its products, while an operational failure is graded
-        against whether the store backs a product already in production use.
+        swallowing failures — the caller decides what each outcome means.
         """
         outcomes: dict[str, BaseException | None] = {}
         logger.debug("Prewarming %d stores: %s", len(store_urls), store_urls)
@@ -380,7 +354,6 @@ def get_store(store_url: str) -> xr.Dataset:
 
 
 def cached_store(store_url: str) -> xr.Dataset | None:
-    """Already-open dataset for ``store_url``, without opening it. See ``cached``."""
     return store_registry.cached(store_url)
 
 
@@ -391,10 +364,5 @@ def get_available_dates(store_url: str) -> list[str]:
 
 
 async def prewarm_stores(store_urls: list[str]) -> dict[str, BaseException | None]:
-    """Prewarm every URL and return the per-URL outcome map.
-
-    Deliberately does not catch: startup grades these outcomes and decides what
-    is fatal, so swallowing an error here would leave it deciding from an
-    incomplete map.
-    """
+    """Prewarm every URL and return the per-URL outcome map."""
     return await store_registry.prewarm(store_urls)

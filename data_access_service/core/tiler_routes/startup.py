@@ -1,15 +1,8 @@
 """Tiler warmup sequence run during app startup, once API metadata is ready.
 
-Sequencing is the point of this module. Nothing is published before it has been
-verified, and every fatal path exits without ``mark_tiler_ready()`` — so the
-failure mode is a 503 behind ``require_tiler_ready``, never a tiler serving a
-catalogue that is quietly wrong.
-
-No product is privileged. Products that predate derivation go through exactly the
-same discovery, verification and publication path as any other, and a store
-failure is judged by what the store said rather than by which products sit on it.
-That the five original ids still derive correctly is pinned by unit tests against
-the derivation formula, which is where that belongs.
+Nothing is published before it is verified, and every fatal path exits without
+``mark_tiler_ready()`` — so the failure mode is a 503 behind
+``require_tiler_ready``, never a catalogue that is quietly wrong.
 """
 
 import asyncio
@@ -38,17 +31,11 @@ logger = logging.getLogger(__name__)
 
 
 async def run_tiler_warmup(api: API) -> None:
-    """Derive, verify, and publish the product catalogue, then mark ready.
-
-    Runs as a named lifespan task whose result is never awaited, so it has to
-    report its own failures: anything unexpected is logged at CRITICAL and the
-    tiler simply stays unready.
-    """
+    """Derive, verify, and publish the product catalogue, then mark ready."""
     try:
         logger.info("Waiting for API metadata init before starting other tasks")
-        # Indefinite: the catalogue is derived from the metadata index, so
-        # deriving from a half-populated one would publish a silently
-        # incomplete catalogue — strictly worse than becoming ready later.
+        # Indefinite: deriving from a half-populated index would publish a
+        # silently incomplete catalogue.
         if not await api.wait_until_ready(timeout=None):
             raise RuntimeError("API metadata never became ready")
 
@@ -81,8 +68,7 @@ async def run_tiler_warmup(api: API) -> None:
             len(result.rejections),
         )
     except asyncio.CancelledError:
-        # Shutdown cancels this task. Without the re-raise it would be swallowed
-        # by the handler below and logged as a warmup failure.
+        # Shutdown; without this it would be logged as a warmup failure below.
         raise
     except Exception:
         logger.critical("Tiler warmup failed; tiler remains unready", exc_info=True)

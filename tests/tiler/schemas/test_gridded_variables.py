@@ -1,10 +1,8 @@
 """gridded_variables.json normalisation and validation.
 
-The file is the only hand-maintained input to the derived product catalogue, so
-every rule that protects a downstream invariant is pinned here rather than left
-to be discovered at boot: pair arity (the data-tile encoder packs exactly two
-channels), pair order (the shader's R/G assignment), and the scalar-only nature
-of visual tiles.
+The only hand-maintained input to the derived catalogue, so the rules that
+protect downstream invariants are pinned here rather than found at boot: pair
+arity, pair order (the shader's R/G assignment), and scalar-only visual tiles.
 """
 
 import json
