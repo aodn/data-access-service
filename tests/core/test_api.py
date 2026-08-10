@@ -112,10 +112,10 @@ class TestApi(unittest.TestCase):
             return_value=json.load(file),
         )
         def test_get_dataset_variables(self, get_metadata):
-            """Both overloads of the lightweight schema-key accessor.
+            """The lightweight schema-key accessor: uuid -> dataset_name -> fields.
 
             This is the index tiler product discovery matches configured gridded
-            variables against, so the per-uuid shape (dataset name -> field names,
+            variables against, so the per-dataset shape (name -> field names,
             including the .zarr suffix) matters as much as the values.
             """
             api = API()
@@ -125,26 +125,14 @@ class TestApi(unittest.TestCase):
             zarr_key = "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
             parquet_uuid = "541d4f15-122a-443d-ab4e-2b5feb08d6a0"
 
-            # Whole-catalogue overload: uuid -> dataset_name -> frozenset(fields).
-            full = api.get_dataset_variables(None)
+            full = api.get_dataset_variables()
             self.assertIn(zarr_uuid, full)
             self.assertIn(parquet_uuid, full)
             self.assertIsInstance(full[zarr_uuid][zarr_key], frozenset)
-
-            # Per-uuid overload returns just that uuid's dataset map.
-            per_uuid = api.get_dataset_variables(zarr_uuid)
-            self.assertEqual(per_uuid, full[zarr_uuid])
-            self.assertIn(zarr_key, per_uuid)
             # Real gridded variable names, preserved in their source spelling.
-            self.assertIn("analysed_sst", per_uuid[zarr_key])
-            self.assertIn("sea_ice_fraction", per_uuid[zarr_key])
-            self.assertNotIn("GSLA", per_uuid[zarr_key])
-
-            # Unknown uuid is an empty map, not a KeyError and not None.
-            self.assertEqual(api.get_dataset_variables("no-such-uuid"), {})
-
-            # Defaulted argument behaves as the whole-catalogue overload.
-            self.assertIs(api.get_dataset_variables(), full)
+            self.assertIn("analysed_sst", full[zarr_uuid][zarr_key])
+            self.assertIn("sea_ice_fraction", full[zarr_uuid][zarr_key])
+            self.assertNotIn("GSLA", full[zarr_uuid][zarr_key])
 
     def test_nan_to_none_conversion(self):
         # Create a sample pandas DataFrame with NaN values

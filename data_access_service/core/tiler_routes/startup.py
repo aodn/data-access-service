@@ -38,7 +38,7 @@ async def run_tiler_warmup(api: API) -> None:
 
         entries = load_gridded_variables()
         candidates = build_candidate_products(
-            api.get_dataset_variables(None),
+            api.get_dataset_variables(),
             entries,
             Config.get_config().get_tiler_config().zarr_store_base_url,
         )

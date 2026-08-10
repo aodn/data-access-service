@@ -28,7 +28,7 @@ class FakeAPI:
         self.wait_timeouts.append(timeout)
         return self._ready
 
-    def get_dataset_variables(self, uuid=None):
+    def get_dataset_variables(self):
         return self._index
 
 

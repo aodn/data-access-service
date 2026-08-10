@@ -663,34 +663,19 @@ class API(BaseAPI):
             return value
         return {"not_exist": Descriptor(uuid=uuid)}
 
-    @overload
-    def get_dataset_variables(
-        self, uuid: None
-    ) -> Dict[str, Dict[str, frozenset[str]]]: ...
-
-    @overload
-    def get_dataset_variables(self, uuid: str) -> Dict[str, frozenset[str]]: ...
-
-    def get_dataset_variables(
-        self, uuid: str | None = None
-    ) -> Dict[str, frozenset[str]] | Dict[str, Dict[str, frozenset[str]]]:
+    def get_dataset_variables(self) -> Dict[str, Dict[str, frozenset[str]]]:
         """Top-level metadata field names per dataset, as captured at startup.
 
-        ``uuid=None`` returns the whole ``uuid -> dataset_name -> frozenset(field
-        names)`` index; a uuid returns just that uuid's ``dataset_name ->
-        frozenset`` map, or ``{}`` when the uuid is unknown.
-
-        This is the cheap counterpart to get_raw_meta_data: it never decompresses
-        the raw catalogue, which is what makes it usable for whole-catalogue scans
-        such as tiler product discovery.
+        Returns the whole ``uuid -> dataset_name -> frozenset(field names)``
+        index. This is the cheap counterpart to get_raw_meta_data: it never
+        decompresses the raw catalogue, which is what makes it usable for
+        whole-catalogue scans such as tiler product discovery.
 
         The returned mapping is the live internal index, not a copy. Treat it as
         read-only and as a snapshot of the moment it was read — callers should
         consume it and drop it rather than retaining it across a metadata refresh.
         """
-        if uuid is None:
-            return self._schema_keys
-        return self._schema_keys.get(uuid, {})
+        return self._schema_keys
 
     def get_raw_meta_data(self, uuid: str) -> Dict[str, Any]:
         value = self._raw.get(uuid)
