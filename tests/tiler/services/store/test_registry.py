@@ -12,7 +12,9 @@ from data_access_service.tiler.services.product.product import (
 from data_access_service.tiler.services.store import registry
 from data_access_service.tiler.services.store.registry import (
     _storage_options,
+    get_available_dates,
     get_store,
+    is_store_available,
     store_registry,
 )
 
@@ -61,6 +63,60 @@ def test_get_store_sortby_time(monkeypatch):
     monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: ds)
     result = get_store("s3://test/unsorted.zarr")
     assert list(result.time.values) == sorted(result.time.values)
+
+
+def test_get_available_dates_never_opened_returns_empty_without_opening(monkeypatch):
+    """A store nothing has opened yet (never prewarmed, or prewarm failed)
+    reports no dates rather than attempting an open — see get_available_dates'
+    docstring for why that's safe (every route is gated on prewarm having
+    already run for every registered product's store)."""
+
+    def _fail_if_called(*_, **__):
+        raise AssertionError("get_available_dates must not open the store")
+
+    monkeypatch.setattr(xr, "open_zarr", _fail_if_called)
+    assert get_available_dates("s3://test/never_opened.zarr") == []
+
+
+def test_get_available_dates_returns_dates_for_already_open_store(monkeypatch):
+    ds = _make_ds(time=3, lat=5, lon=8)
+    ds = ds.assign_coords(
+        time=np.array(
+            ["2024-01-01", "2024-01-02", "2024-01-03"], dtype="datetime64[ns]"
+        )
+    )
+    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: ds)
+    get_store("s3://test/opened.zarr")  # simulates prewarm having already run
+    assert get_available_dates("s3://test/opened.zarr") == [
+        "2024-01-01",
+        "2024-01-02",
+        "2024-01-03",
+    ]
+
+
+def test_is_store_available_false_for_never_opened_store():
+    # A cheap cache-membership check, deliberately not opening the store —
+    # GET /products' default store_status=available filter must stay fast
+    # for a plain listing call rather than risk a blocking open per product.
+    assert is_store_available("s3://test/never_opened.zarr") is False
+
+
+def test_is_store_available_true_after_successful_open(monkeypatch):
+    monkeypatch.setattr(
+        xr, "open_zarr", lambda *_, **__: _make_ds(time=1, lat=5, lon=8)
+    )
+    get_store("s3://test/opened.zarr")  # simulates prewarm having already run
+    assert is_store_available("s3://test/opened.zarr") is True
+
+
+def test_is_store_available_false_after_failed_open(monkeypatch):
+    def _raise(*_, **__):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(xr, "open_zarr", _raise)
+    with pytest.raises(ValueError):
+        get_store("s3://test/broken.zarr")
+    assert is_store_available("s3://test/broken.zarr") is False
 
 
 def test_get_lod_grids_populates_product(monkeypatch):

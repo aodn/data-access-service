@@ -10,6 +10,29 @@ from data_access_service.tiler.utils.colors import build_categorical_lut
 _PNG = b"\x89PNG\r\n\x1a\n"
 
 
+def test_products_excludes_multi_variable_product(client):
+    # ocean_current (UCUR+VCUR, see conftest.seed_products) 400s on every
+    # visual_tiles single-product endpoint (single_variable_or_400) — listing
+    # it here would advertise something that never actually renders.
+    r = client.get("/api/v1/das/tiler/visual_tiles/products?store_status=all")
+    assert r.status_code == 200
+    ids = {p["id"] for p in r.json()}
+    assert "sea_level_anomaly" in ids
+    assert "ocean_current" not in ids
+
+
+def test_manifest_excludes_multi_variable_product(client):
+    with patch(
+        "data_access_service.core.tiler_routes.products.get_available_dates",
+        return_value=["2024-01-01"],
+    ):
+        r = client.get("/api/v1/das/tiler/visual_tiles/manifest")
+    assert r.status_code == 200
+    products = r.json()["products"]
+    assert "sea_level_anomaly" in products
+    assert "ocean_current" not in products
+
+
 @contextmanager
 def _registered_categorical(name: str, values: list[int]):
     """Patch a categorical colormap with the given category values into the registry."""
@@ -285,6 +308,23 @@ def test_bbox_missing_store(client):
         )
     assert response.status_code == 404
     assert "s3://bucket/missing.zarr" in response.json()["detail"]
+
+
+def test_bbox_broken_store_returns_clean_404_not_500(client):
+    # A store that exists but fails to open for some other reason (corrupted
+    # chunks, permissions) previously propagated as an unhandled 500 —
+    # ensure_store_available_or_404 (see shared.py) guards every product_id
+    # route and wraps it into a clean, product-scoped 404.
+    with patch(
+        "data_access_service.core.tiler_routes.shared.get_store",
+        side_effect=ValueError("store missing lat/lon dims after rename"),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/bbox.png"
+        )
+    assert response.status_code == 404
+    assert "sea_level_anomaly" in response.json()["detail"]
+    assert "store missing lat/lon dims after rename" in response.json()["detail"]
 
 
 def test_bbox_epsg4326_latitude_out_of_range_rejected(client):
@@ -640,6 +680,23 @@ def test_animation_missing_store(client):
         )
     assert response.status_code == 404
     assert "s3://bucket/missing.zarr" in response.json()["detail"]
+
+
+def test_animation_broken_store_returns_clean_404_not_500(client):
+    # A store that exists but fails to open for some other reason (corrupted
+    # chunks, permissions) previously propagated as an unhandled 500 —
+    # ensure_store_available_or_404 (see shared.py) guards every product_id
+    # route and wraps it into a clean, product-scoped 404.
+    with patch(
+        "data_access_service.core.tiler_routes.shared.get_store",
+        side_effect=ValueError("store missing lat/lon dims after rename"),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/2024-01-31/animation.gif"
+        )
+    assert response.status_code == 404
+    assert "sea_level_anomaly" in response.json()["detail"]
+    assert "store missing lat/lon dims after rename" in response.json()["detail"]
 
 
 def test_animation_frame_cap_rejected(client):

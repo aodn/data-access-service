@@ -3,7 +3,13 @@ from dataclasses import dataclass
 # Applied by the store registry to normalise source coordinate names so the rest
 # of the pipeline can assume `time` / `lat` / `lon` regardless of how a product
 # names its dimensions upstream.
-COORD_NAMES = {"TIME": "time", "LATITUDE": "lat", "LONGITUDE": "lon"}
+COORD_NAMES = {
+    "TIME": "time",
+    "LATITUDE": "lat",
+    "LONGITUDE": "lon",
+    "latitude": "lat",
+    "longitude": "lon",
+}
 
 
 @dataclass(frozen=True)

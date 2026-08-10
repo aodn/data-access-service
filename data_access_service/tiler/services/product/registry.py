@@ -1,4 +1,5 @@
-"""In-memory ``Product`` registry, loaded from ``products.json`` at startup.
+"""In-memory ``Product`` registry, populated at startup from discovered zarr
+products plus optional overrides from ``products.json``.
 
 Single front door for everything product-related at runtime:
 
@@ -6,29 +7,37 @@ Single front door for everything product-related at runtime:
     consumers (test fixtures, the prewarm race-guard) still touch it directly
     where the dict's identity matters; production callers should go through
     the facades (``get_product``, ``iter_products``, ``iter_product_items``).
-  * ``load_products`` reads the on-disk ``products.json`` into the in-memory
-    dict. Products are static config (``config/products.json``) — add or
-    remove one by editing the file and redeploying.
+  * ``load_products`` takes the discovered product list (see
+    ``services/product/discovery.py::discover_products``, called once at
+    startup from the zarr catalog ``API`` already fetched) and applies
+    ``products.json`` on top as per-``id`` overrides — ``ocean_masked``,
+    ``data_tile``, ``visual_tile`` only. ``id``/``source_path``/``variable``/
+    ``metadata_uuid`` come from discovery, not products.json: a discovered
+    product needs a products.json entry only when it deviates from defaults.
   * ``id`` convention: ``{zarr_name}:{variable}``, e.g.
     ``satellite_austemp_heatwave_8day:sst_mosaic`` — the colon separates the
     Zarr store name (from ``source_path``) from the variable it exposes,
     since both may themselves contain underscores. Multi-variable products
     join variables with ``+`` in ``variable`` array order, e.g.
-    ``model_sea_level_anomaly_gridded_realtime:ucur+vcur``. This is a
-    readability convention only — ``id`` is never parsed, just used as an
-    opaque lookup key — so it isn't enforced in code.
+    ``model_sea_level_anomaly_gridded_realtime:ucur+vcur``. This convention
+    is now load-bearing: it's exactly what ``discovery._product_id`` produces
+    and what a products.json override's ``id`` must match to apply.
   * ``GET /products`` is built from ``iter_products()`` (live ``Product``
     instances), not the raw JSON — so it reflects resolved defaults (e.g.
-    ``ocean_masked`` via ``_OCEAN_MASKED_BY_DEFAULT``) rather than only what
-    products.json literally spells out.
+    ``ocean_masked`` defaulting to False) rather than only what products.json
+    literally spells out.
 """
 
+import dataclasses
 import json
 import logging
 from pathlib import Path
 
 from data_access_service.config.tiler.paths import PRODUCTS_CONFIG_PATH
-from data_access_service.tiler.schemas.products import CoastalFillConfig, ProductConfig
+from data_access_service.tiler.schemas.products import (
+    CoastalFillConfig,
+    ProductOverride,
+)
 from data_access_service.tiler.services.product.product import (
     CoastalFill,
     DataTileConfig,
@@ -40,16 +49,6 @@ logger = logging.getLogger(__name__)
 
 
 _config_path = Path(PRODUCTS_CONFIG_PATH)
-
-# Products that are ocean-masked unless products.json says otherwise. The committed
-# ocean mask is built from this store's grid, so masking is the safe default for it
-# and shouldn't depend on the config flag being remembered. An explicit
-# "ocean_masked": false in products.json still wins.
-_OCEAN_MASKED_BY_DEFAULT = frozenset(
-    {
-        "model_sea_level_anomaly_gridded_realtime:ucur+vcur",
-    }
-)
 
 # Canonical registered-product state. Exposed (rather than wrapped behind a
 # class) because the dict identity is load-bearing for test fixtures and for
@@ -77,55 +76,74 @@ def iter_product_items() -> list[tuple[str, Product]]:
     return list(PRODUCTS.items())
 
 
-def load_products() -> None:
-    """Read products.json from disk into PRODUCTS. Called once on startup.
+def load_products(discovered: list[Product]) -> None:
+    """Merge ``discovered`` (see discovery.discover_products) with
+    products.json overrides into PRODUCTS. Called once on startup.
 
     products.json is committed static config (config/tiler/products.json) — it should
-    always be present on disk. A missing file means a broken deploy/package, not a
-    legitimate empty state, so this raises rather than silently serving zero products.
+    always be present on disk (an empty ``[]`` is fine — it just means no product needs
+    a non-default override). A missing file means a broken deploy/package, not a
+    legitimate empty state, so this raises rather than silently serving zero overrides.
+
+    An override entry whose ``id`` matches no discovered product (e.g. AODN renamed or
+    removed a variable upstream) is logged and skipped rather than failing startup —
+    the rest of the product set still loads.
 
     Updates PRODUCTS in place without ever exposing an empty state to concurrent readers:
     additions/updates are applied first, then removals. A reader that races a reload sees
     either the previous set, the new set, or a transient with stale entries still
     present — never an empty dict.
     """
-    if not _config_path.exists():
-        raise FileNotFoundError(f"products.json not found at {_config_path}")
-    entries: list[dict] = json.loads(_config_path.read_text())
-    new = {entry["id"]: _from_dict(entry) for entry in entries}
+    overrides = _load_overrides()
+    new = {
+        product.id: _apply_override(product, overrides.pop(product.id, None))
+        for product in discovered
+    }
+    for stale_id in overrides:
+        logger.warning(
+            f"products.json override for '{stale_id}' matches no discovered "
+            "product — ignoring"
+        )
     for product_id, product in new.items():
         PRODUCTS[product_id] = product
     for stale_id in [k for k in PRODUCTS if k not in new]:
         del PRODUCTS[stale_id]
-    logger.info(f"Loaded {len(PRODUCTS)} products from {_config_path}")
+    logger.info(f"Loaded {len(PRODUCTS)} products ({len(discovered)} discovered)")
+
+
+def _load_overrides() -> dict[str, ProductOverride]:
+    if not _config_path.exists():
+        raise FileNotFoundError(f"products.json not found at {_config_path}")
+    entries: list[dict] = json.loads(_config_path.read_text())
+    return {entry["id"]: ProductOverride(**entry) for entry in entries}
 
 
 def _coastal_fill(config: CoastalFillConfig | None) -> CoastalFill | None:
     return CoastalFill(max_dist_px=config.max_dist_px) if config else None
 
 
-def _from_dict(entry: dict) -> Product:
-    """Validate one products.json entry against ProductConfig (extra="forbid"
-    catches typos), after resolving the one default that depends on ``id``
-    (ocean_masked) — every other default (chunk_px, padding) lives directly on
-    ProductConfig/DataTileConfig and applies automatically when omitted.
+def _apply_override(product: Product, override: ProductOverride | None) -> Product:
+    """Resolve a discovered Product's config: an explicit products.json
+    override wins, otherwise plain ocean_masked=False and
+    DataTileConfig/VisualTileConfig defaults.
     """
-    payload = dict(entry)
-    if payload.get("ocean_masked") is None:
-        payload["ocean_masked"] = entry["id"] in _OCEAN_MASKED_BY_DEFAULT
-    parsed = ProductConfig(**payload)
-    return Product(
-        id=parsed.id,
-        source_path=parsed.source_path,
-        variable=parsed.variable,
-        ocean_masked=parsed.ocean_masked,
-        metadata_uuid=parsed.metadata_uuid,
-        data_tile=DataTileConfig(
-            chunk_px=parsed.data_tile.chunk_px,
-            padding=parsed.data_tile.padding,
-            coastal_fill=_coastal_fill(parsed.data_tile.coastal_fill),
-        ),
-        visual_tile=VisualTileConfig(
-            coastal_fill=_coastal_fill(parsed.visual_tile.coastal_fill),
-        ),
+    ocean_masked = False
+    data_tile = DataTileConfig()
+    visual_tile = VisualTileConfig()
+    if override is not None:
+        if override.ocean_masked is not None:
+            ocean_masked = override.ocean_masked
+        data_tile = DataTileConfig(
+            chunk_px=override.data_tile.chunk_px,
+            padding=override.data_tile.padding,
+            coastal_fill=_coastal_fill(override.data_tile.coastal_fill),
+        )
+        visual_tile = VisualTileConfig(
+            coastal_fill=_coastal_fill(override.visual_tile.coastal_fill),
+        )
+    return dataclasses.replace(
+        product,
+        ocean_masked=ocean_masked,
+        data_tile=data_tile,
+        visual_tile=visual_tile,
     )

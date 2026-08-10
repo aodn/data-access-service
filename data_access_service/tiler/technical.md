@@ -53,7 +53,7 @@ It exposes **two independent tile pipelines** from the same underlying data:
 
 The same Zarr slice is the source for both pipelines; they diverge at the renderer. See [§5](#5-tile-coordinate-systems-and-projection-pipeline) for the full distinction.
 
-Products are static config: they live in `data_access_service/config/tiler/products.json`, committed with the code and loaded once on startup. Adding, removing, or changing a product means editing that file and redeploying — there is no runtime registration API. A missing `products.json` at startup is treated as a broken deploy, not a valid empty state: `load_products()` raises `FileNotFoundError` rather than silently starting with zero products. See [§13](#13-adding-a-new-product).
+Products are discovered, not hand-listed: at startup, every Zarr dataset the app's `API` already indexed from S3 (see `core/api.py::iter_zarr_dataset_variables`) is matched against `data_access_service/config/tiler/gridded_variables.json` (an allowlist of variable names, or grouped variable-name lists like `["UCUR", "VCUR"]`); a match becomes one `Product` (`services/product/discovery.py::discover_products`). `data_access_service/config/tiler/products.json`, committed with the code and loaded once on startup, now holds only optional per-product overrides (`ocean_masked`/`data_tile`/`visual_tile`) applied on top by matching `id` — a product needs an entry only when it deviates from defaults. A missing `products.json` at startup is treated as a broken deploy, not a valid empty state: `load_products()` raises `FileNotFoundError` rather than silently starting with zero overrides. An override entry whose `id` matches no discovered product is logged and skipped, not fatal. See [§13](#13-adding-a-new-product).
 
 ---
 
@@ -84,7 +84,7 @@ flowchart TD
     client --> vtRouter
     client --> prodRouter
 
-    registry["Product registry<br/>PRODUCTS dict — products.json at startup"]
+    registry["Product registry<br/>PRODUCTS dict — discovered from S3 + products.json overrides at startup"]
     dtRouter --> registry
     vtRouter --> registry
     prodRouter --> registry
@@ -177,8 +177,9 @@ data_access_service/
     http_cache.py                 ← IMMUTABLE_CACHE_HEADERS / REVALIDATE_CACHE_HEADERS — shared by the tiler and the sites feature-collection endpoints — see §6
     tiler/
       constants.py                ← LOD (DataTileLodConfig: max_lods, min_coarsest) + TILE (chunk_px, padding defaults) + COORD_NAMES
-      paths.py                    ← PRODUCTS_CONFIG_PATH, COLORMAPS_CONFIG_PATH, LAND_MASK_PATH, OCEAN_MASK_PATH
-      products.json                ← static product config, committed with the code — see §13
+      paths.py                    ← PRODUCTS_CONFIG_PATH, GRIDDED_VARIABLES_CONFIG_PATH, COLORMAPS_CONFIG_PATH, LAND_MASK_PATH, OCEAN_MASK_PATH
+      products.json                ← per-product overrides only (ocean_masked/data_tile/visual_tile), committed with the code — see §13
+      gridded_variables.json       ← allowlist of variable names (or grouped lists) product discovery matches against — see §13
       colormaps.json               ← static custom-colormap config, committed with the code
   core/
     tiler_routes/
@@ -192,7 +193,7 @@ data_access_service/
       startup.py                   ← run_tiler_warmup() — the tiler's startup sequence, see §11
   tiler/
     schemas/
-      products.py                  ← ProductConfig (validated products.json entry + GET /products shape), ManifestResponse, PointResponse
+      products.py                  ← ProductConfig (GET /products shape) + ProductOverride (validated products.json entry), ManifestResponse, PointResponse
       data_tiles.py                ← DataTileManifestResponse (manifest.json shape)
       visual_tiles.py              ← ColormapListResponse
     services/
@@ -207,7 +208,8 @@ data_access_service/
         categorical.py              ← CF flag_values helpers (is_categorical_variable, parse_flag_values_and_meanings)
       product/
         product.py                  ← Product dataclass (+ DataTileConfig/VisualTileConfig/CoastalFill) + LOD algorithm + get_lod_grids lazy-init
-        registry.py                  ← PRODUCTS dict + load_products + get_product / iter_products / iter_product_items facades
+        discovery.py                  ← discover_products() — matches API's zarr catalog against gridded_variables.json to build the discovered Product list
+        registry.py                  ← PRODUCTS dict + load_products (merges discovered products with products.json overrides) + get_product / iter_products / iter_product_items facades
         manifest.py                  ← render_manifest() — bounds + per-variable ranges + LOD meta for manifest.json
       rendering/
         kernels.py                   ← numba JIT bilinear/nearest resample + normalize kernels + xr.interp fallback + warmup_resample
@@ -235,7 +237,8 @@ These paths are constants in `data_access_service/config/tiler/paths.py`, resolv
 
 | Constant                | Default                       | Notes                                                                                                          |
 | ----------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `PRODUCTS_CONFIG_PATH`  | `config/tiler/products.json`  | Committed with the code; edit + redeploy to add/remove/change a product — see [§13](#13-adding-a-new-product). |
+| `PRODUCTS_CONFIG_PATH`  | `config/tiler/products.json`  | Committed with the code; per-product overrides only — a new product from a new zarr store/variable needs no entry here — see [§13](#13-adding-a-new-product). |
+| `GRIDDED_VARIABLES_CONFIG_PATH` | `config/tiler/gridded_variables.json` | Committed with the code; allowlist of variable names product discovery matches against — see [§13](#13-adding-a-new-product). |
 | `COLORMAPS_CONFIG_PATH` | `config/tiler/colormaps.json` | Same as above, for custom colormaps.                                                                           |
 | `LAND_MASK_PATH`        | `tiler/assets/land_mask.npz`  | Committed coastline raster used by coastal fill; see [§7.6](#76-coastal-fill-sparse-products).                 |
 | `OCEAN_MASK_PATH`       | `tiler/assets/ocean_mask.npz` | Committed valid-domain raster used by the ocean-validity mask; see [§7.6](#76-coastal-fill-sparse-products).   |
@@ -585,7 +588,7 @@ Because the data-tile cut writes the existing valid-mask channel (alpha for scal
 
 **Land-mask asset.** The coastline is a committed, bit-packed global raster `tiler/assets/land_mask.npz` (Natural Earth 1:10m land, ~5.5 km resolution), built once by `scripts/build_land_mask.py`. At runtime `masks.py` needs only numpy + scipy. `load_land_mask` unpacks it lazily and caches the result module-level.
 
-**Ocean-validity mask.** A second committed mask, `tiler/assets/ocean_mask.npz`, built from the model's valid-domain grid. Unlike the land mask, this one is applied to the **raw slice at read time** via `apply_ocean_mask`, not on a render grid — it samples the mask at the source grid's own lon/lat and sets cells outside the valid domain to NaN. Cutting at the source — before bilinear resampling can bleed it into valid neighbours, and before point lookups read it — means every consumer (data tiles, visual tiles, point endpoint) inherits the cut for free. It's opt-in per product via the `ocean_masked` field (resolved from `_OCEAN_MASKED_BY_DEFAULT` in `services/product/registry.py` when omitted in `products.json`); an explicit `"ocean_masked": false` in `products.json` always wins over the default. The mask is applied every time a slice is read from the Zarr store, so a rebuilt mask asset takes effect immediately on restart.
+**Ocean-validity mask.** A second committed mask, `tiler/assets/ocean_mask.npz`, built from the model's valid-domain grid. Unlike the land mask, this one is applied to the **raw slice at read time** via `apply_ocean_mask`, not on a render grid — it samples the mask at the source grid's own lon/lat and sets cells outside the valid domain to NaN. Cutting at the source — before bilinear resampling can bleed it into valid neighbours, and before point lookups read it — means every consumer (data tiles, visual tiles, point endpoint) inherits the cut for free. It's opt-in per product via the `ocean_masked` field, which defaults to `false` and is set to `true` explicitly in `products.json` for the products whose committed mask matches their grid. The mask is applied every time a slice is read from the Zarr store, so a rebuilt mask asset takes effect immediately on restart.
 
 **Caveats.**
 
@@ -814,7 +817,7 @@ The tiler shares a single FastAPI `lifespan` with the rest of `data-access-servi
 ```python
 async def run_tiler_warmup(api: API) -> None:
     await api.wait_until_ready()     # let the non-tiler API's metadata init finish first
-    load_products()                      # sync: read products.json into PRODUCTS — raises if missing
+    load_products(discover_products(api))  # sync: discover from api's zarr catalog, apply products.json overrides
     load_colormaps()                     # sync: read colormaps.json into the colormap registry
     await anyio.to_thread.run_sync(warmup_resample)   # numba JIT warmup, see §7.4
     await anyio.to_thread.run_sync(warmup_visual)      # rio-tiler warmup
@@ -938,59 +941,72 @@ Sustained throughput is bound by real resources — CPU cores and the S3 connect
 
 ## 13. Adding a new product
 
-`config/tiler/products.json` is the single source of truth for the product list — static config committed with the code, not runtime state. The server reads it once on startup (`load_products()` in `services/product/registry.py`) into the in-memory `PRODUCTS` dict, validating each entry against `ProductConfig` (`schemas/products.py`, `extra="forbid"` catches typos). There is no runtime registration API: adding, removing, or changing a product means editing the file and redeploying. A missing file is treated as a broken deploy — `load_products()` raises `FileNotFoundError` rather than silently starting empty.
+Products are discovered from the zarr catalog, not hand-listed. `config/tiler/gridded_variables.json` is the allowlist that drives what gets discovered; `config/tiler/products.json` holds only optional per-product overrides on top. Both are static config committed with the code, not runtime state.
 
-### 13.1 Editing `config/tiler/products.json`
+On startup (`run_tiler_warmup`, see [§11.2](#112-run_tiler_warmup-core_tiler_routesstartuppy)):
+
+1. `discover_products(api)` (`services/product/discovery.py`) walks every zarr dataset `api.iter_zarr_dataset_variables()` yields (built from the metadata the non-tiler API already fetched from S3 — no extra S3 calls here) and matches its variable names against `gridded_variables.json`. Each match becomes one discovered `Product`, with `id`/`source_path`/`variable`/`metadata_uuid` all derived — never hand-written.
+2. `load_products(discovered)` (`services/product/registry.py`) reads `products.json`, validates each entry against `ProductOverride` (`schemas/products.py`, `extra="forbid"` catches typos), and applies it onto the discovered product with the matching `id`. A discovered product with no matching entry keeps pure defaults. An override entry whose `id` matches nothing is logged as a warning and skipped, not fatal. A missing `products.json` file is still treated as a broken deploy — `load_products` raises `FileNotFoundError` (the file itself may be `[]` when no product needs an override).
+
+There is no runtime registration API for either file: changing what's discovered or overridden means editing the file and redeploying.
+
+### 13.1 Adding a product by editing `config/tiler/gridded_variables.json`
+
+```json
+["GSLA", "sst_mosaic", ["UCUR", "VCUR"]]
+```
+
+Each entry is either a variable name, or a list of variable names that must **all** be present in a dataset to form one multi-variable product (e.g. `["UCUR", "VCUR"]` only becomes a product for a store that has both — a store with just `UCUR` produces nothing for that entry, and there's no separate scalar fallback).
+
+Any zarr store already in the S3 bucket that exposes a listed variable becomes a product automatically on the next restart — no `products.json` entry required. `id` is generated as `{zarr_stem}:{'+'.join(lowercased variable names)}` (`discovery._product_id`), e.g. `model_sea_level_anomaly_gridded_realtime:ucur+vcur` — this convention is load-bearing now, since it's exactly what a `products.json` override's `id` must match to apply.
+
+### 13.2 Tuning a discovered product via `config/tiler/products.json`
 
 ```json
 [
   {
     "id": "model_sea_level_anomaly_gridded_realtime:gsla",
-    "source_path": "s3://aodn-cloud-optimised/model_sea_level_anomaly_gridded_realtime.zarr/",
-    "variable": "GSLA",
-    "metadata_uuid": "0c9eb39c-9cbe-4c6a-8a10-5867087e703a",
     "data_tile": {
       "coastal_fill": { "max_dist_px": 4 }
     }
   },
   {
     "id": "model_sea_level_anomaly_gridded_realtime:ucur+vcur",
-    "source_path": "s3://aodn-cloud-optimised/model_sea_level_anomaly_gridded_realtime.zarr/",
-    "variable": ["UCUR", "VCUR"],
-    "metadata_uuid": "0c9eb39c-9cbe-4c6a-8a10-5867087e703a"
+    "ocean_masked": true
   }
 ]
 ```
 
-Notes on the shape (`ProductConfig` in `schemas/products.py`):
+Notes on the shape (`ProductOverride` in `schemas/products.py`):
 
-- `id` convention: `{zarr_name}:{variable}` — the colon separates the Zarr store name from the variable it exposes (readability only; `id` is never parsed).
-- `metadata_uuid` links the product to its GeoNetwork/STAC collection UUID; `null`/omitted when absent.
-- `ocean_masked` defaults per-`id` from `_OCEAN_MASKED_BY_DEFAULT` in `registry.py` (currently just the UCUR/VCUR current product, since the committed ocean mask is built from its grid) — an explicit value in the JSON always overrides the default.
-- `data_tile` / `visual_tile` are optional nested objects; omit them entirely to take every default (`chunk_px=(240,192)`, `padding=1`, no coastal fill). See [§13.4](#134-optional-overrides) for what each can override.
+- `id` must exactly match a discovered product's generated `id` (see [§13.1](#131-adding-a-product-by-editing-configtilergridded_variablesjson)) — a mismatch is logged and ignored, not applied.
+- No `source_path`/`variable`/`metadata_uuid` fields here — those come from discovery, not from this file.
+- `ocean_masked` defaults to `false` for every product; set `"ocean_masked": true` in the entry for a product whose committed ocean mask matches its grid (currently just the UCUR/VCUR current product).
+- `data_tile` / `visual_tile` are optional nested objects; omit them entirely (or the whole entry) to take every default (`chunk_px=(240,192)`, `padding=1`, no coastal fill). See [§13.5](#135-optional-overrides) for what each can override.
 - `chunk_px`/`padding` are **not** top-level fields — they live under `data_tile` if you need to override them.
 
-On startup:
+A discovered product needs an entry here only when it deviates from defaults — most don't.
 
-- `load_products()` reads the file into `PRODUCTS`.
+On startup, after discovery + override merge:
+
 - `prewarm_stores` opens each unique store's metadata in the background (see [§11](#11-startup-readiness-and-background-tasks)) — slice data stays cold until the first request for that product/date.
 - The store is opened lazily on first request if prewarm hasn't completed yet.
 - LOD grids are computed lazily from the store's actual lat/lon dimensions on the first data-tile request (see [§7](#7-data-tile-internals)).
 
-### 13.2 Removing a product
+### 13.3 Removing a product
 
-Delete its entry from `config/tiler/products.json` and redeploy. There is no cache eviction step to worry about — every deploy is a fresh process, so L1 starts empty regardless.
+Remove the matching variable name from `config/tiler/gridded_variables.json` (or remove the zarr store from S3) and redeploy — that stops it being discovered. If it also had a `products.json` override entry, remove that too (a leftover entry just logs a harmless warning otherwise). There is no cache eviction step to worry about — every deploy is a fresh process, so L1 starts empty regardless.
 
-### 13.3 Requirements for the Zarr store
+### 13.4 Requirements for the Zarr store
 
 | Requirement        | Detail                                                                                                                                                                                                           |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Coordinate names   | Must be `lat`/`lon`/`time`, or the uppercase variants `LATITUDE`/`LONGITUDE`/`TIME` (renamed automatically on open). Add a mapping to `COORD_NAMES` in `config/tiler/constants.py` for other naming conventions. |
+| Coordinate names   | Must be `lat`/`lon`/`time`, the uppercase variants `LATITUDE`/`LONGITUDE`/`TIME`, or the lowercase `latitude`/`longitude` (all renamed automatically on open). Add a mapping to `COORD_NAMES` in `config/tiler/constants.py` for other naming conventions. |
 | Spatial dimensions | `lat` and `lon` must be present after normalisation — `_open_store` raises `ValueError` if not.                                                                                                                  |
 | CRS                | Coordinates must be geographic degrees (EPSG:4326). The visual renderer guards against projected CRS values; see [§8.1](#81-crs-guard).                                                                          |
-| Variable           | The variable(s) named in `Product.variable` must exist in the store.                                                                                                                                             |
+| Variable           | The variable(s) named in `gridded_variables.json` must exist in the store to be discovered — see [§13.1](#131-adding-a-product-by-editing-configtilergridded_variablesjson).                                    |
 
-### 13.4 Optional overrides
+### 13.5 Optional overrides
 
 | Field                      | Where                | Default                  | When to override                                                                                                                                   |
 | -------------------------- | -------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -998,10 +1014,9 @@ Delete its entry from `config/tiler/products.json` and redeploy. There is no cac
 | `data_tile.padding`        | nested `data_tile`   | `1`                      | Tile edge artefacts, or no padding needed                                                                                                          |
 | `data_tile.coastal_fill`   | nested `data_tile`   | unset (off)              | Sparse/coarse products with a wide coastal transparency gap in **data tiles**; see [§7.6](#76-coastal-fill-sparse-products). `{"max_dist_px": N}`. |
 | `visual_tile.coastal_fill` | nested `visual_tile` | unset (off)              | Same, independently, for **visual tiles**.                                                                                                         |
-| `metadata_uuid`            | top-level            | `null`                   | Link to a GeoNetwork/STAC collection.                                                                                                              |
-| `ocean_masked`             | top-level            | id-dependent (see §13.1) | Force on/off the ocean-validity mask.                                                                                                              |
+| `ocean_masked`             | top-level            | id-dependent (see §13.2) | Force on/off the ocean-validity mask.                                                                                                              |
 
-`lod_grids` is not a config field at all — it's computed at runtime and deliberately excluded from `ProductConfig` (see [§7.3](#73-lazy-population-servicesproductproductpy--get_lod_grids)).
+`metadata_uuid` is not an override field — it comes from the discovered dataset's own metadata, not from `products.json`. `lod_grids` is not a config field at all — it's computed at runtime and deliberately excluded from `ProductConfig`/`ProductOverride` (see [§7.3](#73-lazy-population-servicesproductproductpy--get_lod_grids)).
 
 ---
 

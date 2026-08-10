@@ -36,10 +36,12 @@ from data_access_service.tiler.utils.image import (
     media_type,
 )
 
-from .products import router as products_router
+from .products import build_products_router
 from .shared import (
     DATE_EX,
     PRODUCT_EX,
+    is_single_variable,
+    is_store_available_or_404,
     get_product_or_404,
     load_slice_or_404,
     parse_rescale,
@@ -64,7 +66,7 @@ _ANIMATION_LIMITER = anyio.CapacityLimiter(
 )
 
 router = APIRouter()
-router.include_router(products_router)
+router.include_router(build_products_router(product_filter=is_single_variable))
 
 _tile_dedup = Deduper()
 _bbox_dedup = Deduper()
@@ -160,6 +162,7 @@ def get_tile(
     if colormap_name is not None:
         resolve_colormap_or_error(colormap_name)
     product = get_product_or_404(product_id)
+    is_store_available_or_404(product)
     validate_date(date)
     variable = single_variable_or_400(product, context="visual tiles")
 
@@ -424,6 +427,7 @@ def get_bbox(
     if colormap_name is not None:
         resolve_colormap_or_error(colormap_name)
     product = get_product_or_404(product_id)
+    is_store_available_or_404(product)
     validate_date(date)
     variable = single_variable_or_400(product, context="visual tiles")
 
@@ -576,6 +580,8 @@ async def get_animation(
     if colormap_name is not None:
         resolve_colormap_or_error(colormap_name)
     product = get_product_or_404(product_id)
+    # Offloaded like the calls below: can block on xr.open_zarr on cold path.
+    await anyio.to_thread.run_sync(is_store_available_or_404, product)
     variable = single_variable_or_400(product, context="animation")
 
     # Offloaded: each may call get_store, which can block on xr.open_zarr on

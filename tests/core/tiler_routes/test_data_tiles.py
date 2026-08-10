@@ -1,4 +1,3 @@
-import json
 from unittest.mock import patch
 
 import numpy as np
@@ -10,6 +9,27 @@ from data_access_service.tiler.services.product.product import (
     DataTileConfig,
     Product,
 )
+
+
+def test_get_products_includes_multi_variable_product(client):
+    # Unlike visual_tiles, data_tiles has no single-variable restriction —
+    # ocean_current (UCUR+VCUR, see conftest.seed_products) renders fine via
+    # /data_tiles, so it must still be listed here.
+    r = client.get("/api/v1/das/tiler/data_tiles/products?store_status=all")
+    assert r.status_code == 200
+    ids = {p["id"] for p in r.json()}
+    assert "sea_level_anomaly" in ids
+    assert "ocean_current" in ids
+
+
+def test_manifest_includes_multi_variable_product(client):
+    with patch(
+        "data_access_service.core.tiler_routes.products.get_available_dates",
+        return_value=["2024-01-01"],
+    ):
+        r = client.get("/api/v1/das/tiler/data_tiles/manifest")
+    assert r.status_code == 200
+    assert "ocean_current" in r.json()["products"]
 
 
 def test_get_products_coastal_fill_null_when_absent(client, monkeypatch):
@@ -57,34 +77,107 @@ def test_get_products_reflects_effective_state(client, monkeypatch):
     assert p["data_tile"]["chunk_px"] == [240, 192]
     assert p["data_tile"]["padding"] == 1
     # ocean_masked here comes from the Product's own default (False), since this
-    # instance was constructed directly rather than via registry._from_dict —
-    # the default-by-id rule lives in _from_dict, not on Product itself.
+    # instance was constructed directly rather than via registry._apply_override —
+    # the default-by-id rule lives in _apply_override, not on Product itself.
     assert p["ocean_masked"] is False
 
 
+def test_get_products_store_status_filters(client, monkeypatch):
+    monkeypatch.setitem(
+        registry.PRODUCTS,
+        "open_store",
+        Product(id="open_store", source_path="s3://b/open.zarr", variable="V"),
+    )
+    monkeypatch.setitem(
+        registry.PRODUCTS,
+        "closed_store",
+        Product(id="closed_store", source_path="s3://b/closed.zarr", variable="V"),
+    )
+
+    def _fake_is_store_available(source_path):
+        return source_path == "s3://b/open.zarr"
+
+    with patch(
+        "data_access_service.core.tiler_routes.products.is_store_available",
+        side_effect=_fake_is_store_available,
+    ):
+        all_ids = {
+            p["id"]
+            for p in client.get(
+                "/api/v1/das/tiler/data_tiles/products?store_status=all"
+            ).json()
+        }
+        available_ids = {
+            p["id"]
+            for p in client.get(
+                "/api/v1/das/tiler/data_tiles/products?store_status=available"
+            ).json()
+        }
+        unavailable_ids = {
+            p["id"]
+            for p in client.get(
+                "/api/v1/das/tiler/data_tiles/products?store_status=unavailable"
+            ).json()
+        }
+
+    assert {"open_store", "closed_store"} <= all_ids
+    assert "open_store" in available_ids
+    assert "closed_store" not in available_ids
+    assert "closed_store" in unavailable_ids
+    assert "open_store" not in unavailable_ids
+
+
+def test_get_products_store_status_default_is_available(client, monkeypatch):
+    monkeypatch.setitem(
+        registry.PRODUCTS,
+        "plain",
+        Product(id="plain", source_path="s3://b/x.zarr", variable="V"),
+    )
+    with patch(
+        "data_access_service.core.tiler_routes.products.is_store_available",
+        return_value=False,
+    ):
+        r = client.get("/api/v1/das/tiler/data_tiles/products")
+    assert r.status_code == 200
+    assert "plain" not in {p["id"] for p in r.json()}
+
+
+def test_get_products_rejects_unknown_store_status(client):
+    r = client.get("/api/v1/das/tiler/data_tiles/products?store_status=bogus")
+    assert r.status_code == 422
+
+
 def test_list_products_metadata_uuid_null_when_absent(client, tmp_path, monkeypatch):
+    """metadata_uuid comes from the discovered Product (see discovery.py), not
+    from a products.json field — products.json here only needs to exist."""
     cfg = tmp_path / "products.json"
-    cfg.write_text(
-        json.dumps(
+    cfg.write_text("[]")
+    monkeypatch.setattr(registry, "_config_path", cfg)
+    # load_products replaces the whole PRODUCTS set (additions then removals —
+    # see its no-empty-state invariant), so without saving/restoring here,
+    # "linked"/"plain" would leak into every test that runs after this one.
+    saved = dict(registry.PRODUCTS)
+    try:
+        registry.load_products(
             [
-                {
-                    "id": "linked",
-                    "source_path": "s3://b/x.zarr",
-                    "variable": "GSLA",
-                    "metadata_uuid": "uuid-123",
-                },
-                {"id": "plain", "source_path": "s3://b/y.zarr", "variable": "V"},
+                Product(
+                    id="linked",
+                    source_path="s3://b/x.zarr",
+                    variable="GSLA",
+                    metadata_uuid="uuid-123",
+                ),
+                Product(id="plain", source_path="s3://b/y.zarr", variable="V"),
             ]
         )
-    )
-    monkeypatch.setattr(registry, "_config_path", cfg)
-    registry.load_products()
 
-    r = client.get("/api/v1/das/tiler/data_tiles/products")
-    assert r.status_code == 200
-    by_id = {p["id"]: p for p in r.json()}
-    assert by_id["linked"]["metadata_uuid"] == "uuid-123"
-    assert by_id["plain"]["metadata_uuid"] is None
+        r = client.get("/api/v1/das/tiler/data_tiles/products")
+        assert r.status_code == 200
+        by_id = {p["id"]: p for p in r.json()}
+        assert by_id["linked"]["metadata_uuid"] == "uuid-123"
+        assert by_id["plain"]["metadata_uuid"] is None
+    finally:
+        registry.PRODUCTS.clear()
+        registry.PRODUCTS.update(saved)
 
 
 _FAKE_PRODUCTS = {
@@ -190,6 +283,35 @@ def test_tile_missing_store(client):
         )
     assert response.status_code == 404
     assert "s3://bucket/missing.zarr" in response.json()["detail"]
+
+
+def test_tile_broken_store_returns_clean_404_not_500(client):
+    # A store that exists but fails to open for some other reason (corrupted
+    # chunks, permissions) previously propagated as an unhandled 500 — now
+    # ensure_store_available_or_404 (see shared.py) guards every product_id
+    # route and wraps it into a clean, product-scoped 404.
+    with patch(
+        "data_access_service.core.tiler_routes.shared.get_store",
+        side_effect=ValueError("store missing lat/lon dims after rename"),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/1/0/0.png"
+        )
+    assert response.status_code == 404
+    assert "sea_level_anomaly" in response.json()["detail"]
+    assert "store missing lat/lon dims after rename" in response.json()["detail"]
+
+
+def test_manifest_broken_store_returns_clean_404_not_500(client):
+    with patch(
+        "data_access_service.core.tiler_routes.shared.get_store",
+        side_effect=ValueError("store missing lat/lon dims after rename"),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/manifest.json"
+        )
+    assert response.status_code == 404
+    assert "sea_level_anomaly" in response.json()["detail"]
 
 
 def test_tile_ok(client):
@@ -350,6 +472,22 @@ def test_point_missing_date(client):
     assert response.status_code == 404
 
 
+def test_point_broken_store_returns_clean_404_not_500(client):
+    # ensure_store_available_or_404 (see shared.py) guards every product_id
+    # route, including /point, instead of letting a store-open failure
+    # surface as an unhandled 500.
+    with patch(
+        "data_access_service.core.tiler_routes.shared.get_store",
+        side_effect=ValueError("store missing lat/lon dims after rename"),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/point?lat=-35&lon=145"
+        )
+    assert response.status_code == 404
+    assert "sea_level_anomaly" in response.json()["detail"]
+    assert "store missing lat/lon dims after rename" in response.json()["detail"]
+
+
 def test_point_ok(client):
     with patch(
         "data_access_service.core.tiler_routes.shared.load_slice",
@@ -483,3 +621,32 @@ def test_availability_no_dates_in_range(client):
     assert product["available_dates"] == []
     # No dates in range, but the product still has data, so full_date_range is populated.
     assert product["full_date_range"] == {"start": "2020-01-01", "end": "2020-01-01"}
+
+
+def test_availability_product_with_no_dates_at_all_is_omitted(client, monkeypatch):
+    """A product whose store never opened (broken, or never prewarmed) has no
+    dates at all — see get_available_dates. Such a product is left out of
+    /manifest entirely rather than listed with an empty/null range."""
+    monkeypatch.setitem(
+        registry.PRODUCTS,
+        "no_dates",
+        Product(id="no_dates", source_path="s3://bucket/broken.zarr", variable="V"),
+    )
+    monkeypatch.setitem(
+        registry.PRODUCTS,
+        "has_dates",
+        Product(id="has_dates", source_path="s3://bucket/ok.zarr", variable="V"),
+    )
+
+    def _fake_get_available_dates(source_path):
+        return [] if source_path == "s3://bucket/broken.zarr" else ["2024-01-01"]
+
+    with patch(
+        "data_access_service.core.tiler_routes.products.get_available_dates",
+        side_effect=_fake_get_available_dates,
+    ):
+        response = client.get("/api/v1/das/tiler/data_tiles/manifest")
+    assert response.status_code == 200
+    products = response.json()["products"]
+    assert "no_dates" not in products
+    assert "has_dates" in products

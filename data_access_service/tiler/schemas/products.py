@@ -29,7 +29,7 @@ class DataTileConfig(BaseModel):
 
     One shape serves both directions: validating the optional "data_tile"
     block in products.json (chunk_px/padding fall back to the same defaults
-    Product itself uses when omitted — see registry._from_dict) and
+    Product itself uses when omitted — see registry._apply_override) and
     serializing it for GET /products. extra="forbid" catches config typos.
     """
 
@@ -52,12 +52,13 @@ class VisualTileConfig(BaseModel):
 
 
 class ProductConfig(BaseModel):
-    """The resolved configuration of a product: validated straight from a
-    products.json entry on load (see registry._from_dict — id-dependent
-    defaults like ocean_masked are resolved just before validation, everything
-    else defaults on the model itself), and serialized for GET /products from
-    a live Product (see from_product). One shape, two directions —
-    extra="forbid" catches config typos on the way in.
+    """The resolved configuration of a product, serialized for GET /products
+    from a live Product (see from_product). Product identity/geometry
+    (id/source_path/variable/metadata_uuid) comes from runtime discovery
+    against the zarr catalog, not from products.json directly — see
+    registry.load_products and services/product/discovery.py. products.json
+    itself is now validated against ProductOverride (below), a narrower
+    schema of just the fields it's still allowed to set.
 
     Served identically at both /tiler/data_tiles/products and
     /tiler/visual_tiles/products — data_tile/visual_tile are nested (rather
@@ -97,6 +98,23 @@ class ProductConfig(BaseModel):
                 coastal_fill=_coastal_fill_config(product.visual_tile.coastal_fill),
             ),
         )
+
+
+class ProductOverride(BaseModel):
+    """One products.json entry: an optional per-product override applied onto
+    an auto-discovered Product by matching id (see registry.load_products).
+    id/source_path/variable/metadata_uuid are not here — those come from
+    discovery, not products.json. A discovered product with no matching
+    entry here uses pure defaults (ocean_masked=False, default
+    DataTileConfig/VisualTileConfig). extra="forbid" catches typos.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    ocean_masked: bool | None = None
+    data_tile: DataTileConfig = Field(default_factory=DataTileConfig)
+    visual_tile: VisualTileConfig = Field(default_factory=VisualTileConfig)
 
 
 class DateRange(BaseModel):

@@ -7,17 +7,18 @@ from data_access_service.tiler.services.product.manifest import render_manifest
 from data_access_service.tiler.services.product.product import get_lod_grids
 from data_access_service.tiler.services.rendering.data_tiles import render_tile
 
-from .products import router as products_router
+from .products import build_products_router
 from .shared import (
     DATE_EX,
     PRODUCT_EX,
     get_product_or_404,
+    is_store_available_or_404,
     load_slice_or_404,
     validate_date,
 )
 
 router = APIRouter()
-router.include_router(products_router)
+router.include_router(build_products_router())
 
 
 @router.get(
@@ -37,6 +38,7 @@ def get_tile(
     y: int = Path(openapi_examples={"default": Example(value=0)}),
 ):
     product = get_product_or_404(product_id)
+    is_store_available_or_404(product)
     validate_date(date)
     lod_grids = get_lod_grids(product)
 
@@ -95,6 +97,7 @@ def get_manifest(
     date: str = Path(pattern=r"^\d{4}-\d{2}-\d{2}$", openapi_examples=DATE_EX),
 ):
     product = get_product_or_404(product_id)
+    is_store_available_or_404(product)
     validate_date(date)
     get_lod_grids(product)
     variables = product.variables

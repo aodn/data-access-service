@@ -24,6 +24,17 @@ def seed_products():
     PRODUCTS.pop("sea_level_anomaly", None)
 
 
+@pytest.fixture(autouse=True)
+def store_open_by_default(monkeypatch):
+    """ensure_store_available_or_404 (shared.py) is the first thing every
+    product_id route does — mock get_store to succeed so this file's real
+    route hit doesn't attempt a real S3 open."""
+    monkeypatch.setattr(
+        "data_access_service.core.tiler_routes.shared.get_store",
+        lambda store_url: object(),
+    )
+
+
 @pytest.fixture
 def client():
     """Entering TestClient as a context manager triggers lifespan / api_setup.

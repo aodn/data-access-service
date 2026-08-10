@@ -9,6 +9,7 @@ from fastapi.openapi.models import Example
 from data_access_service.tiler.services.colormap.resolver import resolve_colormap
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.product.registry import get_product
+from data_access_service.tiler.services.store.registry import get_store
 from data_access_service.tiler.services.store.slice_loader import load_slice
 
 PRODUCT_EX: dict[str, Example] = {"default": Example(value="sea_level_anomaly")}
@@ -44,6 +45,19 @@ def get_product_or_404(product_id: str) -> Product:
     return product
 
 
+def is_store_available_or_404(product: Product) -> None:
+    """Raise 404 if the product's store is not available."""
+    try:
+        get_store(product.source_path)
+    except FileNotFoundError:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Store for product {product.id!r} is currently unavailable: {e}",
+        ) from e
+
+
 def validate_date(date: str) -> None:
     try:
         _Date.fromisoformat(date)
@@ -73,9 +87,13 @@ def resolve_colormap_or_error(name: str, *, status_code: int = 400) -> None:
         raise HTTPException(status_code=status_code, detail=str(e)) from e
 
 
+def is_single_variable(product: Product) -> bool:
+    return not isinstance(product.variable, list)
+
+
 def single_variable_or_400(product: Product, *, context: str) -> str:
     """Narrow product.variable to a single str, rejecting multi-variable products."""
-    if isinstance(product.variable, list):
+    if not is_single_variable(product):
         raise HTTPException(
             status_code=400,
             detail=(

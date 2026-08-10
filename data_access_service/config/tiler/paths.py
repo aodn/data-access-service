@@ -12,6 +12,11 @@ from pathlib import Path
 # so they're resolved relative to the package rather than the CWD.
 PRODUCTS_CONFIG_PATH = str(Path(__file__).resolve().parent / "products.json")
 COLORMAPS_CONFIG_PATH = str(Path(__file__).resolve().parent / "colormaps.json")
+# Allowlist of zarr variable names (or grouped variable-name lists) product
+# discovery matches against — see tiler/services/product/discovery.py.
+GRIDDED_VARIABLES_CONFIG_PATH = str(
+    Path(__file__).resolve().parent / "gridded_variables.json"
+)
 
 # Mask assets stay with the tiler package (not config) since they're binary
 # data, not something a dev edits — resolved relative to the repo's

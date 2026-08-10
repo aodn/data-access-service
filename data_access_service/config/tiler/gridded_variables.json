@@ -1,0 +1,24 @@
+[
+  "GSLA",
+  "GSL",
+  "sea_surface_temperature",
+  "analysed_sst",
+  "sea_ice_fraction",
+  "sst",
+  "sst_mosaic",
+  "ssta",
+  "ssta_mosaic",
+  "sst_anom_mosaic",
+  "dhd",
+  "dhd_mosaic",
+  "dhd_count_mosaic",
+  "dhdc_mosaic",
+  "mpsa_mosaic",
+  "MCS_category",
+  "MCS_category_mosaic",
+  "MHW_category_mosaic",
+  [
+    "UCUR",
+    "VCUR"
+  ]
+]

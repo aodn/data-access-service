@@ -7,6 +7,7 @@ import anyio
 from data_access_service.core.api import API
 from data_access_service.core.tiler_routes.shared import mark_tiler_ready
 from data_access_service.tiler.services.colormap.registry import load_colormaps
+from data_access_service.tiler.services.product.discovery import discover_products
 from data_access_service.tiler.services.product.registry import (
     iter_products,
     load_products,
@@ -27,7 +28,7 @@ async def run_tiler_warmup(api: API) -> None:
     logger.info("Waiting for API metadata init before starting other tasks")
     await api.wait_until_ready()
 
-    load_products()
+    load_products(discover_products(api))
     load_colormaps()
     await anyio.to_thread.run_sync(warmup_resample)
     await anyio.to_thread.run_sync(warmup_visual)

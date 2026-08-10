@@ -30,6 +30,30 @@ def seed_products():
         PRODUCTS.pop(p.id, None)
 
 
+@pytest.fixture(autouse=True)
+def store_open_by_default(monkeypatch):
+    """is_store_available_or_404 (shared.py) guards every product_id route
+    by calling get_store to confirm the store opens — mock that to succeed
+    by default so existing tests don't each need to know about the guard.
+
+    is_store_available (backs GET /products' default store_status=available
+    filter) is a cheap cache-membership check with no opening side effect of
+    its own — mocked directly here instead, so existing GET /products tests
+    (which never actually open a store) still see their fixture products by
+    default.
+
+    Tests exercising either failure path override the relevant one locally.
+    """
+    monkeypatch.setattr(
+        "data_access_service.core.tiler_routes.shared.get_store",
+        lambda store_url: object(),
+    )
+    monkeypatch.setattr(
+        "data_access_service.core.tiler_routes.products.is_store_available",
+        lambda store_url: True,
+    )
+
+
 @pytest.fixture
 def client():
     """Entering TestClient as a context manager triggers lifespan / api_setup.

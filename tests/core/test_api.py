@@ -102,6 +102,43 @@ class TestApi(unittest.TestCase):
                 "TIME mapped to eventDate, LATITUDE mapped to decimalLatitude, LONGITUDE mapped to decimalLongitude",
             )
 
+    with open(
+        Path(__file__).resolve().parent.parent / "canned/catalog_uncached.json", "r"
+    ) as file:
+
+        @patch.object(
+            DataQuery.Metadata,
+            "metadata_catalog_uncached",
+            return_value=json.load(file),
+        )
+        def test_iter_zarr_dataset_variables(self, get_metadata):
+            api = API()
+            api.initialize_metadata()
+
+            zarr_datasets = {
+                dname: (uuid, source_path, variables)
+                for uuid, dname, source_path, variables in api.iter_zarr_dataset_variables()
+            }
+
+            # Only the one zarr entry in the canned catalog is yielded — the
+            # parquet entries alongside it are filtered out.
+            self.assertEqual(
+                list(zarr_datasets.keys()),
+                ["satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"],
+            )
+
+            uuid, source_path, variables = zarr_datasets[
+                "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
+            ]
+            self.assertEqual(uuid, "a4170ca8-0942-4d13-bdb8-ad4718ce14bb")
+            self.assertEqual(
+                source_path,
+                "s3://aodn-cloud-optimised/satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr/",
+            )
+            # global_attributes is metadata about the store, not a data variable.
+            self.assertNotIn("global_attributes", variables)
+            self.assertIn("analysed_sst", variables)
+
     def test_nan_to_none_conversion(self):
         # Create a sample pandas DataFrame with NaN values
         data = {

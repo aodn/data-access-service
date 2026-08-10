@@ -1,39 +1,36 @@
 import asyncio
+import gc
 import gzip
+import json
+import logging
 import math
 import os
-import gc
-import json
 import zlib
-
-
 from concurrent.futures import ThreadPoolExecutor
-from data_access_service import Config
+from datetime import timedelta, timezone
+from io import BytesIO
+from typing import Any, Dict, Hashable, Iterator, List, Optional, Tuple, overload
 
 import dask.dataframe as ddf
 import pandas as pd
-import logging
 import xarray
-
-from datetime import timedelta, timezone
-from io import BytesIO
-from typing import Optional, Dict, Any, List, Tuple, Hashable, overload
 from aodn_cloud_optimised.lib import DataQuery
-from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
 from aodn_cloud_optimised.lib.config import get_notebook_url
+from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
 from bokeh.server.tornado import psutil
 from xarray.core.utils import Frozen
 
+from data_access_service import Config
 from data_access_service.core.constants import (
     STR_LATITUDE_UPPER_CASE,
     STR_LONGITUDE_UPPER_CASE,
     STR_TIME_UPPER_CASE,
 )
+from data_access_service.core.descriptor import Coordinate, Depth, Descriptor
+from data_access_service.core.size_estimation import estimate_single_key_size
 from data_access_service.models.subset_request import NON_SPECIFIED
 from data_access_service.utils.format_utils import SUPPORTED_OUTPUT_FORMATS
-from data_access_service.core.size_estimation import estimate_single_key_size
 from data_access_service.utils.subset_request_resolver import resolve_subset_request
-from data_access_service.core.descriptor import Depth, Descriptor, Coordinate
 
 log = logging.getLogger(__name__)
 
@@ -574,6 +571,30 @@ class API(BaseAPI):
 
     def get_aodn_instance(self):
         return self._instance
+
+    def iter_zarr_dataset_variables(
+        self,
+    ) -> Iterator[Tuple[str, str, str, frozenset]]:
+        """Yield (uuid, dataset_name, source_path, variable_names) for every
+        zarr dataset captured at init.
+
+        variable_names is every zarr variable/coordinate name minus
+        "global_attributes" — callers filter to what they care about. Reuses
+        the already-fetched _schema_keys index rather than calling
+        self._instance.get_metadata() again, which would re-trigger a full S3
+        catalog scan (see _release_library_metadata_cache).
+        """
+        bucket = self._instance.bucket_name
+        for uuid, datasets in self._schema_keys.items():
+            for dname, field_names in datasets.items():
+                if not dname.endswith(".zarr"):
+                    continue
+                yield (
+                    uuid,
+                    dname,
+                    f"s3://{bucket}/{dname}/",
+                    field_names - {"global_attributes"},
+                )
 
     # Do not use cache, so that we can refresh it again
     def refresh_uuid_dataset_map(self):

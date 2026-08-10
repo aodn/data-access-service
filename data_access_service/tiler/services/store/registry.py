@@ -1,13 +1,12 @@
 """Per-URL registry of long-lived xarray.Dataset handles backed by Zarr stores.
 
-Not a cache in the strict sense: handles are not evicted (the URL set is small
-and bounded by registered products), and ``ttl`` triggers a background refresh
-rather than expiry. Stale entries keep serving until the refresh completes, so
-requests never block on freshness — only the very first open per URL blocks.
+Not a strict cache: handles are never evicted, and ``ttl`` triggers a
+background refresh rather than expiry, so requests never block on freshness
+after the first open.
 
-A per-store ``{local_date: [timestamps]}`` index is built alongside the dataset
-so ``load_slice`` / ``get_available_dates`` can resolve a local date in O(1)
-instead of converting every timestamp on the hot path.
+Also builds a per-store ``{local_date: [timestamps]}`` index so
+``load_slice`` / ``get_available_dates`` can resolve a local date without
+scanning every timestamp.
 """
 
 import asyncio
@@ -29,18 +28,15 @@ _tiler_config = Config.get_config().get_tiler_config()
 
 _STORE_TTL = float(_tiler_config.store_ttl_seconds)
 
-# Capacity gate for concurrent store opens during prewarm. Bounded to the S3
-# connection ceiling, not CPU. Runs on the shared anyio pool but a separate
-# budget so a many-product startup can't transiently consume tile-handler slots.
+# Capacity gate for concurrent store opens during prewarm, bounded to the S3
+# connection ceiling rather than CPU. Kept as its own budget so a many-product
+# startup can't consume all tile-handler thread pool slots.
 _STORE_PREWARM_LIMITER = anyio.CapacityLimiter(_tiler_config.store_prewarm_workers)
 
-# Per-syscall timeouts on every S3 connection. Without these, a stuck socket can
-# pin a worker thread indefinitely (Python threads can't be cancelled, so a
-# request-level wait would free the request but leave the thread held until the
-# kernel eventually times out — minutes under bad network conditions).
-# Passed via `config_kwargs` (not `client_kwargs`): s3fs builds its own Config
-# and passes it as `config=` to create_client, so a `config` key in client_kwargs
-# collides with that positional and raises TypeError.
+# Per-syscall timeouts on every S3 connection, so a stuck socket can't pin a
+# worker thread indefinitely (Python threads can't be cancelled). Passed via
+# `config_kwargs`, not `client_kwargs`: s3fs already uses a `config` key
+# internally and a collision there raises TypeError.
 _S3_CONFIG_KWARGS = {
     "connect_timeout": _tiler_config.s3_connect_timeout,
     "read_timeout": _tiler_config.s3_read_timeout,
@@ -51,47 +47,34 @@ _S3_CONFIG_KWARGS = {
 def _storage_options(store_url: str) -> dict:
     """Storage-backend options for fsspec/zarr, derived from the URL scheme.
 
-    - ``s3://`` defaults to anonymous access (IMOS's AODN buckets are public). Set
-      ``tiler.s3_anon: false`` in config.yaml to let fsspec discover AWS credentials
-      via the standard chain (env vars → ``~/.aws/credentials`` → IAM role) — needed
-      for private buckets.
-    - Other schemes (``file://``, ``https://``, ``gs://``, plain paths …) pass no
-      options; fsspec / its backend picks sensible defaults.
+    ``s3://`` defaults to anonymous access (AODN buckets are public); set
+    ``tiler.s3_anon: false`` to let fsspec discover AWS credentials instead,
+    for private buckets. Other schemes get no options — fsspec picks defaults.
     """
     if store_url.startswith("s3://"):
         return {"anon": _tiler_config.s3_anon, "config_kwargs": _S3_CONFIG_KWARGS}
     return {}
 
 
-# Spatial dims are merged into a single dask chunk per variable, covering both
-# already-canonical names ("lat"/"lon") and the raw names COORD_NAMES renames from
-# ("LATITUDE"/"LONGITUDE") — the rename to canonical names happens *after* open, so
-# open-time chunk keys must match whatever the store calls them natively. "time" is
-# deliberately absent: an unset key falls back to the store's native/preferred chunk
-# size (see xarray.structure.chunks._get_chunk), so native time-chunking is kept
-# without needing to know each store's native time-chunk size in advance.
+# Spatial dims merge into a single dask chunk per variable, covering both
+# canonical ("lat"/"lon") and raw pre-rename names ("LATITUDE"/"LONGITUDE"),
+# since rename to canonical names happens *after* open. "time" is left unset
+# so it keeps the store's native chunk size instead of requiring it upfront.
 _SPATIAL_CHUNK_DIMS = {"lat", "lon"} | {
     raw for raw, canonical in COORD_NAMES.items() if canonical in ("lat", "lon")
 }
 
 
 def _open_store(store_url: str) -> xr.Dataset:
-    # slice_loader.py's only read path selects by time and always reads the full
-    # lat/lon extent — native spatial chunking buys zero read-efficiency there,
-    # since a single time-slice request already touches every native spatial chunk
-    # for that time-block. But dask builds one graph task *per native chunk*, and a
-    # handful of production stores are chunked finely enough (e.g. [5, 250, 250] on
-    # a [8153, 2500, 10000] array) to produce 10M+ chunks for one store alone — tens
-    # of GB of real memory just to describe where the data is, before any of it is
-    # fetched (confirmed via macOS `footprint`; `ps`/`psutil` RSS does not surface
-    # this). Merging spatial dims collapses that to one task per native time-chunk,
-    # with no change in bytes fetched per request and no read-latency regression
-    # (verified: identical .compute() results, same wall-clock fetch time) — just
-    # ~165x less memory to open the worst-case store. Do NOT merge "time" too, and
-    # do NOT switch to chunks='auto' for it — either would merge adjacent
-    # time-blocks into one dask chunk, turning a one-slice read into a multi-slice
-    # S3 over-read. (Tests mock open_zarr with numpy datasets, so such a regression
-    # would pass CI but degrade production.)
+    # Reads always select by time over the full lat/lon extent, so native spatial
+    # chunking buys no read-efficiency but costs one dask task per native chunk —
+    # finely-chunked stores can produce 10M+ chunks, tens of GB just to describe
+    # the data before fetching any of it. Merging spatial dims collapses that to
+    # one task per time-chunk with no change in bytes fetched or latency (~165x
+    # less memory on the worst-case store). Do NOT also merge "time" or switch it
+    # to chunks='auto' — either would turn a one-slice read into a multi-slice S3
+    # over-read (tests mock open_zarr with numpy datasets, so this regression
+    # wouldn't show up in CI).
     ds = xr.open_zarr(
         store_url,
         chunks={dim: -1 for dim in _SPATIAL_CHUNK_DIMS},
@@ -122,10 +105,8 @@ def _build_date_index(ds: xr.Dataset) -> dict[str, list]:
 class StoreRegistry:
     """See module docstring for the design.
 
-    Concurrent first-time opens of the *same* URL share one ``xr.open_zarr`` call
-    via a per-URL ``concurrent.futures.Future``; opens of *different* URLs run in
-    parallel (the original implementation serialised them under a single global
-    lock until this pattern was introduced).
+    Concurrent first-time opens of the *same* URL share one ``xr.open_zarr``
+    call via a per-URL ``Future``; opens of *different* URLs run in parallel.
     """
 
     def __init__(self, ttl: float) -> None:
@@ -183,6 +164,11 @@ class StoreRegistry:
         with self._lock:
             return self._date_index.get(store_url, {})
 
+    def is_open(self, store_url: str) -> bool:
+        """True if ``store_url`` has a successfully-opened handle cached."""
+        with self._lock:
+            return store_url in self._stores
+
     async def prewarm(self, store_urls: list[str]) -> None:
         """Open every URL in parallel via the anyio thread pool.
 
@@ -218,6 +204,9 @@ class StoreRegistry:
             self._opened_at[store_url] = time.monotonic()
             self._date_index[store_url] = index
 
+    # TODO: periodically refresh all stores from products via a background cron
+    # job instead of the current request-triggered refresh, so a product that
+    # failed at warmup can still come online later.
     def _refresh_background(self, store_url: str) -> None:
         try:
             ds = _open_store(store_url)
@@ -239,9 +228,12 @@ def get_store(store_url: str) -> xr.Dataset:
 
 
 def get_available_dates(store_url: str) -> list[str]:
-    get_store(store_url)  # ensures the date index for this URL is populated
     index = store_registry.date_index(store_url)
     return sorted(index) if index else []
+
+
+def is_store_available(store_url: str) -> bool:
+    return store_registry.is_open(store_url)
 
 
 async def prewarm_stores(store_urls: list[str]) -> None:
