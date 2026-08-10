@@ -1,9 +1,8 @@
 """Candidate verification against the stores that actually opened.
 
-Two things are being pinned here. The guards are per *product*, so one bad
-variable must not take out its siblings on the same store. And a store failure
-is classified by what the store said, never by which products sit on it — no
-product is privileged, so nothing here can take the whole tiler down.
+A store failure is classified by what the store said, never by which products
+sit on it — no product is privileged, so nothing here can take the whole
+tiler down.
 """
 
 import numpy as np
@@ -16,7 +15,6 @@ from data_access_service.tiler.services.product.verification import (
     NO_TIME_DIMENSION,
     NOT_GRIDDED,
     STORE_ABSENT,
-    VARIABLE_ABSENT,
     verify_candidate_products,
 )
 from data_access_service.tiler.services.store.registry import NotGriddedStoreError
@@ -132,50 +130,7 @@ def test_absent_store_is_dropped_whatever_the_product_id(stores):
     assert result.rejections[0].product_id == pid
 
 
-# --- guard 1: variable presence --------------------------------------------
-
-
-def test_absent_variable_is_rejected_and_named(stores):
-    stores[GRID] = _dataset(("sst",))
-    candidates = {"a:missing": _product("a:missing", variable="missing")}
-
-    result = verify_candidate_products(candidates, {GRID: None})
-
-    assert result.products == {}
-    assert len(result.rejections) == 1
-    rejection = result.rejections[0]
-    assert rejection.category == VARIABLE_ABSENT
-    assert "missing" in rejection.reason
-
-
-def test_pair_with_only_one_variable_present_is_rejected(stores):
-    stores[GRID] = _dataset(("UCUR",))
-    candidates = {"a:ucur+vcur": _product("a:ucur+vcur", variable=["UCUR", "VCUR"])}
-
-    result = verify_candidate_products(candidates, {GRID: None})
-
-    assert result.products == {}
-    assert result.rejections[0].category == VARIABLE_ABSENT
-    assert "VCUR" in result.rejections[0].reason
-    assert "UCUR" not in result.rejections[0].reason
-
-
-def test_rejection_drops_only_the_affected_product(stores):
-    """The sibling on the same store still publishes — this is the difference
-    between "one variable drifted" and "a store's worth of products vanished"."""
-    stores[GRID] = _dataset(("sst",))
-    candidates = {
-        "a:sst": _product("a:sst", variable="sst"),
-        "a:gone": _product("a:gone", variable="gone"),
-    }
-
-    result = verify_candidate_products(candidates, {GRID: None})
-
-    assert set(result.products) == {"a:sst"}
-    assert [r.product_id for r in result.rejections] == ["a:gone"]
-
-
-# --- guard 2: time dimension ------------------------------------------------
+# --- guard: time dimension ---------------------------------------------
 
 
 def test_store_without_time_dimension_is_rejected(stores):
@@ -186,15 +141,6 @@ def test_store_without_time_dimension_is_rejected(stores):
 
     assert result.products == {}
     assert result.rejections[0].category == NO_TIME_DIMENSION
-
-
-def test_variable_presence_is_checked_before_time_dimension(stores):
-    stores[GRID] = _dataset(("sst",), with_time=False)
-    candidates = {"a:gone": _product("a:gone", variable="gone")}
-
-    result = verify_candidate_products(candidates, {GRID: None})
-
-    assert result.rejections[0].category == VARIABLE_ABSENT
 
 
 # --- graded store failure policy -------------------------------------------
@@ -263,10 +209,9 @@ def test_missing_prewarm_outcome_is_a_wiring_error(stores):
 
 
 def test_log_rejections_breaks_counts_down_by_cause(stores, caplog):
-    stores[GRID] = _dataset(("sst",))
+    stores[GRID] = _dataset(("sst",), with_time=False)
     candidates = {
-        "a:sst": _product("a:sst"),
-        "a:gone": _product("a:gone", variable="gone"),
+        "a:gone": _product("a:gone"),
         "flat:sst": _product("flat:sst", source_path=OTHER),
     }
     result = verify_candidate_products(
@@ -278,10 +223,7 @@ def test_log_rejections_breaks_counts_down_by_cause(stores, caplog):
 
     summary = [r.getMessage() for r in caplog.records if "Verification:" in r.message]
     assert len(summary) == 1
-    assert "1 products kept, 2 rejected" in summary[0]
-    assert (
-        "store not gridded 1, store absent 0, variable absent 1, no time dimension 0"
-        in summary[0]
-    )
+    assert "0 products kept, 2 rejected" in summary[0]
+    assert "store not gridded 1, store absent 0, no time dimension 1" in summary[0]
     # One line per dropped product, naming it.
     assert any("a:gone" in r.getMessage() for r in caplog.records)

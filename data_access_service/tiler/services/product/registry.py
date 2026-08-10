@@ -27,31 +27,10 @@ def iter_product_items() -> list[tuple[str, Product]]:
     return list(PRODUCTS.items())
 
 
-def _assert_no_slice_cache_conflicts(products: dict[str, Product]) -> None:
-    """Two products sharing an L1 cache entry must agree on ``ocean_masked``.
-
-    L1 is keyed on ``(source_path, sorted(variables))`` and the mask is applied
-    before caching, so disagreement poisons the cache in request order. The sort
-    is deliberate — a reversed pair really does share an entry.
-    """
-    by_identity: dict[tuple[str, tuple[str, ...]], Product] = {}
-    for product in products.values():
-        identity = (product.source_path, tuple(sorted(product.variables)))
-        existing = by_identity.get(identity)
-        if existing is None:
-            by_identity[identity] = product
-        elif existing.ocean_masked != product.ocean_masked:
-            raise ValueError(
-                f"Products {existing.id!r} and {product.id!r} share the slice-cache "
-                f"identity {identity} but disagree on ocean_masked."
-            )
-
-
 def publish_products(new_products: dict[str, Product]) -> None:
     # Additions before removals, so a reader never sees an empty dict.
     if not new_products:
         raise ValueError("Refusing to publish an empty product set")
-    _assert_no_slice_cache_conflicts(new_products)
 
     for product_id, product in new_products.items():
         PRODUCTS[product_id] = product

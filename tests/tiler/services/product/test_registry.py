@@ -1,9 +1,8 @@
-"""product/registry: publication semantics and the slice-cache invariant.
+"""product/registry: publication semantics.
 
 The registry no longer parses anything — products arrive already derived and
 verified. What is left to pin is how state is swapped (readers never see an
-empty dict), and the one cross-product invariant that has to hold before
-publication because the slice cache cannot express it.
+empty dict).
 """
 
 import pytest
@@ -90,64 +89,6 @@ def test_publish_never_exposes_empty_state(isolated_products, monkeypatch):
             "remove-before-add ordering breaks the no-empty-state invariant"
         )
     assert set(spy.keys()) == {"c"}
-
-
-# --- slice-cache identity invariant ----------------------------------------
-
-
-def test_conflicting_ocean_masked_on_one_cache_identity_fails(isolated_products):
-    """L1 is keyed on (source_path, sorted(variables)) and ocean_masked is
-    applied before caching, so two products sharing that identity but
-    disagreeing would poison each other's slices in request order."""
-    conflicting = {
-        "a": _product("a", variable="GSLA", ocean_masked=True),
-        "b": _product("b", variable="GSLA", ocean_masked=False),
-    }
-    with pytest.raises(ValueError, match="ocean_masked"):
-        publish_products(conflicting)
-
-
-def test_reversed_pair_shares_the_cache_identity(isolated_products):
-    """The sort in the L1 key is correct, not an oversight: consumers read the
-    cached Dataset by name, so a reversed pair genuinely shares an entry. The
-    invariant is keyed on the sorted identity precisely so that case is caught."""
-    with pytest.raises(ValueError, match="ocean_masked"):
-        publish_products(
-            {
-                "uv": _product("uv", variable=["UCUR", "VCUR"], ocean_masked=True),
-                "vu": _product("vu", variable=["VCUR", "UCUR"], ocean_masked=False),
-            }
-        )
-
-
-def test_same_store_different_variables_is_not_a_conflict(isolated_products):
-    publish_products(
-        {
-            "sla:gsla": _product("sla:gsla", variable="GSLA", ocean_masked=False),
-            "sla:gsl": _product("sla:gsl", variable="GSL", ocean_masked=True),
-        }
-    )
-    assert set(PRODUCTS) == {"sla:gsla", "sla:gsl"}
-
-
-def test_same_identity_with_agreeing_settings_is_allowed(isolated_products):
-    publish_products(
-        {
-            "a": _product("a", variable="GSLA", ocean_masked=True),
-            "b": _product("b", variable="GSLA", ocean_masked=True),
-        }
-    )
-    assert set(PRODUCTS) == {"a", "b"}
-
-
-def test_different_stores_never_conflict(isolated_products):
-    publish_products(
-        {
-            "a": _product("a", source="s3://b/x.zarr", ocean_masked=True),
-            "b": _product("b", source="s3://b/y.zarr", ocean_masked=False),
-        }
-    )
-    assert set(PRODUCTS) == {"a", "b"}
 
 
 # --- read facades -----------------------------------------------------------

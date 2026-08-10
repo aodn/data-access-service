@@ -279,16 +279,19 @@ class StoreRegistry:
         not_gridded = sum(
             1 for e in outcomes.values() if isinstance(e, NotGriddedStoreError)
         )
+        absent = sum(1 for e in outcomes.values() if isinstance(e, FileNotFoundError))
         unresolved = sum(
             1
             for e in outcomes.values()
-            if e is not None and not isinstance(e, NotGriddedStoreError)
+            if e is not None
+            and not isinstance(e, (NotGriddedStoreError, FileNotFoundError))
         )
         logger.info(
-            "Store prewarm complete: %d opened, %d not gridded, %d unresolved "
-            "(of %d)",
-            len(outcomes) - not_gridded - unresolved,
+            "Store prewarm complete: %d opened, %d not gridded, %d absent, "
+            "%d unresolved (of %d)",
+            len(outcomes) - not_gridded - absent - unresolved,
             not_gridded,
+            absent,
             unresolved,
             len(outcomes),
         )

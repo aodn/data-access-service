@@ -240,17 +240,29 @@ async def test_prewarm_summary_counts_each_outcome_category(monkeypatch, caplog)
         {
             "s3://b/ok.zarr": _make_ds(time=2, lat=4, lon=4),
             "s3://b/flat.zarr": _make_ds(time=2, lon=4),
+            "s3://b/gone.zarr": FileNotFoundError("No such file"),
             "s3://b/bad.zarr": RuntimeError("nope"),
         }
     )
     monkeypatch.setattr(xr, "open_zarr", opener)
 
     with caplog.at_level("INFO"):
-        await prewarm_stores(["s3://b/ok.zarr", "s3://b/flat.zarr", "s3://b/bad.zarr"])
+        await prewarm_stores(
+            [
+                "s3://b/ok.zarr",
+                "s3://b/flat.zarr",
+                "s3://b/gone.zarr",
+                "s3://b/bad.zarr",
+            ]
+        )
 
     summary = [r for r in caplog.records if "Store prewarm complete" in r.message]
     assert len(summary) == 1
-    assert "1 opened, 1 not gridded, 1 unresolved (of 3)" in summary[0].getMessage()
+    # Absent (FileNotFoundError) is its own bucket, not lumped into unresolved.
+    assert (
+        "1 opened, 1 not gridded, 1 absent, 1 unresolved (of 4)"
+        in summary[0].getMessage()
+    )
 
 
 @pytest.mark.asyncio

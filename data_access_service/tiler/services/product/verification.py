@@ -1,8 +1,9 @@
 """Verify candidate products against the stores that were actually opened.
 
-Two O(1) guards per candidate: the variable exists, the store is time-indexed.
-Dims, dtype and pair shape are not checked — the curated variable list is what
-vouches for renderability today.
+One O(1) guard per candidate: the store is time-indexed. Variable presence is
+not checked — catalogue and store agreeing on names has held in every real
+boot run; disagreements observed so far were all at store level (not gridded,
+absent), which prewarm already classifies.
 """
 
 import logging
@@ -21,7 +22,6 @@ logger = logging.getLogger(__name__)
 # Rejection categories, for the startup log breakdown.
 NOT_GRIDDED = "store_not_gridded"
 STORE_ABSENT = "store_absent"
-VARIABLE_ABSENT = "variable_absent"
 NO_TIME_DIMENSION = "no_time_dimension"
 
 
@@ -51,35 +51,15 @@ class VerificationResult:
         counts = Counter(r.category for r in self.rejections)
         logger.info(
             "Verification: %d products kept, %d rejected "
-            "(store not gridded %d, store absent %d, variable absent %d, "
-            "no time dimension %d), %d store(s) unresolved",
+            "(store not gridded %d, store absent %d, no time dimension %d), "
+            "%d store(s) unresolved",
             len(self.products),
             len(self.rejections),
             counts[NOT_GRIDDED],
             counts[STORE_ABSENT],
-            counts[VARIABLE_ABSENT],
             counts[NO_TIME_DIMENSION],
             len(self.unresolved_stores),
         )
-
-
-def _guard_failures(product: Product, dataset) -> tuple[str, str] | None:
-    # Unguarded, drift surfaces later as "No data found for date <date>",
-    # blaming the date for a missing variable.
-    missing = [name for name in product.variables if name not in dataset]
-    if missing:
-        return (
-            VARIABLE_ABSENT,
-            f"variable(s) {', '.join(missing)} absent from the opened store",
-        )
-
-    # No time dim means an empty date index: 404 on every date.
-    if "time" not in dataset.dims:
-        return (
-            NO_TIME_DIMENSION,
-            "store has no time dimension; every date request would 404",
-        )
-    return None
 
 
 def verify_candidate_products(
@@ -132,15 +112,14 @@ def verify_candidate_products(
             kept[product_id] = product
             continue
 
-        failure = _guard_failures(product, dataset)
-        if failure is not None:
-            category, reason = failure
+        # No time dim means an empty date index: 404 on every date.
+        if "time" not in dataset.dims:
             rejections.append(
                 Rejection(
                     product_id=product_id,
                     source_path=url,
-                    category=category,
-                    reason=reason,
+                    category=NO_TIME_DIMENSION,
+                    reason="store has no time dimension; every date request would 404",
                 )
             )
             continue

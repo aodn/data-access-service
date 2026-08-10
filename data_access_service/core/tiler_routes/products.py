@@ -143,7 +143,10 @@ def _available_dates_per_store(store_urls: set[str]) -> dict[str, list[str]]:
             resolved[store_url] = get_available_dates(store_url)
             _recent_store_failures.pop(store_url, None)
         except Exception as e:
-            logger.warning(f"Availability lookup failed for store {store_url}: {e!r}")
+            if isinstance(e, FileNotFoundError):
+                logger.warning(f"Availability store is absent: {store_url} ({e})")
+            else:
+                logger.exception(f"Availability lookup failed for store: {store_url}")
             _recent_store_failures[store_url] = (now, e)
             resolved[store_url] = []
             failures[store_url] = e
