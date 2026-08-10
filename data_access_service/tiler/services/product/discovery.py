@@ -39,7 +39,7 @@ def _tile_configs(entry: GriddedVariableEntry, dataset_name: str):
     # Each product needs its *own* instances: lod_grids is a mutable dict filled
     # in place from that product's store, so sharing one would make every
     # product from a spec inherit whichever store was requested first.
-    resolved = entry.resolve_defaults(dataset_name)
+    resolved = entry.settings_for(dataset_name)
 
     def coastal_fill(config) -> CoastalFill | None:
         return CoastalFill(max_dist_px=config.max_dist_px) if config else None

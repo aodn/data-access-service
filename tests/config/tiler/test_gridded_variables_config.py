@@ -43,9 +43,9 @@ def test_no_duplicate_specifications():
 def test_gsla_keeps_its_coastal_fill():
     """Live behaviour today: without it the GSLA grid renders with a visible
     gap along the coast."""
-    entry = _by_variable(load_gridded_variables())["GSLA"]
-    assert entry.defaults.data_tile.coastal_fill is not None
-    assert entry.defaults.data_tile.coastal_fill.max_dist_px == 4
+    settings = _by_variable(load_gridded_variables())["GSLA"].settings_for(SLA_DATASET)
+    assert settings.data_tile.coastal_fill is not None
+    assert settings.data_tile.coastal_fill.max_dist_px == 4
 
 
 def test_currents_pair_masks_only_the_sla_grid():
@@ -56,8 +56,8 @@ def test_currents_pair_masks_only_the_sla_grid():
 
     assert entry.visual is False
     assert set(entry.overrides) == {SLA_DATASET}
-    assert entry.resolve_defaults(SLA_DATASET).ocean_masked is True
-    assert entry.resolve_defaults("radar_site.zarr").ocean_masked is False
+    assert entry.settings_for(SLA_DATASET).ocean_masked is True
+    assert entry.settings_for("radar_site.zarr").ocean_masked is False
 
 
 def test_no_scalar_in_the_seed_disables_visual_tiles():

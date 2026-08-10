@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from data_access_service.tiler.schemas.gridded_variables import (
     GriddedVariableEntry,
-    ProductDefaults,
+    ProductSettings,
     load_gridded_variables,
     parse_gridded_variables,
 )
@@ -30,7 +30,6 @@ def test_scalar_shorthand_defaults_to_visual():
     assert entry.variable == "GSLA"
     assert entry.variables == ["GSLA"]
     assert entry.visual is True
-    assert entry.defaults == ProductDefaults()
     assert entry.overrides == {}
 
 
@@ -40,16 +39,18 @@ def test_pair_shorthand_defaults_to_data_only():
     assert entry.visual is False
 
 
-def test_object_entry_with_defaults_and_overrides():
+def test_object_entry_with_overrides():
     entry = _entry(
         {
             "variable": "GSLA",
-            "defaults": {"data_tile": {"coastal_fill": {"max_dist_px": 4}}},
-            "overrides": {"other.zarr": {"ocean_masked": True}},
+            "overrides": {
+                "a.zarr": {"data_tile": {"coastal_fill": {"max_dist_px": 4}}},
+                "b.zarr": {"ocean_masked": True},
+            },
         }
     )
-    assert entry.defaults.data_tile.coastal_fill.max_dist_px == 4
-    assert entry.overrides["other.zarr"].ocean_masked is True
+    assert entry.overrides["a.zarr"].data_tile.coastal_fill.max_dist_px == 4
+    assert entry.overrides["b.zarr"].ocean_masked is True
 
 
 def test_variable_case_is_preserved_verbatim():
@@ -116,16 +117,6 @@ def test_unknown_field_on_entry_rejected():
         _entry({"variable": "GSLA", "vizual": True})
 
 
-def test_unknown_field_on_defaults_rejected():
-    with pytest.raises(ValidationError):
-        _entry({"variable": "GSLA", "defaults": {"ocean_maskd": True}})
-
-
-def test_unknown_field_on_nested_data_tile_rejected():
-    with pytest.raises(ValidationError):
-        _entry({"variable": "GSLA", "defaults": {"data_tile": {"max_lods": 6}}})
-
-
 def test_unknown_field_on_override_rejected():
     with pytest.raises(ValidationError):
         _entry({"variable": "GSLA", "overrides": {"x.zarr": {"ocean_maskd": True}}})
@@ -141,12 +132,14 @@ def test_unknown_field_on_nested_override_data_tile_rejected():
         )
 
 
-# --- recursive override resolution ------------------------------------------
+# --- override lookup -------------------------------------------------------
 
 
-def test_resolve_defaults_without_override_returns_entry_defaults():
-    entry = _entry({"variable": "GSLA", "defaults": {"ocean_masked": True}})
-    assert entry.resolve_defaults("anything.zarr").ocean_masked is True
+def test_dataset_without_an_override_gets_plain_defaults():
+    entry = _entry(
+        {"variable": "GSLA", "overrides": {"x.zarr": {"ocean_masked": True}}}
+    )
+    assert entry.settings_for("other.zarr") == ProductSettings()
 
 
 def test_override_applies_only_to_its_own_dataset():
@@ -159,55 +152,30 @@ def test_override_applies_only_to_its_own_dataset():
         }
     )
     assert (
-        entry.resolve_defaults(
-            "model_sea_level_anomaly_gridded_realtime.zarr"
-        ).ocean_masked
+        entry.settings_for("model_sea_level_anomaly_gridded_realtime.zarr").ocean_masked
         is True
     )
-    # The 18 HF-radar grids matched by the same specification must not inherit
+    # The HF-radar grids matched by the same specification must not inherit
     # the SLA-grid ocean mask.
     assert (
-        entry.resolve_defaults(
+        entry.settings_for(
             "radar_TurquoiseCoast_velocity_hourly_delayed_qc.zarr"
         ).ocean_masked
         is False
     )
 
 
-def test_partial_nested_override_inherits_sibling_defaults():
+def test_override_carries_nested_tile_settings():
     entry = _entry(
         {
             "variable": "GSLA",
-            "defaults": {
-                "data_tile": {
-                    "padding": 3,
-                    "coastal_fill": {"max_dist_px": 4},
-                }
+            "overrides": {
+                "x.zarr": {"data_tile": {"coastal_fill": {"max_dist_px": 4}}}
             },
-            "overrides": {"x.zarr": {"data_tile": {"padding": 9}}},
         }
     )
-    resolved = entry.resolve_defaults("x.zarr")
-    assert resolved.data_tile.padding == 9
-    assert resolved.data_tile.coastal_fill.max_dist_px == 4
-    # Untouched entry defaults are not mutated by resolution.
-    assert entry.defaults.data_tile.padding == 3
-
-
-def test_override_leaves_unmentioned_top_level_fields_alone():
-    entry = _entry(
-        {
-            "variable": "GSLA",
-            "defaults": {
-                "ocean_masked": True,
-                "visual_tile": {"coastal_fill": {"max_dist_px": 8}},
-            },
-            "overrides": {"x.zarr": {"data_tile": {"padding": 9}}},
-        }
-    )
-    resolved = entry.resolve_defaults("x.zarr")
-    assert resolved.ocean_masked is True
-    assert resolved.visual_tile.coastal_fill.max_dist_px == 8
+    assert entry.settings_for("x.zarr").data_tile.coastal_fill.max_dist_px == 4
+    assert entry.settings_for("other.zarr").data_tile.coastal_fill is None
 
 
 # --- file loading -----------------------------------------------------------

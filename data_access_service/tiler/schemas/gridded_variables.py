@@ -15,7 +15,9 @@ from data_access_service.config.tiler.paths import GRIDDED_VARIABLES_CONFIG_PATH
 from data_access_service.tiler.schemas.products import DataTileConfig, VisualTileConfig
 
 
-class ProductDefaults(BaseModel):
+class ProductSettings(BaseModel):
+    """Per-dataset tuning. Anything unset takes the field's own default."""
+
     model_config = ConfigDict(extra="forbid")
 
     ocean_masked: bool = False
@@ -23,25 +25,7 @@ class ProductDefaults(BaseModel):
     visual_tile: VisualTileConfig = Field(default_factory=VisualTileConfig)
 
 
-class ProductDefaultsOverride(BaseModel):
-    """Only explicitly supplied fields overlay ProductDefaults, recursively."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    ocean_masked: bool | None = None
-    data_tile: DataTileConfig | None = None
-    visual_tile: VisualTileConfig | None = None
-
-
-def _deep_merge(base: dict, overlay: dict) -> dict:
-    merged = dict(base)
-    for key, value in overlay.items():
-        current = merged.get(key)
-        if isinstance(value, dict) and isinstance(current, dict):
-            merged[key] = _deep_merge(current, value)
-        else:
-            merged[key] = value
-    return merged
+_NO_OVERRIDE = ProductSettings()
 
 
 class GriddedVariableEntry(BaseModel):
@@ -51,9 +35,9 @@ class GriddedVariableEntry(BaseModel):
     # R/G channel order and must never be sorted.
     variable: str | list[str]
     visual: bool
-    defaults: ProductDefaults = Field(default_factory=ProductDefaults)
-    # Keyed by the exact metadata dataset name, including .zarr.
-    overrides: dict[str, ProductDefaultsOverride] = Field(default_factory=dict)
+    # Keyed by the exact metadata dataset name, including .zarr. Tuning is
+    # per dataset because it describes one grid, not the variable.
+    overrides: dict[str, ProductSettings] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
@@ -102,14 +86,8 @@ class GriddedVariableEntry(BaseModel):
     def variables(self) -> list[str]:
         return self.variable if isinstance(self.variable, list) else [self.variable]
 
-    def resolve_defaults(self, dataset_name: str) -> ProductDefaults:
-        override = self.overrides.get(dataset_name)
-        if override is None:
-            return self.defaults
-        merged = _deep_merge(
-            self.defaults.model_dump(), override.model_dump(exclude_unset=True)
-        )
-        return ProductDefaults(**merged)
+    def settings_for(self, dataset_name: str) -> ProductSettings:
+        return self.overrides.get(dataset_name, _NO_OVERRIDE)
 
 
 def parse_gridded_variables(raw: Any) -> list[GriddedVariableEntry]:

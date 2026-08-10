@@ -1002,7 +1002,11 @@ Each array element is either shorthand or an object:
   ["UCUR", "VCUR"],
   {
     "variable": "GSLA",
-    "defaults": { "data_tile": { "coastal_fill": { "max_dist_px": 4 } } }
+    "overrides": {
+      "model_sea_level_anomaly_gridded_realtime.zarr": {
+        "data_tile": { "coastal_fill": { "max_dist_px": 4 } }
+      }
+    }
   },
   {
     "variable": ["UCUR", "VCUR"],
@@ -1018,8 +1022,7 @@ Shorthand and object entries normalise into one canonical `GriddedVariableEntry`
 
 - **`variable`** — a `str` for a scalar product, or an **ordered two-element list** for a vector pair. The pair's order is the R/G channel order the data-tile shader decodes and is **never sorted**. A list must hold exactly two distinct names: one is a scalar (use a plain string), and three or more cannot be encoded into a data tile. A one-element list is rejected rather than silently unwrapped — it would turn a scalar product into a broken vector one.
 - **`visual`** — whether `/visual_tiles` can render it. Defaults to `true` for a scalar and `false` for a pair; `true` on a pair is rejected, since visual tiles render one scalar band. Set it to `false` on a scalar whose variable the renderer has no sensible colouring for. ogcapi-java publishes `tile_types` from this field, so it is what stops a non-renderable product advertising visual tiles.
-- **`defaults`** — settings applied to every product the specification fans out to (`ocean_masked`, `data_tile`, `visual_tile`).
-- **`overrides`** — keyed by the exact metadata dataset name *including* `.zarr`, for the cases where one grid genuinely differs. Overrides overlay `defaults` recursively, so naming one nested field does not reset its siblings. An override key that matches no discovered product is **logged at ERROR** (usually an upstream rename), but is not fatal.
+- **`overrides`** — the only place tuning lives, keyed by the exact metadata dataset name *including* `.zarr*. Tuning is per dataset because it describes one grid, not the variable: the same variable can appear on stores that need different settings. A dataset with no entry takes the plain defaults. An override key that matches no discovered product is **logged at ERROR** (usually an upstream rename), but is not fatal.
 - `extra="forbid"` applies at every level, so a typo fails at load rather than being ignored.
 
 The live example of why `overrides` exists: `["UCUR", "VCUR"]` matches 19 datasets, 18 of which are HF-radar sites on entirely different grids. The committed ocean mask is built from the SLA grid, so only that dataset may enable `ocean_masked`.
@@ -1054,10 +1057,10 @@ Remove the variable specification and redeploy — which removes it from *every*
 
 | Field                      | Where                          | Default        | When to override                                                                                                                                   |
 | -------------------------- | ------------------------------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `data_tile.chunk_px`       | `defaults`/`overrides`         | `[240, 192]`   | Store has very small or very large spatial extent                                                                                                  |
-| `data_tile.padding`        | `defaults`/`overrides`         | `1`            | Tile edge artefacts, or no padding needed                                                                                                          |
-| `data_tile.coastal_fill`   | `defaults`/`overrides`         | unset (off)    | Sparse/coarse products with a wide coastal transparency gap in **data tiles**; see [§7.6](#76-coastal-fill-sparse-products). `{"max_dist_px": N}`. |
-| `visual_tile.coastal_fill` | `defaults`/`overrides`         | unset (off)    | Same, independently, for **visual tiles**.                                                                                                         |
+| `data_tile.chunk_px`       | `overrides`                    | `[240, 192]`   | Store has very small or very large spatial extent                                                                                                  |
+| `data_tile.padding`        | `overrides`                    | `1`            | Tile edge artefacts, or no padding needed                                                                                                          |
+| `data_tile.coastal_fill`   | `overrides`                    | unset (off)    | Sparse/coarse products with a wide coastal transparency gap in **data tiles**; see [§7.6](#76-coastal-fill-sparse-products). `{"max_dist_px": N}`. |
+| `visual_tile.coastal_fill` | `overrides`                    | unset (off)    | Same, independently, for **visual tiles**.                                                                                                         |
 | `ocean_masked`             | `defaults`/`overrides`         | `false`        | Force on the ocean-validity mask. Grid-specific, so it normally belongs in `overrides`.                                                             |
 | `visual`                   | entry top level                | scalar `true`, pair `false` | A scalar the current renderer cannot colour meaningfully.                                                                              |
 

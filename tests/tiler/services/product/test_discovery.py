@@ -141,19 +141,21 @@ def test_source_path_built_from_the_configured_base_url():
 # --- defaults and overrides -------------------------------------------------
 
 
-def test_entry_defaults_apply_to_every_matched_dataset():
+def test_a_dataset_without_an_override_takes_plain_defaults():
     index = {"u1": {"a.zarr": frozenset({"GSLA"}), "b.zarr": frozenset({"GSLA"})}}
     candidates = _build(
         index,
         [
             {
                 "variable": "GSLA",
-                "defaults": {"data_tile": {"coastal_fill": {"max_dist_px": 4}}},
+                "overrides": {
+                    "a.zarr": {"data_tile": {"coastal_fill": {"max_dist_px": 4}}}
+                },
             }
         ],
     )
-    for product in candidates.values():
-        assert product.data_tile.coastal_fill.max_dist_px == 4
+    assert candidates["a:gsla"].data_tile.coastal_fill.max_dist_px == 4
+    assert candidates["b:gsla"].data_tile.coastal_fill is None
 
 
 def test_dataset_override_applies_only_to_its_own_dataset():
@@ -185,24 +187,27 @@ def test_dataset_override_applies_only_to_its_own_dataset():
     assert candidates["radar_site:ucur+vcur"].ocean_masked is False
 
 
-def test_override_overlays_recursively_onto_entry_defaults():
+def test_override_carries_every_setting_for_its_dataset():
     index = {"u1": {"a.zarr": frozenset({"GSLA"}), "b.zarr": frozenset({"GSLA"})}}
     candidates = _build(
         index,
         [
             {
                 "variable": "GSLA",
-                "defaults": {
-                    "data_tile": {"padding": 3, "coastal_fill": {"max_dist_px": 4}}
+                "overrides": {
+                    "b.zarr": {
+                        "data_tile": {
+                            "padding": 9,
+                            "coastal_fill": {"max_dist_px": 4},
+                        }
+                    }
                 },
-                "overrides": {"b.zarr": {"data_tile": {"padding": 9}}},
             }
         ],
     )
-    assert candidates["a:gsla"].data_tile.padding == 3
     assert candidates["b:gsla"].data_tile.padding == 9
-    # Naming padding does not reset the sibling coastal_fill.
     assert candidates["b:gsla"].data_tile.coastal_fill.max_dist_px == 4
+    assert candidates["a:gsla"].data_tile.padding == 1
 
 
 # --- config instance identity (Step 3 rule 9) -------------------------------
@@ -378,7 +383,11 @@ ORIGINAL_PRODUCT_IDS = [
 ORIGINAL_CONFIG = [
     {
         "variable": "GSLA",
-        "defaults": {"data_tile": {"coastal_fill": {"max_dist_px": 4}}},
+        "overrides": {
+            "model_sea_level_anomaly_gridded_realtime.zarr": {
+                "data_tile": {"coastal_fill": {"max_dist_px": 4}}
+            }
+        },
     },
     "GSL",
     {
