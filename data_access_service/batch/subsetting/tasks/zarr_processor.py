@@ -21,6 +21,10 @@ from data_access_service.utils.email_templates.download_email import (
     get_download_email_html_body,
 )
 from data_access_service.models.subset_request import SubsetRequest
+from data_access_service.utils.format_utils import (
+    OUTPUT_FORMAT_GEOTIFF,
+    OUTPUT_FORMAT_NETCDF,
+)
 from data_access_service.utils import geotiff_export
 from data_access_service.utils.process_logger import ProcessLogger
 from data_access_service.batch.subsetting.helpers.zarr_chunking import (
@@ -121,8 +125,14 @@ class ZarrProcessor:
         Add a new format by adding one entry here - no other code changes.
         """
         handlers = {
-            "netcdf": (self.__prepare_netcdf, self.__write_to_s3_as_netcdf),
-            "geotiff": (self.__prepare_geotiff, self.__write_to_s3_as_geotiff),
+            OUTPUT_FORMAT_NETCDF: (
+                self.__prepare_netcdf,
+                self.__write_to_s3_as_netcdf,
+            ),
+            OUTPUT_FORMAT_GEOTIFF: (
+                self.__prepare_geotiff,
+                self.__write_to_s3_as_geotiff,
+            ),
         }
         if self.output_format not in handlers:
             raise ValueError(f"Unsupported format: {self.output_format}")

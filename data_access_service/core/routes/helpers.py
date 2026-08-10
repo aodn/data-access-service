@@ -24,7 +24,6 @@ from dateutil import parser
 from fastapi import Depends, HTTPException, Request, BackgroundTasks
 from fastapi.responses import Response, FileResponse
 from geojson import Feature, FeatureCollection
-from geojson.geometry import Geometry
 from pydantic import BaseModel
 
 from data_access_service import init_log
@@ -602,51 +601,3 @@ def generate_feature_collection(
                 features.append(feature)
 
     return FeatureCollection(features=features)
-
-
-def generate_rect_features(
-    dataset: xarray.Dataset,
-    lat_key: str,
-    lon_key: str,
-    time_key: str,
-):
-    """
-    Generate a FeatureCollection  with rectangle features from an xarray Dataset.
-    It is a shortterm solution for the zarr subsetting issue.
-    """
-
-    lats = dataset.coords[lat_key].values
-    lons = dataset.coords[lon_key].values
-    times = dataset.coords[time_key].values
-    pandas_times = pandas.to_datetime(times)
-
-    if len(pandas_times) == 0:
-        logger.info("No data available in the dataset.")
-        return None
-
-    rounded_time = round_dates(pandas_times)[0]
-
-    min_lat = float(numpy.nanmin(lats))
-    max_lat = float(numpy.nanmax(lats))
-    min_lon = float(numpy.nanmin(lons))
-    max_lon = float(numpy.nanmax(lons))
-
-    rect_polygon = [
-        [min_lon, min_lat],
-        [min_lon, max_lat],
-        [max_lon, max_lat],
-        [max_lon, min_lat],
-        [min_lon, min_lat],
-    ]
-
-    geometry = Geometry(type="Polygon", coordinates=[rect_polygon])
-    # Do not use len() to check size, some zarr have empty dim with single value,
-    # which cause exception
-    feature = Feature(
-        geometry=geometry,
-        properties={
-            "date": rounded_time.value,
-            "count": lats.size * lons.size * rounded_time.count,
-        },
-    )
-    return [feature]

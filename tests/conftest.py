@@ -2,9 +2,20 @@
 
 import pytest
 
+from aodn_cloud_optimised.lib import DataQuery
+
 from data_access_service.batch.subsetting.helpers.request_helper import (
     get_subset_request,
 )
+
+
+@pytest.fixture(autouse=True)
+def clear_partition_value_cache():
+    """Drop aodn_cloud_optimised's partition-value cache between tests."""
+    DataQuery._partition_value_cache.clear()
+    yield
+    DataQuery._partition_value_cache.clear()
+
 
 DEFAULT_MULTI_POLYGON = '{"type":"MultiPolygon","coordinates":[[[[-180,90],[-180,-90],[180,-90],[180,90],[-180,90]]]]}'
 DEFAULT_CITATION = "Cite data as: Mazor, T., Watermeyer, K., Hobley, T., Grinter, V., Holden, R., MacDonald, K. and Ferns, L. (2023). Statewide Marine Habitat Map."

@@ -5,13 +5,14 @@ keys, which date range, which area. This module is the single owner of that
 interpretation, so the consumers cannot drift apart.
 """
 
+import logging
 from dataclasses import dataclass, replace
 from typing import List, Optional, Tuple, Union
 
 import pandas as pd
 from shapely.geometry.base import BaseGeometry
 
-from data_access_service.core.constants import UNIX_EPOCH_UTC, WHOLE_GLOBE_BBOX
+from data_access_service.core.constants import UNIX_EPOCH_UTC
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.date_time_utils import (
@@ -22,6 +23,8 @@ from data_access_service.utils.date_time_utils import (
     supply_day_with_nano_precision,
 )
 from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -48,14 +51,6 @@ class ResolvedSubsetRequest:
         """False when the requested date range is entirely outside the
         dataset's temporal extent (the download would produce no data)."""
         return self.start_date is not None and self.end_date is not None
-
-    @property
-    def effective_bboxes(self) -> List[BoundingBox]:
-        """The bboxes to slice with when a consumer needs an explicit box:
-        empty means "no spatial filter", which becomes one whole-globe bbox.
-        This is the SINGLE place [] becomes [WHOLE_GLOBE_BBOX].
-        """
-        return self.bboxes or [WHOLE_GLOBE_BBOX]
 
 
 def resolve_subset_request(
@@ -207,6 +202,15 @@ def trim_date_range_for_keys(
         except KeyError:
             # key does not exist in this dataset; callers report/skip unknown
             # keys downstream, they must not break the trim
+            continue
+        except ValueError:
+            # dataset has no recognisable time variable; skip it rather than
+            # kill the whole job before any email is sent
+            logger.warning(
+                "No time variable for uuid=%s key=%s; skipping temporal trim",
+                uuid,
+                key,
+            )
             continue
         if start_date is None or end_date is None:
             # if didn't get the temporal extent (e.g. when testing) just return the requested dates

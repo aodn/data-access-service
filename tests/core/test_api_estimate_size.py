@@ -179,12 +179,30 @@ def test_zarr_netcdf_object_string_var_sized_as_fixed_width():
 def test_geotiff_non_gridded_raises():
     # No variable is gridded on lat+lon, so the export can't produce a GeoTIFF
     # (build_geotiff_zip raises). The estimate mirrors that and stops instead of
-    # promising a size for a download that would fail.
+    # promising a size for a download that would fail. It must also fail FAST:
+    # before the date trim (get_temporal_extent) and the slicing.
     dataset = _make_dataset()  # vars on TIME only -> no var gridded on lat+lon
     api, _ = _api_with_zarr(dataset)
+    api.get_temporal_extent = MagicMock()
 
     with pytest.raises(ValueError, match="no gridded numeric variables"):
         estimate_single_key_size(api, KEY, _resolved(), output_format="geotiff")
+
+    api.get_temporal_extent.assert_not_called()
+
+
+def test_csv_on_zarr_raises_fast():
+    # csv is only for parquet keys. The mismatch must fail before any
+    # metadata/slicing work - the date trim (get_temporal_extent) never runs.
+    # KEY carries no ".zarr" suffix on purpose: the estimate judges the storage
+    # type from the resolved datasource, not the key name.
+    api, _ = _api_with_zarr(_make_dataset())
+    api.get_temporal_extent = MagicMock()
+
+    with pytest.raises(ValueError, match=r"downloads from \.parquet keys only"):
+        estimate_single_key_size(api, KEY, _resolved(), output_format="csv")
+
+    api.get_temporal_extent.assert_not_called()
 
 
 def test_geotiff_gridded_dimension_based():
@@ -538,15 +556,6 @@ def test_invalid_multi_polygon_raises():
         resolve_bboxes(bad)
 
 
-def test_parquet_path_not_implemented_yet():
-    from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
-
-    api = API()
-    api.get_datasource = MagicMock(return_value=MagicMock(spec=ParquetDataSource))
-    with pytest.raises(NotImplementedError):
-        estimate_single_key_size(api, KEY, _resolved(), output_format="netcdf")
-
-
 def test_date_range_clamped_to_extent_then_estimated():
     # With both bounds given, the request is clamped to the dataset's temporal
     # extent (trim_date_range_for_keys) before slicing, so the estimate reflects
@@ -713,3 +722,43 @@ def test_all_keys_missing_returns_none(monkeypatch):
         api.estimate_datasets_size(UUID, keys=["nope.zarr"], output_format="netcdf")
         is None
     )
+
+
+def test_unsupported_key_skipped_and_noted(monkeypatch):
+    # A key that cannot produce the format (worker raises ValueError) is skipped;
+    # the other keys still get estimated. Bad key FIRST to prove the loop goes on.
+    api = API()
+    monkeypatch.setattr(
+        core_api,
+        "estimate_single_key_size",
+        MagicMock(
+            side_effect=[
+                ValueError("GeoTIFF export not possible for a.parquet"),
+                _single_result("b.zarr", 200, 80),
+            ]
+        ),
+    )
+
+    result = api.estimate_datasets_size(
+        UUID, keys=["a.parquet", "b.zarr"], output_format="geotiff"
+    )
+
+    assert result["keys"] == ["b.zarr"]
+    assert result["estimated_uncompressed_bytes"] == 200
+    assert "keys skipped ('geotiff' not possible): ['a.parquet']" in result["notes"]
+
+
+def test_all_keys_unsupported_raises(monkeypatch):
+    # Every key raises -> a request-level ValueError, NOT None (None would 404
+    # as "key not found", but the keys do exist).
+    api = API()
+    monkeypatch.setattr(
+        core_api,
+        "estimate_single_key_size",
+        MagicMock(side_effect=ValueError("no gridded numeric variables")),
+    )
+
+    with pytest.raises(ValueError, match="not possible for any requested key"):
+        api.estimate_datasets_size(
+            UUID, keys=["a.parquet", "b.parquet"], output_format="geotiff"
+        )

@@ -1,19 +1,19 @@
 [
   {
-    "id": "satellite_austemp_heatwave_8day:sst_mosaic",
-    "source_path": "s3://aodn-cloud-optimised/satellite_austemp_heatwave_8day.zarr",
+    "id": "satellite_austemp_heatwave_14day:sst_mosaic",
+    "source_path": "s3://aodn-cloud-optimised/satellite_austemp_heatwave_14day.zarr/",
     "variable": "sst_mosaic",
     "metadata_uuid": "2ffccdad-1197-4e41-b412-a9033517cfb2"
   },
   {
-    "id": "satellite_austemp_heatwave_8day:ssta_mosaic",
-    "source_path": "s3://aodn-cloud-optimised/satellite_austemp_heatwave_8day.zarr",
+    "id": "satellite_austemp_heatwave_14day:ssta_mosaic",
+    "source_path": "s3://aodn-cloud-optimised/satellite_austemp_heatwave_14day.zarr/",
     "variable": "ssta_mosaic",
     "metadata_uuid": "2ffccdad-1197-4e41-b412-a9033517cfb2"
   },
   {
-    "id": "satellite_austemp_heatwave_8day:mcs_category",
-    "source_path": "s3://aodn-cloud-optimised/satellite_austemp_heatwave_8day.zarr",
+    "id": "satellite_austemp_heatwave_14day:mcs_category",
+    "source_path": "s3://aodn-cloud-optimised/satellite_austemp_heatwave_14day.zarr/",
     "variable": "MCS_category",
     "metadata_uuid": "2ffccdad-1197-4e41-b412-a9033517cfb2"
   },

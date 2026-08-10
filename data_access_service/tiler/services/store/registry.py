@@ -64,15 +64,25 @@ def _storage_options(store_url: str) -> dict:
 
 
 def _open_store(store_url: str) -> xr.Dataset:
-    # chunks={} pins dask to the store's *native* on-disk chunking (one dask chunk
-    # per zarr chunk). This is what the no-arg default already resolves to, but we
-    # state it explicitly: the hot path is a single-time .sel(...).compute(), and
-    # native chunks mean that read fetches only the time-block(s) it needs while
-    # still letting dask fetch spatial chunks from S3 in parallel. Do NOT switch to
-    # chunks='auto' — auto merges adjacent time-blocks into one dask chunk, turning
-    # a one-slice read into a multi-slice S3 over-read. (Tests mock open_zarr with
-    # numpy datasets, so such a regression would pass CI but degrade production.)
-    ds = xr.open_zarr(store_url, chunks={}, storage_options=_storage_options(store_url))
+    # chunks=None disables dask. Every read in this service is a single
+    # `.sel(time=...)` over the full lat/lon extent followed by an immediate
+    # `.compute()` (slice_loader.py); multi-date reads (animation) are already
+    # fanned out as separate per-date calls across a thread pool rather than one
+    # combined dask-parallel selection. So dask's task graph buys nothing here,
+    # while costing real open-time memory: a handful of production stores are
+    # chunked finely enough (e.g. [5, 250, 250] on a [8153, 2500, 10000] array)
+    # that building a dask array produces 10M+ graph tasks for one store alone —
+    # tens of GB just to describe where the data is, before any of it is fetched
+    # (confirmed via macOS `footprint`; `ps`/`psutil` RSS does not surface this).
+    # Without dask, xarray still lazily indexes the underlying zarr array and
+    # only fetches the physical chunks a selection touches on `.compute()`/
+    # `.load()`, so per-request fetch behavior (including which native chunks
+    # get pulled) is unchanged — only the open-time graph construction is gone.
+    ds = xr.open_zarr(
+        store_url,
+        chunks=None,
+        storage_options=_storage_options(store_url),
+    )
     rename = {k: v for k, v in COORD_NAMES.items() if k in ds.dims or k in ds.coords}
     if rename:
         ds = ds.rename(rename)
