@@ -47,8 +47,6 @@ def test_source_path_is_canonical_without_trailing_slash():
 
 
 def test_parquet_datasets_are_ignored_before_matching():
-    """The schema index holds Parquet datasets too. The tiler only opens Zarr,
-    so they are excluded before any variable is looked at."""
     index = {
         "u1": {
             "a.parquet": frozenset({"GSLA"}),
@@ -101,8 +99,6 @@ def test_metadata_uuid_propagates_from_the_outer_index_key():
 
 
 def test_two_specifications_on_one_dataset_yield_two_products():
-    """GSL and GSLA both live on the SLA store; two products sharing one store
-    with different variable sets is expected."""
     index = {"u1": {"sla.zarr": frozenset({"GSLA", "GSL"})}}
     candidates = _build(index, ["GSLA", "GSL"])
     assert set(candidates) == {"sla:gsla", "sla:gsl"}
@@ -113,7 +109,6 @@ def test_two_specifications_on_one_dataset_yield_two_products():
 
 
 def test_scalar_variable_stays_a_str():
-    """A one-element list would turn a scalar into a broken vector product."""
     candidates = _build({"u1": {"a.zarr": frozenset({"GSLA"})}}, ["GSLA"])
     assert candidates["a:gsla"].variable == "GSLA"
     assert isinstance(candidates["a:gsla"].variable, str)
@@ -304,8 +299,6 @@ def test_index_with_only_parquet_raises():
 
 
 def test_unmatched_override_is_reported_but_not_fatal(caplog):
-    """A stale override key means its setting stops applying, which is loud but
-    must not take the whole catalogue down."""
     index = {"u1": {"a.zarr": frozenset({"GSLA"})}}
     entries = parse_gridded_variables(
         [{"variable": "GSLA", "overrides": {"renamed.zarr": {"ocean_masked": True}}}]

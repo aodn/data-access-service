@@ -36,10 +36,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# StoreRegistry deliberately does not cache a failed open, so without this every
-# /manifest call would re-attempt every broken store — tens of seconds each
-# against the S3 timeouts, on the shared thread pool, and ogcapi-java calls this
-# route on every getCollectionProducts.
+# Failed opens are not cached by StoreRegistry, so without this every /manifest
+# call re-attempts every broken store at full S3 timeout — and ogcapi-java calls
+# this route on every getCollectionProducts.
 _STORE_FAILURE_COOLDOWN_SECONDS = 60.0
 _recent_store_failures: dict[str, tuple[float, Exception]] = {}
 
@@ -128,12 +127,7 @@ def get_products_availability(
 
 
 def _available_dates_per_store(store_urls: set[str]) -> dict[str, list[str]]:
-    """Resolve available dates once per unique store, isolating per-store failure.
-
-    ogcapi-java fetches this global manifest on *every* getCollectionProducts
-    call, so letting one unreachable store propagate would break the product
-    listing for every collection. Each store fails alone instead.
-    """
+    """Resolve available dates once per unique store, isolating per-store failure."""
     resolved: dict[str, list[str]] = {}
     failures: dict[str, Exception] = {}
     now = time.monotonic()
@@ -141,7 +135,7 @@ def _available_dates_per_store(store_urls: set[str]) -> dict[str, list[str]]:
     for store_url in sorted(store_urls):
         recent = _recent_store_failures.get(store_url)
         if recent and now - recent[0] < _STORE_FAILURE_COOLDOWN_SECONDS:
-            # Replay the same error, so the answer stays stable across the window.
+            # Replay it, so the answer stays stable across the window.
             resolved[store_url] = []
             failures[store_url] = recent[1]
             continue
@@ -155,8 +149,8 @@ def _available_dates_per_store(store_urls: set[str]) -> dict[str, list[str]]:
             failures[store_url] = e
 
     if failures and len(failures) == len(store_urls):
-        # Absent is a different answer from unreachable: re-raise so the app's
-        # FileNotFoundError handler answers 404 naming the store.
+        # Absent differs from unreachable: the app handler turns this into a
+        # 404 naming the store.
         if all(isinstance(e, FileNotFoundError) for e in failures.values()):
             raise next(iter(failures.values()))
         raise HTTPException(

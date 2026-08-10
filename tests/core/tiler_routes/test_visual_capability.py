@@ -50,8 +50,6 @@ def test_visual_route_rejects_a_non_visual_scalar(client, route):
 
 @pytest.mark.parametrize("route", VISUAL_ROUTES)
 def test_rejection_happens_before_any_rendering(client, route, monkeypatch):
-    """The check runs before the slice is loaded, so an unrenderable product
-    never costs an S3 read."""
 
     def explode(*args, **kwargs):
         raise AssertionError("rendering must not be reached")
@@ -65,14 +63,11 @@ def test_rejection_happens_before_any_rendering(client, route, monkeypatch):
 
 @pytest.mark.parametrize("route", VISUAL_ROUTES)
 def test_unknown_product_is_still_a_404_not_a_400(client, route):
-    """Capability is only consulted after the product resolves."""
     assert client.get(route.format(pid="no_such_product")).status_code == 404
 
 
 @pytest.mark.parametrize("route", VISUAL_ROUTES)
 def test_vector_product_remains_rejected(client, route):
-    """A pair is data-tile-only for both reasons now — config forces visual
-    false, and the arity narrowing would reject it anyway."""
     assert client.get(route.format(pid=PAIR_ID)).status_code == 400
 
 

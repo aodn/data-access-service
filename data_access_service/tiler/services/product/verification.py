@@ -1,9 +1,8 @@
 """Verify candidate products against the stores that were actually opened.
 
-Discovery matches against *catalogue* metadata; this is where candidates meet
-the real store schema. Two O(1) guards per candidate — the variable exists, the
-store is time-indexed. Dimensions, dtype and pair shape are deliberately not
-checked: the curated variable list is what vouches for renderability today.
+Two O(1) guards per candidate: the variable exists, the store is time-indexed.
+Dims, dtype and pair shape are not checked — the curated variable list is what
+vouches for renderability today.
 """
 
 import logging
@@ -19,7 +18,7 @@ from data_access_service.tiler.services.store.registry import (
 
 logger = logging.getLogger(__name__)
 
-# Rejection categories, so the startup log can break counts down by cause.
+# Rejection categories, for the startup log breakdown.
 NOT_GRIDDED = "store_not_gridded"
 STORE_ABSENT = "store_absent"
 VARIABLE_ABSENT = "variable_absent"
@@ -38,12 +37,10 @@ class Rejection:
 class VerificationResult:
     products: dict[str, Product] = field(default_factory=dict)
     rejections: list[Rejection] = field(default_factory=list)
-    # Still published: StoreRegistry.get does not cache the failure, so the
-    # first real request re-attempts the open.
+    # Still published: the failure is not cached, so a later request retries.
     unresolved_stores: list[str] = field(default_factory=list)
 
     def log_rejections(self) -> None:
-        """One line per dropped product, then a breakdown by cause."""
         for rejection in self.rejections:
             logger.info(
                 "Rejected product %s on %s: %s",
@@ -67,9 +64,8 @@ class VerificationResult:
 
 
 def _guard_failures(product: Product, dataset) -> tuple[str, str] | None:
-    """Run the two phase-1 guards. Returns ``(category, reason)`` or None."""
-    # Unguarded, catalogue/store drift surfaces later as "No data found for
-    # date <date>", which blames the date for a missing variable.
+    # Unguarded, drift surfaces later as "No data found for date <date>",
+    # blaming the date for a missing variable.
     missing = [name for name in product.variables if name not in dataset]
     if missing:
         return (
@@ -77,8 +73,7 @@ def _guard_failures(product: Product, dataset) -> tuple[str, str] | None:
             f"variable(s) {', '.join(missing)} absent from the opened store",
         )
 
-    # Without a time dim the date index is empty, so the product would appear
-    # in /products and 404 on every date.
+    # No time dim means an empty date index: 404 on every date.
     if "time" not in dataset.dims:
         return (
             NO_TIME_DIMENSION,
@@ -93,9 +88,8 @@ def verify_candidate_products(
 ) -> VerificationResult:
     """Drop candidates their store cannot support; degrade stores that never opened.
 
-    A store failure is classified by what the store said, never by which
-    products sit on it — nothing here takes the tiler down. Rejections are per
-    product, so a bad variable leaves its siblings on the same store published.
+    Classified by what the store said, never by which products sit on it, so
+    nothing here takes the tiler down. Rejections are per product.
     """
     kept: dict[str, Product] = {}
     rejections: list[Rejection] = []
@@ -122,7 +116,6 @@ def verify_candidate_products(
             continue
 
         if isinstance(outcome, FileNotFoundError):
-            # Confirmed absence: nothing to recover on a later request.
             rejections.append(
                 Rejection(
                     product_id=product_id,
@@ -135,8 +128,6 @@ def verify_candidate_products(
 
         dataset = cached_store(url) if outcome is None else None
         if dataset is None:
-            # The open failed, or reported success with nothing cached — same
-            # uncertainty either way.
             unresolved.setdefault(url, []).append(product_id)
             kept[product_id] = product
             continue
@@ -166,7 +157,6 @@ def verify_candidate_products(
 
 
 def _log_unresolved_stores(unresolved: Mapping[str, list[str]]) -> None:
-    """Report stores still unknown after prewarm's retries. Never fatal."""
     if not unresolved:
         return
 

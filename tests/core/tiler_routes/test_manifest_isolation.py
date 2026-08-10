@@ -54,8 +54,6 @@ def _patch_dates(monkeypatch, behaviour):
 
 
 def test_dates_are_resolved_once_per_unique_store(client, catalogue, monkeypatch):
-    """Availability is a property of the store, not the product. Two products
-    sharing a store must not cost two lookups — each one opens the store."""
     calls = _patch_dates(
         monkeypatch, {STORE_A: ["2024-01-01", "2024-01-02"], STORE_B: ["2024-02-01"]}
     )
@@ -113,8 +111,6 @@ def test_only_the_failing_stores_products_are_degraded(client, catalogue, monkey
 def test_every_product_is_still_listed_when_a_store_fails(
     client, catalogue, monkeypatch
 ):
-    """A degraded product stays visible with empty availability rather than
-    disappearing from the catalogue."""
     _patch_dates(
         monkeypatch,
         {STORE_A: RuntimeError("s3 unreachable"), STORE_B: ["2024-02-01"]},
@@ -159,8 +155,6 @@ def test_total_failure_of_absent_stores_is_a_404_naming_them(
 def test_mixed_total_failure_prefers_the_retryable_answer(
     client, catalogue, monkeypatch
 ):
-    """One absent store and one unreachable store is not proof the data is gone,
-    so the answer stays 503."""
     _patch_dates(
         monkeypatch,
         {
@@ -175,7 +169,6 @@ def test_mixed_total_failure_prefers_the_retryable_answer(
 def test_one_absent_store_among_healthy_ones_still_yields_200(
     client, catalogue, monkeypatch
 ):
-    """Isolation wins over the 404: the rest of the catalogue is still answerable."""
     _patch_dates(
         monkeypatch,
         {

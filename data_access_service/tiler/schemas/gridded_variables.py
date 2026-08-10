@@ -1,19 +1,8 @@
 """Source config model for ``gridded_variables.json``.
 
-The input side of product configuration, separate from [[products]]'s
-``ProductConfig`` wire model. The file lists variable specifications only, never
-datasets; startup fans each one out across the metadata catalogue.
-
-Two syntaxes per entry, both normalised into one canonical entry at load time:
-
-```json
-"GSLA"                                     // scalar, visual defaults true
-["UCUR", "VCUR"]                           // ordered pair, visual defaults false
-{ "variable": "GSL", "defaults": { ... } } // explicit settings
-```
-
-Variable case is preserved verbatim — it is looked up against the real store
-schema; lower-casing happens only when building a product ID.
+Lists variable specifications, never datasets; startup fans each one out across
+the metadata catalogue. Entries are ``"GSLA"``, ``["UCUR", "VCUR"]``, or an
+object, all normalised into one canonical form at load.
 """
 
 import json
@@ -27,8 +16,6 @@ from data_access_service.tiler.schemas.products import DataTileConfig, VisualTil
 
 
 class ProductDefaults(BaseModel):
-    """Settings applied to every product a specification fans out to."""
-
     model_config = ConfigDict(extra="forbid")
 
     ocean_masked: bool = False
@@ -37,11 +24,7 @@ class ProductDefaults(BaseModel):
 
 
 class ProductDefaultsOverride(BaseModel):
-    """Only explicitly supplied fields overlay ProductDefaults, recursively.
-
-    Read out via ``model_dump(exclude_unset=True)``, which recurses into nested
-    models — so ``{"data_tile": {"padding": 8}}`` overlays only the padding.
-    """
+    """Only explicitly supplied fields overlay ProductDefaults, recursively."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -51,7 +34,6 @@ class ProductDefaultsOverride(BaseModel):
 
 
 def _deep_merge(base: dict, overlay: dict) -> dict:
-    """Recursively overlay ``overlay`` onto ``base``. Non-dict values replace."""
     merged = dict(base)
     for key, value in overlay.items():
         current = merged.get(key)
@@ -63,29 +45,20 @@ def _deep_merge(base: dict, overlay: dict) -> dict:
 
 
 class GriddedVariableEntry(BaseModel):
-    """One canonical variable specification.
-
-    ``variable`` keeps the configured representation exactly: ``str`` for a
-    scalar, ordered two-element ``list[str]`` for a vector pair. Pair order is
-    the shader's R/G channel order and must never be sorted.
-    """
-
     model_config = ConfigDict(extra="forbid")
 
+    # str for a scalar, ordered pair for a vector. Pair order is the shader's
+    # R/G channel order and must never be sorted.
     variable: str | list[str]
     visual: bool
     defaults: ProductDefaults = Field(default_factory=ProductDefaults)
-    # Keyed by the exact metadata dataset name, including .zarr. A key matching
-    # no discovered dataset is fatal at startup (see discovery).
+    # Keyed by the exact metadata dataset name, including .zarr.
     overrides: dict[str, ProductDefaultsOverride] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
     def _normalise(cls, data: Any) -> Any:
-        """Expand shorthand and resolve the capability default.
-
-        Runs before field validation so ``visual`` can stay non-optional.
-        """
+        # Before field validation, so ``visual`` can stay non-optional.
         if isinstance(data, (str, list)):
             data = {"variable": data}
         if not isinstance(data, dict):
@@ -93,7 +66,6 @@ class GriddedVariableEntry(BaseModel):
 
         data = dict(data)
         variable = data.get("variable")
-        # A pair is data-tile-only: DAS visual tiles render one scalar band.
         is_pair = isinstance(variable, list)
         if data.get("visual") is None:
             data["visual"] = not is_pair
@@ -128,11 +100,9 @@ class GriddedVariableEntry(BaseModel):
 
     @property
     def variables(self) -> list[str]:
-        """The specification's names in configured order."""
         return self.variable if isinstance(self.variable, list) else [self.variable]
 
     def resolve_defaults(self, dataset_name: str) -> ProductDefaults:
-        """Settings for this specification on ``dataset_name``."""
         override = self.overrides.get(dataset_name)
         if override is None:
             return self.defaults
@@ -143,7 +113,6 @@ class GriddedVariableEntry(BaseModel):
 
 
 def parse_gridded_variables(raw: Any) -> list[GriddedVariableEntry]:
-    """Validate and normalise the parsed contents of gridded_variables.json."""
     if not isinstance(raw, list):
         raise ValueError(
             f"gridded_variables.json must contain a JSON array, got {type(raw).__name__}"
@@ -156,10 +125,7 @@ def parse_gridded_variables(raw: Any) -> list[GriddedVariableEntry]:
 def load_gridded_variables(
     path: str | Path = GRIDDED_VARIABLES_CONFIG_PATH,
 ) -> list[GriddedVariableEntry]:
-    """Read and validate the committed gridded_variables.json.
-
-    A missing or empty file is a broken deploy, not a legitimate empty state.
-    """
+    # A missing or empty file is a broken deploy, not an empty state.
     config_path = Path(path)
     if not config_path.exists():
         raise FileNotFoundError(f"gridded_variables.json not found at {config_path}")

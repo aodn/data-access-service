@@ -48,8 +48,6 @@ def test_publish_replaces_the_previous_set(isolated_products):
 
 
 def test_publish_preserves_dict_identity(isolated_products):
-    """Test fixtures and the prewarm race-guard both rely on the same Python
-    object being mutated in place rather than rebound."""
     before = registry.PRODUCTS
     publish_products({"p1": _product("p1")})
     assert registry.PRODUCTS is before
@@ -123,8 +121,6 @@ def test_reversed_pair_shares_the_cache_identity(isolated_products):
 
 
 def test_same_store_different_variables_is_not_a_conflict(isolated_products):
-    """GSL and GSLA both live on the SLA store. Different variable sets are
-    different cache entries, so they may differ freely."""
     publish_products(
         {
             "sla:gsla": _product("sla:gsla", variable="GSLA", ocean_masked=False),
@@ -167,8 +163,6 @@ def test_read_facades_reflect_published_state(isolated_products):
 
 
 def test_iter_facades_return_snapshots_not_views(isolated_products):
-    """A concurrent publish must not raise "dictionary changed size during
-    iteration" in a caller's loop."""
     publish_products({"p1": _product("p1")})
     products = iter_products()
     items = iter_product_items()

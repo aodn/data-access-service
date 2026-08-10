@@ -1,8 +1,7 @@
-"""Tiler warmup sequence run during app startup, once API metadata is ready.
+"""Tiler warmup, run during app startup once API metadata is ready.
 
 Nothing is published before it is verified, and every fatal path exits without
-``mark_tiler_ready()`` — so the failure mode is a 503 behind
-``require_tiler_ready``, never a catalogue that is quietly wrong.
+``mark_tiler_ready()`` — the failure mode is a 503, never a wrong catalogue.
 """
 
 import asyncio
@@ -31,11 +30,9 @@ logger = logging.getLogger(__name__)
 
 
 async def run_tiler_warmup(api: API) -> None:
-    """Derive, verify, and publish the product catalogue, then mark ready."""
     try:
         logger.info("Waiting for API metadata init before starting other tasks")
-        # Indefinite: deriving from a half-populated index would publish a
-        # silently incomplete catalogue.
+        # Indefinite: a half-populated index would publish a partial catalogue.
         if not await api.wait_until_ready(timeout=None):
             raise RuntimeError("API metadata never became ready")
 
@@ -68,7 +65,6 @@ async def run_tiler_warmup(api: API) -> None:
             len(result.rejections),
         )
     except asyncio.CancelledError:
-        # Shutdown; without this it would be logged as a warmup failure below.
-        raise
+        raise  # shutdown, not a warmup failure
     except Exception:
         logger.critical("Tiler warmup failed; tiler remains unready", exc_info=True)

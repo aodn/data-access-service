@@ -28,8 +28,6 @@ def _make_ds() -> xr.Dataset:
 
 
 def test_refresh_uses_the_bounded_pool_not_a_raw_thread(monkeypatch):
-    """A raw Thread per expired store is exactly the unbounded behaviour this
-    replaced, so spawning one is a regression even if it happens to work."""
     monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: _make_ds())
     monkeypatch.setattr(
         threading,
@@ -83,8 +81,6 @@ def test_refresh_concurrency_never_exceeds_the_configured_bound(monkeypatch):
 
 
 def test_one_store_queues_at_most_one_refresh(monkeypatch):
-    """The _refreshing guard means concurrent requests for the same stale store
-    do not each queue their own reopen."""
     monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: _make_ds())
     submitted: list[str] = []
     monkeypatch.setattr(
@@ -100,8 +96,6 @@ def test_one_store_queues_at_most_one_refresh(monkeypatch):
 
 
 def test_stale_store_is_served_immediately_during_refresh(monkeypatch):
-    """Requests never block on freshness — the point of refreshing in the
-    background rather than on the request path."""
     monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: _make_ds())
     monkeypatch.setattr(registry._REFRESH_EXECUTOR, "submit", lambda fn, url: None)
 
@@ -111,7 +105,6 @@ def test_stale_store_is_served_immediately_during_refresh(monkeypatch):
 
 
 def test_jitter_spreads_deadlines_across_stores(monkeypatch):
-    """Stores opened in one startup burst must not share an expiry instant."""
     monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: _make_ds())
 
     store = StoreRegistry(ttl=600.0)
@@ -124,8 +117,6 @@ def test_jitter_spreads_deadlines_across_stores(monkeypatch):
 
 
 def test_jitter_is_bounded_so_freshness_policy_is_not_changed(monkeypatch):
-    """HF-radar datasets update frequently; jitter is for spreading load, not
-    for quietly extending the TTL."""
     monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: _make_ds())
 
     store = StoreRegistry(ttl=600.0)

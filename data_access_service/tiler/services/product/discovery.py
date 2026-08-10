@@ -1,12 +1,8 @@
 """Derive candidate tiler products from the metadata schema index.
 
-Pure functions of the index, the config entries and the store base URL — no API
-instance, no S3, no registry. Dataset names and metadata UUIDs come from the
-live metadata snapshot rather than config, so a dataset rename changes the
-derived product id instead of leaving a stale one pointing at nothing.
-
-The output is *candidates*; [[verification]] then checks them against the stores
-that actually opened.
+Dataset names and UUIDs come from live metadata, not config, so a rename changes
+the derived id instead of leaving a stale one. [[verification]] then checks
+these candidates against the real stores.
 """
 
 import logging
@@ -22,33 +18,27 @@ from data_access_service.tiler.services.product.product import (
 
 logger = logging.getLogger(__name__)
 
-# uuid -> dataset_name -> field names, i.e. what API.get_dataset_variables returns.
+# uuid -> dataset_name -> field names, as API.get_dataset_variables returns.
 SchemaIndex = Mapping[str, Mapping[str, frozenset[str]]]
 
 
 def product_id(dataset_name: str, variables: list[str]) -> str:
-    # Frontend-cached and opaque to ogcapi-java, so this format is a
-    # compatibility surface, not just a naming convention.
+    # Frontend-cached and opaque to ogcapi-java: a compatibility surface.
     return (
         f"{dataset_name.removesuffix('.zarr')}:{'+'.join(v.lower() for v in variables)}"
     )
 
 
 def source_path(dataset_name: str, base_url: str) -> str:
-    # One canonical spelling, no trailing slash: this string keys the store
-    # registry, date index, and both cache layers.
+    # No trailing slash: this string keys the store registry, date index and
+    # both cache layers, so a second spelling doubles all of them.
     return f"{base_url.rstrip('/')}/{dataset_name}"
 
 
 def _tile_configs(entry: GriddedVariableEntry, dataset_name: str):
-    """Fresh tile config instances for one product, plus its resolved masking.
-
-    Every product must get its *own* instances. DataTileConfig.lod_grids is a
-    mutable dict filled in place from that product's store dimensions and never
-    recomputed, so a shared instance would make every product fanned out from
-    one spec inherit whichever store was requested first — wrong grids
-    everywhere, with nothing raised.
-    """
+    # Each product needs its *own* instances: lod_grids is a mutable dict filled
+    # in place from that product's store, so sharing one would make every
+    # product from a spec inherit whichever store was requested first.
     resolved = entry.resolve_defaults(dataset_name)
 
     def coastal_fill(config) -> CoastalFill | None:
@@ -72,11 +62,7 @@ def build_candidate_products(
     entries: list[GriddedVariableEntry],
     base_url: str,
 ) -> dict[str, Product]:
-    """Fan every configured specification out across the metadata catalogue.
-
-    A spec matches a dataset when all its variable names are present, matched
-    case-sensitively. Raises on a duplicate generated id or an empty result.
-    """
+    """Fan each specification out across the catalogue. Matching is case-sensitive."""
     candidates: dict[str, Product] = {}
     origin: dict[str, str] = {}
     matched_entries: set[int] = set()
@@ -84,7 +70,7 @@ def build_candidate_products(
     # Sorted iteration keeps logs and tests deterministic.
     for uuid in sorted(index):
         for dataset_name in sorted(index[uuid]):
-            # The index carries Parquet datasets too; the tiler only opens Zarr.
+            # The index carries Parquet too; the tiler only opens Zarr.
             if not dataset_name.endswith(".zarr"):
                 continue
             fields = index[uuid][dataset_name]
@@ -109,8 +95,8 @@ def build_candidate_products(
                 candidates[pid] = Product(
                     id=pid,
                     source_path=source_path(dataset_name, base_url),
-                    # str for a scalar, ordered list for a pair — entry.variables
-                    # would turn a scalar into a one-element vector product.
+                    # Not entry.variables: that would turn a scalar into a
+                    # one-element vector product.
                     variable=entry.variable,
                     metadata_uuid=uuid,
                     ocean_masked=ocean_masked,
@@ -147,14 +133,10 @@ def log_unmatched_overrides(
     candidates: Mapping[str, Product],
     entries: list[GriddedVariableEntry],
 ) -> None:
-    """Report dataset overrides that matched no candidate.
+    """Report overrides that matched no candidate.
 
-    An override carries a setting a whole-spec default would get wrong (the SLA
-    ocean mask), so a key that stops matching — usually an upstream rename —
-    means that setting silently stops applying. Logged loudly rather than fatal:
-    one stale key should not take the whole catalogue down. Matching is per
-    spec, so an override on the UCUR/VCUR entry is unmatched if *that pair*
-    produced no product there.
+    A stale key silently stops its setting applying, so this is loud — but not
+    fatal, since one key should not take the catalogue down.
     """
     unmatched = [
         f"{entry.variable} -> {dataset_name}"

@@ -1,8 +1,6 @@
 """In-memory ``Product`` registry, published once at startup by tiler warmup.
 
-Products are derived from the metadata catalogue and gridded-variable config
-(see [[discovery]]) and verified against their stores (see [[verification]])
-before they get here; this module only holds them.
+Products arrive already derived ([[discovery]]) and verified ([[verification]]).
 """
 
 import logging
@@ -21,8 +19,7 @@ def get_product(product_id: str) -> Product | None:
 
 
 def iter_products() -> list[Product]:
-    # A list, not a view: a concurrent publish would otherwise raise
-    # "dictionary changed size during iteration" in the caller's loop.
+    # A list, not a view: a concurrent publish would break a caller's loop.
     return list(PRODUCTS.values())
 
 
@@ -34,9 +31,8 @@ def _assert_no_slice_cache_conflicts(products: dict[str, Product]) -> None:
     """Two products sharing an L1 cache entry must agree on ``ocean_masked``.
 
     L1 is keyed on ``(source_path, sorted(variables))`` and the mask is applied
-    before caching, so products sharing that key would poison each other's
-    slices in request order. The sort is deliberate: a reversed pair really does
-    share an entry, since consumers read the cached Dataset by name.
+    before caching, so disagreement poisons the cache in request order. The sort
+    is deliberate — a reversed pair really does share an entry.
     """
     by_identity: dict[tuple[str, tuple[str, ...]], Product] = {}
     for product in products.values():
@@ -52,10 +48,7 @@ def _assert_no_slice_cache_conflicts(products: dict[str, Product]) -> None:
 
 
 def publish_products(new_products: dict[str, Product]) -> None:
-    """Replace the registered product set with a verified one.
-
-    Additions before removals, so a concurrent reader never sees an empty dict.
-    """
+    # Additions before removals, so a reader never sees an empty dict.
     if not new_products:
         raise ValueError("Refusing to publish an empty product set")
     _assert_no_slice_cache_conflicts(new_products)

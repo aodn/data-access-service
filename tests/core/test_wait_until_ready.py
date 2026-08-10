@@ -44,8 +44,6 @@ async def test_returns_true_once_ready():
 
 @pytest.mark.asyncio
 async def test_returns_false_on_timeout():
-    """The caller that cannot proceed without metadata needs to tell the
-    difference; the previous version only logged a warning and returned None."""
     assert await _Api().wait_until_ready(timeout=1) is False
 
 

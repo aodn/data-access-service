@@ -53,8 +53,6 @@ def test_object_entry_with_defaults_and_overrides():
 
 
 def test_variable_case_is_preserved_verbatim():
-    """Names are looked up against the real store schema; only the generated
-    product ID lower-cases them."""
     assert _entry("MCS_category").variable == "MCS_category"
     assert _entry("sea_surface_temperature").variable == "sea_surface_temperature"
 
@@ -69,8 +67,6 @@ def test_list_must_hold_exactly_two_names(variable):
 
 
 def test_single_element_list_is_not_a_scalar():
-    """A one-element list would turn a scalar product into a broken vector one,
-    so it is rejected rather than silently unwrapped."""
     with pytest.raises(ValidationError):
         _entry(["GSLA"])
 
@@ -105,8 +101,6 @@ def test_pair_with_explicit_visual_false_accepted():
 
 
 def test_scalar_with_visual_false_accepted():
-    """The mechanism that stops a non-renderable scalar (WDIR is the known
-    example) advertising visual tiles it cannot serve."""
     assert _entry({"variable": "WDIR", "visual": False}).visual is False
 
 
@@ -181,8 +175,6 @@ def test_override_applies_only_to_its_own_dataset():
 
 
 def test_partial_nested_override_inherits_sibling_defaults():
-    """An omitted override field inherits the default; it does not reset the
-    whole nested block back to the model defaults."""
     entry = _entry(
         {
             "variable": "GSLA",

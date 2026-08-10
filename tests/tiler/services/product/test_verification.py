@@ -101,8 +101,6 @@ def test_not_gridded_store_drops_every_candidate_on_it(stores):
 
 
 def test_absent_store_drops_every_candidate_on_it(stores):
-    """A confirmed absence, so its candidates are dropped rather than kept
-    degraded — there is nothing to recover on a later request."""
     stores[GRID] = _dataset(("sst",))
     candidates = {
         "gone:sst": _product("gone:sst", source_path=OTHER),
@@ -122,8 +120,6 @@ def test_absent_store_drops_every_candidate_on_it(stores):
 
 
 def test_absent_store_is_dropped_whatever_the_product_id(stores):
-    """A long-standing product id gets no special treatment: its store is gone,
-    so the product is dropped and named like any other."""
     pid = "model_sea_level_anomaly_gridded_realtime:gsla"
     candidates = {pid: _product(pid, variable="GSLA")}
 
@@ -140,8 +136,6 @@ def test_absent_store_is_dropped_whatever_the_product_id(stores):
 
 
 def test_absent_variable_is_rejected_and_named(stores):
-    """Catalogue metadata and store schema can drift. Unguarded, this surfaces
-    later as a 404 that blames the requested date for a missing variable."""
     stores[GRID] = _dataset(("sst",))
     candidates = {"a:missing": _product("a:missing", variable="missing")}
 
@@ -185,8 +179,6 @@ def test_rejection_drops_only_the_affected_product(stores):
 
 
 def test_store_without_time_dimension_is_rejected(stores):
-    """The store opens cleanly; the date index is just empty, so the product
-    would appear in /products and 404 on every single date."""
     stores[GRID] = _dataset(("sst",), with_time=False)
     candidates = {"a:sst": _product("a:sst")}
 
@@ -197,7 +189,6 @@ def test_store_without_time_dimension_is_rejected(stores):
 
 
 def test_variable_presence_is_checked_before_time_dimension(stores):
-    """A missing variable is the more specific diagnosis of the two."""
     stores[GRID] = _dataset(("sst",), with_time=False)
     candidates = {"a:gone": _product("a:gone", variable="gone")}
 

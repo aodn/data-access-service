@@ -121,14 +121,11 @@ async def test_missing_lat_lon_yields_not_gridded_store_error(monkeypatch):
 
 
 def test_not_gridded_store_error_is_a_value_error():
-    """Existing callers catch ValueError; the typed subclass keeps them working."""
     assert issubclass(NotGriddedStoreError, ValueError)
 
 
 @pytest.mark.asyncio
 async def test_non_grid_store_is_not_retried(monkeypatch):
-    """The store answered. Retrying will not change the answer, and sixty
-    legitimate skips retried three times each would be pure startup cost."""
     opener, calls = _open_zarr({"s3://b/flat.zarr": _make_ds(time=2, lon=4)})
     monkeypatch.setattr(xr, "open_zarr", opener)
 
@@ -166,8 +163,6 @@ async def test_missing_store_yields_file_not_found(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_missing_store_is_not_retried(monkeypatch):
-    """The bucket answered "not there", which is as final as a non-grid answer.
-    Retrying it three times per missing store is pure startup cost."""
     opener, calls = _open_zarr({"s3://b/gone.zarr": FileNotFoundError("No such file")})
     monkeypatch.setattr(xr, "open_zarr", opener)
 
@@ -178,8 +173,6 @@ async def test_missing_store_is_not_retried(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_missing_store_logs_at_warning(monkeypatch, caplog):
-    """Unlike a non-grid store, an absent one is never intentional — usually an
-    upstream rename the catalogue has not caught up with."""
     opener, _ = _open_zarr({"s3://b/gone.zarr": FileNotFoundError("No such file")})
     monkeypatch.setattr(xr, "open_zarr", opener)
 
