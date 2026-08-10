@@ -49,6 +49,28 @@ class TestResolveSubset:
         assert resolved.keys == ["a.zarr", "ghost.zarr"]
         assert resolved.has_data
 
+    def test_key_without_time_variable_is_skipped(self):
+        api = _mock_api(known_keys=["a.parquet", "b.zarr"])
+
+        # a dataset without a recognisable time variable raises ValueError from
+        # get_temporal_extent (aodn_cloud_optimised); the trim must survive it
+        # and still trim against the keys that do have an extent.
+        def extent_or_value_error(uuid, key):
+            if key == "b.zarr":
+                return (
+                    pd.Timestamp("2024-03-01", tz="UTC"),
+                    pd.Timestamp("2024-06-30", tz="UTC"),
+                )
+            raise ValueError("No known time variable found in dataset.")
+
+        api.get_temporal_extent.side_effect = extent_or_value_error
+        resolved = resolve_subset_request(
+            api, UUID, ["a.parquet", "b.zarr"], "2024-01-01", "2024-12-31", None
+        )
+        assert resolved.has_data
+        assert resolved.start_date == pd.Timestamp("2024-03-01", tz="UTC")
+        assert resolved.end_date.date() == pd.Timestamp("2024-06-30").date()
+
     def test_star_expands_to_all_keys(self):
         api = _mock_api(known_keys=["a.zarr", "b.zarr"])
         resolved = resolve_subset_request(
