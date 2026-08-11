@@ -25,6 +25,11 @@ def _make_ds(**dims: int) -> xr.Dataset:
     )
 
 
+class _FakeZarrSource:
+    def __init__(self, ds: xr.Dataset):
+        self.zarr_store = ds
+
+
 @pytest.fixture(autouse=True)
 def clear_stores():
     store_registry.clear()
@@ -38,20 +43,27 @@ def no_backoff_sleep(monkeypatch):
     monkeypatch.setattr(registry, "_PREWARM_BACKOFF_SECONDS", 0.0)
 
 
-def _open_zarr(behaviour):
-    """Build an open_zarr stub dispatching on URL. Values are datasets or raisers."""
+def _patch_resolve(monkeypatch, behaviour):
+    """Stub ``_resolve_zarr_source`` dispatching on URL.
+
+    Values are datasets, raisers (BaseException instances), or callables.
+    """
     calls: list[str] = []
 
-    def opener(url, *_, **__):
+    def resolve(url: str):
         calls.append(url)
         result = behaviour[url]
         if isinstance(result, BaseException):
             raise result
         if callable(result):
-            return result(url)
-        return result
+            result = result(url)
+        return _FakeZarrSource(result)
 
-    return opener, calls
+    monkeypatch.setattr(
+        "data_access_service.tiler.services.store.registry._resolve_zarr_source",
+        resolve,
+    )
+    return calls
 
 
 # --- outcome reporting ------------------------------------------------------
@@ -59,13 +71,13 @@ def _open_zarr(behaviour):
 
 @pytest.mark.asyncio
 async def test_successful_prewarm_reports_none_per_url(monkeypatch):
-    opener, calls = _open_zarr(
+    calls = _patch_resolve(
+        monkeypatch,
         {
             "s3://b/a.zarr": _make_ds(time=2, lat=4, lon=4),
             "s3://b/b.zarr": _make_ds(time=2, lat=4, lon=4),
-        }
+        },
     )
-    monkeypatch.setattr(xr, "open_zarr", opener)
 
     outcomes = await prewarm_stores(["s3://b/a.zarr", "s3://b/b.zarr"])
 
@@ -76,10 +88,10 @@ async def test_successful_prewarm_reports_none_per_url(monkeypatch):
 @pytest.mark.asyncio
 async def test_failures_are_returned_not_swallowed(monkeypatch):
     boom = RuntimeError("s3 unavailable")
-    opener, _ = _open_zarr(
-        {"s3://b/ok.zarr": _make_ds(time=2, lat=4, lon=4), "s3://b/bad.zarr": boom}
+    _patch_resolve(
+        monkeypatch,
+        {"s3://b/ok.zarr": _make_ds(time=2, lat=4, lon=4), "s3://b/bad.zarr": boom},
     )
-    monkeypatch.setattr(xr, "open_zarr", opener)
 
     outcomes = await prewarm_stores(["s3://b/ok.zarr", "s3://b/bad.zarr"])
 
@@ -89,14 +101,14 @@ async def test_failures_are_returned_not_swallowed(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_one_bad_url_does_not_block_the_others(monkeypatch):
-    opener, calls = _open_zarr(
+    calls = _patch_resolve(
+        monkeypatch,
         {
             "s3://b/bad.zarr": RuntimeError("nope"),
             "s3://b/ok1.zarr": _make_ds(time=2, lat=4, lon=4),
             "s3://b/ok2.zarr": _make_ds(time=2, lat=4, lon=4),
-        }
+        },
     )
-    monkeypatch.setattr(xr, "open_zarr", opener)
 
     outcomes = await prewarm_stores(
         ["s3://b/bad.zarr", "s3://b/ok1.zarr", "s3://b/ok2.zarr"]
@@ -105,6 +117,7 @@ async def test_one_bad_url_does_not_block_the_others(monkeypatch):
     assert outcomes["s3://b/ok1.zarr"] is None
     assert outcomes["s3://b/ok2.zarr"] is None
     assert isinstance(outcomes["s3://b/bad.zarr"], RuntimeError)
+    assert set(calls) >= {"s3://b/ok1.zarr", "s3://b/ok2.zarr", "s3://b/bad.zarr"}
 
 
 # --- confirmed non-grid stores ---------------------------------------------
@@ -112,8 +125,7 @@ async def test_one_bad_url_does_not_block_the_others(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_missing_lat_lon_yields_not_gridded_store_error(monkeypatch):
-    opener, _ = _open_zarr({"s3://b/flat.zarr": _make_ds(time=2, lon=4)})
-    monkeypatch.setattr(xr, "open_zarr", opener)
+    _patch_resolve(monkeypatch, {"s3://b/flat.zarr": _make_ds(time=2, lon=4)})
 
     outcomes = await prewarm_stores(["s3://b/flat.zarr"])
 
@@ -126,8 +138,7 @@ def test_not_gridded_store_error_is_a_value_error():
 
 @pytest.mark.asyncio
 async def test_non_grid_store_is_not_retried(monkeypatch):
-    opener, calls = _open_zarr({"s3://b/flat.zarr": _make_ds(time=2, lon=4)})
-    monkeypatch.setattr(xr, "open_zarr", opener)
+    calls = _patch_resolve(monkeypatch, {"s3://b/flat.zarr": _make_ds(time=2, lon=4)})
 
     await prewarm_stores(["s3://b/flat.zarr"])
 
@@ -136,8 +147,7 @@ async def test_non_grid_store_is_not_retried(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_non_grid_store_logs_at_info_without_traceback(monkeypatch, caplog):
-    opener, _ = _open_zarr({"s3://b/flat.zarr": _make_ds(time=2, lon=4)})
-    monkeypatch.setattr(xr, "open_zarr", opener)
+    _patch_resolve(monkeypatch, {"s3://b/flat.zarr": _make_ds(time=2, lon=4)})
 
     with caplog.at_level("INFO"):
         await prewarm_stores(["s3://b/flat.zarr"])
@@ -153,8 +163,7 @@ async def test_non_grid_store_logs_at_info_without_traceback(monkeypatch, caplog
 
 @pytest.mark.asyncio
 async def test_missing_store_yields_file_not_found(monkeypatch):
-    opener, _ = _open_zarr({"s3://b/gone.zarr": FileNotFoundError("No such file")})
-    monkeypatch.setattr(xr, "open_zarr", opener)
+    _patch_resolve(monkeypatch, {"s3://b/gone.zarr": FileNotFoundError("No such file")})
 
     outcomes = await prewarm_stores(["s3://b/gone.zarr"])
 
@@ -163,8 +172,9 @@ async def test_missing_store_yields_file_not_found(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_missing_store_is_not_retried(monkeypatch):
-    opener, calls = _open_zarr({"s3://b/gone.zarr": FileNotFoundError("No such file")})
-    monkeypatch.setattr(xr, "open_zarr", opener)
+    calls = _patch_resolve(
+        monkeypatch, {"s3://b/gone.zarr": FileNotFoundError("No such file")}
+    )
 
     await prewarm_stores(["s3://b/gone.zarr"])
 
@@ -173,8 +183,7 @@ async def test_missing_store_is_not_retried(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_missing_store_logs_at_warning(monkeypatch, caplog):
-    opener, _ = _open_zarr({"s3://b/gone.zarr": FileNotFoundError("No such file")})
-    monkeypatch.setattr(xr, "open_zarr", opener)
+    _patch_resolve(monkeypatch, {"s3://b/gone.zarr": FileNotFoundError("No such file")})
 
     with caplog.at_level("INFO"):
         await prewarm_stores(["s3://b/gone.zarr"])
@@ -189,8 +198,7 @@ async def test_missing_store_logs_at_warning(monkeypatch, caplog):
 
 @pytest.mark.asyncio
 async def test_operational_failure_is_retried_a_bounded_number_of_times(monkeypatch):
-    opener, calls = _open_zarr({"s3://b/flaky.zarr": RuntimeError("timeout")})
-    monkeypatch.setattr(xr, "open_zarr", opener)
+    calls = _patch_resolve(monkeypatch, {"s3://b/flaky.zarr": RuntimeError("timeout")})
 
     outcomes = await prewarm_stores(["s3://b/flaky.zarr"])
 
@@ -202,13 +210,13 @@ async def test_operational_failure_is_retried_a_bounded_number_of_times(monkeypa
 async def test_retry_succeeds_after_a_transient_failure(monkeypatch):
     attempts = {"n": 0}
 
-    def opener(url, *_, **__):
+    def flaky(_url):
         attempts["n"] += 1
         if attempts["n"] < 2:
             raise RuntimeError("transient")
         return _make_ds(time=2, lat=4, lon=4)
 
-    monkeypatch.setattr(xr, "open_zarr", opener)
+    _patch_resolve(monkeypatch, {"s3://b/flaky.zarr": flaky})
 
     outcomes = await prewarm_stores(["s3://b/flaky.zarr"])
 
@@ -225,8 +233,7 @@ async def test_backoff_grows_between_attempts(monkeypatch):
 
     monkeypatch.setattr(registry, "_PREWARM_BACKOFF_SECONDS", 1.0)
     monkeypatch.setattr(registry.anyio, "sleep", fake_sleep)
-    opener, _ = _open_zarr({"s3://b/flaky.zarr": RuntimeError("timeout")})
-    monkeypatch.setattr(xr, "open_zarr", opener)
+    _patch_resolve(monkeypatch, {"s3://b/flaky.zarr": RuntimeError("timeout")})
 
     await prewarm_stores(["s3://b/flaky.zarr"])
 
@@ -236,15 +243,15 @@ async def test_backoff_grows_between_attempts(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_prewarm_summary_counts_each_outcome_category(monkeypatch, caplog):
-    opener, _ = _open_zarr(
+    _patch_resolve(
+        monkeypatch,
         {
             "s3://b/ok.zarr": _make_ds(time=2, lat=4, lon=4),
             "s3://b/flat.zarr": _make_ds(time=2, lon=4),
             "s3://b/gone.zarr": FileNotFoundError("No such file"),
             "s3://b/bad.zarr": RuntimeError("nope"),
-        }
+        },
     )
-    monkeypatch.setattr(xr, "open_zarr", opener)
 
     with caplog.at_level("INFO"):
         await prewarm_stores(
@@ -272,13 +279,13 @@ async def test_failed_open_is_not_cached_so_a_later_request_retries(monkeypatch)
     degraded product registered safe rather than permanently broken."""
     attempts = {"n": 0}
 
-    def opener(url, *_, **__):
+    def flaky(_url):
         attempts["n"] += 1
         if attempts["n"] <= registry._PREWARM_MAX_ATTEMPTS:
             raise RuntimeError("s3 down")
         return _make_ds(time=2, lat=4, lon=4)
 
-    monkeypatch.setattr(xr, "open_zarr", opener)
+    _patch_resolve(monkeypatch, {"s3://b/recovers.zarr": flaky})
 
     outcomes = await prewarm_stores(["s3://b/recovers.zarr"])
     assert isinstance(outcomes["s3://b/recovers.zarr"], RuntimeError)

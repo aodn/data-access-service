@@ -272,7 +272,7 @@ def test_bbox_webp_ok(client):
 
 def test_bbox_missing_store(client):
     # With no bbox param, default_bbox_from_store opens the store directly
-    # (get_store -> xr.open_zarr) before load_slice_or_404 runs, so a missing
+    # (get_store -> aodn_cloud_optimised) before load_slice_or_404 runs, so a missing
     # store must still 404 via the app-level FileNotFoundError handler.
     with patch(
         "data_access_service.core.tiler_routes.visual_tiles.default_bbox_from_store",

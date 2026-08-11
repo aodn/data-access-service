@@ -178,7 +178,7 @@ def test_tile_missing_date(client):
 
 
 def test_tile_missing_store(client):
-    # get_lod_grids opens the store directly (get_store -> xr.open_zarr) before
+    # get_lod_grids opens the store directly (get_store -> aodn_cloud_optimised) before
     # load_slice_or_404 ever runs, so a missing store must still surface as a
     # 404 via the app-level FileNotFoundError handler, not an unhandled 500.
     with patch(

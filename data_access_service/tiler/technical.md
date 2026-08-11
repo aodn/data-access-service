@@ -123,7 +123,7 @@ flowchart TD
     vtColor -.-> colormapReg
 
     s3[("AWS S3 — Zarr stores")]
-    storeReg -. "metadata (xr.open_zarr)" .-> s3
+    storeReg -. "metadata (aodn_cloud_optimised)" .-> s3
     sliceCache -. "L1 miss → .compute()" .-> s3
 
     classDef router fill:#DCE7EF,stroke:#2E6E96,color:#0F2942,stroke-width:1px;
@@ -752,9 +752,9 @@ Do not construct date strings from the client's local clock — the server inter
 
 ### 9.4 Coordinate name normalisation
 
-On store open, `_open_store` in `services/store/registry.py` renames any of `COORD_NAMES = {"TIME": "time", "LATITUDE": "lat", "LONGITUDE": "lon"}` found among the store's dims/coords to lowercase. This happens once per store URL and is cached on the singleton. All downstream code (renderer, manifest, point endpoint) can assume `lat`/`lon`/`time` regardless of what the store uses natively.
+On store open, `_normalise_coords` in `services/store/registry.py` renames any of `COORD_NAMES = {"TIME": "time", "LATITUDE": "lat", "LONGITUDE": "lon"}` found among the store's dims/coords to lowercase. The long-lived handle is an `aodn_cloud_optimised` `ZarrDataSource` (native coord names, for `get_data`); `get_store` derives the normalised view for callers. All downstream code (renderer, manifest, point endpoint) can assume `lat`/`lon`/`time` regardless of what the store uses natively.
 
-If `lat`/`lon` are still missing after renaming, `_open_store` raises `ValueError` with a clear message rather than failing deeper in the pipeline.
+If `lat`/`lon` are still missing after renaming, `_normalise_coords` raises `NotGriddedStoreError` with a clear message rather than failing deeper in the pipeline.
 
 ---
 
@@ -779,9 +779,9 @@ Uses a **stale-while-revalidate** strategy to pick up newly appended time steps 
 - **Startup** — `prewarm_stores` opens every registered store concurrently on the shared anyio pool, gated by `_STORE_PREWARM_LIMITER` (`store_prewarm_workers`, default 6), so the cache is warm before most requests arrive.
 - **Within TTL** (`store_ttl_seconds`, default `600`) — the cached store is returned immediately.
 - **After TTL** — the stale store is returned immediately for the current request, and a single background daemon thread (`StoreRegistry._refresh_background`) re-opens it. A `_refreshing` set prevents duplicate refresh threads for the same URL.
-- **First-ever open** — the request blocks until `xr.open_zarr` completes; concurrent requests for the same URL wait on the same `concurrent.futures.Future` (keyed per-URL in `_in_flight`) rather than each opening independently. Opens of _different_ URLs proceed in parallel.
+- **First-ever open** — the request blocks until `aodn_cloud_optimised` opens the `ZarrDataSource`; concurrent requests for the same URL wait on the same `concurrent.futures.Future` (keyed per-URL in `_in_flight`) rather than each opening independently. Opens of _different_ URLs proceed in parallel.
 
-Re-opening is cheap — `xr.open_zarr` reads only metadata and coordinate arrays, no data chunks. In-flight `load_slice` calls hold a direct Python reference to the old dataset object and complete normally.
+Re-opening is cheap — the lib open reads only metadata and coordinate arrays, no data chunks. In-flight `load_slice` calls hold a direct Python reference to the old source object and complete normally.
 
 Alongside the dataset, the registry builds a per-URL `{local_date: [timestamps]}` index so `load_slice` / `get_available_dates` can resolve a local date in O(1).
 
@@ -882,7 +882,7 @@ Phase 1 deliberately checks *presence* and *time-indexability* only — not dime
 
 ### 11.4 What prewarm does and doesn't do
 
-`prewarm_stores` opens each unique Zarr store's **metadata only** (`xr.open_zarr`, no data chunks) via `services/store/registry.py` — it does not populate the L1 slice cache with any actual data. Since `cache_backend` defaults to `none`, L1 population wouldn't help anyway (nothing survives between requests); the value of prewarming is purely to avoid the first request to each store paying the metadata-open cost.
+`prewarm_stores` opens each unique Zarr store's **metadata only** (via `aodn_cloud_optimised` `ZarrDataSource`, no data chunks) via `services/store/registry.py` — it does not populate the L1 slice cache with any actual data. Since `cache_backend` defaults to `none`, L1 population wouldn't help anyway (nothing survives between requests); the value of prewarming is purely to avoid the first request to each store paying the metadata-open cost.
 
 ### 11.5 Other background actions
 
@@ -949,7 +949,7 @@ Nearly every offload lands in **one** anyio worker pool; what's split into indep
 
 - **Default limiter** (size `thread_pool_size`, default 20) — used by every sync `def` tile handler and any `to_thread.run_sync(...)` call without an explicit limiter.
 - **`_ANIMATION_LIMITER`** (size `animation_workers`, default 10, module-level in `core/tiler_routes/visual_tiles.py`) — gates the per-frame `load_slice_uncached` fan-out inside `/animation`. Sized to the aiobotocore S3 connection-pool ceiling (~10/host).
-- **`_STORE_PREWARM_LIMITER`** (size `store_prewarm_workers`, default 6, module-level in `services/store/registry.py`) — gates concurrent `xr.open_zarr` opens at startup. Same S3 connection-pool rationale.
+- **`_STORE_PREWARM_LIMITER`** (size `store_prewarm_workers`, default 6, module-level in `services/store/registry.py`) — gates concurrent lib store opens at startup. Same S3 connection-pool rationale.
 
 A store-prewarm burst saturating its budget does not reduce the tile-handler budget, and a 30-frame animation does not steal from store-prewarm either.
 
@@ -1047,7 +1047,7 @@ Remove the variable specification and redeploy — which removes it from *every*
 | Requirement        | Detail                                                                                                                                                                                                           | Enforced |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
 | Coordinate names   | Must be `lat`/`lon`/`time`, or the uppercase variants `LATITUDE`/`LONGITUDE`/`TIME` (renamed automatically on open). Add a mapping to `COORD_NAMES` in `config/tiler/constants.py` for other naming conventions. | On open |
-| Spatial dimensions | `lat` and `lon` must be present after normalisation — `_open_store` raises `NotGriddedStoreError`, and every candidate on that store is dropped.                                                                 | Startup |
+| Spatial dimensions | `lat` and `lon` must be present after normalisation — `_normalise_coords` raises `NotGriddedStoreError`, and every candidate on that store is dropped.                                                                 | Startup |
 | Time dimension     | `time` must be a dimension, or every date request would 404 against an empty date index. The candidate is rejected at startup instead.                                                                           | Startup |
 | Variable           | Every name in `Product.variable` must exist in the opened store. Catalogue metadata and store schema can drift; unguarded, that surfaces later as a 404 blaming the requested *date* for a missing variable.     | Startup |
 | CRS                | Coordinates must be geographic degrees (EPSG:4326). The visual renderer guards against projected CRS values; see [§8.1](#81-crs-guard).                                                                          | Render |
@@ -1090,7 +1090,7 @@ A wrong-layer choice has real costs: making `LOD.max_lods` a freely-edited opera
 | ----------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tile_timezone`               | `Australia/Sydney` | IANA timezone for date conversion. See [§9](#9-date-timezone-and-coordinate-normalisation).                                                                                  |
 | `store_ttl_seconds`           | `600`              | Stale-while-revalidate window for the Zarr store singleton.                                                                                                                  |
-| `store_prewarm_workers`       | `6`                | Capacity-limiter cap for concurrent `xr.open_zarr` opens during startup store prewarm. Sized to the S3 connection pool.                                                      |
+| `store_prewarm_workers`       | `6`                | Capacity-limiter cap for concurrent lib store opens during startup store prewarm. Sized to the S3 connection pool.                                                      |
 | `thread_pool_size`            | `20`               | Anyio thread-pool size, shared with the rest of `data-access-service`. Each in-flight sync tiler request uses one slot. See [§12](#12-concurrency-event-loop-and-threading). |
 | `animation_workers`           | `10`               | Capacity-limiter cap for `/animation` per-frame S3 fan-out. Sized to the aiobotocore S3 connection pool.                                                                     |
 | `cache_backend`               | `"none"`           | Selects the L1 `CacheBackend` implementation. `"none"` is the only one implemented today — see [§10](#10-caching-strategy).                                                  |
