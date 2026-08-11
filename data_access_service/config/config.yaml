@@ -90,9 +90,8 @@ tiler:
     store_ttl_seconds: 600
     # Capacity gate for concurrent store opens during startup prewarm. Bounded to
     # the S3 connection ceiling, not CPU.
-    store_prewarm_workers:
-      20
-      # Bounded pool for TTL-triggered background store refreshes. Caps how many of
+    store_prewarm_workers: 20
+    # Bounded pool for TTL-triggered background store refreshes. Caps how many of
     # the ~60 stores can be reopening from S3 at once, so an expiry burst cannot
     # starve live tile requests of the same connection pool.
     store_refresh_workers: 4
