@@ -272,7 +272,9 @@ class Config:
             extensions=tuple(pqconfig["extensions"]),
         )
 
+
     def get_tiler_config(self) -> TilerConfig:
+        redis_env = os.getenv("CACHE_HOST")
         tconfig = self.config.get("tiler", {})
         return TilerConfig(
             tile_timezone=tconfig["tile_timezone"],
@@ -282,7 +284,7 @@ class Config:
             animation_workers=tconfig["animation_workers"],
             cache_backend=tconfig["cache_backend"],
             slice_cache_ttl_seconds=tconfig["slice_cache_ttl_seconds"],
-            redis_host=tconfig["redis_host"],
+            redis_host=redis_env or tconfig.get("redis_host"),
             redis_port=tconfig["redis_port"],
             s3_anon=tconfig["s3_anon"],
             s3_connect_timeout=tconfig["s3_connect_timeout"],

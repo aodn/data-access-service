@@ -6,11 +6,3 @@ services:
       - .env
     ports:
       - "8000:8000"
-  # Local Redis-protocol store for CACHE_BACKEND=redis (see
-  # config/config.yaml's tiler.redis_host/redis_port). Runs the Valkey image
-  # for parity with AWS ElastiCache for Valkey. No persistence — it's a cache.
-  redis:
-    image: valkey/valkey:8
-    container_name: data-access-service-redis
-    ports:
-      - "6379:6379"
