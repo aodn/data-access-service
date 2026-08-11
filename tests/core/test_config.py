@@ -32,10 +32,14 @@ def test_tiler_co_bucket_defaults_when_absent_from_yaml():
 
 
 # co_bucket is derived (yaml co_bucket + "s3://" prefix) rather than a direct
-# yaml passthrough, so it's optional; every other tiler field is required.
-_REQUIRED_TILER_FIELDS = {
+# yaml passthrough, so it's not expected in yaml at all.
+_YAML_TILER_FIELDS = {
     f.name for f in dataclasses.fields(TilerConfig) if f.name != "co_bucket"
 }
+
+# redis_host is read with .get() (env var CACHE_HOST can override/fill it in),
+# so unlike the rest it does not raise KeyError when absent from yaml.
+_REQUIRED_TILER_FIELDS = _YAML_TILER_FIELDS - {"redis_host"}
 
 
 def test_tiler_config_fields_all_come_from_yaml():
@@ -43,15 +47,15 @@ def test_tiler_config_fields_all_come_from_yaml():
     the YAML generically — so a new field has to be declared in three places.
     This is the check that a missed one fails here rather than at first use.
     """
-    yaml_keys = set(Config.get_config(EnvType.TESTING).config["tiler"])
-    assert _REQUIRED_TILER_FIELDS == yaml_keys
+    yaml_keys = set(Config.get_config(EnvType.TESTING).config["tiler"]["config"])
+    assert _YAML_TILER_FIELDS == yaml_keys
 
 
 @pytest.mark.parametrize("missing", sorted(_REQUIRED_TILER_FIELDS))
 def test_get_tiler_config_raises_on_missing_yaml_key(missing):
-    tiler_section = dict(Config.get_config(EnvType.TESTING).config["tiler"])
+    tiler_section = dict(Config.get_config(EnvType.TESTING).config["tiler"]["config"])
     del tiler_section[missing]
-    stub = SimpleNamespace(config={"tiler": tiler_section})
+    stub = SimpleNamespace(config={"tiler": {"config": tiler_section}})
 
     with pytest.raises(KeyError):
         Config.get_tiler_config(stub)
