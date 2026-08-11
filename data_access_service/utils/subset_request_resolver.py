@@ -5,6 +5,7 @@ keys, which date range, which area. This module is the single owner of that
 interpretation, so the consumers cannot drift apart.
 """
 
+import logging
 from dataclasses import dataclass, replace
 from typing import List, Optional, Tuple, Union
 
@@ -22,6 +23,8 @@ from data_access_service.utils.date_time_utils import (
     supply_day_with_nano_precision,
 )
 from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -199,6 +202,15 @@ def trim_date_range_for_keys(
         except KeyError:
             # key does not exist in this dataset; callers report/skip unknown
             # keys downstream, they must not break the trim
+            continue
+        except ValueError:
+            # dataset has no recognisable time variable; skip it rather than
+            # kill the whole job before any email is sent
+            logger.warning(
+                "No time variable for uuid=%s key=%s; skipping temporal trim",
+                uuid,
+                key,
+            )
             continue
         if start_date is None or end_date is None:
             # if didn't get the temporal extent (e.g. when testing) just return the requested dates
