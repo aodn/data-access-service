@@ -447,6 +447,23 @@ def test_selects_no_data_when_the_area_misses_a_regular_grid():
     assert _selects_no_data(subset, [bbox_of(FAR_AWAY)], FAR_AWAY)
 
 
+def test_selects_no_data_when_only_the_lon_axis_is_emptied():
+    # The reported satellite_net_primary_productivity_oc3_1day_aqua.zarr case:
+    # the lat range is inside the store but the lon range is not, so the file
+    # came out shaped (time, lat, 0) - one empty axis is enough to be no data.
+    ds = _regular_grid()
+    lat_inside_lon_outside = shapely_box(50, 0, 60, 2)
+
+    subset = _run(
+        ds, [bbox_of(lat_inside_lon_outside)], geometry=lat_inside_lon_outside
+    )
+
+    assert dict(subset.sizes) == {"TIME": 2, "LATITUDE": 3, "LONGITUDE": 0}
+    assert _selects_no_data(
+        subset, [bbox_of(lat_inside_lon_outside)], lat_inside_lon_outside
+    )
+
+
 def test_selects_no_data_when_the_area_misses_a_curvilinear_grid():
     # 2D LATITUDE/LONGITUDE cannot be cropped, so the grid keeps its full shape
     # and only the all-False mask says the area found nothing.
