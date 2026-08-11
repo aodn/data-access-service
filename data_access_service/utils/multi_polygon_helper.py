@@ -1,23 +1,37 @@
 """Turning the user's drawn polygons into the shapes the subset paths use.
 
-The portal sends a GeoJSON MultiPolygon whose parts may overlap. Every consumer
-has to dissolve them the same way first - overlapping parts become one outline,
-so the overlap is counted (queried, downloaded, estimated) once - and this
-module is the single owner of that step, so the parquet and zarr paths cannot
-drift apart.
+The portal sends a GeoJSON MultiPolygon whose parts may overlap, and Mapbox may
+emit longitudes outside [-180, 180] when a selection crosses the dateline.
+Every internal consumer has to:
+
+1. dissolve overlapping parts into one outline (overlap counted once), and
+2. split any part that leaves [-180, 180] into polygons that meet at the
+   dateline with longitudes normalised back into that range,
+
+so the parquet, zarr, and size-estimate paths cannot drift apart. This module
+is the single owner of those steps. Email display keeps the original request
+geometry and does not go through this normalisation.
 """
+
+import math
 
 import geojson
 
 from typing import List, Optional, Union
 from geojson import MultiPolygon, Polygon
+from shapely.affinity import translate
 from shapely.geometry import MultiPolygon as ShapelyMultiPolygon
 from shapely.geometry import Polygon as ShapelyPolygon
+from shapely.geometry import box as shapely_box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.models.subset_request import NON_SPECIFIED
+
+# Unit longitude/latitude window used when cutting unwrapped geometries back
+# into the range dataset lon axes and point-in-polygon filters expect.
+_WORLD_BOUNDS = shapely_box(-180.0, -90.0, 180.0, 90.0)
 
 
 def get_bbox_from(polygon: Polygon) -> BoundingBox:
@@ -64,6 +78,9 @@ def merge_polygons(
 
     Overlapping parts merge into one outline (their overlap is then counted
     once); disjoint parts stay separate. Holes drawn by the user are kept.
+    Parts that leave [-180, 180] (Mapbox dateline wraps) are then split into
+    polygons that meet at the dateline with longitudes in that range — works
+    for both axis-aligned boxes and freeform rings.
 
     Returns [] when there is no spatial filter (or the MultiPolygon has no
     parts) - the caller decides what that means.
@@ -84,16 +101,55 @@ def merge_polygons(
         # e.g. every part is a zero-area sliver. Returning [] here would be read
         # as "no spatial filter" and silently subset the whole globe.
         raise ValueError(f"multi_polygon encloses no area: {parsed}")
-    return merged
+
+    # Dissolve first (unwrapped coords are fine for planar union), then cut
+    # anything that still sits outside [-180, 180] into dateline-safe pieces.
+    split: List[ShapelyPolygon] = []
+    for polygon in merged:
+        split.extend(split_at_dateline(polygon))
+    if not split:
+        raise ValueError(f"multi_polygon encloses no area: {parsed}")
+    return split
+
+
+def split_at_dateline(geometry: BaseGeometry) -> List[ShapelyPolygon]:
+    """Cut a polygon into pieces whose longitudes all lie in [-180, 180].
+
+    Mapbox may send a continuous ring with lon &lt; -180 or lon &gt; 180 when the
+    user selects across the antimeridian. Vertex-only wrapping is wrong (it
+    invents a near-global strip). Instead, keep the unwrapped shape, slide it
+    by multiples of 360°, and intersect each copy with the unit world window.
+    Rectangles become two boxes that meet at ±180; freeform rings become two
+    freeform pieces with a cut on the dateline. Already-normal geometry is
+    returned unchanged.
+    """
+    if geometry is None or geometry.is_empty:
+        return []
+
+    min_lon, _min_lat, max_lon, _max_lat = geometry.bounds
+    if min_lon >= -180.0 and max_lon <= 180.0:
+        return to_polygons(geometry)
+
+    # Window k covers lon in [-180 + 360k, 180 + 360k]. Every unwrapped bound
+    # falls in at least one such window; empty intersections are dropped below.
+    k_min = math.floor((min_lon + 180.0) / 360.0)
+    k_max = math.floor((max_lon + 180.0) / 360.0)
+
+    pieces: List[ShapelyPolygon] = []
+    for k in range(int(k_min), int(k_max) + 1):
+        shifted = translate(geometry, xoff=-360.0 * k)
+        clipped = shifted.intersection(_WORLD_BOUNDS)
+        pieces.extend(to_polygons(clipped))
+    return pieces
 
 
 def to_polygons(geometry: BaseGeometry) -> List[ShapelyPolygon]:
-    """Flatten a unary_union result into a plain list of polygons with area.
+    """Flatten a unary_union / intersection result into polygons with area.
 
-    unary_union returns a Polygon, a MultiPolygon, or - when the parts include
-    degenerate geometry - a GeometryCollection mixing lines/points in. Anything
-    without area is dropped: it selects no cell to subset, and a zero-width
-    bounding box is rejected by BoundingBox anyway.
+    unary_union and intersection return a Polygon, a MultiPolygon, or - when
+    the parts include degenerate geometry - a GeometryCollection mixing
+    lines/points in. Anything without area is dropped: it selects no cell to
+    subset, and a zero-width bounding box is rejected by BoundingBox anyway.
     """
     if isinstance(geometry, ShapelyPolygon):
         return [geometry] if geometry.area > 0 else []
