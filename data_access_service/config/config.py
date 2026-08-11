@@ -274,7 +274,7 @@ class Config:
 
     def get_tiler_config(self) -> TilerConfig:
         redis_env = os.getenv("CACHE_HOST")
-        tconfig = self.config.get("tiler", {})
+        tconfig = self.config.get("tiler", {}).get("config", {})
         return TilerConfig(
             tile_timezone=tconfig["tile_timezone"],
             store_ttl_seconds=tconfig["store_ttl_seconds"],
