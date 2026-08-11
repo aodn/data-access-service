@@ -53,10 +53,8 @@ class VisualTileConfig(BaseModel):
 
 class ProductConfig(BaseModel):
     """The resolved configuration of a product, serialized for GET /products
-    from a live Product (see from_product). Products themselves are derived at
-    startup from the metadata catalogue and gridded_variables.json rather than
-    written out one by one, so this is now a wire model first — extra="forbid"
-    still guards it against drifting from Product.
+    from a live Product (see from_product). extra="forbid" guards it against
+    drifting from Product.
 
     Served identically at both /tiler/data_tiles/products and
     /tiler/visual_tiles/products — data_tile/visual_tile are nested (rather
@@ -76,10 +74,8 @@ class ProductConfig(BaseModel):
     # Links this product to its GeoNetwork/STAC collection UUID. Null when absent.
     metadata_uuid: str | None = None
     ocean_masked: bool
-    # Whether /visual_tiles can render this product. Required rather than
-    # defaulted: ogcapi-java keys its published tile_types on this field, so
-    # GET /products must never omit it and leave the consumer guessing from
-    # variable arity. from_product supplies it from the resolved Product.
+    # Whether /visual_tiles can render this product; ogcapi-java keys its
+    # tile_types on it, so it's required rather than defaulted.
     visual: bool
     data_tile: DataTileConfig = Field(default_factory=DataTileConfig)
     visual_tile: VisualTileConfig = Field(default_factory=VisualTileConfig)

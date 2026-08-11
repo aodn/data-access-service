@@ -11,10 +11,8 @@ from pathlib import Path
 # change) — same static-asset rationale as the mask paths below, so it's
 # resolved relative to the package rather than the CWD.
 COLORMAPS_CONFIG_PATH = str(Path(__file__).resolve().parent / "colormaps.json")
-# Variable specifications that startup fans out across the metadata catalogue to
-# derive the product set (see tiler/schemas/gridded_variables.py). Replaced the
-# hand-maintained per-product products.json, which could not keep dataset names
-# and metadata UUIDs in step with the catalogue.
+# Variable specifications fanned out across the metadata catalogue at startup
+# to derive the product set — see tiler/schemas/gridded_variables.py.
 GRIDDED_VARIABLES_CONFIG_PATH = str(
     Path(__file__).resolve().parent / "gridded_variables.json"
 )

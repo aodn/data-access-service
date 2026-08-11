@@ -114,15 +114,9 @@ class BaseAPI:
         tiler startup) until metadata init has finished, so it isn't competing
         with them for resources.
 
-        ``timeout=None`` waits indefinitely. Tiler warmup uses that: it derives
-        its entire product catalogue from the metadata index, so continuing from
-        a half-populated one would publish a silently incomplete catalogue —
-        strictly worse than taking longer to become ready.
-
-        Returns whether the API actually became ready, so a caller that cannot
-        proceed without metadata can tell the difference. The 300-second default
-        and the give-up-and-return behaviour are unchanged for callers that
-        ignore the result (core/scheduler.py).
+        ``timeout=None`` waits indefinitely — tiler warmup uses this, since a
+        half-populated index would publish an incomplete catalogue. Returns
+        whether the API actually became ready.
         """
         waited = 0.0
         while not self.get_api_status():
@@ -664,16 +658,12 @@ class API(BaseAPI):
         return {"not_exist": Descriptor(uuid=uuid)}
 
     def get_dataset_variables(self) -> Dict[str, Dict[str, frozenset[str]]]:
-        """Top-level metadata field names per dataset, as captured at startup.
+        """The ``uuid -> dataset_name -> frozenset(field names)`` index.
 
-        Returns the whole ``uuid -> dataset_name -> frozenset(field names)``
-        index. This is the cheap counterpart to get_raw_meta_data: it never
-        decompresses the raw catalogue, which is what makes it usable for
-        whole-catalogue scans such as tiler product discovery.
-
-        The returned mapping is the live internal index, not a copy. Treat it as
-        read-only and as a snapshot of the moment it was read — callers should
-        consume it and drop it rather than retaining it across a metadata refresh.
+        Cheap counterpart to get_raw_meta_data: never decompresses the raw
+        catalogue, which is what makes it usable for whole-catalogue scans
+        such as tiler product discovery. Live internal index, not a copy —
+        treat as read-only and as a snapshot of the moment it was read.
         """
         return self._schema_keys
 

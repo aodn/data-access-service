@@ -10,9 +10,7 @@ from data_access_service.config.config import Config
 # Requests must send them back unchanged.
 LOCAL_TZ = ZoneInfo(Config.get_config().get_tiler_config().tile_timezone)
 
-# Shared with the vectorised date-index build in store.registry, which performs
-# the same conversion over a whole DatetimeIndex at once. Both must format
-# identically or a date string from one would not match the other.
+# Shared with store.registry's date-index build — both must format identically.
 DATE_FMT = "%Y-%m-%d"
 
 

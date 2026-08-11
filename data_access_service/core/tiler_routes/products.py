@@ -36,9 +36,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Failed opens are not cached by StoreRegistry, so without this every /manifest
-# call re-attempts every broken store at full S3 timeout — and ogcapi-java calls
-# this route on every getCollectionProducts.
+# StoreRegistry doesn't cache failed opens, so without this every /manifest
+# call re-attempts every broken store at full S3 timeout.
 _STORE_FAILURE_COOLDOWN_SECONDS = 60.0
 _recent_store_failures: dict[str, tuple[float, Exception]] = {}
 
@@ -152,8 +151,7 @@ def _available_dates_per_store(store_urls: set[str]) -> dict[str, list[str]]:
             failures[store_url] = e
 
     if failures and len(failures) == len(store_urls):
-        # Absent differs from unreachable: the app handler turns this into a
-        # 404 naming the store.
+        # Absent: let the app's FileNotFoundError handler 404 with the store name.
         if all(isinstance(e, FileNotFoundError) for e in failures.values()):
             raise next(iter(failures.values()))
         raise HTTPException(

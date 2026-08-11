@@ -98,11 +98,8 @@ class Product:
     # group products by collection UUID. Optional and generic for both visual and data tiles.
     metadata_uuid: str | None = None
     ocean_masked: bool = False
-    # Whether /visual_tiles can render this product. Defaulted (unlike the wire
-    # model's required field) because plenty of code — tests especially —
-    # constructs Product directly without going through config; True matches the
-    # behaviour every scalar product has had since the visual routes existed.
-    # A pair is always False: visual tiles render one scalar band.
+    # Defaulted True (unlike the wire model's required field) since tests
+    # construct Product directly; a pair is always False in practice.
     visual: bool = True
     data_tile: DataTileConfig = field(default_factory=DataTileConfig)
     visual_tile: VisualTileConfig = field(default_factory=VisualTileConfig)

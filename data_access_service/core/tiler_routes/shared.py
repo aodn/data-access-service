@@ -47,9 +47,8 @@ def get_product_or_404(product_id: str) -> Product:
 def visual_product_or_400(product_id: str) -> Product:
     """Look up a product and reject it if it cannot serve visual tiles.
 
-    Capability is explicit on the product, so a registered *scalar* can be
-    data-tile-only; arity narrowing alone would accept it and render a
-    meaningless image.
+    A registered scalar can still be data-tile-only, so arity alone can't
+    decide this.
     """
     product = get_product_or_404(product_id)
     if not product.visual:

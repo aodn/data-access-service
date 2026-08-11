@@ -36,9 +36,7 @@ def source_path(dataset_name: str, base_url: str) -> str:
 
 
 def _tile_configs(entry: GriddedVariableEntry, dataset_name: str):
-    # Each product needs its *own* instances: lod_grids is a mutable dict filled
-    # in place from that product's store, so sharing one would make every
-    # product from a spec inherit whichever store was requested first.
+    # Fresh instances per product: lod_grids is filled in place per store.
     resolved = entry.settings_for(dataset_name)
 
     def coastal_fill(config) -> CoastalFill | None:

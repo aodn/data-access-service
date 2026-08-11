@@ -1,9 +1,8 @@
 """Verify candidate products against the stores that were actually opened.
 
-One O(1) guard per candidate: the store is time-indexed. Variable presence is
-not checked — catalogue and store agreeing on names has held in every real
-boot run; disagreements observed so far were all at store level (not gridded,
-absent), which prewarm already classifies.
+Variable presence isn't checked here — catalogue/store disagreements observed
+in practice have always been at store level (not gridded, absent), which
+prewarm already classifies.
 """
 
 import logging
@@ -19,7 +18,6 @@ from data_access_service.tiler.services.store.registry import (
 
 logger = logging.getLogger(__name__)
 
-# Rejection categories, for the startup log breakdown.
 NOT_GRIDDED = "store_not_gridded"
 STORE_ABSENT = "store_absent"
 NO_TIME_DIMENSION = "no_time_dimension"

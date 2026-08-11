@@ -59,7 +59,6 @@ _S3_CONFIG_KWARGS = {
 }
 
 
-# Ride out a transient blip without stalling startup on a dead bucket.
 _PREWARM_MAX_ATTEMPTS = 3
 _PREWARM_BACKOFF_SECONDS = 1.0
 
@@ -132,8 +131,8 @@ def _open_store(store_url: str) -> xr.Dataset:
 def _build_date_index(ds: xr.Dataset) -> dict[str, list]:
     """Return {local_date: [timestamps]} for the dataset's time coord, or {}.
 
-    Vectorised: 60 of these are built at startup. Values stay the raw coord
-    elements, since ``_fetch_slice_from_store`` selects with them.
+    Values stay the raw coord elements, since ``_fetch_slice_from_store``
+    selects with them.
     """
     if "time" not in ds.dims:
         return {}
@@ -223,10 +222,10 @@ class StoreRegistry:
             return self._date_index.get(store_url, {})
 
     async def _prewarm_one(self, store_url: str) -> BaseException | None:
-        """Open one URL, retrying operational failures. Returns None on success.
+        """Open one URL. None on success, else the exception.
 
-        Not-a-grid and not-there are confirmed and returned immediately;
-        anything else gets bounded retries with backoff.
+        Not-a-grid and not-there are confirmed and not retried; anything else
+        gets bounded retries with backoff.
         """
         last_error: BaseException | None = None
         for attempt in range(1, _PREWARM_MAX_ATTEMPTS + 1):
@@ -239,8 +238,7 @@ class StoreRegistry:
                 logger.info(f"Store is not a lat/lon grid, skipping: {store_url} ({e})")
                 return e
             except FileNotFoundError as e:
-                # Not retried, but never intentional — usually an upstream
-                # rename the catalogue has not caught up with.
+                # Usually an upstream rename the catalogue hasn't caught up with.
                 logger.warning(f"Store does not exist: {store_url} ({e})")
                 return e
             except Exception as e:
