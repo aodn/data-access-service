@@ -53,7 +53,7 @@ It exposes **two independent tile pipelines** from the same underlying data:
 
 The same Zarr slice is the source for both pipelines; they diverge at the renderer. See [§5](#5-tile-coordinate-systems-and-projection-pipeline) for the full distinction.
 
-Products are **derived at startup**, not written out one by one. `data_access_service/config/tiler/gridded_variables.json` lists *variable specifications* (`"GSLA"`, `["UCUR", "VCUR"]`, …), and warmup fans each one out to every `.zarr` dataset in the DAS metadata catalogue that carries the variable(s), verifies the stores, and publishes the result. Dataset names and metadata UUIDs therefore always come from live metadata, so a dataset rename changes the derived product id rather than leaving a stale one pointing at nothing. Adding or removing a *variable* means editing that file and redeploying; there is no runtime registration API, and a missing or empty config is treated as a broken deploy rather than a valid empty state. See [§13](#13-adding-a-new-product).
+Products are **derived at startup**, not written out one by one. `data_access_service/config/tiler/gridded_variables.json` lists *variable specifications* (`"GSLA"`, `["UCUR", "VCUR"]`, …), and warmup fans each one out to every `.zarr` dataset in the DAS metadata catalogue that carries the variable(s), applies any per-product tuning from `data_access_service/config/tiler/products.json`, verifies the stores, and publishes the result. Dataset names and metadata UUIDs therefore always come from live metadata, so a dataset rename changes the derived product id rather than leaving a stale one pointing at nothing. Adding or removing a *variable* means editing `gridded_variables.json` and redeploying; there is no runtime registration API, and a missing or empty config (either file) is treated as a broken deploy rather than a valid empty state. See [§13](#13-adding-a-new-product).
 
 ---
 
@@ -177,8 +177,9 @@ data_access_service/
     http_cache.py                 ← IMMUTABLE_CACHE_HEADERS / REVALIDATE_CACHE_HEADERS — shared by the tiler and the sites feature-collection endpoints — see §6
     tiler/
       constants.py                ← LOD (DataTileLodConfig: max_lods, min_coarsest) + TILE (chunk_px, padding defaults) + COORD_NAMES
-      paths.py                    ← GRIDDED_VARIABLES_CONFIG_PATH, COLORMAPS_CONFIG_PATH, LAND_MASK_PATH, OCEAN_MASK_PATH
-      gridded_variables.json       ← variable specifications fanned out across the catalogue at startup — see §13
+      paths.py                    ← GRIDDED_VARIABLES_CONFIG_PATH, PRODUCTS_CONFIG_PATH, COLORMAPS_CONFIG_PATH, LAND_MASK_PATH, OCEAN_MASK_PATH
+      gridded_variables.json       ← variable specifications fanned out across the catalogue at startup — see §13.1
+      products.json                 ← per-product tuning, keyed by derived product id — see §13.2
       colormaps.json               ← static custom-colormap config, committed with the code
   core/
     tiler_routes/
@@ -192,8 +193,7 @@ data_access_service/
       startup.py                   ← run_tiler_warmup() — the tiler's startup sequence, see §11
   tiler/
     schemas/
-      products.py                  ← ProductConfig (GET /products wire shape), ManifestResponse, PointResponse
-      gridded_variables.py         ← GriddedVariableEntry — source config model, shorthand normalisation + validation
+      products.py                  ← ProductConfig (GET /products wire shape), ProductOverride (products.json), ManifestResponse, PointResponse
       data_tiles.py                ← DataTileManifestResponse (manifest.json shape)
       visual_tiles.py              ← ColormapListResponse
     services/
@@ -209,7 +209,7 @@ data_access_service/
       product/
         product.py                  ← Product dataclass (+ DataTileConfig/VisualTileConfig/CoastalFill) + LOD algorithm + get_lod_grids lazy-init
         registry.py                  ← PRODUCTS dict + publish_products + get_product / iter_products / iter_product_items facades
-        discovery.py                 ← build_candidate_products — fans variable specs out across the metadata schema index
+        discovery.py                 ← discover_products — loads config, fans variable specs out across the metadata schema index, layers products.json on top
         verification.py              ← verify_candidate_products + the store-failure classification
         manifest.py                  ← render_manifest() — bounds + per-variable ranges + LOD meta for manifest.json
       rendering/
@@ -239,6 +239,7 @@ These paths are constants in `data_access_service/config/tiler/paths.py`, resolv
 | Constant                | Default                       | Notes                                                                                                          |
 | ----------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `GRIDDED_VARIABLES_CONFIG_PATH` | `config/tiler/gridded_variables.json` | Committed with the code; edit + redeploy to add/remove a *variable* — products are derived from it, see [§13](#13-adding-a-new-product). |
+| `PRODUCTS_CONFIG_PATH` | `config/tiler/products.json` | Committed with the code; edit + redeploy to tune a discovered product by id — see [§13.2](#132-editing-configtilerproductsjson). |
 | `COLORMAPS_CONFIG_PATH` | `config/tiler/colormaps.json` | Same as above, for custom colormaps.                                                                           |
 | `LAND_MASK_PATH`        | `tiler/assets/land_mask.npz`  | Committed coastline raster used by coastal fill; see [§7.6](#76-coastal-fill-sparse-products).                 |
 | `OCEAN_MASK_PATH`       | `tiler/assets/ocean_mask.npz` | Committed valid-domain raster used by the ocean-validity mask; see [§7.6](#76-coastal-fill-sparse-products).   |
@@ -592,7 +593,7 @@ Because the data-tile cut writes the existing valid-mask channel (alpha for scal
 
 **Land-mask asset.** The coastline is a committed, bit-packed global raster `tiler/assets/land_mask.npz` (Natural Earth 1:10m land, ~5.5 km resolution), built once by `scripts/build_land_mask.py`. At runtime `masks.py` needs only numpy + scipy. `load_land_mask` unpacks it lazily and caches the result module-level.
 
-**Ocean-validity mask.** A second committed mask, `tiler/assets/ocean_mask.npz`, built from the model's valid-domain grid. Unlike the land mask, this one is applied to the **raw slice at read time** via `apply_ocean_mask`, not on a render grid — it samples the mask at the source grid's own lon/lat and sets cells outside the valid domain to NaN. Cutting at the source — before bilinear resampling can bleed it into valid neighbours, and before point lookups read it — means every consumer (data tiles, visual tiles, point endpoint) inherits the cut for free. It's opt-in per product via the `ocean_masked` field, which defaults to `false` and is normally switched on through a per-dataset `overrides` entry in `gridded_variables.json` ([§13.1](#131-editing-configtilergridded_variablesjson)) — the mask is built from one specific model grid, so it is a property of that dataset rather than of the variable. The mask is applied every time a slice is read from the Zarr store, so a rebuilt mask asset takes effect immediately on restart.
+**Ocean-validity mask.** A second committed mask, `tiler/assets/ocean_mask.npz`, built from the model's valid-domain grid. Unlike the land mask, this one is applied to the **raw slice at read time** via `apply_ocean_mask`, not on a render grid — it samples the mask at the source grid's own lon/lat and sets cells outside the valid domain to NaN. Cutting at the source — before bilinear resampling can bleed it into valid neighbours, and before point lookups read it — means every consumer (data tiles, visual tiles, point endpoint) inherits the cut for free. It's opt-in per product via the `ocean_masked` field, which defaults to `false` and is normally switched on through a per-id entry in `products.json` ([§13.2](#132-editing-configtilerproductsjson)) — the mask is built from one specific model grid, so it is a property of that product id rather than of the variable. The mask is applied every time a slice is read from the Zarr store, so a rebuilt mask asset takes effect immediately on restart.
 
 **Caveats.**
 
@@ -824,10 +825,7 @@ async def run_tiler_warmup(api: API) -> None:
         if not await api.wait_until_ready(timeout=None):  # indefinite — see below
             raise RuntimeError("API metadata never became ready")
 
-        entries = load_gridded_variables()                # variable specs, validated
-        candidates = build_candidate_products(            # fan out across the catalogue
-            api.get_dataset_variables(None), entries, base_url)
-        log_unmatched_overrides(candidates, entries)      # stale key -> loud, not fatal
+        candidates = discover_products(api, base_url)      # load config, fan out, layer overrides
 
         load_colormaps()
         await anyio.to_thread.run_sync(warmup_resample)   # numba JIT warmup, see §7.4
@@ -988,61 +986,74 @@ Sustained throughput is bound by real resources — CPU cores and the S3 connect
 
 ## 13. Adding a new product
 
-Products are **derived**, not listed. `config/tiler/gridded_variables.json` is the single source of truth for which *variables* the tiler serves; which *datasets* those variables live on comes from the DAS metadata catalogue at startup. Adding a product means adding a variable specification and redeploying — and it may add several products at once, since one specification fans out to every matching `.zarr` dataset.
+Products are **derived**, not listed. `config/tiler/gridded_variables.json` is the single source of truth for which *variables* the tiler serves; which *datasets* those variables live on comes from the DAS metadata catalogue at startup. `config/tiler/products.json` then layers optional per-product tuning on top, matched by the id discovery derives. Adding a product means adding a variable specification and redeploying — and it may add several products at once, since one specification fans out to every matching `.zarr` dataset.
 
-That indirection is the point. The old `products.json` hard-coded a dataset name and metadata UUID per product, so an upstream rename left a stale product id pointing at nothing and nobody found out until a tile 404'd. Deriving both from live metadata makes a rename change the derived id instead.
+That indirection is the point. A products.json that hard-codes a dataset name and metadata UUID per product lets an upstream rename leave a stale product id pointing at nothing, with nobody finding out until a tile 404's. Deriving identity (`id`/`source_path`/`metadata_uuid`) from live metadata makes a rename change the derived id instead — `products.json` here only ever *tunes* an id that discovery already produced, it never establishes one.
 
 ### 13.1 Editing `config/tiler/gridded_variables.json`
 
-Each array element is either shorthand or an object:
+A pure flat list — each element is shorthand only, no objects and no tuning:
 
 ```json
 [
   "GSL",
-  ["UCUR", "VCUR"],
+  "GSLA",
+  ["UCUR", "VCUR"]
+]
+```
+
+Loaded as raw JSON by `discovery._load_gridded_variable_specs` — there is no schema/validation layer for this file, unlike `products.json` (see [§13.2](#132-editing-configtilerproductsjson)). It's a flat list, so there's nothing to normalise.
+
+- Each element is a `str` for a scalar product, or an **ordered two-element list** for a vector pair. The pair's order is the R/G channel order the data-tile shader decodes and is **never sorted**.
+- A malformed entry (blank name, a three-element list, a duplicate name in a pair) isn't rejected at load. It's caught downstream instead: `build_candidate_products` requires every name in an entry to be present in a dataset's field set, so a bad entry almost always just matches nothing and gets logged as an unmatched specification — not a hard failure at startup. `test_gridded_variables_config.py` pins the shape of the committed file so a real mistake still shows up in CI.
+
+### 13.2 Editing `config/tiler/products.json`
+
+A flat list of overrides, each keyed by the derived product id (`{dataset.removesuffix('.zarr')}:{'+'.join(v.lower() for v in variables)}`, joined with `+` in configured pair order):
+
+```json
+[
   {
-    "variable": "GSLA",
-    "overrides": {
-      "model_sea_level_anomaly_gridded_realtime.zarr": {
-        "data_tile": { "coastal_fill": { "max_dist_px": 4 } }
-      }
-    }
+    "id": "model_sea_level_anomaly_gridded_realtime:gsla",
+    "data_tile": { "coastal_fill": { "max_dist_px": 4 } }
   },
   {
-    "variable": ["UCUR", "VCUR"],
-    "visual": false,
-    "overrides": {
-      "model_sea_level_anomaly_gridded_realtime.zarr": { "ocean_masked": true }
-    }
+    "id": "model_sea_level_anomaly_gridded_realtime:ucur+vcur",
+    "ocean_masked": true
   }
 ]
 ```
 
-Shorthand and object entries normalise into one canonical `GriddedVariableEntry` (`schemas/gridded_variables.py`) at load time, so discovery and tests only ever see the canonical form.
+Entries normalise into `ProductOverride` (`schemas/products.py`) at load time.
 
-- **`variable`** — a `str` for a scalar product, or an **ordered two-element list** for a vector pair. The pair's order is the R/G channel order the data-tile shader decodes and is **never sorted**. A list must hold exactly two distinct names: one is a scalar (use a plain string), and three or more cannot be encoded into a data tile. A one-element list is rejected rather than silently unwrapped — it would turn a scalar product into a broken vector one.
-- **`visual`** — whether `/visual_tiles` can render it. Defaults to `true` for a scalar and `false` for a pair; `true` on a pair is rejected, since visual tiles render one scalar band. Set it to `false` on a scalar whose variable the renderer has no sensible colouring for. ogcapi-java publishes `tile_types` from this field, so it is what stops a non-renderable product advertising visual tiles.
-- **`overrides`** — the only place tuning lives, keyed by the exact metadata dataset name *including* `.zarr*. Tuning is per dataset because it describes one grid, not the variable: the same variable can appear on stores that need different settings. A dataset with no entry takes the plain defaults. An override key that matches no discovered product is **logged at ERROR** (usually an upstream rename), but is not fatal.
+- **`id`** — must match a product id discovery would derive. Tuning is per *product id*, not per dataset or variable, because the same variable spec fans out across many stores that usually need different settings. A product with no matching entry takes plain defaults. An `id` that matches no discovered product is **logged at ERROR** (usually an upstream rename), but is not fatal.
+- **`visual`** — whether `/visual_tiles` can render this product. Defaults to `true` for a scalar and `false` for a pair; `true` on a pair is rejected, since visual tiles render one scalar band. Set it to `false` on a scalar whose variable the renderer has no sensible colouring for. ogcapi-java publishes `tile_types` from this field, so it is what stops a non-renderable product advertising visual tiles.
+- **`ocean_masked`**, **`data_tile`**, **`visual_tile`** — see [§13.6](#136-optional-overrides).
 - `extra="forbid"` applies at every level, so a typo fails at load rather than being ignored.
+- Duplicate `id`s in the file are rejected at load.
 
-The live example of why `overrides` exists: `["UCUR", "VCUR"]` matches 19 datasets, 18 of which are HF-radar sites on entirely different grids. The committed ocean mask is built from the SLA grid, so only that dataset may enable `ocean_masked`.
+The live example of why per-id tuning exists: `["UCUR", "VCUR"]` matches 19 datasets, 18 of which are HF-radar sites on entirely different grids. The committed ocean mask is built from the SLA grid, so only `model_sea_level_anomaly_gridded_realtime:ucur+vcur` may enable `ocean_masked` — every other dataset that specification matches keeps the plain default.
 
-### 13.2 What startup does with it
+### 13.3 What startup does with it
 
-1. Wait for the DAS metadata catalogue (indefinitely — see [§11.2](#112-run_tiler_warmup-coretiler_routesstartuppy)).
-2. Match each specification against the lightweight schema index (`API.get_dataset_variables`), skipping every dataset key that does not end in `.zarr` — the index holds Parquet datasets too. Matching is **case-sensitive**; a pair requires both names.
-3. Build a `Product` per match: id `f"{dataset.removesuffix('.zarr')}:{'+'.join(v.lower() for v in variables)}"`, `source_path` as `f"{tiler.co_bucket}/{dataset}"` (no trailing slash, ever — that string keys the store registry, date index, and both cache layers), `metadata_uuid` from the index key.
-4. Prewarm every unique store, verify every candidate, publish atomically. See [§11.2](#112-run_tiler_warmup-coretiler_routesstartuppy).
+`run_tiler_warmup` calls one function, `discovery.discover_products(api, base_url)`, which internally:
+
+1. Loads and validates both config files — `load_gridded_variables()`, `load_product_overrides()`.
+2. Matches each specification against `API.iter_zarr_dataset_variables()` — already filtered to zarr and with `"global_attributes"` stripped from each field set, so discovery never has to know the catalogue holds Parquet too. Matching is **case-sensitive**; a pair requires both names. Builds a `Product` per match at plain defaults: id `f"{dataset.removesuffix('.zarr')}:{'+'.join(v.lower() for v in variables)}"`, `source_path` as `f"{tiler.co_bucket}/{dataset}"` (no trailing slash, ever — that string keys the store registry, date index, and both cache layers), `metadata_uuid` from the index key. This step never looks at `products.json` — see `discovery.build_candidate_products`.
+3. Logs any `products.json` id that matched no candidate (`discovery.log_unmatched_overrides`) — loud, not fatal.
+4. Layers `products.json` on top by id (`discovery.apply_product_overrides`), via `dataclasses.replace` — a separate pass over the already-built candidates, kept apart from step 2 so identity-derivation and config-resolution never mix.
+
+Warmup then prewarms every unique store, verifies every candidate, and publishes atomically. See [§11.2](#112-run_tiler_warmup-coretiler_routesstartuppy).
 
 A duplicate generated id and a zero-candidate result are both fatal; a specification or override that matches nothing is logged, not fatal.
 
 > **Each product gets its own `DataTileConfig`/`VisualTileConfig` instance.** This is a correctness rule, not a style preference. `lod_grids` is a mutable dict on a frozen dataclass, filled in place on first request from *that product's own* store dimensions and never recomputed ([§7.3](#73-lazy-population-servicesproductproductpy--get_lod_grids)). Sharing one instance across a fan-out would make all 32 `sea_surface_temperature` products — which sit on differently-sized grids — inherit whichever store was requested first, producing wrong LOD grids in both `/manifest` and every data tile, with nothing raised anywhere.
 
-### 13.3 Removing a product
+### 13.4 Removing a product
 
 Remove the variable specification and redeploy — which removes it from *every* dataset that carried it. To drop one dataset's product while keeping the variable elsewhere, the variable has to stop matching that dataset, which is a metadata change rather than a config one. There is no cache eviction step: every deploy is a fresh process, so L1 starts empty regardless.
 
-### 13.4 Requirements for the Zarr store
+### 13.5 Requirements for the Zarr store
 
 | Requirement        | Detail                                                                                                                                                                                                           | Enforced |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
@@ -1053,16 +1064,18 @@ Remove the variable specification and redeploy — which removes it from *every*
 | CRS                | Coordinates must be geographic degrees (EPSG:4326). The visual renderer guards against projected CRS values; see [§8.1](#81-crs-guard).                                                                          | Render |
 | Renderability      | That the variable is actually a renderable 2-D field is carried by the curated variable list, not proven — dimension/dtype verification is deferred.                                                              | Curation |
 
-### 13.5 Optional overrides
+### 13.6 Optional overrides
 
-| Field                      | Where                          | Default        | When to override                                                                                                                                   |
-| -------------------------- | ------------------------------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `data_tile.chunk_px`       | `overrides`                    | `[240, 192]`   | Store has very small or very large spatial extent                                                                                                  |
-| `data_tile.padding`        | `overrides`                    | `1`            | Tile edge artefacts, or no padding needed                                                                                                          |
-| `data_tile.coastal_fill`   | `overrides`                    | unset (off)    | Sparse/coarse products with a wide coastal transparency gap in **data tiles**; see [§7.6](#76-coastal-fill-sparse-products). `{"max_dist_px": N}`. |
-| `visual_tile.coastal_fill` | `overrides`                    | unset (off)    | Same, independently, for **visual tiles**.                                                                                                         |
-| `ocean_masked`             | `defaults`/`overrides`         | `false`        | Force on the ocean-validity mask. Grid-specific, so it normally belongs in `overrides`.                                                             |
-| `visual`                   | entry top level                | scalar `true`, pair `false` | A scalar the current renderer cannot colour meaningfully.                                                                              |
+All of the following live in `products.json`, keyed by product id (see [§13.2](#132-editing-configtilerproductsjson)):
+
+| Field                      | Default                     | When to override                                                                                                                                   |
+| -------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data_tile.chunk_px`       | `[240, 192]`                 | Store has very small or very large spatial extent                                                                                                  |
+| `data_tile.padding`        | `1`                          | Tile edge artefacts, or no padding needed                                                                                                          |
+| `data_tile.coastal_fill`   | unset (off)                  | Sparse/coarse products with a wide coastal transparency gap in **data tiles**; see [§7.6](#76-coastal-fill-sparse-products). `{"max_dist_px": N}`. |
+| `visual_tile.coastal_fill` | unset (off)                  | Same, independently, for **visual tiles**.                                                                                                         |
+| `ocean_masked`             | `false`                      | Force on the ocean-validity mask. Grid-specific, so it belongs to one product id, not the variable generally.                                      |
+| `visual`                   | scalar `true`, pair `false`  | A scalar the current renderer cannot colour meaningfully.                                                                                           |
 
 `id`, `source_path`, and `metadata_uuid` are **not** configurable — they are derived. `lod_grids` is not a config field either; it is computed at runtime and deliberately excluded from `ProductConfig` (see [§7.3](#73-lazy-population-servicesproductproductpy--get_lod_grids)).
 
@@ -1078,9 +1091,9 @@ There is no `.env` file and no ad-hoc Python-constants module for the tiler. Eve
 | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | **`config/config.yaml` `tiler:` block** (this section) | Operational knobs — perf, resource limits, backend selection. Do **not** affect wire format or shader contract. | Edit the YAML directly; doesn't need coordinated frontend review.               |
 | **`config/tiler/constants.py`**                        | Wire / shader contracts — values that must stay in lockstep with the frontend or the data encoding.             | Change via PR so frontend and server stay in sync; the diff is the audit trail. |
-| **Per-product fields** (`gridded_variables.json`)      | Data characteristics that legitimately vary across products.                                                    | Set per product in the config file; restart.                                    |
+| **Per-product fields** (`products.json`)                | Data characteristics that legitimately vary across products.                                                    | Set per product id in the config file; restart.                                 |
 
-The rule when adding a new tunable: ask _who needs to be informed when the value changes?_ Only the operator → the YAML config. The frontend (or any wire-format consumer) needs a matching update → `constants.py`, via code review. Only some products are affected → a `defaults` (or per-dataset `overrides`) field in `gridded_variables.json`.
+The rule when adding a new tunable: ask _who needs to be informed when the value changes?_ Only the operator → the YAML config. The frontend (or any wire-format consumer) needs a matching update → `constants.py`, via code review. Only some products are affected → a per-id field in `products.json`.
 
 A wrong-layer choice has real costs: making `LOD.max_lods` a freely-edited operational setting would let someone raise it thinking "more LODs = better detail," silently overflowing the WebGL atlas's 4096×4096 (~64 MB VRAM) cap.
 

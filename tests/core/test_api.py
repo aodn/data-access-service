@@ -134,6 +134,39 @@ class TestApi(unittest.TestCase):
             self.assertIn("sea_ice_fraction", full[zarr_uuid][zarr_key])
             self.assertNotIn("GSLA", full[zarr_uuid][zarr_key])
 
+    with open(
+        Path(__file__).resolve().parent.parent / "canned/catalog_uncached.json", "r"
+    ) as file:
+
+        @patch.object(
+            DataQuery.Metadata,
+            "metadata_catalog_uncached",
+            return_value=json.load(file),
+        )
+        def test_iter_zarr_dataset_variables(self, get_metadata):
+            """The tiler product-discovery entry point: pre-filtered to zarr,
+            with "global_attributes" excluded from the field-name set so
+            callers only ever see real variable/coordinate names.
+            """
+            api = API()
+            api.initialize_metadata()
+
+            zarr_uuid = "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
+            zarr_key = "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
+
+            entries = list(api.iter_zarr_dataset_variables())
+            dataset_names = {dname for _, dname, _ in entries}
+
+            # Parquet is in the same catalogue but never yielded here.
+            self.assertTrue(all(name.endswith(".zarr") for name in dataset_names))
+            self.assertIn(zarr_key, dataset_names)
+
+            uuid, fields = next((u, f) for u, dname, f in entries if dname == zarr_key)
+            self.assertEqual(uuid, zarr_uuid)
+            self.assertIn("analysed_sst", fields)
+            self.assertIn("sea_ice_fraction", fields)
+            self.assertNotIn("global_attributes", fields)
+
     def test_nan_to_none_conversion(self):
         # Create a sample pandas DataFrame with NaN values
         data = {

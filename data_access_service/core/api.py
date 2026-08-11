@@ -17,7 +17,7 @@ import xarray
 
 from datetime import timedelta, timezone
 from io import BytesIO
-from typing import Optional, Dict, Any, List, Tuple, Hashable, overload
+from typing import Iterator, Optional, Dict, Any, List, Tuple, Hashable, overload
 from aodn_cloud_optimised.lib import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
 from aodn_cloud_optimised.lib.config import get_notebook_url
@@ -666,6 +666,27 @@ class API(BaseAPI):
         treat as read-only and as a snapshot of the moment it was read.
         """
         return self._schema_keys
+
+    def iter_zarr_dataset_variables(
+        self,
+    ) -> Iterator[Tuple[str, str, frozenset[str]]]:
+        """Yield (uuid, dataset_name, variable_names) for every zarr dataset
+        captured at init, skipping Parquet entries so callers matching zarr
+        variable specs (e.g. tiler product discovery) don't have to filter
+        dataset_name themselves.
+
+        variable_names is every top-level field name minus
+        "global_attributes" — every remaining key is a real zarr
+        variable/coordinate name. Reuses the already-fetched _schema_keys
+        index rather than calling self._instance.get_metadata() again, which
+        would re-trigger a full S3 catalog scan (see
+        _release_library_metadata_cache).
+        """
+        for uuid, datasets in self._schema_keys.items():
+            for dname, field_names in datasets.items():
+                if not dname.endswith(".zarr"):
+                    continue
+                yield uuid, dname, field_names - {"global_attributes"}
 
     def get_raw_meta_data(self, uuid: str) -> Dict[str, Any]:
         value = self._raw.get(uuid)
