@@ -2,11 +2,11 @@
 
 ``CacheBackend`` is the shared contract; ``NullMemoizer`` and ``RedisMemoizer``
 are the current implementations (see ``create_memoizer`` below, chosen via
-``CACHE_BACKEND``). ``RedisMemoizer`` talks to a Redis-protocol store — today
-that's a local container only (see docker-compose.yml's ``redis`` service,
-which actually runs the Valkey image for parity with AWS ElastiCache for
-Valkey); pointing it at a real ElastiCache for Valkey cluster (auth, TLS,
-cluster topology) is a deliberate follow-up, not covered here.
+``CACHE_BACKEND``). ``RedisMemoizer`` talks to a Redis-protocol store — in
+deployment that's an AWS ElastiCache for Valkey cluster, addressed via the
+``CACHE_HOST`` env var (see ``Config.get_tiler_config``); there's no local
+container in docker-compose.yml, so local runs need ``CACHE_HOST`` pointed at
+a reachable Redis/Valkey instance or ``CACHE_BACKEND=none`` to skip caching.
 
 In-process dedup-only coalescing (``services.caching.deduper.Deduper``) is a
 separate, simpler concern that doesn't fit this module's cache-or-recompute
