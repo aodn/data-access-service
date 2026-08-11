@@ -37,9 +37,9 @@ def test_get_products_coastal_fill_null_when_absent(client, monkeypatch):
 
 
 def test_get_products_reflects_effective_state(client, monkeypatch):
-    """GET /products is built from live Product state, not the raw JSON —
-    fields that products.json doesn't set explicitly still show their
-    resolved value (e.g. ocean_masked's default-by-id rule)."""
+    """GET /products is built from live Product state, so it shows each
+    product's resolved configuration — including defaults nothing in config
+    spelled out explicitly."""
     monkeypatch.setitem(
         registry.PRODUCTS,
         "currents",
@@ -56,29 +56,31 @@ def test_get_products_reflects_effective_state(client, monkeypatch):
     p = by_id["model_sea_level_anomaly_gridded_realtime:ucur+vcur"]
     assert p["data_tile"]["chunk_px"] == [240, 192]
     assert p["data_tile"]["padding"] == 1
-    # ocean_masked here comes from the Product's own default (False), since this
-    # instance was constructed directly rather than via registry._from_dict —
-    # the default-by-id rule lives in _from_dict, not on Product itself.
+    # ocean_masked here is the Product's own default (False). In production the
+    # real currents product gets True from the dataset override in
+    # gridded_variables.json; this instance was constructed directly.
     assert p["ocean_masked"] is False
 
 
-def test_list_products_metadata_uuid_null_when_absent(client, tmp_path, monkeypatch):
-    cfg = tmp_path / "products.json"
-    cfg.write_text(
-        json.dumps(
-            [
-                {
-                    "id": "linked",
-                    "source_path": "s3://b/x.zarr",
-                    "variable": "GSLA",
-                    "metadata_uuid": "uuid-123",
-                },
-                {"id": "plain", "source_path": "s3://b/y.zarr", "variable": "V"},
-            ]
-        )
+def test_list_products_metadata_uuid_null_when_absent(client, monkeypatch):
+    """Derived products always carry the uuid they were discovered under, but
+    the field stays optional on Product, so /products must still serialize the
+    absent case as null rather than omitting it."""
+    monkeypatch.setitem(
+        registry.PRODUCTS,
+        "linked",
+        Product(
+            id="linked",
+            source_path="s3://b/x.zarr",
+            variable="GSLA",
+            metadata_uuid="uuid-123",
+        ),
     )
-    monkeypatch.setattr(registry, "_config_path", cfg)
-    registry.load_products()
+    monkeypatch.setitem(
+        registry.PRODUCTS,
+        "plain",
+        Product(id="plain", source_path="s3://b/y.zarr", variable="V"),
+    )
 
     r = client.get("/api/v1/das/tiler/data_tiles/products")
     assert r.status_code == 200

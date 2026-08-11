@@ -102,6 +102,38 @@ class TestApi(unittest.TestCase):
                 "TIME mapped to eventDate, LATITUDE mapped to decimalLatitude, LONGITUDE mapped to decimalLongitude",
             )
 
+    with open(
+        Path(__file__).resolve().parent.parent / "canned/catalog_uncached.json", "r"
+    ) as file:
+
+        @patch.object(
+            DataQuery.Metadata,
+            "metadata_catalog_uncached",
+            return_value=json.load(file),
+        )
+        def test_get_dataset_variables(self, get_metadata):
+            """The lightweight schema-key accessor: uuid -> dataset_name -> fields.
+
+            This is the index tiler product discovery matches configured gridded
+            variables against, so the per-dataset shape (name -> field names,
+            including the .zarr suffix) matters as much as the values.
+            """
+            api = API()
+            api.initialize_metadata()
+
+            zarr_uuid = "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
+            zarr_key = "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
+            parquet_uuid = "541d4f15-122a-443d-ab4e-2b5feb08d6a0"
+
+            full = api.get_dataset_variables()
+            self.assertIn(zarr_uuid, full)
+            self.assertIn(parquet_uuid, full)
+            self.assertIsInstance(full[zarr_uuid][zarr_key], frozenset)
+            # Real gridded variable names, preserved in their source spelling.
+            self.assertIn("analysed_sst", full[zarr_uuid][zarr_key])
+            self.assertIn("sea_ice_fraction", full[zarr_uuid][zarr_key])
+            self.assertNotIn("GSLA", full[zarr_uuid][zarr_key])
+
     def test_nan_to_none_conversion(self):
         # Create a sample pandas DataFrame with NaN values
         data = {

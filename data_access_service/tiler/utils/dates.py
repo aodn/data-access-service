@@ -10,9 +10,12 @@ from data_access_service.config.config import Config
 # Requests must send them back unchanged.
 LOCAL_TZ = ZoneInfo(Config.get_config().get_tiler_config().tile_timezone)
 
+# Shared with store.registry's date-index build — both must format identically.
+DATE_FMT = "%Y-%m-%d"
+
 
 def ts_to_local_date(ts) -> str:
     """Convert a UTC numpy datetime64 or Timestamp to a local date string (YYYY-MM-DD)."""
     return str(
-        pd.Timestamp(ts).tz_localize("UTC").tz_convert(LOCAL_TZ).strftime("%Y-%m-%d")
+        pd.Timestamp(ts).tz_localize("UTC").tz_convert(LOCAL_TZ).strftime(DATE_FMT)
     )

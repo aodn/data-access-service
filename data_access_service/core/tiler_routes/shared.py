@@ -44,6 +44,21 @@ def get_product_or_404(product_id: str) -> Product:
     return product
 
 
+def visual_product_or_400(product_id: str) -> Product:
+    """Look up a product and reject it if it cannot serve visual tiles.
+
+    A registered scalar can still be data-tile-only, so arity alone can't
+    decide this.
+    """
+    product = get_product_or_404(product_id)
+    if not product.visual:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Product {product_id!r} does not support visual tiles",
+        )
+    return product
+
+
 def validate_date(date: str) -> None:
     try:
         _Date.fromisoformat(date)

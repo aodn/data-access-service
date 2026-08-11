@@ -98,6 +98,9 @@ class Product:
     # group products by collection UUID. Optional and generic for both visual and data tiles.
     metadata_uuid: str | None = None
     ocean_masked: bool = False
+    # Defaulted True (unlike the wire model's required field) since tests
+    # construct Product directly; a pair is always False in practice.
+    visual: bool = True
     data_tile: DataTileConfig = field(default_factory=DataTileConfig)
     visual_tile: VisualTileConfig = field(default_factory=VisualTileConfig)
 

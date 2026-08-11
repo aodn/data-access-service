@@ -107,21 +107,29 @@ class BaseAPI:
     def get_api_status(self) -> bool:
         return False
 
-    async def wait_until_ready(self, timeout: float = 300) -> None:
+    async def wait_until_ready(self, timeout: float | None = 300) -> bool:
         """Poll get_api_status() until it's ready or timeout elapses.
 
         Used to hold off other CPU/memory-heavy startup work (repository refresh,
         tiler startup) until metadata init has finished, so it isn't competing
         with them for resources.
+
+        ``timeout=None`` waits indefinitely — tiler warmup uses this, since a
+        half-populated index would publish an incomplete catalogue. Returns
+        whether the API actually became ready.
         """
         waited = 0.0
         while not self.get_api_status():
-            if waited >= timeout:
+            if timeout is not None and waited >= timeout:
                 log.warning("Timed out waiting for API to become ready")
-                break
+                return False
             await asyncio.sleep(0.5)
             waited += 0.5
+            # An indefinite wait still has to be observable.
+            if timeout is None and waited % 60 == 0:
+                log.info(f"Still waiting for API metadata init ({waited:.0f}s)")
         log.info(f"API ready status = {self.get_api_status()} (waited {waited}s)")
+        return True
 
     def map_column_names(
         self, uuid: str, key: str, columns: list[str] | None
@@ -648,6 +656,16 @@ class API(BaseAPI):
         if value is not None:
             return value
         return {"not_exist": Descriptor(uuid=uuid)}
+
+    def get_dataset_variables(self) -> Dict[str, Dict[str, frozenset[str]]]:
+        """The ``uuid -> dataset_name -> frozenset(field names)`` index.
+
+        Cheap counterpart to get_raw_meta_data: never decompresses the raw
+        catalogue, which is what makes it usable for whole-catalogue scans
+        such as tiler product discovery. Live internal index, not a copy —
+        treat as read-only and as a snapshot of the moment it was read.
+        """
+        return self._schema_keys
 
     def get_raw_meta_data(self, uuid: str) -> Dict[str, Any]:
         value = self._raw.get(uuid)

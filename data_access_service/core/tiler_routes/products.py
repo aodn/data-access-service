@@ -1,4 +1,7 @@
+import logging
 import math
+import time
+from http import HTTPStatus
 
 import xarray as xr
 from fastapi import APIRouter, HTTPException, Path, Query, Response
@@ -29,7 +32,14 @@ from .shared import (
     validate_date,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+# StoreRegistry doesn't cache failed opens, so without this every /manifest
+# call re-attempts every broken store at full S3 timeout.
+_STORE_FAILURE_COOLDOWN_SECONDS = 60.0
+_recent_store_failures: dict[str, tuple[float, Exception]] = {}
 
 
 def _require_point_in_bounds(ds: xr.Dataset, lat: float, lon: float) -> None:
@@ -86,12 +96,16 @@ def get_products_availability(
         openapi_examples={"default": Example(value="2024-12-31")},
     ),
 ):
-    products = {}
-
     # iter_product_items returns a snapshot list so a concurrent reload can't
     # raise RuntimeError ("dictionary changed size during iteration") here.
-    for product_id, product in iter_product_items():
-        all_dates = get_available_dates(product.source_path)
+    items = iter_product_items()
+    dates_by_store = _available_dates_per_store(
+        {product.source_path for _, product in items}
+    )
+
+    products = {}
+    for product_id, product in items:
+        all_dates = dates_by_store[product.source_path]
         # full_date_range is the product's full dataset bounds, independent of from/to;
         # available_dates below is the from/to-filtered subset.
         dates = all_dates
@@ -109,6 +123,50 @@ def get_products_availability(
 
     response.headers.update(REVALIDATE_CACHE_HEADERS)
     return {"products": products}
+
+
+def _available_dates_per_store(store_urls: set[str]) -> dict[str, list[str]]:
+    """Resolve available dates once per unique store, isolating per-store failure."""
+    resolved: dict[str, list[str]] = {}
+    failures: dict[str, Exception] = {}
+    now = time.monotonic()
+
+    for store_url in sorted(store_urls):
+        recent = _recent_store_failures.get(store_url)
+        if recent and now - recent[0] < _STORE_FAILURE_COOLDOWN_SECONDS:
+            # Replay it, so the answer stays stable across the window.
+            resolved[store_url] = []
+            failures[store_url] = recent[1]
+            continue
+        try:
+            resolved[store_url] = get_available_dates(store_url)
+            _recent_store_failures.pop(store_url, None)
+        except Exception as e:
+            if isinstance(e, FileNotFoundError):
+                logger.warning(f"Availability store is absent: {store_url} ({e})")
+            else:
+                logger.exception(f"Availability lookup failed for store: {store_url}")
+            _recent_store_failures[store_url] = (now, e)
+            resolved[store_url] = []
+            failures[store_url] = e
+
+    if failures and len(failures) == len(store_urls):
+        # Absent: let the app's FileNotFoundError handler 404 with the store name.
+        if all(isinstance(e, FileNotFoundError) for e in failures.values()):
+            raise next(iter(failures.values()))
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail="No product store could be opened; availability is unknown.",
+        )
+    if failures:
+        logger.warning(
+            "%d of %d stores failed to resolve availability; their products report "
+            "empty date ranges: %s",
+            len(failures),
+            len(store_urls),
+            ", ".join(sorted(failures)),
+        )
+    return resolved
 
 
 @router.get(
