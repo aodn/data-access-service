@@ -21,15 +21,21 @@ def test_pmtiles_use_fork_process_default():
     assert pm.use_fork_process is True
 
 
-def test_tiler_zarr_store_base_url_has_no_trailing_slash():
-    """Derived product source paths are built as "<base>/<dataset>", and that
-    string is the key for the store registry, date index, and both cache
-    layers. A trailing slash here would produce a second spelling of every
-    store.
+def test_tiler_co_bucket_defaults_when_absent_from_yaml():
+    """Not in config.yaml's tiler section yet (unify with parquet/pmtiles'
+    co_bucket later); falls back to the same bucket name they default to,
+    with the s3:// scheme this field's consumers need.
     """
-    base_url = Config.get_config(EnvType.TESTING).get_tiler_config().zarr_store_base_url
-    assert base_url == "s3://aodn-cloud-optimised"
-    assert not base_url.endswith("/")
+    co_bucket = Config.get_config(EnvType.TESTING).get_tiler_config().co_bucket
+    assert co_bucket == "s3://aodn-cloud-optimised"
+    assert not co_bucket.endswith("/")
+
+
+# co_bucket is derived (yaml co_bucket + "s3://" prefix) rather than a direct
+# yaml passthrough, so it's optional; every other tiler field is required.
+_REQUIRED_TILER_FIELDS = {
+    f.name for f in dataclasses.fields(TilerConfig) if f.name != "co_bucket"
+}
 
 
 def test_tiler_config_fields_all_come_from_yaml():
@@ -38,11 +44,10 @@ def test_tiler_config_fields_all_come_from_yaml():
     This is the check that a missed one fails here rather than at first use.
     """
     yaml_keys = set(Config.get_config(EnvType.TESTING).config["tiler"])
-    dataclass_fields = {f.name for f in dataclasses.fields(TilerConfig)}
-    assert dataclass_fields == yaml_keys
+    assert _REQUIRED_TILER_FIELDS == yaml_keys
 
 
-@pytest.mark.parametrize("missing", [f.name for f in dataclasses.fields(TilerConfig)])
+@pytest.mark.parametrize("missing", sorted(_REQUIRED_TILER_FIELDS))
 def test_get_tiler_config_raises_on_missing_yaml_key(missing):
     tiler_section = dict(Config.get_config(EnvType.TESTING).config["tiler"])
     del tiler_section[missing]

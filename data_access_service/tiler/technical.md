@@ -1031,7 +1031,7 @@ The live example of why `overrides` exists: `["UCUR", "VCUR"]` matches 19 datase
 
 1. Wait for the DAS metadata catalogue (indefinitely — see [§11.2](#112-run_tiler_warmup-coretiler_routesstartuppy)).
 2. Match each specification against the lightweight schema index (`API.get_dataset_variables`), skipping every dataset key that does not end in `.zarr` — the index holds Parquet datasets too. Matching is **case-sensitive**; a pair requires both names.
-3. Build a `Product` per match: id `f"{dataset.removesuffix('.zarr')}:{'+'.join(v.lower() for v in variables)}"`, `source_path` as `f"{tiler.zarr_store_base_url}/{dataset}"` (no trailing slash, ever — that string keys the store registry, date index, and both cache layers), `metadata_uuid` from the index key.
+3. Build a `Product` per match: id `f"{dataset.removesuffix('.zarr')}:{'+'.join(v.lower() for v in variables)}"`, `source_path` as `f"{tiler.co_bucket}/{dataset}"` (no trailing slash, ever — that string keys the store registry, date index, and both cache layers), `metadata_uuid` from the index key.
 4. Prewarm every unique store, verify every candidate, publish atomically. See [§11.2](#112-run_tiler_warmup-coretiler_routesstartuppy).
 
 A duplicate generated id and a zero-candidate result are both fatal; a specification or override that matches nothing is logged, not fatal.

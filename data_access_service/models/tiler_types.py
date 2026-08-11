@@ -8,11 +8,7 @@ class TilerConfig:
     """
 
     tile_timezone: str
-    # Bucket/prefix every derived product's source_path is built under. One
-    # canonical spelling matters: source_path is the key for the store registry,
-    # date index, slice cache, processed cache, and dedupe, so a second spelling
-    # of the same store silently doubles all of them.
-    zarr_store_base_url: str
+    co_bucket: str
     store_ttl_seconds: int
     store_prewarm_workers: int
     store_refresh_workers: int

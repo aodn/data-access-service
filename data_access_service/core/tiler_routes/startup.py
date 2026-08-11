@@ -40,7 +40,7 @@ async def run_tiler_warmup(api: API) -> None:
         candidates = build_candidate_products(
             api.get_dataset_variables(),
             entries,
-            Config.get_config().get_tiler_config().zarr_store_base_url,
+            Config.get_config().get_tiler_config().co_bucket,
         )
         log_unmatched_overrides(candidates, entries)
 
