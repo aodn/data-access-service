@@ -311,6 +311,90 @@ class TestSubsetZarr(TestWithS3):
                 finally:
                     shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
 
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_zarr_mapbox_unwrapped_dateline_matches_normalised(
+        self,
+        aws_clients,
+        upload_test_case_to_s3,
+        mock_get_fs_token_paths,
+        subset_request_factory,
+    ):
+        """#8210 end to end: Mapbox unwrapped lon outside [-180, 180].
+
+        Portal/Mapbox can send a continuous box that crosses the antimeridian
+        with lon < -180. That must be split into dateline-safe pieces and yield
+        the same NetCDF as the already-normal MultiPolygon of those pieces —
+        not an empty lon axis (raw unwrapped bbox misses the store) and not a
+        near-global strip from wrapping vertices alone.
+        """
+        config = Config.get_config()
+        helper = AWSHelper()
+
+        api = API()
+        api.initialize_metadata()
+
+        # Continuous unwrapped box across the dateline. West side after the
+        # split is the Tasman Sea (RAMSSA canned store has real SST there).
+        unwrapped = (-210.0, -40.0, -150.0, -38.0)
+        west = (150.0, -40.0, 180.0, -38.0)
+        east = (-180.0, -40.0, -150.0, -38.0)
+
+        no_ext_key = RAMSSA_KEY.replace(".zarr", "")
+        out_key = f"job_id_888/{no_ext_key}.nc"
+
+        def _download(multi_polygon: str) -> xarray.Dataset:
+            ZarrProcessor(
+                api,
+                job_id="job_id_888",
+                subset_request=subset_request_factory(
+                    uuid=RAMSSA_UUID,
+                    keys=[RAMSSA_KEY],
+                    start_date="2011-11-17",
+                    end_date="2011-11-17",
+                    multi_polygon=multi_polygon,
+                ),
+            ).process()
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                temp_file_path = Path(tmpdirname) / f"{no_ext_key}.nc"
+                helper.download_file_from_s3(
+                    config.get_subsetting_bucket_name(),
+                    out_key,
+                    str(temp_file_path),
+                )
+                # Load into memory so the temp file can be removed.
+                return xarray.open_dataset(temp_file_path).load()
+
+        with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
+            with patch.object(AWSHelper, "send_email"):
+                try:
+                    from_unwrapped = _download(_multi_polygon_of(unwrapped))
+                    from_normalised = _download(_multi_polygon_of(west, east))
+
+                    assert from_unwrapped.sizes["lon"] > 0, (
+                        "unwrapped dateline box produced empty lon axis "
+                        "(coords were not split back into [-180, 180])"
+                    )
+                    assert from_unwrapped.sizes == from_normalised.sizes
+                    np.testing.assert_allclose(
+                        from_unwrapped["lat"].values, from_normalised["lat"].values
+                    )
+                    np.testing.assert_allclose(
+                        from_unwrapped["lon"].values, from_normalised["lon"].values
+                    )
+                    np.testing.assert_allclose(
+                        from_unwrapped["analysed_sst"].values,
+                        from_normalised["analysed_sst"].values,
+                        equal_nan=True,
+                    )
+
+                    lons = from_unwrapped["lon"].values
+                    assert lons.min() >= -180.0 and lons.max() <= 180.0
+                    # Australian / Tasman side of the split must be present.
+                    assert ((lons >= 150.0) & (lons <= 180.0)).any()
+                    assert np.isfinite(from_unwrapped["analysed_sst"].values).any()
+                finally:
+                    shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
+
     def test_non_specified_multi_polygon(
         self,
         aws_clients,
