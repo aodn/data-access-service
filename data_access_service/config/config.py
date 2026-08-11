@@ -272,7 +272,6 @@ class Config:
             extensions=tuple(pqconfig["extensions"]),
         )
 
-
     def get_tiler_config(self) -> TilerConfig:
         redis_env = os.getenv("CACHE_HOST")
         tconfig = self.config.get("tiler", {})

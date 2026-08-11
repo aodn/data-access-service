@@ -78,9 +78,7 @@ class TestRedisMemoizer:
         time.sleep(1.5)
         assert memo.get_or_compute("ttl-key", factory) == 2
 
-    def test_concurrent_get_or_compute_dedups_across_instances(
-        self, redis_container
-    ):
+    def test_concurrent_get_or_compute_dedups_across_instances(self, redis_container):
         # Two separate RedisMemoizer instances (own clients) simulate two app
         # instances racing the same cold key.
         client_a = redis_container.get_client()
@@ -119,7 +117,9 @@ class TestRedisMemoizer:
         unreachable_client = redis.Redis(
             host="localhost", port=1, socket_connect_timeout=1, socket_timeout=1
         )
-        memo = RedisMemoizer(namespace="test", ttl_seconds=60, client=unreachable_client)
+        memo = RedisMemoizer(
+            namespace="test", ttl_seconds=60, client=unreachable_client
+        )
         calls = 0
 
         def factory():
