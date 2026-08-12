@@ -115,13 +115,6 @@ def _resolve_zarr_source(store_url: str) -> ZarrDataSource:
     return source
 
 
-def _open_source(store_url: str) -> ZarrDataSource:
-    """Resolve via lib and validate that coords normalise to lat/lon."""
-    source = _resolve_zarr_source(store_url)
-    _normalise_coords(source.zarr_store, store_url)  # raises if spatial dims missing
-    return source
-
-
 def _build_date_index(ds: xr.Dataset) -> dict[str, list]:
     """Return {local_date: [timestamps]} for the dataset's time coord, or {}.
 
@@ -146,6 +139,17 @@ def _build_date_index(ds: xr.Dataset) -> dict[str, list]:
     return index
 
 
+def _open_store(store_url: str) -> ZarrDataSource:
+    """Resolve via lib and normalise its dataset in place to time/lat/lon."""
+    source = _resolve_zarr_source(store_url)
+    # `source.zarr_store` already holds the full dataset (native TIME/LATITUDE/
+    # LONGITUDE names) the moment the lib opens it; this just overwrites that
+    # same attribute with the renamed/sorted view, once, so every later reader
+    # (ours and the lib's own get_data) sees time/lat/lon without recomputing it.
+    source.zarr_store = _normalise_coords(source.zarr_store, store_url)
+    return source
+
+
 class StoreRegistry:
     """See module docstring for the design.
 
@@ -157,7 +161,7 @@ class StoreRegistry:
 
     def __init__(self, ttl: float) -> None:
         self._ttl = ttl
-        self._sources: dict[str, ZarrDataSource] = {}
+        self._stores: dict[str, ZarrDataSource] = {}
         self._opened_at: dict[str, float] = {}
         self._ttl_jitter: dict[str, float] = {}
         self._refreshing: set[str] = set()
@@ -169,10 +173,10 @@ class StoreRegistry:
         """Return the long-lived source for ``store_url``, opening on first request."""
         should_open = False
         with self._lock:
-            if store_url in self._sources:
+            if store_url in self._stores:
                 deadline = self._ttl + self._ttl_jitter.get(store_url, 0.0)
                 if time.monotonic() - self._opened_at[store_url] < deadline:
-                    return self._sources[store_url]
+                    return self._stores[store_url]
                 # Serve stale, refresh once in the background.
                 if store_url not in self._refreshing:
                     self._refreshing.add(store_url)
@@ -180,7 +184,7 @@ class StoreRegistry:
                         f"Store TTL expired, refreshing in background: {store_url}"
                     )
                     _REFRESH_EXECUTOR.submit(self._refresh_background, store_url)
-                return self._sources[store_url]
+                return self._stores[store_url]
             if store_url in self._in_flight:
                 future = self._in_flight[store_url]
             else:
@@ -192,8 +196,8 @@ class StoreRegistry:
             return future.result()
 
         try:
-            source = _open_source(store_url)
-            index = _build_date_index(_normalise_coords(source.zarr_store, store_url))
+            source = _open_store(store_url)
+            index = _build_date_index(source.zarr_store)
             self._publish(store_url, source, index)
             logger.info(f"Store opened: {store_url} (date_count={len(index)})")
             future.set_result(source)
@@ -207,8 +211,7 @@ class StoreRegistry:
 
     def get(self, store_url: str) -> xr.Dataset:
         """Return a normalised (time/lat/lon) view, opening the source if needed."""
-        source = self._ensure_open(store_url)
-        return _normalise_coords(source.zarr_store, store_url)
+        return self._ensure_open(store_url).zarr_store
 
     def get_datasource(self, store_url: str) -> ZarrDataSource:
         """Return the long-lived ``ZarrDataSource`` for ``store_url`` (opens if needed)."""
@@ -217,10 +220,8 @@ class StoreRegistry:
     def cached(self, store_url: str) -> xr.Dataset | None:
         """Already-open normalised dataset, or None. Never opens, never refreshes."""
         with self._lock:
-            source = self._sources.get(store_url)
-        if source is None:
-            return None
-        return _normalise_coords(source.zarr_store, store_url)
+            source = self._stores.get(store_url)
+        return source.zarr_store if source is not None else None
 
     def date_index(self, store_url: str) -> dict[str, list]:
         """Return the {local_date: [timestamps]} map for ``store_url`` (or empty dict)."""
@@ -304,7 +305,7 @@ class StoreRegistry:
     def clear(self) -> None:
         """Drop all cached state. Intended for tests."""
         with self._lock:
-            self._sources.clear()
+            self._stores.clear()
             self._opened_at.clear()
             self._ttl_jitter.clear()
             self._refreshing.clear()
@@ -319,7 +320,7 @@ class StoreRegistry:
     ) -> None:
         """Atomically replace source, opened-at timestamp, and date index for a URL."""
         with self._lock:
-            self._sources[store_url] = source
+            self._stores[store_url] = source
             self._opened_at[store_url] = time.monotonic()
             self._ttl_jitter[store_url] = random.uniform(
                 0.0, self._ttl * _REFRESH_JITTER_FRACTION
@@ -328,8 +329,8 @@ class StoreRegistry:
 
     def _refresh_background(self, store_url: str) -> None:
         try:
-            source = _open_source(store_url)
-            index = _build_date_index(_normalise_coords(source.zarr_store, store_url))
+            source = _open_store(store_url)
+            index = _build_date_index(source.zarr_store)
             self._publish(store_url, source, index)
             logger.info(f"Store refreshed: {store_url}")
         except Exception:
