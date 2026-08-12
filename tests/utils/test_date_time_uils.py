@@ -1151,14 +1151,32 @@ class TestDateTimeUtils(unittest.TestCase):
         start = ensure_timezone(pd.Timestamp("2010-01-01"))
         end = ensure_timezone(pd.Timestamp("2010-01-03"))
 
-        split_start, split_mid, split_end = split_date_range_binary(start, end)
-        expected_split_start = pd.Timestamp("2010-01-01", tz="UTC")
-        expected_split_mid = pd.Timestamp("2010-01-02", tz="UTC")
-        expected_split_end = pd.Timestamp("2010-01-03", tz="UTC")
-        self.assertEqual(
-            (split_start, split_mid, split_end),
-            (expected_split_start, expected_split_mid, expected_split_end),
+        left_start, left_end, right_start, right_end = split_date_range_binary(
+            start, end
         )
+        expected_left_start = pd.Timestamp("2010-01-01", tz="UTC")
+        # Midpoint of [01-01, 01-03] → right starts at 01-02; left ends 1ns before.
+        expected_right_start = pd.Timestamp("2010-01-02", tz="UTC")
+        expected_left_end = expected_right_start - pd.Timedelta(nanoseconds=1)
+        expected_right_end = pd.Timestamp("2010-01-03", tz="UTC")
+        self.assertEqual(
+            (left_start, left_end, right_start, right_end),
+            (
+                expected_left_start,
+                expected_left_end,
+                expected_right_start,
+                expected_right_end,
+            ),
+        )
+        # Halves are adjacent and non-overlapping (inclusive ends).
+        self.assertEqual(left_end + pd.Timedelta(nanoseconds=1), right_start)
+        self.assertLess(left_end, right_start)
+
+    def test_split_date_range_binary_rejects_too_short_range(self):
+        start = ensure_timezone(pd.Timestamp("2010-01-01 00:00:00"))
+        end = start  # zero-width
+        with self.assertRaises(ValueError):
+            split_date_range_binary(start, end)
 
     @patch(
         "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
@@ -1202,8 +1220,10 @@ class TestDateTimeUtils(unittest.TestCase):
 
         start_date = mock_date_ranges[0]["start_date"]
         end_date = mock_date_ranges[0]["end_date"]
-        mid_date = datetime(2023, 1, 15, tzinfo=timezone.utc)
-        mock_split.return_value = (start_date, mid_date, end_date)
+        # Non-overlapping halves: left ends 1ns before right starts.
+        right_start = datetime(2023, 1, 15, tzinfo=timezone.utc)
+        left_end = right_start - pd.Timedelta(nanoseconds=1)
+        mock_split.return_value = (start_date, left_end, right_start, end_date)
 
         result = check_rows_with_date_range(
             api=mock_api,
@@ -1217,6 +1237,10 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(len(result), 2)
         mock_split.assert_called_once()
         mock_log.info.assert_called_once()
+        # Parent-replacement wording, not a bare "Splitting range".
+        log_msg = mock_log.info.call_args[0][0]
+        self.assertIn("discarding parent", log_msg)
+        self.assertIn("non-overlapping halves", log_msg)
 
     @patch(
         "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
