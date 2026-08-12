@@ -1,28 +1,9 @@
 [
-  {
-    "variable": "GSLA",
-    "overrides": {
-      "model_sea_level_anomaly_gridded_realtime.zarr": {
-        "data_tile": {
-          "coastal_fill": {
-            "max_dist_px": 4
-          }
-        }
-      }
-    }
-  },
-  {
-    "variable": [
-      "UCUR",
-      "VCUR"
-    ],
-    "visual": false,
-    "overrides": {
-      "model_sea_level_anomaly_gridded_realtime.zarr": {
-        "ocean_masked": true
-      }
-    }
-  },
+  "GSLA",
+  [
+    "UCUR",
+    "VCUR"
+  ],
   "GSL",
   "sea_surface_temperature",
   "analysed_sst",

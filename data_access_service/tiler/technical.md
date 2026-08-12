@@ -46,14 +46,14 @@ The tiler is a set of FastAPI routers, mounted inside the larger `data-access-se
 
 It exposes **two independent tile pipelines** from the same underlying data:
 
-| Pipeline        | Output CRS               | Coordinate convention                                                                                  | Consumer                                                                             |
-| --------------- | ------------------------ | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| `/data_tiles`   | EPSG:4326 (Plate Carrée) | Custom LOD pyramid: `z` = LOD level, `x`/`y` = chunk col/row                                           | WebGL shader (decodes raw values, reprojects on GPU)                                 |
+| Pipeline        | Output CRS                                                                                                                                                       | Coordinate convention                                                                                  | Consumer                                                                                                                                |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `/data_tiles`   | EPSG:4326 (Plate Carrée)                                                                                                                                         | Custom LOD pyramid: `z` = LOD level, `x`/`y` = chunk col/row                                           | WebGL shader (decodes raw values, reprojects on GPU)                                                                                    |
 | `/visual_tiles` | EPSG:3857 (Web Mercator) for the `{z}/{x}/{y}` tile endpoint, `/bbox`, and `/animation` alike — see [§5.4](#54-visual-tiles--generated-in-epsg3857-web-mercator) | Standard Web Mercator slippy-map (XYZ) tiles, plus a bbox endpoint and a date-range animation endpoint | Any slippy-map client (MapboxGL, MapLibre, Leaflet, OpenLayers, OSM-style consumers) — all three endpoints are drop-in `raster` sources |
 
 The same Zarr slice is the source for both pipelines; they diverge at the renderer. See [§5](#5-tile-coordinate-systems-and-projection-pipeline) for the full distinction.
 
-Products are **derived at startup**, not written out one by one. `data_access_service/config/tiler/gridded_variables.json` lists *variable specifications* (`"GSLA"`, `["UCUR", "VCUR"]`, …), and warmup fans each one out to every `.zarr` dataset in the DAS metadata catalogue that carries the variable(s), verifies the stores, and publishes the result. Dataset names and metadata UUIDs therefore always come from live metadata, so a dataset rename changes the derived product id rather than leaving a stale one pointing at nothing. Adding or removing a *variable* means editing that file and redeploying; there is no runtime registration API, and a missing or empty config is treated as a broken deploy rather than a valid empty state. See [§13](#13-adding-a-new-product).
+Products are **derived at startup**, not written out one by one. `data_access_service/config/tiler/gridded_variables.json` lists _variable specifications_ (`"GSLA"`, `["UCUR", "VCUR"]`, …), and warmup fans each one out to every `.zarr` dataset in the DAS metadata catalogue that carries the variable(s), applies any per-product tuning from `data_access_service/config/tiler/products.json`, verifies the stores, and publishes the result. Dataset names and metadata UUIDs therefore always come from live metadata, so a dataset rename changes the derived product id rather than leaving a stale one pointing at nothing. Adding or removing a _variable_ means editing `gridded_variables.json` and redeploying; there is no runtime registration API, and a missing or empty config (either file) is treated as a broken deploy rather than a valid empty state. See [§13](#13-adding-a-new-product).
 
 ---
 
@@ -177,8 +177,9 @@ data_access_service/
     http_cache.py                 ← IMMUTABLE_CACHE_HEADERS / REVALIDATE_CACHE_HEADERS — shared by the tiler and the sites feature-collection endpoints — see §6
     tiler/
       constants.py                ← LOD (DataTileLodConfig: max_lods, min_coarsest) + TILE (chunk_px, padding defaults) + COORD_NAMES
-      paths.py                    ← GRIDDED_VARIABLES_CONFIG_PATH, COLORMAPS_CONFIG_PATH, LAND_MASK_PATH, OCEAN_MASK_PATH
-      gridded_variables.json       ← variable specifications fanned out across the catalogue at startup — see §13
+      paths.py                    ← GRIDDED_VARIABLES_CONFIG_PATH, PRODUCTS_CONFIG_PATH, COLORMAPS_CONFIG_PATH, LAND_MASK_PATH, OCEAN_MASK_PATH
+      gridded_variables.json       ← variable specifications fanned out across the catalogue at startup — see §13.1
+      products.json                 ← per-product tuning, keyed by derived product id — see §13.2
       colormaps.json               ← static custom-colormap config, committed with the code
   core/
     tiler_routes/
@@ -192,8 +193,7 @@ data_access_service/
       startup.py                   ← run_tiler_warmup() — the tiler's startup sequence, see §11
   tiler/
     schemas/
-      products.py                  ← ProductConfig (GET /products wire shape), ManifestResponse, PointResponse
-      gridded_variables.py         ← GriddedVariableEntry — source config model, shorthand normalisation + validation
+      products.py                  ← ProductConfig (GET /products wire shape), ProductOverride (products.json), ManifestResponse, PointResponse
       data_tiles.py                ← DataTileManifestResponse (manifest.json shape)
       visual_tiles.py              ← ColormapListResponse
     services/
@@ -209,7 +209,7 @@ data_access_service/
       product/
         product.py                  ← Product dataclass (+ DataTileConfig/VisualTileConfig/CoastalFill) + LOD algorithm + get_lod_grids lazy-init
         registry.py                  ← PRODUCTS dict + publish_products + get_product / iter_products / iter_product_items facades
-        discovery.py                 ← build_candidate_products — fans variable specs out across the metadata schema index
+        discovery.py                 ← discover_products — loads config, fans variable specs out across the metadata schema index, layers products.json on top
         verification.py              ← verify_candidate_products + the store-failure classification
         manifest.py                  ← render_manifest() — bounds + per-variable ranges + LOD meta for manifest.json
       rendering/
@@ -236,12 +236,13 @@ tests/
 
 These paths are constants in `data_access_service/config/tiler/paths.py`, resolved relative to the package (not the CWD) since they're static assets shipped with the code, not runtime-writable state:
 
-| Constant                | Default                       | Notes                                                                                                          |
-| ----------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `GRIDDED_VARIABLES_CONFIG_PATH` | `config/tiler/gridded_variables.json` | Committed with the code; edit + redeploy to add/remove a *variable* — products are derived from it, see [§13](#13-adding-a-new-product). |
-| `COLORMAPS_CONFIG_PATH` | `config/tiler/colormaps.json` | Same as above, for custom colormaps.                                                                           |
-| `LAND_MASK_PATH`        | `tiler/assets/land_mask.npz`  | Committed coastline raster used by coastal fill; see [§7.6](#76-coastal-fill-sparse-products).                 |
-| `OCEAN_MASK_PATH`       | `tiler/assets/ocean_mask.npz` | Committed valid-domain raster used by the ocean-validity mask; see [§7.6](#76-coastal-fill-sparse-products).   |
+| Constant                        | Default                               | Notes                                                                                                                                    |
+| ------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `GRIDDED_VARIABLES_CONFIG_PATH` | `config/tiler/gridded_variables.json` | Committed with the code; edit + redeploy to add/remove a _variable_ — products are derived from it, see [§13](#13-adding-a-new-product). |
+| `PRODUCTS_CONFIG_PATH`          | `config/tiler/products.json`          | Committed with the code; edit + redeploy to tune a discovered product by id — see [§13.2](#132-editing-configtilerproductsjson).         |
+| `COLORMAPS_CONFIG_PATH`         | `config/tiler/colormaps.json`         | Same as above, for custom colormaps.                                                                                                     |
+| `LAND_MASK_PATH`                | `tiler/assets/land_mask.npz`          | Committed coastline raster used by coastal fill; see [§7.6](#76-coastal-fill-sparse-products).                                           |
+| `OCEAN_MASK_PATH`               | `tiler/assets/ocean_mask.npz`         | Committed valid-domain raster used by the ocean-validity mask; see [§7.6](#76-coastal-fill-sparse-products).                             |
 
 **Configuration note.** There is no `.env` file. Operational knobs live under the `tiler:` block of `config/config.yaml` (and the per-environment `config-{dev,staging,edge,prod}.yaml` overlays), read once into a `TilerConfig` dataclass via `Config.get_config().get_tiler_config()`. To change a value, edit the YAML and restart the server. See [§14](#14-configuration).
 
@@ -322,10 +323,10 @@ Because the tile output is already in Web Mercator, `/{z}/{x}/{y}.{ext}` works d
 
 **`/bbox.{ext}`'s `?crs=` query parameter controls both the input bbox's coordinates and the output image's projection — the same value drives both, matching the OGC WMS `SRS`/`CRS` convention.** The route (`_parse_bbox_and_crs` in `core/tiler_routes/visual_tiles.py`) validates and uppercases `crs` once, then uses it two ways:
 
-- **As `bounds_crs`**, to interpret the caller-supplied bbox *input* numbers via `bbox_to_wgs84` (`services/store/spatial.py`) — `EPSG:4326` degrees or `EPSG:3857` metres — before converting to WGS84 for cropping. When `bbox` is omitted, this is forced to `EPSG:4326` regardless of `crs`, because `default_bbox_from_store`'s native bounds are always WGS84.
-- **As `dst_crs`**, passed straight through to `XarrayReader.part(bbox_wgs84, dst_crs=dst_crs, width=..., height=..., reproject_method=...)` (`_bbox_parts_to_rgba` / `render_bbox` in `services/rendering/visual_tiles.py`) to set the *output* projection — independent of whether `bbox` was omitted.
+- **As `bounds_crs`**, to interpret the caller-supplied bbox _input_ numbers via `bbox_to_wgs84` (`services/store/spatial.py`) — `EPSG:4326` degrees or `EPSG:3857` metres — before converting to WGS84 for cropping. When `bbox` is omitted, this is forced to `EPSG:4326` regardless of `crs`, because `default_bbox_from_store`'s native bounds are always WGS84.
+- **As `dst_crs`**, passed straight through to `XarrayReader.part(bbox_wgs84, dst_crs=dst_crs, width=..., height=..., reproject_method=...)` (`_bbox_parts_to_rgba` / `render_bbox` in `services/rendering/visual_tiles.py`) to set the _output_ projection — independent of whether `bbox` was omitted.
 
-`crs` defaults to `EPSG:3857`, so a request with no `crs` argument gets a genuine Web Mercator reprojection (pixels evenly spaced in Web Mercator metres) — a drop-in raster source for MapboxGL/MapLibre/Leaflet/OpenLayers `raster` layers, the same as the `{z}/{x}/{y}` tile endpoint. Passing `crs=EPSG:4326` instead switches both legs: the bbox input is read as geographic degrees, *and* the output becomes a Plate-Carrée crop — useful for non-slippy-map consumers that want geographic-degree pixel spacing (e.g. further scientific processing).
+`crs` defaults to `EPSG:3857`, so a request with no `crs` argument gets a genuine Web Mercator reprojection (pixels evenly spaced in Web Mercator metres) — a drop-in raster source for MapboxGL/MapLibre/Leaflet/OpenLayers `raster` layers, the same as the `{z}/{x}/{y}` tile endpoint. Passing `crs=EPSG:4326` instead switches both legs: the bbox input is read as geographic degrees, _and_ the output becomes a Plate-Carrée crop — useful for non-slippy-map consumers that want geographic-degree pixel spacing (e.g. further scientific processing).
 
 `/animation` (`render_bbox_animation`) takes the same `crs` (as `bounds_crs`) and `dst_crs` split, so every animation frame follows the same rule.
 
@@ -333,7 +334,7 @@ Because the tile output is already in Web Mercator, `/{z}/{x}/{y}.{ext}` works d
 
 - **`crs=EPSG:4326`**: latitude outside `[-90, 90]` — catches real Web Mercator metre values (which run into the millions) passed as degrees.
 - **`crs=EPSG:3857`, world-extent check**: any coordinate outside `±20,037,508.34` metres — catches degree values large enough to already be out of range.
-- **`crs=EPSG:3857`, magnitude check (`_looks_like_degrees`)**: rejects if *every* coordinate individually falls within plausible lon/lat range (`lon` in `[-180, 360]`, `lat` in `[-90, 90]`). This is a magnitude check, not a span check — an earlier version used a minimum-span threshold, but a wide degree bbox like `-180,-90,180,90` (span 360°×180°) has plenty of "span" as fake metres and would slip past that. Checking each coordinate's own plausible range instead catches degree-scale bboxes regardless of span: a genuine Web Mercator bbox with every coordinate this small describes a crop sitting within a few hundred metres of the map's origin (0°N, 0°E) — not a realistic request against this service's IMOS ocean products. This is exactly the failure mode of omitting `crs` with a degree bbox now that the default is `EPSG:3857`: without this guard, the request wouldn't error on CRS validity, it would silently crop a sliver near null island instead of the intended region.
+- **`crs=EPSG:3857`, magnitude check (`_looks_like_degrees`)**: rejects if _every_ coordinate individually falls within plausible lon/lat range (`lon` in `[-180, 360]`, `lat` in `[-90, 90]`). This is a magnitude check, not a span check — an earlier version used a minimum-span threshold, but a wide degree bbox like `-180,-90,180,90` (span 360°×180°) has plenty of "span" as fake metres and would slip past that. Checking each coordinate's own plausible range instead catches degree-scale bboxes regardless of span: a genuine Web Mercator bbox with every coordinate this small describes a crop sitting within a few hundred metres of the map's origin (0°N, 0°E) — not a realistic request against this service's IMOS ocean products. This is exactly the failure mode of omitting `crs` with a degree bbox now that the default is `EPSG:3857`: without this guard, the request wouldn't error on CRS validity, it would silently crop a sliver near null island instead of the intended region.
 
 ### 5.5 Frontend integration
 
@@ -401,7 +402,7 @@ GET /{prefix}/{product_id}/{date}/point?lat=&lon=                → variable va
 
 **Performance**: dates are read from the `time` coordinate of each Zarr store — a 1-D array held in the store singleton, resolved via its per-URL `{local_date: [timestamps]}` index. No spatial data chunks are touched. Availability is a property of the **store**, not the product, so it is resolved once per unique `source_path` and reused by every product sharing it — 85 products, 60 lookups.
 
-**Fault isolation**: each unique store's lookup is wrapped individually. A store that cannot be opened yields `available_dates: []` and a null `full_date_range` **for its own products only**, logged once, while every other product answers normally; the route returns 200 whenever at least one store resolved, and 503 only when none did. This is not an optimisation — ogcapi-java fetches this global manifest on *every* collection-products call, so an unisolated failure would break the product listing for every collection, a global outage wearing the costume of a local degradation. It is also what makes the graded prewarm policy in [§11.2](#112-run_tiler_warmup-coretiler_routesstartuppy) safe: keeping an unresolved store's products registered is only reasonable when one bad store cannot fail `/manifest`.
+**Fault isolation**: each unique store's lookup is wrapped individually. A store that cannot be opened yields `available_dates: []` and a null `full_date_range` **for its own products only**, logged once, while every other product answers normally; the route returns 200 whenever at least one store resolved, and 503 only when none did. This is not an optimisation — ogcapi-java fetches this global manifest on _every_ collection-products call, so an unisolated failure would break the product listing for every collection, a global outage wearing the costume of a local degradation. It is also what makes the graded prewarm policy in [§11.2](#112-run_tiler_warmup-coretiler_routesstartuppy) safe: keeping an unresolved store's products registered is only reasonable when one bad store cannot fail `/manifest`.
 
 **`GET /products`** returns one `ProductConfig` (`schemas/products.py`) per registered product, built from the live `Product` via `ProductConfig.from_product` — so it reflects each product's fully resolved configuration (`ocean_masked`, `visual`, tile settings) rather than what the variable config literally spells out. `lod_grids` is deliberately excluded (computed lazily from the store, not config — see [§13](#13-adding-a-new-product)).
 
@@ -420,7 +421,7 @@ GET /data_tiles/{product_id}/{date}/manifest.json         → bounds + value ran
 
 Colourised PNG/WebP tiles in standard Web Mercator (XYZ). Single-variable products only, **and only those a product's `visual` flag allows**.
 
-The three product-consuming endpoints here (tile, `/bbox`, `/animation`) go through `visual_product_or_400` (`core/tiler_routes/shared.py`), which 404s an unknown product and 400s a registered one whose `visual` is `false`, before any slice is loaded. Arity narrowing alone is no longer sufficient: capability is explicit on the product now, so a registered *scalar* can legitimately be data-tile-only — a variable the renderer has no sensible colouring for — and would otherwise render a meaningless image rather than saying it cannot. The `/point` endpoint is deliberately **not** gated: it reads values rather than rendering them, so a data-only product must still be able to answer it.
+The three product-consuming endpoints here (tile, `/bbox`, `/animation`) go through `visual_product_or_400` (`core/tiler_routes/shared.py`), which 404s an unknown product and 400s a registered one whose `visual` is `false`, before any slice is loaded. Arity narrowing alone is no longer sufficient: capability is explicit on the product now, so a registered _scalar_ can legitimately be data-tile-only — a variable the renderer has no sensible colouring for — and would otherwise render a meaningless image rather than saying it cannot. The `/point` endpoint is deliberately **not** gated: it reads values rather than rendering them, so a data-only product must still be able to answer it.
 
 ```
 GET /visual_tiles/colormaps                                            → all supported colormap names
@@ -450,12 +451,12 @@ Without `rescale`, only the color bar is rendered. With `rescale`, 20 pixels alo
 
 **Bbox-specific query parameters:**
 
-| Query param | Default                 | Description                                                                                                                      |
-| ----------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `bbox`      | dataset's native bounds | Bounding box as `minx,miny,maxx,maxy` — the CRS of these *input* numbers, and of the rendered output, per `crs` (same value drives both — see [§5.4](#54-visual-tiles--generated-in-epsg3857-web-mercator)). **When omitted, `crs` only affects the output** — `_parse_bbox_and_crs` (`core/tiler_routes/visual_tiles.py`) falls back to `default_bbox_from_store` and always reads those native bounds as `EPSG:4326` for input purposes, regardless of what `crs` was passed; the output projection still follows `crs`. |
-| `width`     | `256`                   | Output image width in pixels (1–2048)                                                                                            |
-| `height`    | `256`                   | Output image height in pixels (1–2048)                                                                                           |
-| `crs`       | `EPSG:3857`             | CRS of both the *input* `bbox` coordinates and the rendered *output* image — same value drives both — see [§5.4](#54-visual-tiles--generated-in-epsg3857-web-mercator). `EPSG:3857` (default) for Web Mercator metres in and out (Mapbox `{bbox-epsg-3857}`); `EPSG:4326` for geographic degrees in and a Plate-Carrée image out. When `bbox` is omitted, only affects the output — the input bounds are always read as `EPSG:4326`. |
+| Query param | Default                 | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bbox`      | dataset's native bounds | Bounding box as `minx,miny,maxx,maxy` — the CRS of these _input_ numbers, and of the rendered output, per `crs` (same value drives both — see [§5.4](#54-visual-tiles--generated-in-epsg3857-web-mercator)). **When omitted, `crs` only affects the output** — `_parse_bbox_and_crs` (`core/tiler_routes/visual_tiles.py`) falls back to `default_bbox_from_store` and always reads those native bounds as `EPSG:4326` for input purposes, regardless of what `crs` was passed; the output projection still follows `crs`. |
+| `width`     | `256`                   | Output image width in pixels (1–2048)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `height`    | `256`                   | Output image height in pixels (1–2048)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `crs`       | `EPSG:3857`             | CRS of both the _input_ `bbox` coordinates and the rendered _output_ image — same value drives both — see [§5.4](#54-visual-tiles--generated-in-epsg3857-web-mercator). `EPSG:3857` (default) for Web Mercator metres in and out (Mapbox `{bbox-epsg-3857}`); `EPSG:4326` for geographic degrees in and a Plate-Carrée image out. When `bbox` is omitted, only affects the output — the input bounds are always read as `EPSG:4326`.                                                                                       |
 
 #### 6.3.1 Animation endpoint
 
@@ -469,15 +470,15 @@ GET /visual_tiles/{product_id}/{from_date}/{to_date}/animation.{ext}
 
 **Query parameters:**
 
-| Query param | Default                               | Description                                                                                                                                                                                                              |
-| ----------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Query param | Default                               | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ----------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `bbox`      | dataset's native extent               | `minx,miny,maxx,maxy` in the CRS specified by `crs` (see [§5.4](#54-visual-tiles--generated-in-epsg3857-web-mercator) — `crs` governs both how these numbers are interpreted and the output frames' projection). When omitted, **`crs` only affects the output**: the dataset's lat/lon bounds are always read as `EPSG:4326` (clamped to ±180° lon for antimeridian-straddling grids; pass `bbox` explicitly to render the slice past 180°), while output frames still follow `crs`. |
-| `width`     | _(see "Resolution defaulting" below)_ | Output frame width in pixels (1–2048).                                                                                                                                                                                   |
-| `height`    | _(see "Resolution defaulting" below)_ | Output frame height in pixels (1–2048).                                                                                                                                                                                  |
-| `colormap`  | `viridis`                             | Colormap name. A categorical colormap may only be applied to a categorical variable and is rejected as animated WebP (use `.apng` or `.gif`).                                                                            |
-| `rescale`   | union of all frames                   | `min,max`. The default spans the union of every requested date so the colour ramp is stable frame-to-frame; auto-ranging per frame would flicker.                                                                        |
-| `crs`       | `EPSG:3857`                           | CRS of both the explicit `bbox` *input* and the rendered *output* frames — same value drives both. The default bbox (when `bbox` omitted) is always read as `EPSG:4326` regardless of `crs`, but output frames still follow `crs`.                                                                                                                        |
-| `duration`  | `200`                                 | Milliseconds per frame (10–5000).                                                                                                                                                                                        |
+| `width`     | _(see "Resolution defaulting" below)_ | Output frame width in pixels (1–2048).                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `height`    | _(see "Resolution defaulting" below)_ | Output frame height in pixels (1–2048).                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `colormap`  | `viridis`                             | Colormap name. A categorical colormap may only be applied to a categorical variable and is rejected as animated WebP (use `.apng` or `.gif`).                                                                                                                                                                                                                                                                                                                                         |
+| `rescale`   | union of all frames                   | `min,max`. The default spans the union of every requested date so the colour ramp is stable frame-to-frame; auto-ranging per frame would flicker.                                                                                                                                                                                                                                                                                                                                     |
+| `crs`       | `EPSG:3857`                           | CRS of both the explicit `bbox` _input_ and the rendered _output_ frames — same value drives both. The default bbox (when `bbox` omitted) is always read as `EPSG:4326` regardless of `crs`, but output frames still follow `crs`.                                                                                                                                                                                                                                                    |
+| `duration`  | `200`                                 | Milliseconds per frame (10–5000).                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 **Resolution defaulting** — `_resolve_resolution` (`core/tiler_routes/visual_tiles.py`):
 
@@ -592,7 +593,7 @@ Because the data-tile cut writes the existing valid-mask channel (alpha for scal
 
 **Land-mask asset.** The coastline is a committed, bit-packed global raster `tiler/assets/land_mask.npz` (Natural Earth 1:10m land, ~5.5 km resolution), built once by `scripts/build_land_mask.py`. At runtime `masks.py` needs only numpy + scipy. `load_land_mask` unpacks it lazily and caches the result module-level.
 
-**Ocean-validity mask.** A second committed mask, `tiler/assets/ocean_mask.npz`, built from the model's valid-domain grid. Unlike the land mask, this one is applied to the **raw slice at read time** via `apply_ocean_mask`, not on a render grid — it samples the mask at the source grid's own lon/lat and sets cells outside the valid domain to NaN. Cutting at the source — before bilinear resampling can bleed it into valid neighbours, and before point lookups read it — means every consumer (data tiles, visual tiles, point endpoint) inherits the cut for free. It's opt-in per product via the `ocean_masked` field, which defaults to `false` and is normally switched on through a per-dataset `overrides` entry in `gridded_variables.json` ([§13.1](#131-editing-configtilergridded_variablesjson)) — the mask is built from one specific model grid, so it is a property of that dataset rather than of the variable. The mask is applied every time a slice is read from the Zarr store, so a rebuilt mask asset takes effect immediately on restart.
+**Ocean-validity mask.** A second committed mask, `tiler/assets/ocean_mask.npz`, built from the model's valid-domain grid. Unlike the land mask, this one is applied to the **raw slice at read time** via `apply_ocean_mask`, not on a render grid — it samples the mask at the source grid's own lon/lat and sets cells outside the valid domain to NaN. Cutting at the source — before bilinear resampling can bleed it into valid neighbours, and before point lookups read it — means every consumer (data tiles, visual tiles, point endpoint) inherits the cut for free. It's opt-in per product via the `ocean_masked` field, which defaults to `false` and is normally switched on through a per-id entry in `products.json` ([§13.2](#132-editing-configtilerproductsjson)) — the mask is built from one specific model grid, so it is a property of that product id rather than of the variable. The mask is applied every time a slice is read from the Zarr store, so a rebuilt mask asset takes effect immediately on restart.
 
 **Caveats.**
 
@@ -617,7 +618,7 @@ Everything specific to the `/visual_tiles` pipeline: how the renderer guards aga
 
 A dataset in a projected CRS (e.g. UTM, GDA94/MGA) would have coordinate values in the millions and is rejected immediately with a descriptive `ValueError` (mapped to HTTP 400). This prevents silent mis-rendering — the hardcoded `write_crs("EPSG:4326")` call would otherwise label projected coordinates as geographic without error.
 
-**Not to be confused with the `/bbox` endpoint's `?crs=` query parameter.** This guard is about the *source dataset's own* coordinates, always assumed geographic — it has nothing to do with `?crs=`, which (for `/bbox` and `/animation`) drives both how `bbox_to_wgs84` interprets the caller-supplied bbox numbers (`EPSG:4326` degrees or `EPSG:3857` metres) *and* the output image's projection — see [§5.4](#54-visual-tiles--generated-in-epsg3857-web-mercator).
+**Not to be confused with the `/bbox` endpoint's `?crs=` query parameter.** This guard is about the _source dataset's own_ coordinates, always assumed geographic — it has nothing to do with `?crs=`, which (for `/bbox` and `/animation`) drives both how `bbox_to_wgs84` interprets the caller-supplied bbox numbers (`EPSG:4326` degrees or `EPSG:3857` metres) _and_ the output image's projection — see [§5.4](#54-visual-tiles--generated-in-epsg3857-web-mercator).
 
 ### 8.2 Antimeridian handling
 
@@ -824,10 +825,7 @@ async def run_tiler_warmup(api: API) -> None:
         if not await api.wait_until_ready(timeout=None):  # indefinite — see below
             raise RuntimeError("API metadata never became ready")
 
-        entries = load_gridded_variables()                # variable specs, validated
-        candidates = build_candidate_products(            # fan out across the catalogue
-            api.get_dataset_variables(None), entries, base_url)
-        log_unmatched_overrides(candidates, entries)      # stale key -> loud, not fatal
+        candidates = discover_products(api, base_url)      # load config, fan out, layer overrides
 
         load_colormaps()
         await anyio.to_thread.run_sync(warmup_resample)   # numba JIT warmup, see §7.4
@@ -856,14 +854,14 @@ It deliberately waits for the non-tiler API's own startup before doing tiler wor
 
 `verify_candidate_products` runs two O(1) guards per candidate against the dataset prewarm already opened — the variable exists, and the store has a `time` dimension — and grades store-level failures rather than treating them uniformly:
 
-| Prewarm outcome                              | Result                                                              |
-| -------------------------------------------- | ------------------------------------------------------------------- |
-| Opened successfully                          | Run the two guards; a failure drops **only** that product           |
-| `NotGriddedStoreError` (no lat/lon dims)     | Drop every candidate on that store, logged at INFO                  |
-| `FileNotFoundError` (store is not there)     | Drop every candidate on that store, logged at WARNING               |
-| Unresolved (any store)                       | Keep its candidates, log at ERROR; recovers on the first request    |
+| Prewarm outcome                          | Result                                                           |
+| ---------------------------------------- | ---------------------------------------------------------------- |
+| Opened successfully                      | Run the two guards; a failure drops **only** that product        |
+| `NotGriddedStoreError` (no lat/lon dims) | Drop every candidate on that store, logged at INFO               |
+| `FileNotFoundError` (store is not there) | Drop every candidate on that store, logged at WARNING            |
+| Unresolved (any store)                   | Keep its candidates, log at ERROR; recovers on the first request |
 
-Absence is graded with the *confirmed* answers rather than the operational ones,
+Absence is graded with the _confirmed_ answers rather than the operational ones,
 and is not retried: the bucket said "not there", which will not change on a
 second attempt. It is logged at WARNING rather than INFO because, unlike a
 non-grid store, it is never an intentional exclusion — the usual cause is an
@@ -874,7 +872,7 @@ log, instead of leaving them registered in a state that would never resolve.
 
 No store is special: the outcome is decided by what the store said, never by which products happen to sit on it. Uniformly fatal would be right at 2 stores and wrong at 60 — one flaky S3 endpoint would take the whole tiler to a permanent 503. Keeping unresolved-store products registered is only safe because the availability manifest is fault-isolated per store (see [§6.1](#61-shared-endpoints-mounted-under-both-data_tiles-and-visual_tiles)); otherwise one bad store would fail `/manifest`, and ogcapi-java fetches that on every collection-products call.
 
-Phase 1 deliberately checks *presence* and *time-indexability* only — not dimensions, dtype, or pair-shape compatibility. The curated variable list in `gridded_variables.json` is the phase-1 authority on renderability; per-variable proof is a later step that slots in behind this same call site.
+Phase 1 deliberately checks _presence_ and _time-indexability_ only — not dimensions, dtype, or pair-shape compatibility. The curated variable list in `gridded_variables.json` is the phase-1 authority on renderability; per-variable proof is a later step that slots in behind this same call site.
 
 ### 11.3 Readiness gate
 
@@ -886,9 +884,9 @@ Phase 1 deliberately checks *presence* and *time-indexability* only — not dime
 
 ### 11.5 Other background actions
 
-| Trigger                     | Action                                                                                       | Mechanism                                                                                                              |
-| --------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `prewarm_stores` at startup | Open each unique Zarr store URL (metadata only) and report a per-URL outcome                 | Fans out on the anyio pool, gated by `_STORE_PREWARM_LIMITER` (`store_prewarm_workers`, default 6); operational failures get 3 attempts with exponential backoff |
+| Trigger                     | Action                                                                                       | Mechanism                                                                                                                                                                           |
+| --------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prewarm_stores` at startup | Open each unique Zarr store URL (metadata only) and report a per-URL outcome                 | Fans out on the anyio pool, gated by `_STORE_PREWARM_LIMITER` (`store_prewarm_workers`, default 6); operational failures get 3 attempts with exponential backoff                    |
 | Store TTL expiry            | Re-open Zarr store in the background to pick up new timestamps; stale store served meanwhile | `StoreRegistry._refresh_background` on a bounded pool (`store_refresh_workers`, default 4), with per-store TTL jitter so stores opened together at startup don't all expire at once |
 
 ---
@@ -988,81 +986,92 @@ Sustained throughput is bound by real resources — CPU cores and the S3 connect
 
 ## 13. Adding a new product
 
-Products are **derived**, not listed. `config/tiler/gridded_variables.json` is the single source of truth for which *variables* the tiler serves; which *datasets* those variables live on comes from the DAS metadata catalogue at startup. Adding a product means adding a variable specification and redeploying — and it may add several products at once, since one specification fans out to every matching `.zarr` dataset.
+Products are **derived**, not listed. `config/tiler/gridded_variables.json` is the single source of truth for which _variables_ the tiler serves; which _datasets_ those variables live on comes from the DAS metadata catalogue at startup. `config/tiler/products.json` then layers optional per-product tuning on top, matched by the id discovery derives. Adding a product means adding a variable specification and redeploying — and it may add several products at once, since one specification fans out to every matching `.zarr` dataset.
 
-That indirection is the point. The old `products.json` hard-coded a dataset name and metadata UUID per product, so an upstream rename left a stale product id pointing at nothing and nobody found out until a tile 404'd. Deriving both from live metadata makes a rename change the derived id instead.
+That indirection is the point. A products.json that hard-codes a dataset name and metadata UUID per product lets an upstream rename leave a stale product id pointing at nothing, with nobody finding out until a tile 404's. Deriving identity (`id`/`source_path`/`metadata_uuid`) from live metadata makes a rename change the derived id instead — `products.json` here only ever _tunes_ an id that discovery already produced, it never establishes one.
 
 ### 13.1 Editing `config/tiler/gridded_variables.json`
 
-Each array element is either shorthand or an object:
+A pure flat list — each element is shorthand only, no objects and no tuning:
+
+```json
+["GSL", "GSLA", ["UCUR", "VCUR"]]
+```
+
+Loaded as raw JSON by `discovery._load_gridded_variable_specs` — there is no schema/validation layer for this file, unlike `products.json` (see [§13.2](#132-editing-configtilerproductsjson)). It's a flat list, so there's nothing to normalise.
+
+- Each element is a `str` for a scalar product, or an **ordered two-element list** for a vector pair. The pair's order is the R/G channel order the data-tile shader decodes and is **never sorted**.
+- A malformed entry (blank name, a three-element list, a duplicate name in a pair) isn't rejected at load. It's caught downstream instead: `build_candidate_products` requires every name in an entry to be present in a dataset's field set, so a bad entry almost always just matches nothing and gets logged as an unmatched specification — not a hard failure at startup. `test_gridded_variables_config.py` pins the shape of the committed file so a real mistake still shows up in CI.
+
+### 13.2 Editing `config/tiler/products.json`
+
+A flat list of overrides, each keyed by the derived product id (`{dataset.removesuffix('.zarr')}:{'+'.join(v.lower() for v in variables)}`, joined with `+` in configured pair order):
 
 ```json
 [
-  "GSL",
-  ["UCUR", "VCUR"],
   {
-    "variable": "GSLA",
-    "overrides": {
-      "model_sea_level_anomaly_gridded_realtime.zarr": {
-        "data_tile": { "coastal_fill": { "max_dist_px": 4 } }
-      }
-    }
+    "id": "model_sea_level_anomaly_gridded_realtime:gsla",
+    "data_tile": { "coastal_fill": { "max_dist_px": 4 } }
   },
   {
-    "variable": ["UCUR", "VCUR"],
-    "visual": false,
-    "overrides": {
-      "model_sea_level_anomaly_gridded_realtime.zarr": { "ocean_masked": true }
-    }
+    "id": "model_sea_level_anomaly_gridded_realtime:ucur+vcur",
+    "ocean_masked": true
   }
 ]
 ```
 
-Shorthand and object entries normalise into one canonical `GriddedVariableEntry` (`schemas/gridded_variables.py`) at load time, so discovery and tests only ever see the canonical form.
+Entries normalise into `ProductOverride` (`schemas/products.py`) at load time.
 
-- **`variable`** — a `str` for a scalar product, or an **ordered two-element list** for a vector pair. The pair's order is the R/G channel order the data-tile shader decodes and is **never sorted**. A list must hold exactly two distinct names: one is a scalar (use a plain string), and three or more cannot be encoded into a data tile. A one-element list is rejected rather than silently unwrapped — it would turn a scalar product into a broken vector one.
-- **`visual`** — whether `/visual_tiles` can render it. Defaults to `true` for a scalar and `false` for a pair; `true` on a pair is rejected, since visual tiles render one scalar band. Set it to `false` on a scalar whose variable the renderer has no sensible colouring for. ogcapi-java publishes `tile_types` from this field, so it is what stops a non-renderable product advertising visual tiles.
-- **`overrides`** — the only place tuning lives, keyed by the exact metadata dataset name *including* `.zarr*. Tuning is per dataset because it describes one grid, not the variable: the same variable can appear on stores that need different settings. A dataset with no entry takes the plain defaults. An override key that matches no discovered product is **logged at ERROR** (usually an upstream rename), but is not fatal.
+- **`id`** — must match a product id discovery would derive. Tuning is per _product id_, not per dataset or variable, because the same variable spec fans out across many stores that usually need different settings. A product with no matching entry takes plain defaults. An `id` that matches no discovered product is **logged at ERROR** (usually an upstream rename), but is not fatal.
+- **`visual`** — whether `/visual_tiles` can render this product. Defaults to `true` for a scalar and `false` for a pair; `true` on a pair is rejected, since visual tiles render one scalar band. Set it to `false` on a scalar whose variable the renderer has no sensible colouring for. ogcapi-java publishes `tile_types` from this field, so it is what stops a non-renderable product advertising visual tiles.
+- **`ocean_masked`**, **`data_tile`**, **`visual_tile`** — see [§13.6](#136-optional-overrides).
 - `extra="forbid"` applies at every level, so a typo fails at load rather than being ignored.
+- Duplicate `id`s in the file are rejected at load.
 
-The live example of why `overrides` exists: `["UCUR", "VCUR"]` matches 19 datasets, 18 of which are HF-radar sites on entirely different grids. The committed ocean mask is built from the SLA grid, so only that dataset may enable `ocean_masked`.
+The live example of why per-id tuning exists: `["UCUR", "VCUR"]` matches 19 datasets, 18 of which are HF-radar sites on entirely different grids. The committed ocean mask is built from the SLA grid, so only `model_sea_level_anomaly_gridded_realtime:ucur+vcur` may enable `ocean_masked` — every other dataset that specification matches keeps the plain default.
 
-### 13.2 What startup does with it
+### 13.3 What startup does with it
 
-1. Wait for the DAS metadata catalogue (indefinitely — see [§11.2](#112-run_tiler_warmup-coretiler_routesstartuppy)).
-2. Match each specification against the lightweight schema index (`API.get_dataset_variables`), skipping every dataset key that does not end in `.zarr` — the index holds Parquet datasets too. Matching is **case-sensitive**; a pair requires both names.
-3. Build a `Product` per match: id `f"{dataset.removesuffix('.zarr')}:{'+'.join(v.lower() for v in variables)}"`, `source_path` as `f"{tiler.co_bucket}/{dataset}"` (no trailing slash, ever — that string keys the store registry, date index, and both cache layers), `metadata_uuid` from the index key.
-4. Prewarm every unique store, verify every candidate, publish atomically. See [§11.2](#112-run_tiler_warmup-coretiler_routesstartuppy).
+`run_tiler_warmup` calls one function, `discovery.discover_products(api, base_url)`, which internally:
+
+1. Loads both config files — `discovery._load_gridded_variable_specs()`, `load_product_overrides()`.
+2. Matches each specification against `API.iter_zarr_dataset_variables()` — already filtered to zarr and with `"global_attributes"` stripped from each field set, so discovery never has to know the catalogue holds Parquet too. Matching is **case-sensitive**; a pair requires both names. Builds a `Product` per match at plain defaults: id `f"{dataset.removesuffix('.zarr')}:{'+'.join(v.lower() for v in variables)}"`, `source_path` as `f"{tiler.co_bucket}/{dataset}"` (no trailing slash, ever — that string keys the store registry, date index, and both cache layers), `metadata_uuid` from the index key. This step never looks at `products.json` — see `discovery.build_candidate_products`.
+3. Logs any `products.json` id that matched no candidate (`discovery.log_unmatched_overrides`) — loud, not fatal.
+4. Layers `products.json` on top by id (`discovery.apply_product_overrides`), via `dataclasses.replace` — a separate pass over the already-built candidates, kept apart from step 2 so identity-derivation and config-resolution never mix.
+
+Warmup then prewarms every unique store, verifies every candidate, and publishes atomically. See [§11.2](#112-run_tiler_warmup-coretiler_routesstartuppy).
 
 A duplicate generated id and a zero-candidate result are both fatal; a specification or override that matches nothing is logged, not fatal.
 
-> **Each product gets its own `DataTileConfig`/`VisualTileConfig` instance.** This is a correctness rule, not a style preference. `lod_grids` is a mutable dict on a frozen dataclass, filled in place on first request from *that product's own* store dimensions and never recomputed ([§7.3](#73-lazy-population-servicesproductproductpy--get_lod_grids)). Sharing one instance across a fan-out would make all 32 `sea_surface_temperature` products — which sit on differently-sized grids — inherit whichever store was requested first, producing wrong LOD grids in both `/manifest` and every data tile, with nothing raised anywhere.
+> **Each product gets its own `DataTileConfig`/`VisualTileConfig` instance.** This is a correctness rule, not a style preference. `lod_grids` is a mutable dict on a frozen dataclass, filled in place on first request from _that product's own_ store dimensions and never recomputed ([§7.3](#73-lazy-population-servicesproductproductpy--get_lod_grids)). Sharing one instance across a fan-out would make all 32 `sea_surface_temperature` products — which sit on differently-sized grids — inherit whichever store was requested first, producing wrong LOD grids in both `/manifest` and every data tile, with nothing raised anywhere.
 
-### 13.3 Removing a product
+### 13.4 Removing a product
 
-Remove the variable specification and redeploy — which removes it from *every* dataset that carried it. To drop one dataset's product while keeping the variable elsewhere, the variable has to stop matching that dataset, which is a metadata change rather than a config one. There is no cache eviction step: every deploy is a fresh process, so L1 starts empty regardless.
+Remove the variable specification and redeploy — which removes it from _every_ dataset that carried it. To drop one dataset's product while keeping the variable elsewhere, the variable has to stop matching that dataset, which is a metadata change rather than a config one. There is no cache eviction step: every deploy is a fresh process, so L1 starts empty regardless.
 
-### 13.4 Requirements for the Zarr store
+### 13.5 Requirements for the Zarr store
 
 | Requirement        | Detail                                                                                                                                                                                                           | Enforced |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| Coordinate names   | Must be `lat`/`lon`/`time`, or the uppercase variants `LATITUDE`/`LONGITUDE`/`TIME` (renamed automatically on open). Add a mapping to `COORD_NAMES` in `config/tiler/constants.py` for other naming conventions. | On open |
-| Spatial dimensions | `lat` and `lon` must be present after normalisation — `_open_store` raises `NotGriddedStoreError`, and every candidate on that store is dropped.                                                                 | Startup |
-| Time dimension     | `time` must be a dimension, or every date request would 404 against an empty date index. The candidate is rejected at startup instead.                                                                           | Startup |
-| Variable           | Every name in `Product.variable` must exist in the opened store. Catalogue metadata and store schema can drift; unguarded, that surfaces later as a 404 blaming the requested *date* for a missing variable.     | Startup |
-| CRS                | Coordinates must be geographic degrees (EPSG:4326). The visual renderer guards against projected CRS values; see [§8.1](#81-crs-guard).                                                                          | Render |
-| Renderability      | That the variable is actually a renderable 2-D field is carried by the curated variable list, not proven — dimension/dtype verification is deferred.                                                              | Curation |
+| Coordinate names   | Must be `lat`/`lon`/`time`, or the uppercase variants `LATITUDE`/`LONGITUDE`/`TIME` (renamed automatically on open). Add a mapping to `COORD_NAMES` in `config/tiler/constants.py` for other naming conventions. | On open  |
+| Spatial dimensions | `lat` and `lon` must be present after normalisation — `_open_store` raises `NotGriddedStoreError`, and every candidate on that store is dropped.                                                                 | Startup  |
+| Time dimension     | `time` must be a dimension, or every date request would 404 against an empty date index. The candidate is rejected at startup instead.                                                                           | Startup  |
+| Variable           | Every name in `Product.variable` must exist in the opened store. Catalogue metadata and store schema can drift; unguarded, that surfaces later as a 404 blaming the requested _date_ for a missing variable.     | Startup  |
+| CRS                | Coordinates must be geographic degrees (EPSG:4326). The visual renderer guards against projected CRS values; see [§8.1](#81-crs-guard).                                                                          | Render   |
+| Renderability      | That the variable is actually a renderable 2-D field is carried by the curated variable list, not proven — dimension/dtype verification is deferred.                                                             | Curation |
 
-### 13.5 Optional overrides
+### 13.6 Optional overrides
 
-| Field                      | Where                          | Default        | When to override                                                                                                                                   |
-| -------------------------- | ------------------------------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `data_tile.chunk_px`       | `overrides`                    | `[240, 192]`   | Store has very small or very large spatial extent                                                                                                  |
-| `data_tile.padding`        | `overrides`                    | `1`            | Tile edge artefacts, or no padding needed                                                                                                          |
-| `data_tile.coastal_fill`   | `overrides`                    | unset (off)    | Sparse/coarse products with a wide coastal transparency gap in **data tiles**; see [§7.6](#76-coastal-fill-sparse-products). `{"max_dist_px": N}`. |
-| `visual_tile.coastal_fill` | `overrides`                    | unset (off)    | Same, independently, for **visual tiles**.                                                                                                         |
-| `ocean_masked`             | `defaults`/`overrides`         | `false`        | Force on the ocean-validity mask. Grid-specific, so it normally belongs in `overrides`.                                                             |
-| `visual`                   | entry top level                | scalar `true`, pair `false` | A scalar the current renderer cannot colour meaningfully.                                                                              |
+All of the following live in `products.json`, keyed by product id (see [§13.2](#132-editing-configtilerproductsjson)):
+
+| Field                      | Default                     | When to override                                                                                                                                   |
+| -------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data_tile.chunk_px`       | `[240, 192]`                | Store has very small or very large spatial extent                                                                                                  |
+| `data_tile.padding`        | `1`                         | Tile edge artefacts, or no padding needed                                                                                                          |
+| `data_tile.coastal_fill`   | unset (off)                 | Sparse/coarse products with a wide coastal transparency gap in **data tiles**; see [§7.6](#76-coastal-fill-sparse-products). `{"max_dist_px": N}`. |
+| `visual_tile.coastal_fill` | unset (off)                 | Same, independently, for **visual tiles**.                                                                                                         |
+| `ocean_masked`             | `false`                     | Force on the ocean-validity mask. Grid-specific, so it belongs to one product id, not the variable generally.                                      |
+| `visual`                   | scalar `true`, pair `false` | A scalar the current renderer cannot colour meaningfully.                                                                                          |
 
 `id`, `source_path`, and `metadata_uuid` are **not** configurable — they are derived. `lod_grids` is not a config field either; it is computed at runtime and deliberately excluded from `ProductConfig` (see [§7.3](#73-lazy-population-servicesproductproductpy--get_lod_grids)).
 
@@ -1078,26 +1087,26 @@ There is no `.env` file and no ad-hoc Python-constants module for the tiler. Eve
 | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | **`config/config.yaml` `tiler:` block** (this section) | Operational knobs — perf, resource limits, backend selection. Do **not** affect wire format or shader contract. | Edit the YAML directly; doesn't need coordinated frontend review.               |
 | **`config/tiler/constants.py`**                        | Wire / shader contracts — values that must stay in lockstep with the frontend or the data encoding.             | Change via PR so frontend and server stay in sync; the diff is the audit trail. |
-| **Per-product fields** (`gridded_variables.json`)      | Data characteristics that legitimately vary across products.                                                    | Set per product in the config file; restart.                                    |
+| **Per-product fields** (`products.json`)               | Data characteristics that legitimately vary across products.                                                    | Set per product id in the config file; restart.                                 |
 
-The rule when adding a new tunable: ask _who needs to be informed when the value changes?_ Only the operator → the YAML config. The frontend (or any wire-format consumer) needs a matching update → `constants.py`, via code review. Only some products are affected → a `defaults` (or per-dataset `overrides`) field in `gridded_variables.json`.
+The rule when adding a new tunable: ask _who needs to be informed when the value changes?_ Only the operator → the YAML config. The frontend (or any wire-format consumer) needs a matching update → `constants.py`, via code review. Only some products are affected → a per-id field in `products.json`.
 
 A wrong-layer choice has real costs: making `LOD.max_lods` a freely-edited operational setting would let someone raise it thinking "more LODs = better detail," silently overflowing the WebGL atlas's 4096×4096 (~64 MB VRAM) cap.
 
 ### 14.2 The `tiler:` config block (`config/config.yaml`)
 
-| Key                           | Default            | Description                                                                                                                                                                  |
-| ----------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tile_timezone`               | `Australia/Sydney` | IANA timezone for date conversion. See [§9](#9-date-timezone-and-coordinate-normalisation).                                                                                  |
-| `store_ttl_seconds`           | `600`              | Stale-while-revalidate window for the Zarr store singleton.                                                                                                                  |
-| `store_prewarm_workers`       | `6`                | Capacity-limiter cap for concurrent `xr.open_zarr` opens during startup store prewarm. Sized to the S3 connection pool.                                                      |
-| `thread_pool_size`            | `20`               | Anyio thread-pool size, shared with the rest of `data-access-service`. Each in-flight sync tiler request uses one slot. See [§12](#12-concurrency-event-loop-and-threading). |
-| `animation_workers`           | `10`               | Capacity-limiter cap for `/animation` per-frame S3 fan-out. Sized to the aiobotocore S3 connection pool.                                                                     |
-| `cache_backend`               | `"none"`           | Selects the L1 `CacheBackend` implementation. `"none"` is the only one implemented today — see [§10](#10-caching-strategy).                                                  |
-| `slice_cache_ttl_seconds`     | `600`              | Per-entry TTL for the L1 slice cache. Unused while `cache_backend` is `"none"` (no cache backend reads it).                                                                  |
-| `s3_anon`                     | `true`             | Anonymous S3 access — correct for the public AODN buckets. `false` lets `fsspec` discover AWS credentials for private buckets.                                               |
-| `s3_connect_timeout`          | `5`                | Seconds for DNS + TCP/TLS handshake.                                                                                                                                         |
-| `s3_read_timeout`             | `30`               | Seconds of socket inactivity before a read fails (per-read, not per-request).                                                                                                |
-| `s3_max_attempts`             | `2`                | Maximum total attempts (initial + retries) per S3 operation, botocore `standard` retry mode.                                                                                 |
+| Key                       | Default            | Description                                                                                                                                                                  |
+| ------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tile_timezone`           | `Australia/Sydney` | IANA timezone for date conversion. See [§9](#9-date-timezone-and-coordinate-normalisation).                                                                                  |
+| `store_ttl_seconds`       | `600`              | Stale-while-revalidate window for the Zarr store singleton.                                                                                                                  |
+| `store_prewarm_workers`   | `6`                | Capacity-limiter cap for concurrent `xr.open_zarr` opens during startup store prewarm. Sized to the S3 connection pool.                                                      |
+| `thread_pool_size`        | `20`               | Anyio thread-pool size, shared with the rest of `data-access-service`. Each in-flight sync tiler request uses one slot. See [§12](#12-concurrency-event-loop-and-threading). |
+| `animation_workers`       | `10`               | Capacity-limiter cap for `/animation` per-frame S3 fan-out. Sized to the aiobotocore S3 connection pool.                                                                     |
+| `cache_backend`           | `"none"`           | Selects the L1 `CacheBackend` implementation. `"none"` is the only one implemented today — see [§10](#10-caching-strategy).                                                  |
+| `slice_cache_ttl_seconds` | `600`              | Per-entry TTL for the L1 slice cache. Unused while `cache_backend` is `"none"` (no cache backend reads it).                                                                  |
+| `s3_anon`                 | `true`             | Anonymous S3 access — correct for the public AODN buckets. `false` lets `fsspec` discover AWS credentials for private buckets.                                               |
+| `s3_connect_timeout`      | `5`                | Seconds for DNS + TCP/TLS handshake.                                                                                                                                         |
+| `s3_read_timeout`         | `30`               | Seconds of socket inactivity before a read fails (per-read, not per-request).                                                                                                |
+| `s3_max_attempts`         | `2`                | Maximum total attempts (initial + retries) per S3 operation, botocore `standard` retry mode.                                                                                 |
 
 There are no Redis/distributed-cache connection settings in the current config — `cache_backend` only accepts `"none"` today; `create_memoizer()` raises `ValueError` for anything else.

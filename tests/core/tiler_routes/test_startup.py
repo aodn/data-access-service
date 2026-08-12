@@ -71,13 +71,11 @@ def warmup_env(monkeypatch):
         calls.append("mark_ready")
         state["ready"] = True
 
-    monkeypatch.setattr(startup, "load_gridded_variables", record("load_config", []))
     monkeypatch.setattr(
         startup,
-        "build_candidate_products",
+        "discover_products",
         lambda *a, **k: (calls.append("discover"), state["candidates"])[1],
     )
-    monkeypatch.setattr(startup, "log_unmatched_overrides", record("overrides"))
     monkeypatch.setattr(startup, "load_colormaps", record("colormaps"))
     monkeypatch.setattr(startup, "warmup_resample", record("resample"))
     monkeypatch.setattr(startup, "warmup_visual", record("visual"))
@@ -157,9 +155,7 @@ async def test_verification_dropping_everything_leaves_the_tiler_unready(
 @pytest.mark.parametrize(
     "failing_step",
     [
-        "load_gridded_variables",
-        "build_candidate_products",
-        "log_unmatched_overrides",
+        "discover_products",
         "publish_products",
     ],
 )

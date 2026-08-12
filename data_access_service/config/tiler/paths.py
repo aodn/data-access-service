@@ -12,10 +12,14 @@ from pathlib import Path
 # resolved relative to the package rather than the CWD.
 COLORMAPS_CONFIG_PATH = str(Path(__file__).resolve().parent / "colormaps.json")
 # Variable specifications fanned out across the metadata catalogue at startup
-# to derive the product set — see tiler/schemas/gridded_variables.py.
+# to derive the product set — see services/product/discovery.py.
 GRIDDED_VARIABLES_CONFIG_PATH = str(
     Path(__file__).resolve().parent / "gridded_variables.json"
 )
+# Per-product tuning, keyed by the derived product id (see
+# services/product/discovery.py::product_id) and applied on top of the
+# candidates gridded_variables.json fans out — see schemas/products.py.
+PRODUCTS_CONFIG_PATH = str(Path(__file__).resolve().parent / "products.json")
 
 # Mask assets stay with the tiler package (not config) since they're binary
 # data, not something a dev edits — resolved relative to the repo's
