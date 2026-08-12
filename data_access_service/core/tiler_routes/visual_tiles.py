@@ -578,7 +578,7 @@ async def get_animation(
     product = visual_product_or_400(product_id)
     variable = single_variable_or_400(product, context="animation")
 
-    # Offloaded: each may call get_store, which can block on xr.open_zarr on
+    # Offloaded: each may call get_store, which can block on lib open on
     # cold path or while a TTL refresh is racing the cached entry.
     bbox_tuple, bounds_crs, dst_crs = await anyio.to_thread.run_sync(
         _parse_bbox_and_crs, bbox, crs, product.source_path

@@ -7,6 +7,7 @@ in-process via ``_slice_dedup`` (independent of ``CACHE_BACKEND``); when
 instances and caches the result (see ``services.caching.slice_cache``).
 
 Long-lived store handles live in their own module ([[store.registry]]).
+Time selection goes through ``aodn_cloud_optimised`` ``ZarrDataSource.get_data``.
 """
 
 import pandas as pd
@@ -16,6 +17,7 @@ from data_access_service.tiler.services.caching.deduper import Deduper
 from data_access_service.tiler.services.caching.slice_cache import slice_memo
 from data_access_service.tiler.services.rendering.masks import apply_ocean_mask
 from data_access_service.tiler.services.store.registry import (
+    get_datasource,
     get_store,
     store_registry,
 )
@@ -23,6 +25,11 @@ from data_access_service.tiler.services.store.registry import (
 # Always in-process, independent of CACHE_BACKEND — see Deduper's docstring
 # for why this matters even (especially) under CACHE_BACKEND=none.
 _slice_dedup = Deduper()
+
+
+def _ts_for_get_data(ts) -> str:
+    """Format a timestamp for ``ZarrDataSource.get_data`` date bounds."""
+    return pd.Timestamp(ts).isoformat()
 
 
 def _compute_slice_from_store(
@@ -45,6 +52,7 @@ def _compute_slice_from_store(
 def _fetch_slice_from_store(
     store_url: str, date: str, variables: list[str]
 ) -> xr.Dataset:
+    # Ensure store is open (date index + variable catalogue on normalised view).
     store = get_store(store_url)
 
     missing = [v for v in variables if v not in store.data_vars]
@@ -64,8 +72,23 @@ def _fetch_slice_from_store(
             else " No dates are available."
         )
         raise FileNotFoundError(f"No data for date {date!r}.{hint}")
+
+    # Exact timestamp from the local-date index keeps tiler date semantics
+    # (tile_timezone) rather than a bare calendar-string range on get_data.
+    t0 = matching[0]
     try:
-        return store[variables].sel(time=pd.Timestamp(matching[0])).compute()
+        ds = get_datasource(store_url).get_data(
+            date_start=_ts_for_get_data(t0),
+            date_end=_ts_for_get_data(t0),
+        )
+        ds = ds[variables]
+        # get_data returns a time range (often length 1). Match previous
+        # .sel(time=scalar) behaviour: one frame, time dim dropped.
+        if "time" in ds.dims:
+            if ds.sizes["time"] == 0:
+                raise KeyError(date)
+            ds = ds.isel(time=0)
+        return ds.compute() if hasattr(ds, "compute") else ds
     except KeyError as e:
         raise FileNotFoundError(f"No data found for date {date}") from e
 
@@ -76,7 +99,7 @@ def load_slice(
     """
     Return a fully-computed 2D (lat × lon) slice for the given store, date, and variables.
     Uses nearest-match on time so callers don't need to ask exact timestamps.
-    Coordinate names are already normalised by the store registry.
+    Coordinate names are normalised to ``time``/``lat``/``lon`` before return.
 
     ``ocean_masked`` (from ``Product.ocean_masked``) nulls anomalous values outside
     the valid model domain. It's a deterministic function of the cache key (a store
@@ -99,7 +122,7 @@ def load_slice_uncached(
 ) -> xr.Dataset:
     """Return a 2-D slice without touching L1.
 
-    Pulls directly from the Zarr store. Used by the animation endpoint so a
+    Pulls via lib ``get_data``. Used by the animation endpoint so a
     rare multi-date request doesn't evict another product's hot slices from
     the shared L1 cache (CACHE_BACKEND=redis).
     """

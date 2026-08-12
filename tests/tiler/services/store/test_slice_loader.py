@@ -1,7 +1,7 @@
 """loader.load_slice + date-index resolution.
 
-Existing tests in test_loader.py cover get_store + get_lod_grids. These cover
-the L1 cache interaction and the multi-timestamp resolution path.
+Existing tests in test_registry.py cover get_store + get_lod_grids. These cover
+the L1 cache interaction, get_data path, and multi-timestamp resolution.
 """
 
 import threading
@@ -14,6 +14,29 @@ import xarray as xr
 
 import data_access_service.tiler.services.store.slice_loader as loader
 from data_access_service.tiler.services.store.registry import store_registry
+
+
+class _FakeZarrSource:
+    def __init__(self, ds: xr.Dataset):
+        self.zarr_store = ds
+
+    def get_data(self, date_start=None, date_end=None, **_kwargs) -> xr.Dataset:
+        ds = self.zarr_store
+        time_name = (
+            "time" if "time" in ds.dims else "TIME" if "TIME" in ds.dims else None
+        )
+        if time_name is not None and (date_start is not None or date_end is not None):
+            return ds.sel({time_name: slice(date_start, date_end)})
+        return ds
+
+
+def _patch_source(monkeypatch, ds: xr.Dataset):
+    source = _FakeZarrSource(ds)
+    monkeypatch.setattr(
+        "data_access_service.tiler.services.store.registry._resolve_zarr_source",
+        lambda _url: source,
+    )
+    return source
 
 
 @pytest.fixture(autouse=True)
@@ -46,7 +69,7 @@ def test_load_slice_returns_dataset_for_known_date(monkeypatch):
     """Happy path: date in index → slice computed and returned."""
     # 2024-01-15 UTC → local date 2024-01-16 in Sydney (UTC+11).
     ds = _ds_with_time(["2024-01-15T13:00:00"])
-    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: ds)
+    _patch_source(monkeypatch, ds)
 
     result = loader.load_slice("s3://b/x.zarr", "2024-01-16", ["v"])
     assert "v" in result.data_vars
@@ -55,7 +78,7 @@ def test_load_slice_returns_dataset_for_known_date(monkeypatch):
 
 def test_load_slice_unknown_date_raises_file_not_found(monkeypatch):
     ds = _ds_with_time(["2024-01-15T13:00:00"])
-    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: ds)
+    _patch_source(monkeypatch, ds)
 
     with pytest.raises(
         FileNotFoundError, match="Latest available date is '2024-01-16'"
@@ -65,11 +88,9 @@ def test_load_slice_unknown_date_raises_file_not_found(monkeypatch):
 
 def test_load_slice_unknown_variable_names_the_variable_not_the_date(monkeypatch):
     """A variable absent from the store (e.g. a stale/misconfigured products.json
-    entry) must be reported as such, not misattributed to the date — store[variables]
-    and .sel(time=...) both raise plain KeyError, so the missing-variable case has
-    to be told apart from a genuine missing-timestamp case before that catch-all."""
+    entry) must be reported as such, not misattributed to the date."""
     ds = _ds_with_time(["2024-01-15T13:00:00"])
-    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: ds)
+    _patch_source(monkeypatch, ds)
 
     with pytest.raises(FileNotFoundError, match=r"NOT_A_REAL_VAR"):
         loader.load_slice("s3://b/x.zarr", "2024-01-16", ["NOT_A_REAL_VAR"])
@@ -80,11 +101,30 @@ def test_load_slice_uses_first_timestamp_when_multiple_map_to_same_date(monkeypa
     using the first (index-order) timestamp's data."""
     # Two times that both land on Sydney local date 2024-01-16.
     ds = _ds_with_time(["2024-01-15T13:00:00", "2024-01-15T14:00:00"])
-    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: ds)
+    _patch_source(monkeypatch, ds)
 
     result = loader.load_slice("s3://b/x.zarr", "2024-01-16", ["v"])
 
     assert np.array_equal(result["v"].values, ds["v"].isel(time=0).values)
+
+
+def test_load_slice_calls_get_data(monkeypatch):
+    """Slice path must go through ZarrDataSource.get_data (lib query API)."""
+    ds = _ds_with_time(["2024-01-15T13:00:00"])
+    source = _patch_source(monkeypatch, ds)
+    calls: list[tuple] = []
+    real_get_data = source.get_data
+
+    def tracking_get_data(*args, **kwargs):
+        calls.append((args, kwargs))
+        return real_get_data(*args, **kwargs)
+
+    source.get_data = tracking_get_data  # type: ignore[method-assign]
+
+    loader.load_slice("s3://b/x.zarr", "2024-01-16", ["v"])
+    assert len(calls) == 1
+    assert calls[0][1].get("date_start") is not None
+    assert calls[0][1].get("date_end") is not None
 
 
 # --- ocean_masked flag ---
@@ -109,7 +149,7 @@ def _ds_ocean(times: list[str], lats: list[float], lons: list[float]) -> xr.Data
 
 def test_load_slice_ocean_masked_nulls_invalid_cells(monkeypatch):
     ds = _ds_ocean(["2024-01-15T13:00:00"], [-40.0, -6.4], [150.0, 137.0])
-    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: ds)
+    _patch_source(monkeypatch, ds)
 
     result = loader.load_slice("s3://b/x.zarr", "2024-01-16", ["v"], ocean_masked=True)
     # Open-ocean cell survives; the New Guinea land cell is nulled.
@@ -119,7 +159,7 @@ def test_load_slice_ocean_masked_nulls_invalid_cells(monkeypatch):
 
 def test_load_slice_without_ocean_masked_keeps_all_cells(monkeypatch):
     ds = _ds_ocean(["2024-01-15T13:00:00"], [-40.0, -6.4], [150.0, 137.0])
-    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: ds)
+    _patch_source(monkeypatch, ds)
 
     result = loader.load_slice(
         "s3://b/x.zarr", "2024-01-16", ["v"]
@@ -136,7 +176,7 @@ def test_concurrent_identical_loads_share_one_compute(monkeypatch):
     S3 fetch independently. This is what `_slice_dedup` (services.caching.deduper)
     protects — see its docstring for why this matters even without a cache."""
     ds = _ds_with_time(["2024-01-15T13:00:00"])
-    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: ds)
+    _patch_source(monkeypatch, ds)
 
     calls = 0
     proceed = threading.Event()

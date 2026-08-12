@@ -27,8 +27,25 @@ def _make_ds() -> xr.Dataset:
     )
 
 
+class _FakeZarrSource:
+    def __init__(self, ds: xr.Dataset):
+        self.zarr_store = ds
+
+
+def _patch_resolve(monkeypatch, factory):
+    """``factory`` is a zero-arg callable returning a Dataset (or raises)."""
+
+    def resolve(_url: str):
+        return _FakeZarrSource(factory())
+
+    monkeypatch.setattr(
+        "data_access_service.tiler.services.store.registry._resolve_zarr_source",
+        resolve,
+    )
+
+
 def test_refresh_uses_the_bounded_pool_not_a_raw_thread(monkeypatch):
-    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: _make_ds())
+    _patch_resolve(monkeypatch, _make_ds)
     monkeypatch.setattr(
         threading,
         "Thread",
@@ -51,8 +68,11 @@ def test_refresh_uses_the_bounded_pool_not_a_raw_thread(monkeypatch):
 def test_refresh_concurrency_never_exceeds_the_configured_bound(monkeypatch):
     peak = {"current": 0, "max": 0}
     lock = threading.Lock()
+    phase = {"refresh": False}
 
-    def slow_open(*_, **__):
+    def factory():
+        if not phase["refresh"]:
+            return _make_ds()
         with lock:
             peak["current"] += 1
             peak["max"] = max(peak["max"], peak["current"])
@@ -61,13 +81,13 @@ def test_refresh_concurrency_never_exceeds_the_configured_bound(monkeypatch):
             peak["current"] -= 1
         return _make_ds()
 
-    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: _make_ds())
+    _patch_resolve(monkeypatch, factory)
     store = StoreRegistry(ttl=0.0)
     urls = [f"s3://b/{i}.zarr" for i in range(20)]
     for url in urls:
         store.get(url)
 
-    monkeypatch.setattr(xr, "open_zarr", slow_open)
+    phase["refresh"] = True
     for url in urls:
         store.get(url)  # each is stale, so each queues a refresh
 
@@ -81,7 +101,7 @@ def test_refresh_concurrency_never_exceeds_the_configured_bound(monkeypatch):
 
 
 def test_one_store_queues_at_most_one_refresh(monkeypatch):
-    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: _make_ds())
+    _patch_resolve(monkeypatch, _make_ds)
     submitted: list[str] = []
     monkeypatch.setattr(
         registry._REFRESH_EXECUTOR, "submit", lambda fn, url: submitted.append(url)
@@ -96,16 +116,16 @@ def test_one_store_queues_at_most_one_refresh(monkeypatch):
 
 
 def test_stale_store_is_served_immediately_during_refresh(monkeypatch):
-    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: _make_ds())
+    _patch_resolve(monkeypatch, _make_ds)
     monkeypatch.setattr(registry._REFRESH_EXECUTOR, "submit", lambda fn, url: None)
 
     store = StoreRegistry(ttl=0.0)
-    first = store.get("s3://b/a.zarr")
-    assert store.get("s3://b/a.zarr") is first
+    first = store.get_datasource("s3://b/a.zarr")
+    assert store.get_datasource("s3://b/a.zarr") is first
 
 
 def test_jitter_spreads_deadlines_across_stores(monkeypatch):
-    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: _make_ds())
+    _patch_resolve(monkeypatch, _make_ds)
 
     store = StoreRegistry(ttl=600.0)
     for i in range(30):
@@ -117,7 +137,7 @@ def test_jitter_spreads_deadlines_across_stores(monkeypatch):
 
 
 def test_jitter_is_bounded_so_freshness_policy_is_not_changed(monkeypatch):
-    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: _make_ds())
+    _patch_resolve(monkeypatch, _make_ds)
 
     store = StoreRegistry(ttl=600.0)
     store.get("s3://b/a.zarr")
@@ -126,7 +146,7 @@ def test_jitter_is_bounded_so_freshness_policy_is_not_changed(monkeypatch):
 
 
 def test_clear_drops_jitter_state(monkeypatch):
-    monkeypatch.setattr(xr, "open_zarr", lambda *_, **__: _make_ds())
+    _patch_resolve(monkeypatch, _make_ds)
     store = StoreRegistry(ttl=600.0)
     store.get("s3://b/a.zarr")
 
