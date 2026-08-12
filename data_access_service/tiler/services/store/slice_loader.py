@@ -17,7 +17,6 @@ from data_access_service.tiler.services.caching.deduper import Deduper
 from data_access_service.tiler.services.caching.slice_cache import slice_memo
 from data_access_service.tiler.services.rendering.masks import apply_ocean_mask
 from data_access_service.tiler.services.store.registry import (
-    _normalise_coords,
     get_datasource,
     get_store,
     store_registry,
@@ -82,7 +81,6 @@ def _fetch_slice_from_store(
             date_start=_ts_for_get_data(t0),
             date_end=_ts_for_get_data(t0),
         )
-        ds = _normalise_coords(ds, store_url)
         ds = ds[variables]
         # get_data returns a time range (often length 1). Match previous
         # .sel(time=scalar) behaviour: one frame, time dim dropped.
