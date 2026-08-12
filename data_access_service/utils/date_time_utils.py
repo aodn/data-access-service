@@ -12,6 +12,7 @@ from datetime import datetime
 from inspect import iscoroutinefunction
 
 from dateutil.relativedelta import relativedelta
+from pandas._libs import NaTType
 
 from data_access_service.models.subset_request import NON_SPECIFIED
 
@@ -30,8 +31,8 @@ log = logging.getLogger(__name__)
 
 # parse all common format of date string into given format, such as "%Y-%m-%d"
 def parse_date(
-    date_string: str, format_to_convert: str = None, time_zone: str = pytz.UTC
-) -> pd.Timestamp:
+    date_string: str, format_to_convert: str | None = None, time_zone: str = pytz.UTC
+) -> pd.Timestamp | NaTType:
     if format_to_convert is None:
         return pd.Timestamp(date_string).tz_localize(time_zone)
     else:
@@ -96,7 +97,7 @@ def next_month_first_day(date: pd.Timestamp) -> pd.Timestamp:
     )
 
 
-def ensure_timezone(dt: pd.Timestamp) -> pd.Timestamp:
+def ensure_timezone(dt: pd.Timestamp | NaTType) -> pd.Timestamp | NaTType:
     """
     Check if datetime has timezone info; if not, assume UTC.
 
@@ -106,7 +107,7 @@ def ensure_timezone(dt: pd.Timestamp) -> pd.Timestamp:
     Returns:
         Datetime object with timezone info (UTC if none was present)
     """
-    if dt.tz is None:
+    if dt.tz is None and not isinstance(dt, NaTType):
         return dt.tz_localize(pytz.UTC)
     return dt
 
@@ -122,30 +123,68 @@ def to_naive_utc(ts: pd.Timestamp | None) -> pd.Timestamp | None:
 
 def split_date_range_binary(
     start_date: Timestamp, end_date: Timestamp
-) -> tuple[Timestamp, Timestamp, Timestamp]:
+) -> tuple[Timestamp, Timestamp | NaTType, Timestamp | NaTType, Timestamp]:
     """
-    A basic binary division to split date range
+    Binary-split a date range into two adjacent, non-overlapping inclusive halves.
+
+    Filters treat both ends as inclusive, so the split uses a 1ns gap at the mid
+    point: left is [start, mid_exclusive_end] and right is [right_start, end],
+    with mid_exclusive_end + 1ns == right_start. Together they cover [start, end]
+    without sharing any timestamp.
+
     Args:
-        start_date: The start date of the range. UTC string in 'YYYY-MM-DD HH:MM:SS.fffffffff+00:00' format.
-        end_date: The end date of the range. UTC string in 'YYYY-MM-DD HH:MM:SS.fffffffff+00:00' format.
+        start_date: Inclusive start of the range (UTC).
+        end_date: Inclusive end of the range (UTC).
+
     Returns:
-        tuple[str, str, str] The start date, mid date, and end date of the date range.
+        (left_start, left_end, right_start, right_end)
+
+    Raises:
+        ValueError: If the range is too short to split into two non-empty halves.
     """
     if not isinstance(start_date, pd.Timestamp):
         start_date = pd.Timestamp(start_date)
     if not isinstance(end_date, pd.Timestamp):
         end_date = pd.Timestamp(end_date)
 
-    duration_ns = (end_date - start_date).total_seconds() * 1e9
-    mid_ns = duration_ns / 2
-
-    mid_date = start_date + pd.Timedelta(nanoseconds=mid_ns)
-    # make sure the time zone is attached
     start_date = ensure_timezone(start_date)
-    mid_date = ensure_timezone(mid_date)
     end_date = ensure_timezone(end_date)
 
-    return start_date, mid_date, end_date
+    if isinstance(start_date, NaTType):
+        raise ValueError(f"Invalid start_date of type NaTType")
+
+    if isinstance(end_date, NaTType):
+        raise ValueError(f"Invalid end_date of type NaTType")
+
+    if end_date < start_date:
+        raise ValueError(f"Invalid range: end {end_date} is before start {start_date}")
+
+    # Need at least 2 distinct nanosecond ticks so each half is non-empty.
+    # Work in integer nanoseconds so we never hit pandas' Timestamp|NaTType
+    # arithmetic stubs (Timestamp ± Timedelta is typed as possibly NaT).
+    start_ns = int(start_date.value)
+    end_ns = int(end_date.value)
+    duration_ns = end_ns - start_ns
+    if duration_ns < 1:
+        raise ValueError(
+            f"Range too short to split without overlap: {start_date} to {end_date}"
+        )
+
+    # right_start is the first tick of the right half (ceiling of midpoint).
+    mid_offset_ns = (duration_ns + 1) // 2
+    right_start_ns = start_ns + mid_offset_ns
+    left_end_ns = right_start_ns - 1
+    tz = start_date.tz
+
+    right_start = pd.Timestamp(right_start_ns, unit="ns", tz=tz)
+    left_end = pd.Timestamp(left_end_ns, unit="ns", tz=tz)
+
+    if left_end < start_date or right_start > end_date:
+        raise ValueError(
+            f"Range too short to split without overlap: {start_date} to {end_date}"
+        )
+
+    return start_date, left_end, right_start, end_date
 
 
 def get_monthly_utc_date_range_array_from_(

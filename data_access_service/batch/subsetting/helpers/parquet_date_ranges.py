@@ -156,11 +156,30 @@ def check_rows_with_date_range(
                 }
             )
         else:
-            log.info(f"Splitting range {start} to {end} (rows: {num_rows})")
             try:
-                split_start, split_mid, split_end = split_date_range_binary(start, end)
-                heapq.heappush(q, (split_start, split_mid, times_of_split + 1))
-                heapq.heappush(q, (split_mid, split_end, times_of_split + 1))
+                left_start, left_end, right_start, right_end = split_date_range_binary(
+                    start, end
+                )
+                # Parent is discarded: only the two non-overlapping halves are
+                # re-queued. Log makes that replacement explicit so nested split
+                # lines are not read as re-processing the same parent range.
+                log.info(
+                    "Range too large (%s rows > limit %s); discarding parent "
+                    "[%s → %s] and enqueueing non-overlapping halves "
+                    "[%s → %s] and [%s → %s] (split depth %s → %s)",
+                    num_rows,
+                    PARQUET_SUBSET_ROW_NUMBER,
+                    start,
+                    end,
+                    left_start,
+                    left_end,
+                    right_start,
+                    right_end,
+                    times_of_split,
+                    times_of_split + 1,
+                )
+                heapq.heappush(q, (left_start, left_end, times_of_split + 1))
+                heapq.heappush(q, (right_start, right_end, times_of_split + 1))
 
             except Exception as e:
                 log.warning(f"Could not split range {start} to {end}: {e}")
