@@ -142,6 +142,10 @@ def _build_date_index(ds: xr.Dataset) -> dict[str, list]:
 def _open_store(store_url: str) -> ZarrDataSource:
     """Resolve via lib and normalise its dataset in place to time/lat/lon."""
     source = _resolve_zarr_source(store_url)
+    # `source.zarr_store` already holds the full dataset (native TIME/LATITUDE/
+    # LONGITUDE names) the moment the lib opens it; this just overwrites that
+    # same attribute with the renamed/sorted view, once, so every later reader
+    # (ours and the lib's own get_data) sees time/lat/lon without recomputing it.
     source.zarr_store = _normalise_coords(source.zarr_store, store_url)
     return source
 
