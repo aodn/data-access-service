@@ -38,8 +38,12 @@ GriddedVariableSpec = str | list[str]
 def _load_gridded_variable_specs(
     path: str | Path = GRIDDED_VARIABLES_CONFIG_PATH,
 ) -> list[GriddedVariableSpec]:
-    return json.loads(Path(path).read_text())
-
+     raw = json.loads(Path(path).read_text())
+     if not isinstance(raw, list) or not raw:
+         raise ValueError(
+             "gridded_variables.json must contain a non-empty JSON array of variable specs"
+         )
+     return raw
 
 def product_id(dataset_name: str, variables: list[str]) -> str:
     # Frontend-cached and opaque to ogcapi-java: a compatibility surface.
@@ -93,7 +97,7 @@ def build_candidate_products(
                 source_path=source_path(dataset_name, base_url),
                 # Not `variables`: that would turn a scalar into a
                 # one-element vector product.
-                variable=spec,
+                variable=list(spec) if is_pair else spec,
                 metadata_uuid=uuid,
                 visual=not is_pair,
             )

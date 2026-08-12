@@ -5,6 +5,10 @@ file through the real validator so a malformed or semantically-drifted seed
 fails in CI rather than leaving the tiler at 503 on deploy.
 """
 
+import json
+from pathlib import Path
+
+from data_access_service.config.tiler.paths import PRODUCTS_CONFIG_PATH
 from data_access_service.tiler.schemas.products import load_product_overrides
 
 SLA_GSLA = "model_sea_level_anomaly_gridded_realtime:gsla"
@@ -35,5 +39,9 @@ def test_currents_pair_masks_only_the_sla_grid():
 
 
 def test_no_duplicate_override_ids():
-    overrides = load_product_overrides()
-    assert len(overrides) == len({SLA_GSLA, SLA_CURRENTS})
+    """Checks the raw committed list directly, rather than hardcoding the
+    current override count, so this doesn't need updating every time a
+    new override is legitimately added."""
+    raw = json.loads(Path(PRODUCTS_CONFIG_PATH).read_text())
+    ids = [entry["id"] for entry in raw]
+    assert len(ids) == len(set(ids))
