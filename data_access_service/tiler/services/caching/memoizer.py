@@ -94,19 +94,75 @@ class RedisMemoizer(CacheBackend):
         self._ttl_seconds = ttl_seconds
         self._client = client
         self._unlock_script = client.register_script(_UNLOCK_SCRIPT)
+        conn_kwargs = client.connection_pool.connection_kwargs
+        self._endpoint = (
+            f"{conn_kwargs.get('host', 'unknown')}:{conn_kwargs.get('port', 'unknown')}"
+        )
+        # Connection failures are common in local dev without Redis; log the
+        # actionable message once so every request doesn't dump a traceback.
+        self._connection_error_logged = False
 
     def _key(self, key: Hashable) -> str:
         return f"{self._namespace}:{key!r}"
+
+    def _log_redis_error(
+        self,
+        operation: str,
+        redis_key: str,
+        exc: BaseException,
+        *,
+        recovery: str,
+    ) -> None:
+        """Log Redis failures with host/port context; de-noise connection errors."""
+        if isinstance(exc, redis.exceptions.ConnectionError):
+            if not self._connection_error_logged:
+                # Strip trailing period from redis-py messages so we don't get "refused.."
+                detail = str(exc).rstrip(".")
+                log.warning(
+                    "Cannot connect to Redis/Valkey at %s during %s for key %s: %s. "
+                    "%s. "
+                    "For local dev without a cache, set CACHE_BACKEND=none "
+                    "(or tiler.cache_backend: none in config.yaml). "
+                    "To use caching, start Redis/Valkey on that host/port or set "
+                    "CACHE_HOST to a reachable instance. Further connection "
+                    "failures will be logged at DEBUG.",
+                    self._endpoint,
+                    operation,
+                    redis_key,
+                    detail,
+                    recovery,
+                )
+                self._connection_error_logged = True
+            else:
+                log.debug(
+                    "Redis still unreachable at %s during %s for %s; %s",
+                    self._endpoint,
+                    operation,
+                    redis_key,
+                    recovery,
+                )
+            return
+
+        log.warning(
+            "Redis %s failed for key %s at %s: %s. %s",
+            operation,
+            redis_key,
+            self._endpoint,
+            exc,
+            recovery,
+            exc_info=True,
+        )
 
     def get_or_compute(self, key: Hashable, factory: Callable[[], T]) -> T:
         redis_key = self._key(key)
         try:
             cached = self._client.get(redis_key)
-        except redis.exceptions.RedisError:
-            log.warning(
-                "Redis GET failed for %s; falling back to factory()",
+        except redis.exceptions.RedisError as exc:
+            self._log_redis_error(
+                "GET",
                 redis_key,
-                exc_info=True,
+                exc,
+                recovery="falling back to uncached factory()",
             )
             return factory()
 
@@ -119,11 +175,12 @@ class RedisMemoizer(CacheBackend):
             acquired = self._client.set(
                 lock_key, token, nx=True, ex=self._LOCK_TTL_SECONDS
             )
-        except redis.exceptions.RedisError:
-            log.warning(
-                "Redis lock acquire failed for %s; falling back to factory()",
+        except redis.exceptions.RedisError as exc:
+            self._log_redis_error(
+                "lock acquire",
                 redis_key,
-                exc_info=True,
+                exc,
+                recovery="falling back to uncached factory()",
             )
             return factory()
 
@@ -134,20 +191,22 @@ class RedisMemoizer(CacheBackend):
                     self._client.set(
                         redis_key, pickle.dumps(result), ex=self._ttl_seconds
                     )
-                except redis.exceptions.RedisError:
-                    log.warning(
-                        "Redis SET failed for %s; result computed but not cached",
+                except redis.exceptions.RedisError as exc:
+                    self._log_redis_error(
+                        "SET",
                         redis_key,
-                        exc_info=True,
+                        exc,
+                        recovery="result computed but not cached",
                     )
             finally:
                 try:
                     self._unlock_script(keys=[lock_key], args=[token])
-                except redis.exceptions.RedisError:
-                    log.warning(
-                        "Redis unlock failed for %s; lock will expire via TTL",
+                except redis.exceptions.RedisError as exc:
+                    self._log_redis_error(
+                        "unlock",
                         lock_key,
-                        exc_info=True,
+                        exc,
+                        recovery="lock will expire via TTL",
                     )
             return result
 
@@ -159,11 +218,12 @@ class RedisMemoizer(CacheBackend):
             time.sleep(self._POLL_INTERVAL_SECONDS)
             try:
                 cached = self._client.get(redis_key)
-            except redis.exceptions.RedisError:
-                log.warning(
-                    "Redis poll failed for %s; falling back to factory()",
+            except redis.exceptions.RedisError as exc:
+                self._log_redis_error(
+                    "poll",
                     redis_key,
-                    exc_info=True,
+                    exc,
+                    recovery="falling back to uncached factory()",
                 )
                 return factory()
             if cached is not None:
