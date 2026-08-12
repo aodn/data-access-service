@@ -9,9 +9,10 @@ A per-store ``{local_date: [timestamps]}`` index is built alongside the source
 so ``load_slice`` / ``get_available_dates`` can resolve a local date in O(1)
 instead of converting every timestamp on the hot path.
 
-Single source of truth is the lib ``ZarrDataSource`` (default chunking, native
-coord names for ``get_data``). Callers that need ``time``/``lat``/``lon`` use
-``get_store``, which derives a normalised view on demand.
+Single source of truth is the lib ``ZarrDataSource`` (opened with
+``chunks=None`` so dask is not built at open time; native coord names for
+``get_data``). Callers that need ``time``/``lat``/``lon`` use ``get_store``,
+which derives a normalised view on demand.
 """
 
 from __future__ import annotations
@@ -97,9 +98,16 @@ def _normalise_coords(ds: xr.Dataset, store_url: str) -> xr.Dataset:
 
 
 def _resolve_zarr_source(store_url: str) -> ZarrDataSource:
-    """Open a ZarrDataSource via aodn_cloud_optimised (lib default chunking)."""
+    """Open a ZarrDataSource via aodn_cloud_optimised with dask disabled.
+
+    ``chunks=None`` is required: every tiler read is a single-slice
+    ``get_data`` + eager ``.compute()``, so dask's task graph buys nothing
+    while costing open-time memory on finely-chunked production stores
+    (10M+ graph tasks / tens of GB just to describe layout). xarray still
+    indexes Zarr lazily and only fetches native chunks on ``.compute()``.
+    """
     key = _dataset_key_from_url(store_url)
-    source = DataQuery.GetAodn().get_dataset(key)
+    source = DataQuery.GetAodn().get_dataset(key, chunks=None)
     if not isinstance(source, DataQuery.ZarrDataSource):
         raise TypeError(
             f"Expected ZarrDataSource for {key!r}, got {type(source).__name__}"

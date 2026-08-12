@@ -9,6 +9,7 @@ from data_access_service.tiler.services.product.product import (
 )
 from data_access_service.tiler.services.store.registry import (
     _dataset_key_from_url,
+    _resolve_zarr_source,
     get_datasource,
     get_store,
     store_registry,
@@ -58,6 +59,28 @@ def clear_stores():
 def test_dataset_key_from_url():
     assert _dataset_key_from_url("s3://aodn-cloud-optimised/foo.zarr/") == "foo.zarr"
     assert _dataset_key_from_url("s3://bucket/prefix/bar.zarr") == "bar.zarr"
+
+
+def test_resolve_zarr_source_passes_chunks_none(monkeypatch):
+    """Tiler opens stores with chunks=None so dask graphs are not built at open."""
+    from aodn_cloud_optimised.lib import DataQuery
+
+    captured: dict = {}
+    source = _FakeZarrSource(_make_ds(time=1, lat=2, lon=3))
+
+    class _FakeGetAodn:
+        def get_dataset(self, key, chunks="auto"):
+            captured["key"] = key
+            captured["chunks"] = chunks
+            return source
+
+    # isinstance check in _resolve_zarr_source uses DataQuery.ZarrDataSource
+    monkeypatch.setattr(DataQuery, "GetAodn", lambda: _FakeGetAodn())
+    monkeypatch.setattr(DataQuery, "ZarrDataSource", _FakeZarrSource)
+
+    result = _resolve_zarr_source("s3://aodn-cloud-optimised/foo.zarr/")
+    assert result is source
+    assert captured == {"key": "foo.zarr", "chunks": None}
 
 
 def test_dataset_key_from_url_rejects_non_zarr():
