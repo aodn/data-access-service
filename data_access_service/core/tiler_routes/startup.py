@@ -12,12 +12,8 @@ import anyio
 from data_access_service.config.config import Config
 from data_access_service.core.api import API
 from data_access_service.core.tiler_routes.shared import mark_tiler_ready
-from data_access_service.tiler.schemas.gridded_variables import load_gridded_variables
 from data_access_service.tiler.services.colormap.registry import load_colormaps
-from data_access_service.tiler.services.product.discovery import (
-    build_candidate_products,
-    log_unmatched_overrides,
-)
+from data_access_service.tiler.services.product.discovery import discover_products
 from data_access_service.tiler.services.product.registry import publish_products
 from data_access_service.tiler.services.product.verification import (
     verify_candidate_products,
@@ -36,13 +32,9 @@ async def run_tiler_warmup(api: API) -> None:
         if not await api.wait_until_ready(timeout=None):
             raise RuntimeError("API metadata never became ready")
 
-        entries = load_gridded_variables()
-        candidates = build_candidate_products(
-            api.get_dataset_variables(),
-            entries,
-            Config.get_config().get_tiler_config().co_bucket,
+        candidates = discover_products(
+            api, Config.get_config().get_tiler_config().co_bucket
         )
-        log_unmatched_overrides(candidates, entries)
 
         load_colormaps()
         await anyio.to_thread.run_sync(warmup_resample)

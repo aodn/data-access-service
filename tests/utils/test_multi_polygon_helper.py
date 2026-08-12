@@ -1,11 +1,13 @@
 import geojson
 import pytest
 from shapely.geometry import Point as ShapelyPoint
+from shapely.geometry import Polygon as ShapelyPolygon
 
 from data_access_service.utils.multi_polygon_helper import (
     MultiPolygonHelper,
     merge_polygons,
     parse_multi_polygon,
+    split_at_dateline,
 )
 
 
@@ -99,6 +101,126 @@ class TestMergePolygons:
             merge_polygons(collapsed)
 
 
+class TestSplitAtDateline:
+    def test_already_in_range_is_unchanged(self):
+        poly = ShapelyPolygon(_rect(10, 0, 20, 10))
+        pieces = split_at_dateline(poly)
+
+        assert len(pieces) == 1
+        assert pieces[0].equals(poly)
+
+    def test_mapbox_unwrapped_rectangle_splits_at_dateline(self):
+        # Portal/Mapbox example: continuous box with lon < -180 that crosses
+        # the antimeridian. Must become two boxes that meet at ±180, not a
+        # single bogus strip from wrapping vertices alone.
+        lon_min, lon_max = -212.67488435641027, -157.75735934215612
+        lat_min, lat_max = -39.90820956224461, -9.159204863042774
+        poly = ShapelyPolygon(_rect(lon_min, lat_min, lon_max, lat_max))
+
+        pieces = split_at_dateline(poly)
+        bounds = sorted(p.bounds for p in pieces)
+
+        assert len(pieces) == 2
+        west = (lon_min + 360, lat_min, 180.0, lat_max)
+        east = (-180.0, lat_min, lon_max, lat_max)
+        assert bounds[0] == pytest.approx(east)
+        assert bounds[1] == pytest.approx(west)
+        assert sum(p.area for p in pieces) == pytest.approx(poly.area)
+        for piece in pieces:
+            min_lon, _, max_lon, _ = piece.bounds
+            assert -180.0 <= min_lon <= max_lon <= 180.0
+
+    def test_lon_above_180_splits_at_dateline(self):
+        poly = ShapelyPolygon(_rect(170, -10, 200, 10))
+        pieces = split_at_dateline(poly)
+        bounds = sorted(p.bounds for p in pieces)
+
+        assert len(pieces) == 2
+        assert bounds[0] == pytest.approx((-180.0, -10, -160.0, 10))
+        assert bounds[1] == pytest.approx((170.0, -10, 180.0, 10))
+
+    def test_freeform_unwrapped_crossing_dateline(self):
+        # Triangle with one vertex west of the dateline in unwrapped space.
+        ring = [
+            [-200.0, 0.0],
+            [-160.0, 0.0],
+            [-180.0, 20.0],
+            [-200.0, 0.0],
+        ]
+        poly = ShapelyPolygon(ring)
+        pieces = split_at_dateline(poly)
+
+        assert len(pieces) >= 2
+        assert sum(p.area for p in pieces) == pytest.approx(poly.area)
+        # A point known inside the original on each side of -180.
+        west_point = ShapelyPoint(-190.0, 2.0)  # unwraps to lon 170
+        east_point = ShapelyPoint(-170.0, 2.0)
+        assert poly.contains(west_point) and poly.contains(east_point)
+        covered = ShapelyPolygon()
+        for piece in pieces:
+            min_lon, _, max_lon, _ = piece.bounds
+            assert -180.0 <= min_lon <= max_lon <= 180.0
+            covered = covered.union(piece)
+        # After wrap: west_point becomes (170, 2); east stays (-170, 2).
+        assert any(p.contains(ShapelyPoint(170.0, 2.0)) for p in pieces)
+        assert any(p.contains(ShapelyPoint(-170.0, 2.0)) for p in pieces)
+
+    def test_hole_on_one_side_is_kept(self):
+        outer = _rect(-200, 0, -160, 20)
+        # Hole entirely east of the dateline in unwrapped space (lon > -180).
+        hole = _rect(-175, 5, -165, 15)
+        poly = ShapelyPolygon(outer, [hole])
+
+        pieces = split_at_dateline(poly)
+        assert sum(p.area for p in pieces) == pytest.approx(poly.area)
+        # The hole centre, once lon is still in range, must stay outside.
+        hole_centre = ShapelyPoint(-170.0, 10.0)
+        assert not any(p.contains(hole_centre) for p in pieces)
+
+
+class TestMergePolygonsDateline:
+    def test_mapbox_rectangle_via_merge_polygons(self):
+        merged = merge_polygons(
+            _multi_polygon(
+                _rect(
+                    -212.67488435641027,
+                    -39.90820956224461,
+                    -157.75735934215612,
+                    -9.159204863042774,
+                )
+            )
+        )
+        assert len(merged) == 2
+        for polygon in merged:
+            min_lon, _, max_lon, _ = polygon.bounds
+            assert -180.0 <= min_lon <= max_lon <= 180.0
+
+    def test_whole_globe_stays_one_polygon(self):
+        merged = merge_polygons(_multi_polygon(_rect(-180, -90, 180, 90)))
+        assert len(merged) == 1
+        assert merged[0].bounds == pytest.approx((-180, -90, 180, 90))
+
+    def test_overlapping_unwrapped_rects_dissolve_then_split(self):
+        # Two overlapping unwrapped boxes that both cross the dateline must
+        # dissolve into one continuous region first, then split into two
+        # pieces — not four shards.
+        merged = merge_polygons(
+            _multi_polygon(
+                _rect(-210, 0, -160, 10),
+                _rect(-200, 0, -150, 10),
+            )
+        )
+        assert len(merged) == 2
+        # Unwrapped union is lon -210..-150 (width 60) x height 10.
+        assert sum(p.area for p in merged) == pytest.approx(600.0)
+
+    def test_freeform_in_range_unchanged(self):
+        ring = [[10, 0], [20, 0], [15, 10], [10, 0]]
+        merged = merge_polygons(_multi_polygon(ring))
+        assert len(merged) == 1
+        assert merged[0].equals(ShapelyPolygon(ring))
+
+
 class TestMultiPolygonHelper:
     def test_no_multi_polygon_means_no_bboxes(self):
         # All three views must agree that no spatial filter was given: [] flows
@@ -167,3 +289,21 @@ class TestMultiPolygonHelper:
                 bbox.max_lon,
                 bbox.max_lat,
             )
+
+    def test_mapbox_dateline_box_yields_two_bboxes_and_multipolygon(self):
+        helper = MultiPolygonHelper(
+            multi_polygon=_multi_polygon(
+                _rect(
+                    -212.67488435641027,
+                    -39.90820956224461,
+                    -157.75735934215612,
+                    -9.159204863042774,
+                )
+            )
+        )
+
+        assert len(helper.bboxes) == 2
+        assert helper.geometry.geom_type == "MultiPolygon"
+        for bbox in helper.bboxes:
+            assert -180.0 <= bbox.min_lon <= bbox.max_lon <= 180.0
+            assert bbox.min_lat < bbox.max_lat

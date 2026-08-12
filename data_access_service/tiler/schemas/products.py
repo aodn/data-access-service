@@ -1,8 +1,11 @@
-from typing import TYPE_CHECKING
+import json
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from data_access_service.config.tiler.constants import TILE
+from data_access_service.config.tiler.paths import PRODUCTS_CONFIG_PATH
 
 if TYPE_CHECKING:
     from data_access_service.tiler.services.product.product import CoastalFill, Product
@@ -98,6 +101,48 @@ class ProductConfig(BaseModel):
                 coastal_fill=_coastal_fill_config(product.visual_tile.coastal_fill),
             ),
         )
+
+
+class ProductOverride(BaseModel):
+    """One products.json entry: per-product tuning layered onto a candidate
+    discovered by gridded_variables.json + the metadata catalogue (see
+    services/product/discovery.py), matched by the derived ``id``
+    (``{dataset_name}:{variable(s)}``, see discovery.product_id).
+
+    A candidate with no matching entry here keeps plain defaults
+    (ocean_masked=False, visual inferred from arity, default tile configs).
+    ``visual: true`` on a pair is rejected at application time, mirroring the
+    old per-entry rule now that arity and capability are decided in different
+    places. extra="forbid" catches typos.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    ocean_masked: bool | None = None
+    visual: bool | None = None
+    data_tile: DataTileConfig = Field(default_factory=DataTileConfig)
+    visual_tile: VisualTileConfig = Field(default_factory=VisualTileConfig)
+
+
+def parse_product_overrides(raw: Any) -> dict[str, ProductOverride]:
+    if not isinstance(raw, list):
+        raise ValueError(
+            f"products.json must contain a JSON array, got {type(raw).__name__}"
+        )
+    overrides: dict[str, ProductOverride] = {}
+    for entry in raw:
+        override = ProductOverride.model_validate(entry)
+        if override.id in overrides:
+            raise ValueError(f"Duplicate products.json override id {override.id!r}")
+        overrides[override.id] = override
+    return overrides
+
+
+def load_product_overrides(
+    path: str | Path = PRODUCTS_CONFIG_PATH,
+) -> dict[str, ProductOverride]:
+    return parse_product_overrides(json.loads(Path(path).read_text()))
 
 
 class DateRange(BaseModel):
