@@ -38,12 +38,13 @@ GriddedVariableSpec = str | list[str]
 def _load_gridded_variable_specs(
     path: str | Path = GRIDDED_VARIABLES_CONFIG_PATH,
 ) -> list[GriddedVariableSpec]:
-     raw = json.loads(Path(path).read_text())
-     if not isinstance(raw, list) or not raw:
-         raise ValueError(
-             "gridded_variables.json must contain a non-empty JSON array of variable specs"
-         )
-     return raw
+    raw = json.loads(Path(path).read_text())
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(
+            "gridded_variables.json must contain a non-empty JSON array of variable specs"
+        )
+    return raw
+
 
 def product_id(dataset_name: str, variables: list[str]) -> str:
     # Frontend-cached and opaque to ogcapi-java: a compatibility surface.
