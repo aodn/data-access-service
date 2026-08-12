@@ -113,7 +113,7 @@ class TestRedisMemoizer:
         assert calls == 1
         assert results == {"a": "computed-value", "b": "computed-value"}
 
-    def test_fails_open_when_redis_unreachable(self):
+    def test_fails_open_when_redis_unreachable(self, caplog):
         unreachable_client = redis.Redis(
             host="localhost", port=1, socket_connect_timeout=1, socket_timeout=1
         )
@@ -127,5 +127,20 @@ class TestRedisMemoizer:
             calls += 1
             return "fallback-value"
 
-        assert memo.get_or_compute("unreachable-key", factory) == "fallback-value"
-        assert calls == 1
+        with caplog.at_level(logging.WARNING):
+            assert memo.get_or_compute("unreachable-key", factory) == "fallback-value"
+            # Second call should not re-warn (connection errors are de-duplicated).
+            assert memo.get_or_compute("unreachable-key", factory) == "fallback-value"
+
+        assert calls == 2
+        connection_warnings = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING
+            and "Cannot connect to Redis/Valkey" in r.getMessage()
+        ]
+        assert len(connection_warnings) == 1
+        msg = connection_warnings[0].getMessage()
+        assert "localhost:1" in msg
+        assert "CACHE_BACKEND=none" in msg
+        assert "falling back to uncached factory()" in msg
