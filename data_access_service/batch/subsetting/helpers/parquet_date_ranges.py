@@ -2,22 +2,22 @@
 
 import heapq
 import logging
-from typing import Tuple
-
 import numpy as np
 import pandas as pd
 import pytz
-import pyarrow
+
+from typing import Tuple
+import pyarrow.dataset as ds
 from pyarrow import compute as pc
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from aodn_cloud_optimised.lib.DataQuery import (
-    DataSource,
+    DateOutOfRangeError,
     get_temporal_extent,
     get_timestamps_boundary_values,
     create_time_filter,
+    ParquetDataSource,
 )
-from aodn_cloud_optimised.lib.exceptions import DateOutOfRangeError
 
 from data_access_service.core.api import BaseAPI
 from data_access_service.core.constants import (
@@ -64,7 +64,7 @@ def _count_rows_with_retry(dataset, time_filter) -> int:
 
 
 def check_rows_with_date_range(
-    api: BaseAPI, uuid: str, key: str, ds: DataSource, date_ranges: list[dict]
+    api: BaseAPI, uuid: str, key: str, ds: ParquetDataSource, date_ranges: list[dict]
 ) -> list[dict]:
     """
     Count number of rows with specific monthly range. ignore bbox.
@@ -118,10 +118,31 @@ def check_rows_with_date_range(
                 date_end=end_str,
                 time_varname=time_dim,
             )
-        except DateOutOfRangeError:
-            time_filter = create_customised_time_filter(
-                dataset=dataset, start=start, end=end, time_varname=time_dim
+        except DateOutOfRangeError as e:
+            # create_time_filter validates against partition/temporal bounds and can
+            # raise false positives; fall back to a filter clamped to real extent.
+            # Import note: catch DataQuery.DateOutOfRangeError (what create_time_filter
+            # raises) — lib.exceptions.DateOutOfRangeError is a separate class.
+            log.info(
+                "create_time_filter out of range for %s to %s (%s); "
+                "trying customised time filter",
+                start_str,
+                end_str,
+                e,
             )
+            try:
+                time_filter = create_customised_time_filter(
+                    dataset=dataset, start=start, end=end, time_varname=time_dim
+                )
+            except ValueError as e2:
+                # Fully non-overlapping after clamp (e.g. query after dataset end).
+                log.info(
+                    "Skipping date range %s to %s: no overlap with dataset extent (%s)",
+                    start,
+                    end,
+                    e2,
+                )
+                continue
         num_rows = _count_rows_with_retry(dataset, time_filter)
 
         if num_rows == 0:
@@ -154,11 +175,11 @@ def check_rows_with_date_range(
 
 
 def create_customised_time_filter(
-    dataset: pyarrow.dataset.Dataset,
+    dataset: ds.Dataset,
     start: pd.Timestamp,
     end: pd.Timestamp,
-    time_varname: str = None,
-) -> pyarrow.dataset.Expression:
+    time_varname: str | None = None,
+) -> ds.Expression:
     """
     Creates a time filter using actual dataset temporal extent instead of partition boundaries.
 
@@ -208,14 +229,6 @@ def create_customised_time_filter(
 
     expr1 = pc.field("timestamp") >= np.int64(partition_start)
     expr2 = pc.field("timestamp") <= np.int64(partition_end)
-
-    time_varname = "TIME"
-    if "TIME" in dataset.schema.names:
-        time_varname = "TIME"
-    elif "JULD" in dataset.schema.names:
-        time_varname = "JULD"
-    elif "detection_timestamp" in dataset.schema.names:
-        time_varname = "detection_timestamp"
 
     start_naive = start.tz_localize(None) if start.tz is not None else start
     end_naive = end.tz_localize(None) if end.tz is not None else end

@@ -146,17 +146,16 @@ def _generate_partition_output(
         )
         datasource = api.get_datasource(uuid, key)
         # extract table schema for parquet dataset
-        if datasource is not None:
-            if isinstance(datasource, ParquetDataSource):
-                # save to the root_folder/dataschema.json
-                schema_path = f"{root_folder_path}/dataschema.json"
-                if not Path(schema_path).exists():
-                    table_schema = datasource.get_metadata()
-                    os.makedirs(os.path.dirname(schema_path), exist_ok=True)
-                    with open(schema_path, "w") as f:
-                        json.dump(table_schema, f, indent=2)
+        if datasource is not None and isinstance(datasource, ParquetDataSource):
+            # save to the root_folder/dataschema.json
+            schema_path = f"{root_folder_path}/dataschema.json"
+            if not Path(schema_path).exists():
+                table_schema = datasource.get_metadata()
+                os.makedirs(os.path.dirname(schema_path), exist_ok=True)
+                with open(schema_path, "w") as f:
+                    json.dump(table_schema, f, indent=2)
 
-                    log.info(f"Saved table schema to {schema_path}")
+                log.info(f"Saved table schema to {schema_path}")
 
             checked_date_ranges = check_rows_with_date_range(
                 api, uuid, key, datasource, date_ranges
