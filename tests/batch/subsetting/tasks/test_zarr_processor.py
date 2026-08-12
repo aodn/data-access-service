@@ -11,6 +11,9 @@ from aodn_cloud_optimised.lib import DataQuery
 from data_access_service import Config, API
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.batch.subsetting.tasks.zarr_processor import ZarrProcessor
+from data_access_service.utils.email_templates.no_data_email import (
+    NO_DATA_EMAIL_SUBJECT,
+)
 from tests.core.test_with_s3 import TestWithS3, REGION
 
 # A real-valued gridded store (SST analysis, lowercase lat/lon/time coords), so a
@@ -310,6 +313,103 @@ class TestSubsetZarr(TestWithS3):
                         )
                 finally:
                     shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_area_outside_a_gridded_store_emails_no_data(
+        self,
+        aws_clients,
+        upload_test_case_to_s3,
+        mock_get_fs_token_paths,
+        subset_request_factory,
+    ):
+        """An area the dataset does not cover must email "no data"."""
+        config = Config.get_config()
+        helper = AWSHelper()
+
+        api = API()
+        api.initialize_metadata()
+
+        # RAMSSA canned store covers lat -70..20; this box is far north of it.
+        outside = (100.0, 40.0, 105.0, 45.0)
+        # own job id: the bucket is class-scoped and holds the other tests' files
+        job_id = "job_id_no_data_grid"
+
+        with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
+            with patch.object(AWSHelper, "send_email") as mock_send_email:
+                try:
+                    ZarrProcessor(
+                        api,
+                        job_id=job_id,
+                        subset_request=subset_request_factory(
+                            uuid=RAMSSA_UUID,
+                            keys=[RAMSSA_KEY],
+                            start_date="2011-11-17",
+                            end_date="2011-11-17",
+                            multi_polygon=_multi_polygon_of(outside),
+                        ),
+                    ).process()
+
+                    files = helper.list_all_s3_objects(
+                        config.get_subsetting_bucket_name(), job_id
+                    )
+                    assert files == [], "an empty file was uploaded"
+
+                    sent = mock_send_email.call_args.kwargs
+                    assert sent["subject"] == NO_DATA_EMAIL_SUBJECT
+                    assert "No data available" in sent["html_body"]
+                finally:
+                    shutil.rmtree(config.get_temp_folder(job_id), ignore_errors=True)
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_area_outside_a_trajectory_store_emails_no_data(
+        self,
+        aws_clients,
+        upload_test_case_to_s3,
+        mock_get_fs_token_paths,
+        subset_request_factory,
+    ):
+        """Same as above for a store whose LATITUDE/LONGITUDE run along TIME.
+
+        Here no time step can be cropped away, so the file would have been
+        full-sized and entirely NaN rather than empty.
+        """
+        config = Config.get_config()
+        helper = AWSHelper()
+
+        api = API()
+        api.initialize_metadata()
+
+        key = "vessel_satellite_radiance_delayed_qc.zarr"
+        # The track runs lat -47..-29, lon 110..148; this box is off Africa.
+        outside = (20.0, -47.0, 25.0, -29.0)
+        # own job id: the bucket is class-scoped and holds the other tests' files
+        job_id = "job_id_no_data_track"
+
+        with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
+            with patch.object(AWSHelper, "send_email") as mock_send_email:
+                try:
+                    ZarrProcessor(
+                        api,
+                        job_id=job_id,
+                        subset_request=subset_request_factory(
+                            uuid="28f8bfed-ca6a-472a-84e4-42563ce4df3f",
+                            keys=[key],
+                            start_date="07-2011",
+                            end_date="07-2011",
+                            multi_polygon=_multi_polygon_of(outside),
+                        ),
+                    ).process()
+
+                    files = helper.list_all_s3_objects(
+                        config.get_subsetting_bucket_name(), job_id
+                    )
+                    assert files == [], "an all-NaN file was uploaded"
+
+                    sent = mock_send_email.call_args.kwargs
+                    assert sent["subject"] == NO_DATA_EMAIL_SUBJECT
+                    assert "No data available" in sent["html_body"]
+                finally:
+                    shutil.rmtree(config.get_temp_folder(job_id), ignore_errors=True)
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_zarr_mapbox_unwrapped_dateline_matches_normalised(

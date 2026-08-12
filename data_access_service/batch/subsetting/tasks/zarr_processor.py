@@ -16,9 +16,12 @@ from data_access_service.utils.subset_request_resolver import (
     ResolvedSubsetRequest,
     resolve_subset_request,
 )
-from data_access_service.utils.subset_zarr_helper import subset_zarr
+from data_access_service.utils.subset_zarr_helper import selects_no_data, subset_zarr
 from data_access_service.utils.email_templates.download_email import (
     get_download_email_html_body,
+)
+from data_access_service.utils.email_templates.no_data_email import (
+    NO_DATA_EMAIL_SUBJECT,
 )
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.format_utils import (
@@ -107,7 +110,14 @@ class ZarrProcessor:
 
             download_uri = write(dataset=dataset, key=key)
             urls.extend(download_uri)
-        subject = f"Finish processing data file whose uuid is:  {self.uuid}"
+
+        # No url means no key produced anything - get_download_email_html_body
+        # returns the "no data" body, so the subject must match it.
+        subject = (
+            f"Finish processing data file whose uuid is:  {self.uuid}"
+            if urls
+            else NO_DATA_EMAIL_SUBJECT
+        )
 
         html_content = get_download_email_html_body(
             subset_request=self.subset_request, object_urls=urls
@@ -185,6 +195,14 @@ class ZarrProcessor:
             raise TypeError(
                 f"Data for key: {key} is not an xarray.Dataset. This only support zarr format."
             )
+
+        # The requested area may miss this store entirely. Writing that out
+        # would email the user an empty file; None makes process() skip the key
+        # so the "no data" email is sent instead.
+        if selects_no_data(
+            subset, lat_name, lon_name, time_name, self.bboxes, self.geometry
+        ):
+            return None
         return subset
 
     def __write_to_s3_as_netcdf(self, dataset: xarray.Dataset, key: str):

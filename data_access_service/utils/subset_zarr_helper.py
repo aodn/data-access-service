@@ -89,18 +89,57 @@ def subset_zarr(
 
     # Step 3: mask the cells that fall outside the requested area
     if apply_mask:
-        # Keep the cells that fall inside the resolved geometry or the crop itself, whichever is smaller
-        area = area_to_keep(dataset, lat_name, lon_name, bboxes, geometry)
-        if area is not None:
+        mask = area_mask(subset, lat_name, lon_name, bboxes, geometry)
+        if mask is not None:
             # NOTE: KEEP drop=False
             # The size estimate SKIPS this .where() and relies on the
             # invariant that .where(drop=False). Switching to drop=True would
             # silently making estimate wrong. If you must change it, update
             # the estimation path to match.
-            subset = subset.where(
-                form_geometry_mask(subset, lat_name, lon_name, area), drop=False
-            )
+            subset = subset.where(mask, drop=False)
     return subset
+
+
+def area_mask(
+    dataset: xarray.Dataset,
+    lat_name: str,
+    lon_name: str,
+    bboxes: Sequence[BoundingBox],
+    geometry: Optional[BaseGeometry],
+) -> Optional[DataArray]:
+    """The .where() mask keeping only the requested area, None when no mask is
+    needed."""
+    area = area_to_keep(dataset, lat_name, lon_name, bboxes, geometry)
+    if area is None:
+        return None
+    return form_geometry_mask(dataset, lat_name, lon_name, area)
+
+
+def selects_no_data(
+    subset: xarray.Dataset,
+    lat_name: str,
+    lon_name: str,
+    time_name: str,
+    bboxes: Sequence[BoundingBox],
+    geometry: Optional[BaseGeometry] = None,
+) -> bool:
+    """True when a subset_zarr() result would write out an empty or all-NaN file.
+
+    Two checks, because the crop only cuts 1D axes:
+    - a dimension came back empty
+    - nothing is left inside the drawn area. A store with 2D lat/lon (or lat/lon
+      along TIME) keeps its full grid even when the area misses it completely.
+
+    Only coordinates are read - the data variables stay lazy.
+
+    :param subset: the sliced dataset, not the whole store
+    """
+    if any(
+        subset.sizes.get(dim_name) == 0 for dim_name in (time_name, lat_name, lon_name)
+    ):
+        return True
+    mask = area_mask(subset, lat_name, lon_name, bboxes, geometry)
+    return mask is not None and not bool(mask.any())
 
 
 def subset_conditions(

@@ -18,7 +18,11 @@ from shapely.geometry import box as shapely_box
 
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.utils.multi_polygon_helper import bbox_of
-from data_access_service.utils.subset_zarr_helper import area_to_keep, subset_zarr
+from data_access_service.utils.subset_zarr_helper import (
+    area_to_keep,
+    selects_no_data,
+    subset_zarr,
+)
 
 KEY = "test-key"
 
@@ -81,6 +85,12 @@ BOX_HIGH = BoundingBox(7, 7, 9, 9)  # lat/lon [7, 9]
 def _run(dataset, bboxes, **kwargs):
     return subset_zarr(
         dataset, KEY, "LATITUDE", "LONGITUDE", "TIME", START, END, bboxes, **kwargs
+    )
+
+
+def _selects_no_data(subset, bboxes, geometry=None):
+    return selects_no_data(
+        subset, "LATITUDE", "LONGITUDE", "TIME", bboxes, geometry=geometry
     )
 
 
@@ -422,3 +432,95 @@ def test_unknown_condition_name_raises():
     )
     with pytest.raises(ValueError, match="neither dim"):
         _run(ds, [BOX_LOW])
+
+
+# An area nowhere near any of the test grids, which all live in lat/lon [0, 9].
+FAR_AWAY = shapely_box(50, 50, 60, 60)
+
+
+def test_selects_no_data_when_the_area_misses_a_regular_grid():
+    # The crop empties both axes, so the download would be an empty file.
+    ds = _regular_grid()
+
+    subset = _run(ds, [bbox_of(FAR_AWAY)], geometry=FAR_AWAY)
+
+    assert _selects_no_data(subset, [bbox_of(FAR_AWAY)], FAR_AWAY)
+
+
+def test_selects_no_data_when_only_the_lon_axis_is_emptied():
+    # The reported satellite_net_primary_productivity_oc3_1day_aqua.zarr case:
+    # the lat range is inside the store but the lon range is not, so the file
+    # came out shaped (time, lat, 0) - one empty axis is enough to be no data.
+    ds = _regular_grid()
+    lat_inside_lon_outside = shapely_box(50, 0, 60, 2)
+
+    subset = _run(
+        ds, [bbox_of(lat_inside_lon_outside)], geometry=lat_inside_lon_outside
+    )
+
+    assert dict(subset.sizes) == {"TIME": 2, "LATITUDE": 3, "LONGITUDE": 0}
+    assert _selects_no_data(
+        subset, [bbox_of(lat_inside_lon_outside)], lat_inside_lon_outside
+    )
+
+
+def test_selects_no_data_when_the_area_misses_a_curvilinear_grid():
+    # 2D LATITUDE/LONGITUDE cannot be cropped, so the grid keeps its full shape
+    # and only the all-False mask says the area found nothing.
+    ds = _curvilinear_grid()
+
+    subset = _run(ds, [bbox_of(FAR_AWAY)], geometry=FAR_AWAY)
+
+    assert dict(subset.sizes) == {"TIME": 2, "I": 4, "J": 6}
+    assert _selects_no_data(subset, [bbox_of(FAR_AWAY)], FAR_AWAY)
+
+
+def test_selects_no_data_when_the_area_misses_a_trajectory():
+    # Same as the curvilinear case: lat/lon run along TIME, so no step can be
+    # cropped away and every one comes back NaN.
+    ds = _trajectory()
+
+    subset = _run(ds, [bbox_of(FAR_AWAY)], geometry=FAR_AWAY)
+
+    assert dict(subset.sizes) == {"TIME": 2}
+    assert _selects_no_data(subset, [bbox_of(FAR_AWAY)], FAR_AWAY)
+
+
+def test_selects_no_data_when_the_time_range_is_outside():
+    ds = _regular_grid()
+
+    subset = subset_zarr(
+        ds,
+        KEY,
+        "LATITUDE",
+        "LONGITUDE",
+        "TIME",
+        pd.Timestamp("1990-01-01", tz="UTC"),
+        pd.Timestamp("1990-01-02", tz="UTC"),
+        [BOX_LOW],
+    )
+
+    assert _selects_no_data(subset, [BOX_LOW])
+
+
+@pytest.mark.parametrize(
+    "grid",
+    [_regular_grid, _curvilinear_grid, _trajectory],
+    ids=["regular", "curvilinear", "trajectory"],
+)
+def test_selects_no_data_is_false_when_the_area_hits_the_grid(grid):
+    # The mask must not report "no data" just because some cells are blanked.
+    ds = grid()
+
+    subset = _run(ds, [bbox_of(TRIANGLE)], geometry=TRIANGLE)
+
+    assert not _selects_no_data(subset, [bbox_of(TRIANGLE)], TRIANGLE)
+
+
+def test_selects_no_data_is_false_without_a_spatial_filter():
+    # No area drawn means no mask at all, so nothing may be called "no data".
+    ds = _curvilinear_grid()
+
+    subset = _run(ds, [])
+
+    assert not _selects_no_data(subset, [])

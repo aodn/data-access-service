@@ -28,6 +28,7 @@ from data_access_service.utils.date_time_utils import (
     parse_date,
 )
 from data_access_service.utils.email_templates.no_data_email import (
+    NO_DATA_EMAIL_SUBJECT,
     get_no_data_email_html_body,
 )
 
@@ -64,7 +65,7 @@ def init(api: API, job_id_of_init, parameters):
     if not resolved_subset_request.has_data:
         AWSHelper().send_email(
             recipient=subset_request.recipient,
-            subject="No Data Available for Your Subset Request",
+            subject=NO_DATA_EMAIL_SUBJECT,
             html_body=get_no_data_email_html_body(subset_request),
         )
         return
