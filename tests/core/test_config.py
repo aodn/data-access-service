@@ -31,10 +31,14 @@ def test_tiler_co_bucket_defaults_when_absent_from_yaml():
     assert not co_bucket.endswith("/")
 
 
-# co_bucket is derived (yaml co_bucket + "s3://" prefix) rather than a direct
-# yaml passthrough, so it's not expected in yaml at all.
+# co_bucket is derived (yaml co_bucket + "s3://" prefix) and is_tls is derived
+# (True iff CACHE_HOST env var is set) rather than a direct yaml passthrough,
+# so neither is expected in yaml at all.
+_DERIVED_TILER_FIELDS = {"co_bucket", "is_tls"}
 _YAML_TILER_FIELDS = {
-    f.name for f in dataclasses.fields(TilerConfig) if f.name != "co_bucket"
+    f.name
+    for f in dataclasses.fields(TilerConfig)
+    if f.name not in _DERIVED_TILER_FIELDS
 }
 
 # redis_host is read with .get() (env var CACHE_HOST can override/fill it in),
