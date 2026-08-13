@@ -6,9 +6,10 @@ import time
 from asyncio import CancelledError
 from concurrent.futures import ThreadPoolExecutor
 from functools import wraps
-from inspect import iscoroutinefunction, signature
+from inspect import Parameter, iscoroutinefunction, signature
 from typing import Any, AsyncGenerator, Callable, Optional
 
+from fastapi import Request
 from fastapi.responses import StreamingResponse
 
 from data_access_service.core.constants import DATA, MESSAGE, SSE_WORKER_THREADS, STATUS
@@ -23,6 +24,16 @@ SSE_IT_INTERVAL: float = 20.0
 # passed in. It is hidden from FastAPI (see _public_signature), so it never shows
 # up as a request field.
 CANCELLATION_KWARG = "cancellation"
+
+# The disconnect is read off this request, so sse_it always asks FastAPI for one.
+# Polling it is the only signal we get: uvicorn advertises ASGI spec_version 2.4,
+# which makes Starlette drop its own disconnect watcher and trust send() to raise
+# instead - and uvicorn's send() silently discards writes to a gone client rather
+# than raising. Without this poll nothing ever closes the generator below.
+REQUEST_KWARG = "request"
+
+# How often the stream checks whether the client is still there.
+_DISCONNECT_POLL_INTERVAL: float = 0.1
 
 # Own pool instead of the default asyncio executor, so a queue of estimates
 # cannot starve every other to_thread caller in the service.
@@ -43,24 +54,43 @@ def _to_json_safe(value: Any) -> Any:
     return str(value)
 
 
-def _accepts_cancellation(func: Callable) -> bool:
+def _declared_parameters(func: Callable) -> set[str]:
     try:
-        return CANCELLATION_KWARG in signature(func).parameters
+        return set(signature(func).parameters)
     except (TypeError, ValueError):
-        return False
+        return set()
 
 
 def _public_signature(func: Callable):
     """
-    The wrapped function's signature without the cancellation parameter.
+    The signature FastAPI sees: cancellation taken out, request put in.
 
     FastAPI builds a route's request fields from the signature, so the injected
-    parameter has to be hidden or it would be treated as a query parameter.
+    cancellation has to be hidden or it would be treated as a query parameter.
+    The request goes the other way: the stream needs one to watch for the
+    disconnect, so ask for it even when the wrapped function does not.
     """
     sig = signature(func)
-    return sig.replace(
-        parameters=[p for p in sig.parameters.values() if p.name != CANCELLATION_KWARG]
-    )
+    parameters = [p for p in sig.parameters.values() if p.name != CANCELLATION_KWARG]
+    if REQUEST_KWARG not in sig.parameters:
+        # Keyword-only, so it can be appended without disturbing the existing
+        # parameters (one of which may well have a default).
+        parameters.append(
+            Parameter(REQUEST_KWARG, Parameter.KEYWORD_ONLY, annotation=Request)
+        )
+    return sig.replace(parameters=parameters)
+
+
+async def _client_gone(request: Optional[Request]) -> bool:
+    """
+    Has the client hung up? Peeks at the receive channel, never waits.
+
+    False when there is no request - a direct call from a test or a batch job has
+    no client that can go away.
+    """
+    if request is None:
+        return False
+    return await request.is_disconnected()
 
 
 async def _run_wrapped_function(func: Callable, *args, **kwargs) -> Any:
@@ -101,15 +131,23 @@ def sse_it(
     `interval` seconds while the wrapped function runs. When the function completes,
     sends the return value in a final result event and closes the stream.
 
-    If the wrapped function declares a `cancellation` parameter it is given one,
-    set when the client disconnects, so it can stop itself.
+    The stream polls the request while it waits, and stops as soon as the client
+    disconnects. If the wrapped function declares a `cancellation` parameter it
+    is given one, set at that moment, so it can stop itself too.
     """
 
     def decorator(fn: Callable):
-        injects_cancellation = _accepts_cancellation(fn)
+        declared = _declared_parameters(fn)
+        injects_cancellation = CANCELLATION_KWARG in declared
+        passes_request = REQUEST_KWARG in declared
 
         @wraps(fn)
         async def wrapper(*args, **kwargs):
+            # FastAPI calls the endpoint with keyword arguments only.
+            request = kwargs.get(REQUEST_KWARG)
+            if not passes_request:
+                kwargs.pop(REQUEST_KWARG, None)
+
             async def sse_stream() -> AsyncGenerator[str, None]:
                 cancellation = Cancellation()
                 if injects_cancellation:
@@ -130,6 +168,14 @@ def sse_it(
                     try:
                         last_sent_sse = time.time()
                         while not task.done():
+                            if await _client_gone(request):
+                                # Return rather than break: there is no result to
+                                # send, and nobody to send it to. The finally
+                                # below stops the work.
+                                logger.info(
+                                    "[%s] client disconnected, stopping.", fn.__name__
+                                )
+                                return
                             if time.time() - last_sent_sse >= interval:
                                 yield format_sse(
                                     {
@@ -139,7 +185,7 @@ def sse_it(
                                     "processing",
                                 )
                                 last_sent_sse = time.time()
-                            await asyncio.sleep(0.1)
+                            await asyncio.sleep(_DISCONNECT_POLL_INTERVAL)
 
                         result = task.result()
                         yield format_sse(
@@ -177,8 +223,7 @@ def sse_it(
                 headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
             )
 
-        if injects_cancellation:
-            wrapper.__signature__ = _public_signature(fn)
+        wrapper.__signature__ = _public_signature(fn)
 
         return wrapper
 
