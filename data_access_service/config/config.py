@@ -153,7 +153,11 @@ class Config:
         return val.strip() if isinstance(val, str) else val
 
     def get_job_queue_name(self):
-        name_env = os.getenv("AWS_BATCH_JOB_QUEUE")
+        """
+        Env name cannot start with AWS_BATCH_ as it is reserve and will never work
+        :return: The job definition
+        """
+        name_env = os.getenv("DAS_AWS_BATCH_JOB_QUEUE")
         if name_env:
             return name_env
 
@@ -164,7 +168,11 @@ class Config:
         )
 
     def get_job_definition_name(self):
-        name_env = os.getenv("AWS_BATCH_JOB_DEFINITION")
+        """
+        Env name cannot start with AWS_BATCH_ as it is reserve and will never work
+        :return: The job definition
+        """
+        name_env = os.getenv("DAS_AWS_BATCH_JOB_DEFINITION")
         if name_env:
             return name_env
         return (
