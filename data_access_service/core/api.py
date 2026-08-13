@@ -720,28 +720,35 @@ class API(BaseAPI):
         md: Dict[str, Descriptor] | None = self._cached_metadata.get(uuid)
         if md is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
-            start_date, end_date = ds.get_temporal_extent()
+            try:
+                start_date, end_date = ds.get_temporal_extent()
 
-            if start_date is not None:
-                start_date = start_date.replace(
-                    hour=0, minute=0, second=0, microsecond=0, nanosecond=0
-                )
+                if start_date is not None:
+                    start_date = start_date.replace(
+                        hour=0, minute=0, second=0, microsecond=0, nanosecond=0
+                    )
 
-            if end_date is not None:
-                # Some dataset has future date, we need to do a safety check
-                if end_date.tzinfo is None:
-                    now_compare = pd.Timestamp.now()
-                else:
-                    now_compare = pd.Timestamp.now(tz="UTC")
-                    end_date = end_date.tz_convert("UTC")
+                if end_date is not None:
+                    # Some dataset has future date, we need to do a safety check
+                    if end_date.tzinfo is None:
+                        now_compare = pd.Timestamp.now()
+                    else:
+                        now_compare = pd.Timestamp.now(tz="UTC")
+                        end_date = end_date.tz_convert("UTC")
 
-                end_date = end_date.replace(
-                    hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
-                )
+                    end_date = end_date.replace(
+                        hour=23,
+                        minute=59,
+                        second=59,
+                        microsecond=999999,
+                        nanosecond=999,
+                    )
 
-                if end_date > now_compare:
-                    end_date = now_compare
-            return start_date, end_date
+                    if end_date > now_compare:
+                        end_date = now_compare
+                return start_date, end_date
+            except ValueError as e:
+                return None, None
         else:
             return None, None
 
@@ -867,10 +874,36 @@ class API(BaseAPI):
                         uuid, key
                     )
 
+                    # A requested date range is ignored when the dataset has no
+                    # temporal extent (e.g. aggregated_seagrass_nonqc).
+                    temporal_start, temporal_end = self.get_temporal_extent(uuid, key)
+                    if temporal_start is None and temporal_end is None:
+                        log.info(
+                            "Dataset %s/%s has no temporal extent; "
+                            "ignoring date range %s to %s",
+                            uuid,
+                            key,
+                            date_start,
+                            date_end,
+                        )
+                        query_start = None
+                        query_end = None
+                        query_time_varname = None
+                    else:
+                        query_start = (
+                            f"{date_start.strftime('%Y-%m-%d %H:%M:%S.%f')}"
+                            f"{date_start.nanosecond:03d}"
+                        )
+                        query_end = (
+                            f"{date_end.strftime('%Y-%m-%d %H:%M:%S.%f')}"
+                            f"{date_end.nanosecond:03d}"
+                        )
+                        query_time_varname = time_varname
+
                     # Accuracy to nanoseconds
                     result = ds.get_data(
-                        f"{date_start.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_start.nanosecond:03d}",
-                        f"{date_end.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_end.nanosecond:03d}",
+                        query_start,
+                        query_end,
                         lat_min,
                         lat_max,
                         lon_min,
@@ -879,7 +912,7 @@ class API(BaseAPI):
                         self.map_column_names(uuid, key, columns),
                         lat_varname=lat_varname,
                         lon_varname=lon_varname,
-                        time_varname=time_varname,
+                        time_varname=query_time_varname,
                     )
 
                     return ddf.from_pandas(
