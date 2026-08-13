@@ -1,9 +1,13 @@
 import asyncio
 import json
 import re
+import threading
+import time
+from inspect import signature
 
 import pytest
 
+from data_access_service.utils.cancellation import Cancellation, ClientGoneError
 from data_access_service.utils.sse_utils import sse_it
 
 
@@ -92,3 +96,96 @@ async def test_sse_it_emits_error_event_on_failure():
     assert events[-1]["event"] == "error"
     assert events[-1]["data"]["status"] == "error"
     assert "boom" in events[-1]["data"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_sse_it_injects_a_cancellation_when_the_function_asks_for_one():
+    seen = {}
+
+    @sse_it
+    def task(cancellation=None):
+        seen["cancellation"] = cancellation
+        return "done"
+
+    await _collect_streaming_response(await task())
+
+    assert isinstance(seen["cancellation"], Cancellation)
+
+
+@pytest.mark.asyncio
+async def test_sse_it_hides_the_cancellation_parameter_from_the_signature():
+    # FastAPI builds a route's request fields from the signature, so the
+    # injected parameter must not appear there.
+    @sse_it
+    def task(uuid: str, cancellation=None):
+        return uuid
+
+    assert list(signature(task).parameters) == ["uuid"]
+
+
+@pytest.mark.asyncio
+async def test_sse_it_leaves_the_signature_alone_when_there_is_no_cancellation():
+    @sse_it
+    def task(uuid: str):
+        return uuid
+
+    assert list(signature(task).parameters) == ["uuid"]
+
+
+@pytest.mark.asyncio
+async def test_sse_it_cancels_the_work_when_the_client_disconnects():
+    started = threading.Event()
+    stopped = threading.Event()
+    completed = threading.Event()
+
+    @sse_it(interval=0.01)
+    def slow_task(cancellation=None):
+        started.set()
+        try:
+            # Stand-in for the estimate's checkpoints (per key, per fragment).
+            for _ in range(500):
+                cancellation.raise_if_client_gone()
+                time.sleep(0.01)
+            completed.set()
+            return "done"
+        except ClientGoneError:
+            stopped.set()
+            raise
+
+    response = await slow_task()
+    iterator = response.body_iterator
+    await iterator.__anext__()  # the first "processing" event
+    # The work only starts once the consumer asks for the next event, so pull a
+    # heartbeat before pretending the client went away.
+    await iterator.__anext__()
+    assert started.wait(5)
+
+    # What Starlette does to the generator when the client disconnects.
+    await iterator.aclose()
+
+    assert await _wait_for(stopped, 5), "the worker never reached a checkpoint"
+    assert not completed.is_set()
+
+
+async def _wait_for(event: threading.Event, timeout: float) -> bool:
+    """Wait on a worker-thread event without blocking the event loop."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if event.is_set():
+            return True
+        await asyncio.sleep(0.01)
+    return False
+
+
+@pytest.mark.asyncio
+async def test_sse_it_does_not_emit_an_error_event_when_the_client_is_gone():
+    @sse_it
+    def task(cancellation=None):
+        raise ClientGoneError("client disconnected")
+
+    response = await task()
+    body = await _collect_streaming_response(response)
+    events = _parse_sse_events(body)
+
+    assert [e["event"] for e in events] == ["processing"]
+    assert not [e for e in events if e["event"] == "error"]

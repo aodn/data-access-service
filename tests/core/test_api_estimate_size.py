@@ -22,6 +22,7 @@ from aodn_cloud_optimised.lib.DataQuery import ZarrDataSource
 
 from data_access_service import API
 from data_access_service.core import api as core_api
+from data_access_service.utils.cancellation import Cancellation, ClientGoneError
 from data_access_service.core.size_estimation import estimate_single_key_size
 from data_access_service.core.constants import (
     COMPRESSION_RATIO_NETCDF,
@@ -762,3 +763,78 @@ def test_all_keys_unsupported_raises(monkeypatch):
         api.estimate_datasets_size(
             UUID, keys=["a.parquet", "b.parquet"], output_format="geotiff"
         )
+
+
+def test_cancelled_client_stops_the_key_loop(monkeypatch):
+    # The client goes away after the first key: the second key is never started.
+    cancellation = Cancellation()
+    api = API()
+    mock_single = MagicMock(
+        side_effect=lambda *a, **kw: (
+            cancellation.cancel() or _single_result("a.zarr", 100, 40)
+        )
+    )
+    monkeypatch.setattr(core_api, "estimate_single_key_size", mock_single)
+
+    with pytest.raises(ClientGoneError):
+        api.estimate_datasets_size(
+            UUID,
+            keys=["a.zarr", "b.zarr"],
+            output_format="netcdf",
+            cancellation=cancellation,
+        )
+
+    assert mock_single.call_count == 1
+
+
+def test_cancellation_is_passed_down_to_each_key(monkeypatch):
+    cancellation = Cancellation()
+    api = API()
+    mock_single = MagicMock(return_value=_single_result("a.zarr", 100, 40))
+    monkeypatch.setattr(core_api, "estimate_single_key_size", mock_single)
+
+    api.estimate_datasets_size(
+        UUID, keys=["a.zarr"], output_format="netcdf", cancellation=cancellation
+    )
+
+    assert mock_single.call_args.kwargs["cancellation"] is cancellation
+
+
+def test_cancellation_is_not_swallowed_by_the_unsupported_key_skip(monkeypatch):
+    # The per-key handler catches ValueError to skip unsupported formats. A
+    # cancellation must not be swallowed there and reported as "skipped".
+    cancellation = Cancellation()
+    cancellation.cancel()
+    api = API()
+    monkeypatch.setattr(
+        core_api,
+        "estimate_single_key_size",
+        MagicMock(side_effect=ClientGoneError("client disconnected")),
+    )
+
+    with pytest.raises(ClientGoneError):
+        api.estimate_datasets_size(
+            UUID,
+            keys=["a.zarr", "b.zarr"],
+            output_format="netcdf",
+            cancellation=None,
+        )
+
+
+def test_no_cancellation_runs_every_key(monkeypatch):
+    # Batch jobs and tests pass nothing; the checkpoints must be inert.
+    api = API()
+    mock_single = MagicMock(
+        side_effect=[
+            _single_result("a.zarr", 100, 40),
+            _single_result("b.zarr", 200, 80),
+        ]
+    )
+    monkeypatch.setattr(core_api, "estimate_single_key_size", mock_single)
+
+    result = api.estimate_datasets_size(
+        UUID, keys=["a.zarr", "b.zarr"], output_format="netcdf"
+    )
+
+    assert mock_single.call_count == 2
+    assert result["estimated_uncompressed_bytes"] == 300

@@ -42,6 +42,7 @@ from data_access_service.core.size_estimation import (
     estimate_single_key_size,
 )
 from data_access_service.models.bounding_box import BoundingBox
+from data_access_service.utils.cancellation import Cancellation, ClientGoneError
 from data_access_service.utils.subset_request_resolver import ResolvedSubsetRequest
 
 CANNED = {
@@ -85,7 +86,15 @@ def _parquet_datasource(dataset: pa_ds.Dataset) -> MagicMock:
     return source
 
 
-def _estimate(dataset, api=None, bboxes=(), columns=None, output_format="csv", **dates):
+def _estimate(
+    dataset,
+    api=None,
+    bboxes=(),
+    columns=None,
+    output_format="csv",
+    cancellation=None,
+    **dates,
+):
     return _estimate_parquet_size(
         api or _api(),
         _parquet_datasource(dataset),
@@ -96,6 +105,7 @@ def _estimate(dataset, api=None, bboxes=(), columns=None, output_format="csv", *
         list(bboxes),
         columns,
         output_format,
+        cancellation,
     )
 
 
@@ -436,3 +446,58 @@ def test_non_date_statistic_returns_none(value):
     """A time column stored as a plain number (epoch seconds) is ambiguous - we
     refuse to guess a unit, so the caller keeps the row group."""
     assert _as_utc_timestamp(value) is None
+
+
+# --------------------------------------------------------------------------
+# Cancellation - the fragment loop is where a cancelled estimate spends its time
+# --------------------------------------------------------------------------
+
+
+class _CancelAfter(Cancellation):
+    """A client that disconnects after `checkpoints` checks have gone by."""
+
+    def __init__(self, checkpoints: int):
+        super().__init__()
+        self.checks = 0
+        self._checkpoints = checkpoints
+
+    def raise_if_client_gone(self) -> None:
+        self.checks += 1
+        if self.checks > self._checkpoints:
+            self.cancel()
+        super().raise_if_client_gone()
+
+
+def test_cancelled_client_stops_the_fragment_loop():
+    """argo has 105 fragments, so a footer read each. Once the client goes, the
+    estimate must stop at the next fragment instead of reading the rest."""
+    api = _api()
+    api.resolve_dim_names = MagicMock(return_value=("LATITUDE", "LONGITUDE", "JULD"))
+    cancellation = _CancelAfter(3)
+
+    with pytest.raises(ClientGoneError):
+        _estimate(_canned("argo"), api=api, cancellation=cancellation)
+
+    # Stopped on the 4th check, not after all 105 fragments.
+    assert cancellation.checks == 4
+
+
+def test_fragment_loop_checks_every_fragment():
+    api = _api()
+    api.resolve_dim_names = MagicMock(return_value=("LATITUDE", "LONGITUDE", "JULD"))
+    cancellation = _CancelAfter(10_000)  # never actually cancels
+
+    result = _estimate(_canned("argo"), api=api, cancellation=cancellation)
+
+    assert cancellation.checks == 105
+    assert result["estimated_uncompressed_bytes"] > 0
+
+
+def test_estimate_without_cancellation_is_unaffected():
+    api = _api()
+    api.resolve_dim_names = MagicMock(return_value=("LATITUDE", "LONGITUDE", "JULD"))
+
+    with_none = _estimate(_canned("argo"), api=api, cancellation=None)
+    live = _estimate(_canned("argo"), api=api, cancellation=Cancellation())
+
+    assert with_none == live
