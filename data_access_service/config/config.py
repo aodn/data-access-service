@@ -287,6 +287,7 @@ class Config:
             slice_cache_ttl_seconds=tconfig["slice_cache_ttl_seconds"],
             redis_host=redis_env or tconfig.get("redis_host"),
             redis_port=tconfig["redis_port"],
+            is_tls=redis_env is not None,
             s3_anon=tconfig["s3_anon"],
             s3_connect_timeout=tconfig["s3_connect_timeout"],
             s3_read_timeout=tconfig["s3_read_timeout"],
