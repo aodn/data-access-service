@@ -251,8 +251,8 @@ def create_memoizer(*, namespace: str, ttl_seconds: int) -> CacheBackend:
         client = redis.Redis(
             host=tiler_config.redis_host,
             port=tiler_config.redis_port,
-            socket_connect_timeout=2,
-            socket_timeout=2,
+            socket_connect_timeout=1,
+            socket_timeout=1,
         )
         return RedisMemoizer(
             namespace=namespace, ttl_seconds=ttl_seconds, client=client
