@@ -18,6 +18,7 @@ class TilerConfig:
     slice_cache_ttl_seconds: int
     redis_host: str
     redis_port: int
+    is_tls: bool
     s3_anon: bool
     s3_connect_timeout: int
     s3_read_timeout: int
