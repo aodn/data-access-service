@@ -302,10 +302,10 @@ def estimate_size_multi(
     # in a worker thread, then emits the estimate dict in a final "result" event.
     # Errors are raised below surface as SSE "error" events rather than HTTP status codes
     logger.debug(
-        "estimate_size_multi start: uuid=%s keys=%s start=%s end=%s f=%s "
+        "estimate_size_multi start: uuid=%s key=%s start=%s end=%s f=%s "
         "has_polygon=%s columns=%s",
         uuid,
-        body.keys,
+        body.key,
         body.start_date,
         body.end_date,
         body.output_format,
@@ -318,7 +318,7 @@ def estimate_size_multi(
 
     result = api_instance.estimate_datasets_size(
         uuid,
-        keys=body.keys,
+        keys=body.get_keys(),
         start_date=body.start_date,
         end_date=body.end_date,
         multi_polygon=body.multi_polygon,
@@ -332,7 +332,7 @@ def estimate_size_multi(
     if result is None:
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
-            detail=f"No matching keys found for uuid={uuid}, keys={body.keys}",
+            detail=f"No matching keys found for uuid={uuid}, key={body.key}",
         )
 
     return result
