@@ -115,6 +115,16 @@ def normalize_request(api, subset_request: SubsetRequest) -> SubsetRequest:
     return replace(subset_request, start_date=start_date, end_date=end_date, keys=keys)
 
 
+def parse_keys(raw: Optional[str]) -> List[str]:
+    """
+    Parse the comma-separated `key` string. ["*"] when absent, which
+    resolve_keys then expands to the whole dataset.
+    """
+    if raw is None:
+        return ["*"]
+    return [item.strip() for item in raw.split(",")]
+
+
 def resolve_keys(api, uuid: str, keys: Optional[List[str]]) -> List[str]:
     """Expand "*" / absent keys to all keys of the dataset."""
     if not keys or "*" in keys:
