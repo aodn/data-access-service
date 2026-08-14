@@ -322,7 +322,9 @@ class StoreRegistry:
             1 for e in outcomes.values() if isinstance(e, NotGriddedStoreError)
         )
         absent = sum(1 for e in outcomes.values() if isinstance(e, FileNotFoundError))
-        no_time = sum(1 for e in outcomes.values() if isinstance(e, NoTimeDimensionError))
+        no_time = sum(
+            1 for e in outcomes.values() if isinstance(e, NoTimeDimensionError)
+        )
         unresolved = sum(
             1
             for e in outcomes.values()

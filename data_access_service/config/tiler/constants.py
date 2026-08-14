@@ -11,6 +11,7 @@ COORD_NAMES = {
     "longitude": "lon",
 }
 
+
 @dataclass(frozen=True)
 class DataTileLodConfig:
     """Server-shader contract for the data-tile LOD pyramid. Global policy, not
