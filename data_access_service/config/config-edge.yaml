@@ -13,3 +13,13 @@ aws:
 pmtiles:
   config:
     use_fork_process: True
+tiler:
+  config:
+    # Capacity gate for concurrent store opens during startup prewarm.
+    store_prewarm_workers: 8
+    # Bounded pool for TTL-triggered background store refreshes.
+    store_refresh_workers: 2
+    # Max concurrent sync route handlers (each cold slice needs one thread).
+    thread_pool_size: 8
+    # Capacity gate for /animation per-frame S3 fan-out. Sized to the aiobotocore
+    animation_workers: 4
