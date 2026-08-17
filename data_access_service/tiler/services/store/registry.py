@@ -5,9 +5,11 @@ and bounded by registered products), and ``ttl`` triggers a background refresh
 rather than expiry. Stale entries keep serving until the refresh completes, so
 requests never block on freshness — only the very first open per URL blocks.
 
-A per-store ``{local_date: [timestamps]}`` index is built alongside the source
-so ``load_slice`` / ``get_available_dates`` can resolve a local date in O(1)
-instead of converting every timestamp on the hot path.
+A per-store ``{utc_instant: raw_timestamp}`` index is built alongside the
+source so ``load_slice`` / ``get_available_dates`` can resolve a requested
+timestamp in O(1) instead of scanning every timestamp on the hot path. The
+tiler addresses data by exact UTC instant, not by calendar day — see
+``tiler/technical.md`` §9.
 
 Single source of truth is the lib ``ZarrDataSource`` (opened with
 ``chunks=None`` so dask is not built at open time; native coord names for
@@ -33,7 +35,7 @@ from aodn_cloud_optimised.lib import DataQuery
 
 from data_access_service.config.config import Config
 from data_access_service.config.tiler.constants import COORD_NAMES
-from data_access_service.tiler.utils.dates import DATE_FMT, LOCAL_TZ
+from data_access_service.tiler.utils.dates import parse_query_date, ts_to_utc_iso
 
 if TYPE_CHECKING:
     from aodn_cloud_optimised.lib.DataQuery import ZarrDataSource
@@ -115,28 +117,20 @@ def _resolve_zarr_source(store_url: str) -> ZarrDataSource:
     return source
 
 
-def _build_date_index(ds: xr.Dataset) -> dict[str, list]:
-    """Return {local_date: [timestamps]} for the dataset's time coord, or {}.
+def _build_time_index(ds: xr.Dataset) -> dict[pd.Timestamp, object]:
+    """Return {utc_instant: raw_timestamp} for the dataset's time coord, or {}.
 
-    Values stay the raw coord elements, since ``_fetch_slice_from_store``
-    selects with them.
+    Keys are naive ``pd.Timestamp`` (UTC-implied, matching the store's own
+    ``time`` coord and ``parse_query_date``'s output) so a parsed client
+    request can look itself up directly. Values stay the raw coord elements,
+    since ``_fetch_slice_from_store`` selects with them.
     """
     if "time" not in ds.dims:
         return {}
     times = ds.coords["time"].values
     if len(times) == 0:
         return {}
-
-    local_dates = (
-        pd.DatetimeIndex(times)
-        .tz_localize("UTC")
-        .tz_convert(LOCAL_TZ)
-        .strftime(DATE_FMT)
-    )
-    index: dict[str, list] = {}
-    for local_date, ts in zip(local_dates, times):
-        index.setdefault(local_date, []).append(ts)
-    return index
+    return {pd.Timestamp(ts): ts for ts in times}
 
 
 def _open_store(store_url: str) -> ZarrDataSource:
@@ -166,7 +160,7 @@ class StoreRegistry:
         self._ttl_jitter: dict[str, float] = {}
         self._refreshing: set[str] = set()
         self._in_flight: dict[str, concurrent.futures.Future] = {}
-        self._date_index: dict[str, dict[str, list]] = {}
+        self._time_index: dict[str, dict[pd.Timestamp, object]] = {}
         self._lock = threading.Lock()
 
     def _ensure_open(self, store_url: str) -> ZarrDataSource:
@@ -197,9 +191,9 @@ class StoreRegistry:
 
         try:
             source = _open_store(store_url)
-            index = _build_date_index(source.zarr_store)
+            index = _build_time_index(source.zarr_store)
             self._publish(store_url, source, index)
-            logger.info(f"Store opened: {store_url} (date_count={len(index)})")
+            logger.info(f"Store opened: {store_url} (timestamp_count={len(index)})")
             future.set_result(source)
         except Exception as e:
             future.set_exception(e)
@@ -223,10 +217,20 @@ class StoreRegistry:
             source = self._stores.get(store_url)
         return source.zarr_store if source is not None else None
 
-    def date_index(self, store_url: str) -> dict[str, list]:
-        """Return the {local_date: [timestamps]} map for ``store_url`` (or empty dict)."""
+    def time_index(self, store_url: str) -> dict[pd.Timestamp, object]:
+        """Return the {utc_instant: raw_timestamp} map for ``store_url`` (or empty dict)."""
         with self._lock:
-            return self._date_index.get(store_url, {})
+            return self._time_index.get(store_url, {})
+
+    def resolve_timestamp(self, store_url: str, date: str) -> object | None:
+        """Parse a client-supplied date/timestamp and resolve it to the store's
+        raw timestamp value, or None if no such instant exists.
+        """
+        try:
+            parsed = parse_query_date(date)
+        except ValueError:
+            return None
+        return self.time_index(store_url).get(parsed)
 
     async def _prewarm_one(self, store_url: str) -> BaseException | None:
         """Open one URL. None on success, else the exception.
@@ -310,27 +314,27 @@ class StoreRegistry:
             self._ttl_jitter.clear()
             self._refreshing.clear()
             self._in_flight.clear()
-            self._date_index.clear()
+            self._time_index.clear()
 
     def _publish(
         self,
         store_url: str,
         source: ZarrDataSource,
-        index: dict[str, list],
+        index: dict[pd.Timestamp, object],
     ) -> None:
-        """Atomically replace source, opened-at timestamp, and date index for a URL."""
+        """Atomically replace source, opened-at timestamp, and time index for a URL."""
         with self._lock:
             self._stores[store_url] = source
             self._opened_at[store_url] = time.monotonic()
             self._ttl_jitter[store_url] = random.uniform(
                 0.0, self._ttl * _REFRESH_JITTER_FRACTION
             )
-            self._date_index[store_url] = index
+            self._time_index[store_url] = index
 
     def _refresh_background(self, store_url: str) -> None:
         try:
             source = _open_store(store_url)
-            index = _build_date_index(source.zarr_store)
+            index = _build_time_index(source.zarr_store)
             self._publish(store_url, source, index)
             logger.info(f"Store refreshed: {store_url}")
         except Exception:
@@ -356,9 +360,14 @@ def cached_store(store_url: str) -> xr.Dataset | None:
 
 
 def get_available_dates(store_url: str) -> list[str]:
-    get_store(store_url)  # ensures the date index for this URL is populated
-    index = store_registry.date_index(store_url)
-    return sorted(index) if index else []
+    get_store(store_url)  # ensures the time index for this URL is populated
+    index = store_registry.time_index(store_url)
+    return [ts_to_utc_iso(index[key]) for key in sorted(index)]
+
+
+def resolve_timestamp(store_url: str, date: str) -> object | None:
+    get_store(store_url)  # ensures the time index for this URL is populated
+    return store_registry.resolve_timestamp(store_url, date)
 
 
 async def prewarm_stores(store_urls: list[str]) -> dict[str, BaseException | None]:

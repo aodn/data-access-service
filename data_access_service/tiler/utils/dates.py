@@ -1,21 +1,17 @@
-"""Pure date utility functions shared across routers and services."""
-
-from zoneinfo import ZoneInfo
+"""Pure date utility functions shared across routers and services.
+"""
 
 import pandas as pd
 
-from data_access_service.config.config import Config
 
-# All date strings exposed by the API are local dates in this timezone.
-# Requests must send them back unchanged.
-LOCAL_TZ = ZoneInfo(Config.get_config().get_tiler_config().tile_timezone)
-
-# Shared with store.registry's date-index build — both must format identically.
-DATE_FMT = "%Y-%m-%d"
+def ts_to_utc_iso(ts) -> str:
+    """Format a raw (naive UTC) store timestamp as a canonical UTC ISO-8601 string."""
+    return pd.Timestamp(ts).tz_localize("UTC").isoformat().replace("+00:00", "Z")
 
 
-def ts_to_local_date(ts) -> str:
-    """Convert a UTC numpy datetime64 or Timestamp to a local date string (YYYY-MM-DD)."""
-    return str(
-        pd.Timestamp(ts).tz_localize("UTC").tz_convert(LOCAL_TZ).strftime(DATE_FMT)
-    )
+def parse_query_date(date: str) -> pd.Timestamp:
+    """Parse a client-supplied date/timestamp string into a naive-UTC instant."""
+    ts = pd.Timestamp(date)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert("UTC").tz_localize(None)
+    return ts

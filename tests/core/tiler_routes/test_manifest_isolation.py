@@ -9,7 +9,11 @@ import pytest
 import data_access_service.tiler.services.product.registry as registry
 from data_access_service.tiler.services.product.product import Product
 
-MANIFEST = "/api/v1/das/tiler/data_tiles/manifest"
+MANIFEST_BASE = "/api/v1/das/tiler/data_tiles/manifest"
+# from=2000-01-01 bypasses the "start of last year" default so these tests'
+# fixture dates (all 2024) aren't silently filtered out of available_dates —
+# this file is about per-store isolation, not the from/to default.
+MANIFEST = f"{MANIFEST_BASE}?from=2000-01-01T00:00:00Z"
 
 STORE_A = "s3://test/a.zarr"
 STORE_B = "s3://test/b.zarr"
@@ -193,7 +197,7 @@ def test_date_filters_still_apply_to_healthy_stores(client, catalogue, monkeypat
         },
     )
 
-    products = client.get(f"{MANIFEST}?from=2024-02-01").json()["products"]
+    products = client.get(f"{MANIFEST_BASE}?from=2024-02-01T00:00:00Z").json()["products"]
 
     assert products["b:one"]["available_dates"] == ["2024-02-01", "2024-03-01"]
     # full_date_range stays the store's full bounds, independent of from/to.

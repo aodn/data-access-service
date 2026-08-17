@@ -19,8 +19,10 @@ from data_access_service.tiler.services.rendering.masks import apply_ocean_mask
 from data_access_service.tiler.services.store.registry import (
     get_datasource,
     get_store,
+    resolve_timestamp,
     store_registry,
 )
+from data_access_service.tiler.utils.dates import ts_to_utc_iso
 
 # Always in-process, independent of CACHE_BACKEND — see Deduper's docstring
 # for why this matters even (especially) under CACHE_BACKEND=none.
@@ -52,7 +54,7 @@ def _compute_slice_from_store(
 def _fetch_slice_from_store(
     store_url: str, date: str, variables: list[str]
 ) -> xr.Dataset:
-    # Ensure store is open (date index + variable catalogue on normalised view).
+    # Ensure store is open (time index + variable catalogue on normalised view).
     store = get_store(store_url)
 
     missing = [v for v in variables if v not in store.data_vars]
@@ -62,10 +64,10 @@ def _fetch_slice_from_store(
             f"(available: {sorted(store.data_vars)})"
         )
 
-    index = store_registry.date_index(store_url)
-    matching = list(index.get(date, ()))
-    if not matching:
-        latest = max(index) if index else None
+    t0 = resolve_timestamp(store_url, date)
+    if t0 is None:
+        index = store_registry.time_index(store_url)
+        latest = ts_to_utc_iso(index[max(index)]) if index else None
         hint = (
             f" Latest available date is {latest!r}."
             if latest
@@ -73,9 +75,6 @@ def _fetch_slice_from_store(
         )
         raise FileNotFoundError(f"No data for date {date!r}.{hint}")
 
-    # Exact timestamp from the local-date index keeps tiler date semantics
-    # (tile_timezone) rather than a bare calendar-string range on get_data.
-    t0 = matching[0]
     try:
         ds = get_datasource(store_url).get_data(
             date_start=_ts_for_get_data(t0),

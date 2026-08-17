@@ -1,7 +1,11 @@
-"""loader.load_slice + date-index resolution.
+"""loader.load_slice + exact-instant resolution.
 
 Existing tests in test_registry.py cover get_store + get_lod_grids. These cover
 the L1 cache interaction, get_data path, and multi-timestamp resolution.
+
+The tiler addresses data by exact UTC instant — the request date string must
+match a store timestamp exactly (via parse_query_date), not a calendar-day
+bucket.
 """
 
 import threading
@@ -66,12 +70,11 @@ def _ds_with_time(times: list[str]) -> xr.Dataset:
 
 
 def test_load_slice_returns_dataset_for_known_date(monkeypatch):
-    """Happy path: date in index → slice computed and returned."""
-    # 2024-01-15 UTC → local date 2024-01-16 in Sydney (UTC+11).
+    """Happy path: exact instant in index → slice computed and returned."""
     ds = _ds_with_time(["2024-01-15T13:00:00"])
     _patch_source(monkeypatch, ds)
 
-    result = loader.load_slice("s3://b/x.zarr", "2024-01-16", ["v"])
+    result = loader.load_slice("s3://b/x.zarr", "2024-01-15T13:00:00Z", ["v"])
     assert "v" in result.data_vars
     assert result["v"].shape == (2, 2)
 
@@ -81,7 +84,7 @@ def test_load_slice_unknown_date_raises_file_not_found(monkeypatch):
     _patch_source(monkeypatch, ds)
 
     with pytest.raises(
-        FileNotFoundError, match="Latest available date is '2024-01-16'"
+        FileNotFoundError, match="Latest available date is '2024-01-15T13:00:00Z'"
     ):
         loader.load_slice("s3://b/x.zarr", "1999-01-01", ["v"])
 
@@ -93,19 +96,18 @@ def test_load_slice_unknown_variable_names_the_variable_not_the_date(monkeypatch
     _patch_source(monkeypatch, ds)
 
     with pytest.raises(FileNotFoundError, match=r"NOT_A_REAL_VAR"):
-        loader.load_slice("s3://b/x.zarr", "2024-01-16", ["NOT_A_REAL_VAR"])
+        loader.load_slice("s3://b/x.zarr", "2024-01-15T13:00:00Z", ["NOT_A_REAL_VAR"])
 
 
-def test_load_slice_uses_first_timestamp_when_multiple_map_to_same_date(monkeypatch):
-    """Two UTC timestamps mapping to the same local date should still serve,
-    using the first (index-order) timestamp's data."""
-    # Two times that both land on Sydney local date 2024-01-16.
+def test_load_slice_resolves_exact_timestamp_among_several(monkeypatch):
+    """Multiple timestamps in one store are each independently addressable —
+    requesting one exactly must serve that instant's data, not the first."""
     ds = _ds_with_time(["2024-01-15T13:00:00", "2024-01-15T14:00:00"])
     _patch_source(monkeypatch, ds)
 
-    result = loader.load_slice("s3://b/x.zarr", "2024-01-16", ["v"])
+    result = loader.load_slice("s3://b/x.zarr", "2024-01-15T14:00:00Z", ["v"])
 
-    assert np.array_equal(result["v"].values, ds["v"].isel(time=0).values)
+    assert np.array_equal(result["v"].values, ds["v"].isel(time=1).values)
 
 
 def test_load_slice_calls_get_data(monkeypatch):
@@ -121,7 +123,7 @@ def test_load_slice_calls_get_data(monkeypatch):
 
     source.get_data = tracking_get_data  # type: ignore[method-assign]
 
-    loader.load_slice("s3://b/x.zarr", "2024-01-16", ["v"])
+    loader.load_slice("s3://b/x.zarr", "2024-01-15T13:00:00Z", ["v"])
     assert len(calls) == 1
     assert calls[0][1].get("date_start") is not None
     assert calls[0][1].get("date_end") is not None
@@ -151,7 +153,9 @@ def test_load_slice_ocean_masked_nulls_invalid_cells(monkeypatch):
     ds = _ds_ocean(["2024-01-15T13:00:00"], [-40.0, -6.4], [150.0, 137.0])
     _patch_source(monkeypatch, ds)
 
-    result = loader.load_slice("s3://b/x.zarr", "2024-01-16", ["v"], ocean_masked=True)
+    result = loader.load_slice(
+        "s3://b/x.zarr", "2024-01-15T13:00:00Z", ["v"], ocean_masked=True
+    )
     # Open-ocean cell survives; the New Guinea land cell is nulled.
     assert float(result["v"].sel(lat=-40.0, lon=150.0)) == 1.0
     assert np.isnan(float(result["v"].sel(lat=-6.4, lon=137.0)))
@@ -162,7 +166,7 @@ def test_load_slice_without_ocean_masked_keeps_all_cells(monkeypatch):
     _patch_source(monkeypatch, ds)
 
     result = loader.load_slice(
-        "s3://b/x.zarr", "2024-01-16", ["v"]
+        "s3://b/x.zarr", "2024-01-15T13:00:00Z", ["v"]
     )  # flag defaults off
     assert not np.isnan(result["v"]).any()
 
@@ -193,7 +197,9 @@ def test_concurrent_identical_loads_share_one_compute(monkeypatch):
     results: list = []
 
     def worker():
-        results.append(loader.load_slice("s3://b/x.zarr", "2024-01-16", ["v"]))
+        results.append(
+            loader.load_slice("s3://b/x.zarr", "2024-01-15T13:00:00Z", ["v"])
+        )
 
     threads = [threading.Thread(target=worker) for _ in range(4)]
     for t in threads:

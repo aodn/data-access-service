@@ -1,8 +1,8 @@
 """Helpers shared across the three routers (products, data_tiles, visual_tiles)."""
 
-from datetime import date as _Date
 from http import HTTPStatus
 
+import pandas as pd
 from fastapi import HTTPException
 from fastapi.openapi.models import Example
 
@@ -10,9 +10,10 @@ from data_access_service.tiler.services.colormap.resolver import resolve_colorma
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.product.registry import get_product
 from data_access_service.tiler.services.store.slice_loader import load_slice
+from data_access_service.tiler.utils.dates import parse_query_date
 
 PRODUCT_EX: dict[str, Example] = {"default": Example(value="sea_level_anomaly")}
-DATE_EX: dict[str, Example] = {"default": Example(value="2024-02-24")}
+DATE_EX: dict[str, Example] = {"default": Example(value="2024-02-24T00:00:00Z")}
 
 
 _tiler_ready = False
@@ -59,9 +60,20 @@ def visual_product_or_400(product_id: str) -> Product:
     return product
 
 
-def validate_date(date: str) -> None:
+def validate_date(date: str) -> pd.Timestamp:
+    """Parse ``date`` as a full UTC timestamp, raising 422 on failure.
+    """
+    if "T" not in date:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Invalid date: {date!r} — expected a full UTC timestamp "
+                "(e.g. '2024-06-15T23:00:00Z'), not a bare date. Use one of "
+                "the exact values from /manifest's available_dates."
+            ),
+        )
     try:
-        _Date.fromisoformat(date)
+        return parse_query_date(date)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=f"Invalid date: {date!r}") from e
 

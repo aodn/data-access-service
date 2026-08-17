@@ -64,7 +64,7 @@ def test_gzip_skips_image_tiles(client):
         ),
     ):
         response = client.get(
-            "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/5/0/0.png",
+            "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/5/0/0.png?date=2024-01-01T00:00:00Z",
             headers={"Accept-Encoding": "gzip"},
         )
     assert response.status_code == 200

@@ -3,6 +3,7 @@ import math
 import time
 from http import HTTPStatus
 
+import pandas as pd
 import xarray as xr
 from fastapi import APIRouter, HTTPException, Path, Query, Response
 from fastapi.openapi.models import Example
@@ -22,6 +23,7 @@ from data_access_service.tiler.services.product.registry import (
     iter_products,
 )
 from data_access_service.tiler.services.store.registry import get_available_dates
+from data_access_service.tiler.utils.dates import parse_query_date
 from data_access_service.tiler.utils.geo import dataset_bounds
 
 from .shared import (
@@ -70,12 +72,18 @@ async def get_products(response: Response):
     return [ProductConfig.from_product(p) for p in iter_products()]
 
 
+def _default_from_ts() -> pd.Timestamp:
+    """Start of last calendar year (UTC), used when `from` is omitted."""
+    last_year = pd.Timestamp.now(tz="UTC").year - 1
+    return pd.Timestamp(year=last_year, month=1, day=1)
+
+
 @router.get(
     "/manifest",
     summary="Products availability",
     description=(
         "Returns available dates for every product. "
-        "`from` defaults to each product's earliest available date; `to` is unbounded by default."
+        "`from` defaults to the start of last calendar year; `to` is unbounded by default."
     ),
     response_model=ManifestResponse,
 )
@@ -84,18 +92,25 @@ def get_products_availability(
     from_date: str | None = Query(
         None,
         alias="from",
-        pattern=r"^\d{4}-\d{2}-\d{2}$",
-        description="Start date (inclusive), YYYY-MM-DD. Defaults to each product's earliest available date.",
-        openapi_examples={"default": Example(value="2024-01-01")},
+        description=(
+            "Start instant (inclusive), full UTC ISO-8601 timestamp. "
+            "Defaults to the start of last calendar year."
+        ),
+        openapi_examples={"default": Example(value="2024-01-01T00:00:00Z")},
     ),
     to_date: str | None = Query(
         None,
         alias="to",
-        pattern=r"^\d{4}-\d{2}-\d{2}$",
-        description="End date (inclusive), YYYY-MM-DD. Defaults to no upper bound.",
-        openapi_examples={"default": Example(value="2024-12-31")},
+        description=(
+            "End instant (inclusive), full UTC ISO-8601 timestamp. "
+            "Defaults to no upper bound."
+        ),
+        openapi_examples={"default": Example(value="2024-12-31T00:00:00Z")},
     ),
 ):
+    from_ts = validate_date(from_date) if from_date else _default_from_ts()
+    to_ts = validate_date(to_date) if to_date else None
+
     # iter_product_items returns a snapshot list so a concurrent reload can't
     # raise RuntimeError ("dictionary changed size during iteration") here.
     items = iter_product_items()
@@ -103,16 +118,21 @@ def get_products_availability(
         {product.source_path for _, product in items}
     )
 
+    parsed_by_store = {
+        store_url: [(d, parse_query_date(d)) for d in dates]
+        for store_url, dates in dates_by_store.items()
+    }
+
     products = {}
     for product_id, product in items:
         all_dates = dates_by_store[product.source_path]
         # full_date_range is the product's full dataset bounds, independent of from/to;
         # available_dates below is the from/to-filtered subset.
-        dates = all_dates
-        if from_date:
-            dates = [d for d in dates if d >= from_date]
-        if to_date:
-            dates = [d for d in dates if d <= to_date]
+        dates = [
+            d
+            for d, ts in parsed_by_store[product.source_path]
+            if (from_ts is None or ts >= from_ts) and (to_ts is None or ts <= to_ts)
+        ]
         products[product_id] = {
             "available_dates": dates,
             "full_date_range": {
@@ -170,15 +190,18 @@ def _available_dates_per_store(store_urls: set[str]) -> dict[str, list[str]]:
 
 
 @router.get(
-    "/{product_id}/{date}/point",
+    "/{product_id}/point",
     summary="Point value lookup",
-    description="Returns the value(s) of all product variables at the nearest grid cell to the given lat/lon.",
+    description=(
+        "Returns the value(s) of all product variables at the nearest grid cell to the given lat/lon. "
+        "`date` must be one of the exact UTC timestamps returned by `/manifest`'s `available_dates`."
+    ),
     response_model=PointResponse,
 )
 def get_point(
     response: Response,
     product_id: str = Path(openapi_examples=PRODUCT_EX),
-    date: str = Path(pattern=r"^\d{4}-\d{2}-\d{2}$", openapi_examples=DATE_EX),
+    date: str = Query(openapi_examples=DATE_EX),
     lat: float = Query(..., openapi_examples={"default": Example(value=-33.8)}),
     lon: float = Query(..., openapi_examples={"default": Example(value=151.2)}),
 ):

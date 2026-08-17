@@ -1,48 +1,60 @@
-"""Timezone + date helpers — the silent-404 surface called out in CLAUDE.md.
-
-The API contract is: every date string is a TILE_TIMEZONE local date (default
-Australia/Sydney). Zarr stores UTC. If conversions drift, requests miss the
-matching timestamp and 404. These tests pin the conversion both directions.
+"""UTC date/timestamp helpers — the tiler addresses data by exact instant, not
+by calendar day. These tests pin the conversion both directions: a store
+timestamp must format to the exact string a client can parse back to the
+same instant.
 """
 
-from zoneinfo import ZoneInfo
-
+import numpy as np
 import pandas as pd
+import pytest
 
 from data_access_service.tiler.utils import dates as dates_mod
 
 
-def test_ts_to_local_date_converts_utc_to_sydney():
-    """A UTC midnight maps to the next-day Sydney date (Sydney is UTC+10/11)."""
-    # 2024-06-15T23:00:00Z is 2024-06-16 09:00 AEST.
+def test_ts_to_utc_iso_formats_naive_store_timestamp():
     ts = pd.Timestamp("2024-06-15T23:00:00")
-    assert dates_mod.ts_to_local_date(ts) == "2024-06-16"
+    assert dates_mod.ts_to_utc_iso(ts) == "2024-06-15T23:00:00Z"
 
 
-def test_ts_to_local_date_handles_numpy_datetime64():
+def test_ts_to_utc_iso_handles_numpy_datetime64():
     """The function is called with numpy datetime64 from Zarr — must accept it."""
-    import numpy as np
-
     ts = np.datetime64("2024-01-01T00:00:00")
-    # Sydney is UTC+11 in January → still 2024-01-01 local.
-    assert dates_mod.ts_to_local_date(ts) == "2024-01-01"
+    assert dates_mod.ts_to_utc_iso(ts) == "2024-01-01T00:00:00Z"
 
 
-def test_ts_to_local_date_uses_module_tz(monkeypatch):
-    """Swapping LOCAL_TZ must change the returned local date — proves the call uses it."""
-    monkeypatch.setattr(dates_mod, "LOCAL_TZ", ZoneInfo("UTC"))
-    ts = pd.Timestamp("2024-06-15T23:00:00")
-    assert dates_mod.ts_to_local_date(ts) == "2024-06-15"
-
-
-def test_ts_to_local_date_dst_boundary():
-    """Sydney AEDT→AEST transition (first Sunday of April) — UTC midnight either side
-    must still produce the correct local date."""
-    # 2024-04-06 (Saturday) 23:00Z is 2024-04-07 10:00 AEDT — before the 03:00 fallback.
-    assert (
-        dates_mod.ts_to_local_date(pd.Timestamp("2024-04-06T23:00:00")) == "2024-04-07"
+def test_parse_query_date_accepts_bare_date():
+    assert dates_mod.parse_query_date("2024-06-15") == pd.Timestamp(
+        "2024-06-15T00:00:00"
     )
-    # 2024-04-07 (Sunday) — after fallback Sydney is AEST (UTC+10).
-    assert (
-        dates_mod.ts_to_local_date(pd.Timestamp("2024-04-07T20:00:00")) == "2024-04-08"
+
+
+def test_parse_query_date_accepts_full_timestamp_with_z():
+    assert dates_mod.parse_query_date("2024-06-15T23:00:00Z") == pd.Timestamp(
+        "2024-06-15T23:00:00"
     )
+
+
+def test_parse_query_date_accepts_full_timestamp_with_offset():
+    assert dates_mod.parse_query_date("2024-06-15T23:00:00+00:00") == pd.Timestamp(
+        "2024-06-15T23:00:00"
+    )
+
+
+def test_parse_query_date_converts_non_utc_offset_to_utc():
+    # 2024-06-16T09:00:00+10:00 is the same instant as 2024-06-15T23:00:00Z.
+    assert dates_mod.parse_query_date("2024-06-16T09:00:00+10:00") == pd.Timestamp(
+        "2024-06-15T23:00:00"
+    )
+
+
+def test_parse_query_date_rejects_unparseable_string():
+    with pytest.raises(ValueError):
+        dates_mod.parse_query_date("not-a-date")
+
+
+def test_round_trip_through_ts_to_utc_iso_and_parse_query_date():
+    """A client parsing back what the server formatted must land on the exact
+    same instant — this is the invariant the whole exact-instant lookup relies on."""
+    raw = np.datetime64("2022-05-31T15:20:00")
+    formatted = dates_mod.ts_to_utc_iso(raw)
+    assert dates_mod.parse_query_date(formatted) == pd.Timestamp(raw)

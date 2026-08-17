@@ -284,7 +284,6 @@ class Config:
         redis_env = os.getenv("CACHE_HOST")
         tconfig = self.config.get("tiler", {}).get("config", {})
         return TilerConfig(
-            tile_timezone=tconfig["tile_timezone"],
             co_bucket=f"s3://{tconfig.get('co_bucket', 'aodn-cloud-optimised')}",
             store_ttl_seconds=tconfig["store_ttl_seconds"],
             store_prewarm_workers=tconfig["store_prewarm_workers"],

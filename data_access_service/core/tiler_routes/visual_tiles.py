@@ -29,6 +29,7 @@ from data_access_service.tiler.services.store.spatial import (
     default_bbox_from_store,
     native_resolution_in_bbox,
 )
+from data_access_service.tiler.utils.dates import parse_query_date
 from data_access_service.tiler.utils.image import (
     AnimatedFormat,
     ImageFormat,
@@ -120,18 +121,19 @@ def get_legend(
 
 
 @router.get(
-    "/{product_id}/{date}/{z}/{x}/{y}.{ext}",
+    "/{product_id}/{z}/{x}/{y}.{ext}",
     summary="Visualisation raster tile",
     description=(
         "Standard Web Mercator (XYZ) tile rendered as a colourised PNG or WebP. "
         "Compatible with MapboxGL `raster` sources and any slippy-map library. "
         "Tiles outside the product extent return transparent images. "
-        "WebP is rejected for categorical colormaps because lossy compression corrupts the discrete colour boundaries."
+        "WebP is rejected for categorical colormaps because lossy compression corrupts the discrete colour boundaries. "
+        "`date` must be one of the exact UTC timestamps returned by `/manifest`'s `available_dates`."
     ),
 )
 def get_tile(
     product_id: str = Path(openapi_examples=PRODUCT_EX),
-    date: str = Path(pattern=r"^\d{4}-\d{2}-\d{2}$", openapi_examples=DATE_EX),
+    date: str = Query(openapi_examples=DATE_EX),
     z: int = Path(openapi_examples={"default": Example(value=1)}),
     x: int = Path(openapi_examples={"default": Example(value=0)}),
     y: int = Path(openapi_examples={"default": Example(value=0)}),
@@ -363,7 +365,7 @@ def _parse_bbox_and_crs(
 
 
 @router.get(
-    "/{product_id}/{date}/bbox.{ext}",
+    "/{product_id}/bbox.{ext}",
     summary="Visualisation tile by bbox",
     description=(
         "Renders a colourised PNG or WebP for an arbitrary bounding box. The crs parameter "
@@ -373,12 +375,13 @@ def _parse_bbox_and_crs(
         "raster source for Mapbox GL / MapLibre / Leaflet / OpenLayers. Pass crs=EPSG:4326 "
         "for a Plate Carrée crop instead — e.g. for non-slippy-map / scientific consumers "
         "that want geographic-degree pixel spacing. "
-        "WebP is rejected for categorical colormaps because lossy compression corrupts the discrete colour boundaries."
+        "WebP is rejected for categorical colormaps because lossy compression corrupts the discrete colour boundaries. "
+        "`date` must be one of the exact UTC timestamps returned by `/manifest`'s `available_dates`."
     ),
 )
 def get_bbox(
     product_id: str = Path(openapi_examples=PRODUCT_EX),
-    date: str = Path(pattern=r"^\d{4}-\d{2}-\d{2}$", openapi_examples=DATE_EX),
+    date: str = Query(openapi_examples=DATE_EX),
     ext: ImageFormat = Path(  # noqa: B008
         pattern="^(png|webp)$",
         description="Output image format — 'png' (lossless) or 'webp' (lossy, ~50% smaller).",
@@ -478,7 +481,7 @@ def get_bbox(
 
 
 @router.get(
-    "/{product_id}/{from_date}/{to_date}/animation.{ext}",
+    "/{product_id}/animation.{ext}",
     summary="Animated bbox over a date range",
     description=(
         f"Renders the same bbox across every available date in [from_date, to_date] "
@@ -494,13 +497,15 @@ def get_bbox(
         f"the other is derived from the bbox aspect ratio so the output is not stretched. "
         f"This endpoint bypasses the in-memory slice cache so it never evicts hot tiles, so "
         f"expect cold requests to be slow. Like other tile endpoints the HTTP response itself "
-        f"is cached for a year at the CDN since it's fully determined by the URL."
+        f"is cached for a year at the CDN since it's fully determined by the URL. "
+        f"from_date/to_date are full UTC ISO-8601 timestamps; frames are every "
+        f"exact timestamp from `/manifest`'s `available_dates` falling within [from_date, to_date]."
     ),
 )
 async def get_animation(
     product_id: str = Path(openapi_examples=PRODUCT_EX),
-    from_date: str = Path(pattern=r"^\d{4}-\d{2}-\d{2}$", openapi_examples=DATE_EX),
-    to_date: str = Path(pattern=r"^\d{4}-\d{2}-\d{2}$", openapi_examples=DATE_EX),
+    from_date: str = Query(openapi_examples=DATE_EX),
+    to_date: str = Query(openapi_examples=DATE_EX),
     ext: AnimatedFormat = Path(  # noqa: B008
         pattern="^(gif|apng|webp)$",
         description="Animated output format — 'gif' (universal, 256-colour palette), 'apng' (lossless RGBA), or 'webp' (compressed RGBA).",
@@ -565,9 +570,9 @@ async def get_animation(
         200, ge=10, le=5000, description="Milliseconds per frame in the animation."
     ),
 ):
-    validate_date(from_date)
-    validate_date(to_date)
-    if from_date > to_date:
+    from_ts = validate_date(from_date)
+    to_ts = validate_date(to_date)
+    if from_ts > to_ts:
         raise HTTPException(
             status_code=400,
             detail=f"from_date {from_date!r} is after to_date {to_date!r}.",
@@ -595,8 +600,10 @@ async def get_animation(
             status_code=404,
             detail=f"No data available for product {product_id!r}.",
         )
+   
+    parsed_available = [(d, parse_query_date(d)) for d in available]
     earliest, latest = available[0], available[-1]
-    if from_date < earliest or to_date > latest:
+    if from_ts < parsed_available[0][1] or to_ts > parsed_available[-1][1]:
         raise HTTPException(
             status_code=404,
             detail=(
@@ -604,7 +611,7 @@ async def get_animation(
                 f"for product {product_id!r} ([{earliest}, {latest}])."
             ),
         )
-    dates = [d for d in available if from_date <= d <= to_date]
+    dates = [d for d, ts in parsed_available if from_ts <= ts <= to_ts]
     if not dates:
         raise HTTPException(
             status_code=404,
