@@ -505,7 +505,9 @@ def test_availability_no_dates_in_range(client):
             return_value=["2020-01-01"],
         ),
     ):
-        response = client.get("/api/v1/das/tiler/data_tiles/manifest?to=2019-01-01T00:00:00Z")
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/manifest?to=2019-01-01T00:00:00Z"
+        )
     assert response.status_code == 200
     product = response.json()["products"]["product_a"]
     assert product["available_dates"] == []

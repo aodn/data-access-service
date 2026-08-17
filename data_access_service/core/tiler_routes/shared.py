@@ -61,8 +61,7 @@ def visual_product_or_400(product_id: str) -> Product:
 
 
 def validate_date(date: str) -> pd.Timestamp:
-    """Parse ``date`` as a full UTC timestamp, raising 422 on failure.
-    """
+    """Parse ``date`` as a full UTC timestamp, raising 422 on failure."""
     if "T" not in date:
         raise HTTPException(
             status_code=422,

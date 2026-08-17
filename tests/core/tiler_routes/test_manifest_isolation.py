@@ -197,7 +197,9 @@ def test_date_filters_still_apply_to_healthy_stores(client, catalogue, monkeypat
         },
     )
 
-    products = client.get(f"{MANIFEST_BASE}?from=2024-02-01T00:00:00Z").json()["products"]
+    products = client.get(f"{MANIFEST_BASE}?from=2024-02-01T00:00:00Z").json()[
+        "products"
+    ]
 
     assert products["b:one"]["available_dates"] == ["2024-02-01", "2024-03-01"]
     # full_date_range stays the store's full bounds, independent of from/to.

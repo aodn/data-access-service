@@ -600,7 +600,7 @@ async def get_animation(
             status_code=404,
             detail=f"No data available for product {product_id!r}.",
         )
-   
+
     parsed_available = [(d, parse_query_date(d)) for d in available]
     earliest, latest = available[0], available[-1]
     if from_ts < parsed_available[0][1] or to_ts > parsed_available[-1][1]:
