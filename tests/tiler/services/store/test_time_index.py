@@ -8,6 +8,7 @@ import pandas as pd
 import xarray as xr
 
 from data_access_service.tiler.services.store.registry import _build_time_index
+from data_access_service.tiler.utils.dates import ts_to_utc_iso
 
 
 def _ds(times) -> xr.Dataset:
@@ -29,12 +30,17 @@ def test_keys_are_parsed_timestamps_of_the_raw_coord_values():
     assert set(index.keys()) == {pd.Timestamp(ts) for ts in times}
 
 
-def test_values_are_the_raw_coord_elements():
-    """load_slice selects with these, so they must be the coord's own values."""
+def test_values_pair_the_raw_coord_element_with_its_iso_string():
+    """load_slice selects with the raw half, so it must be the coord's own
+    value; the iso half is get_available_dates' precomputed format."""
     times = pd.date_range("2024-06-01", periods=3, freq="D").values
     index = _build_time_index(_ds(times))
-    assert all(isinstance(ts, np.datetime64) for ts in index.values())
-    assert sorted(index.values()) == sorted(times)
+    raws = [raw for raw, _iso in index.values()]
+    assert all(isinstance(ts, np.datetime64) for ts in raws)
+    assert sorted(raws) == sorted(times)
+    for ts, (raw, iso) in index.items():
+        assert iso == ts_to_utc_iso(raw)
+        assert ts == pd.Timestamp(raw)
 
 
 def test_each_timestamp_is_its_own_key_no_bucketing():
@@ -50,7 +56,8 @@ def test_lookup_by_parsed_client_string_resolves_to_raw_value():
     index = _build_time_index(_ds(times))
     from data_access_service.tiler.utils.dates import parse_query_date
 
-    assert index[parse_query_date("2022-05-31T15:20:00Z")] == times[0]
+    raw, _iso = index[parse_query_date("2022-05-31T15:20:00Z")]
+    assert raw == times[0]
 
 
 def test_store_without_time_dimension_yields_empty_index():
@@ -74,4 +81,4 @@ def test_empty_time_coord_yields_empty_index():
 def test_single_timestamp():
     times = pd.to_datetime(["2024-06-01 03:00"]).values
     index = _build_time_index(_ds(times))
-    assert index == {pd.Timestamp(times[0]): times[0]}
+    assert index == {pd.Timestamp(times[0]): (times[0], ts_to_utc_iso(times[0]))}

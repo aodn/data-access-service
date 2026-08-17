@@ -13,6 +13,7 @@ import xarray as xr
 
 from data_access_service.config.tiler.constants import LOD, TILE
 from data_access_service.tiler.services.product.product import Product
+from data_access_service.tiler.utils.dates import parse_query_date
 
 
 # --- LOD / tile geometry contract -----------------------------------------
@@ -72,7 +73,7 @@ def test_date_from_manifest_is_accepted_by_tile_endpoint(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.products.get_available_dates",
-            return_value=available,
+            return_value=[(d, parse_query_date(d)) for d in available],
         ),
     ):
         # from=2000-01-01 bypasses the "start of last year" default so these

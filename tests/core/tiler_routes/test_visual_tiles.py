@@ -2,12 +2,18 @@ from contextlib import contextmanager
 from unittest.mock import patch
 
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
 from data_access_service.tiler.utils.colors import build_categorical_lut
 
 _PNG = b"\x89PNG\r\n\x1a\n"
+
+
+def _avail(dates: list[str]) -> list[tuple[str, pd.Timestamp]]:
+    """Build a get_available_dates-shaped [(iso_string, timestamp), ...] fixture."""
+    return [(d, pd.Timestamp(d)) for d in dates]
 
 
 @contextmanager
@@ -547,7 +553,7 @@ def test_categorical_animation_mismatched_colormap_rejected(client, mcs_product)
         _registered_categorical("mcs_anim_bad", [1, 2, 3]),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.get_available_dates",
-            return_value=["2024-01-01", "2024-01-02", "2024-01-03"],
+            return_value=_avail(["2024-01-01", "2024-01-02", "2024-01-03"]),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
@@ -566,7 +572,7 @@ def test_animation_ok_with_default_bbox(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.get_available_dates",
-            return_value=["2024-01-01", "2024-01-02", "2024-01-03"],
+            return_value=_avail(["2024-01-01", "2024-01-02", "2024-01-03"]),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
@@ -609,7 +615,7 @@ def test_animation_no_data_in_range_returns_404(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.get_available_dates",
-            return_value=["2025-01-01"],
+            return_value=_avail(["2025-01-01"]),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.default_bbox_from_store",
@@ -651,7 +657,7 @@ def test_animation_frame_cap_rejected(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.get_available_dates",
-            return_value=too_many,
+            return_value=_avail(too_many),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.default_bbox_from_store",
@@ -691,7 +697,7 @@ def test_animation_explicit_bbox_passed_through(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.get_available_dates",
-            return_value=["2024-01-01"],
+            return_value=_avail(["2024-01-01"]),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
@@ -738,7 +744,7 @@ def test_animation_native_resolution_used_when_both_dims_omitted(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.get_available_dates",
-            return_value=["2024-01-01"],
+            return_value=_avail(["2024-01-01"]),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
@@ -764,7 +770,7 @@ def test_animation_height_derived_from_bbox_aspect_when_only_width_given(client)
     with (
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.get_available_dates",
-            return_value=["2024-01-01"],
+            return_value=_avail(["2024-01-01"]),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
@@ -786,7 +792,7 @@ def test_animation_width_derived_from_bbox_aspect_when_only_height_given(client)
     with (
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.get_available_dates",
-            return_value=["2024-01-01"],
+            return_value=_avail(["2024-01-01"]),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
@@ -810,7 +816,7 @@ def test_animation_derived_dimension_clamped_to_max(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.get_available_dates",
-            return_value=["2024-01-01"],
+            return_value=_avail(["2024-01-01"]),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",

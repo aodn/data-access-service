@@ -22,7 +22,6 @@ from data_access_service.tiler.services.store.registry import (
     resolve_timestamp,
     store_registry,
 )
-from data_access_service.tiler.utils.dates import ts_to_utc_iso
 
 # Always in-process, independent of CACHE_BACKEND — see Deduper's docstring
 # for why this matters even (especially) under CACHE_BACKEND=none.
@@ -67,7 +66,7 @@ def _fetch_slice_from_store(
     t0 = resolve_timestamp(store_url, date)
     if t0 is None:
         index = store_registry.time_index(store_url)
-        latest = ts_to_utc_iso(index[max(index)]) if index else None
+        latest = index[max(index)][1] if index else None
         hint = (
             f" Latest available date is {latest!r}."
             if latest

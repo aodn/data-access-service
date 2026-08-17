@@ -23,7 +23,6 @@ from data_access_service.tiler.services.product.registry import (
     iter_products,
 )
 from data_access_service.tiler.services.store.registry import get_available_dates
-from data_access_service.tiler.utils.dates import parse_query_date
 from data_access_service.tiler.utils.geo import dataset_bounds
 
 from .shared import (
@@ -118,11 +117,6 @@ def get_products_availability(
         {product.source_path for _, product in items}
     )
 
-    parsed_by_store = {
-        store_url: [(d, parse_query_date(d)) for d in dates]
-        for store_url, dates in dates_by_store.items()
-    }
-
     products = {}
     for product_id, product in items:
         all_dates = dates_by_store[product.source_path]
@@ -130,14 +124,14 @@ def get_products_availability(
         # available_dates below is the from/to-filtered subset.
         dates = [
             d
-            for d, ts in parsed_by_store[product.source_path]
+            for d, ts in all_dates
             if (from_ts is None or ts >= from_ts) and (to_ts is None or ts <= to_ts)
         ]
         products[product_id] = {
             "available_dates": dates,
             "full_date_range": {
-                "start": all_dates[0] if all_dates else None,
-                "end": all_dates[-1] if all_dates else None,
+                "start": all_dates[0][0] if all_dates else None,
+                "end": all_dates[-1][0] if all_dates else None,
             },
         }
 
@@ -145,9 +139,11 @@ def get_products_availability(
     return {"products": products}
 
 
-def _available_dates_per_store(store_urls: set[str]) -> dict[str, list[str]]:
+def _available_dates_per_store(
+    store_urls: set[str],
+) -> dict[str, list[tuple[str, pd.Timestamp]]]:
     """Resolve available dates once per unique store, isolating per-store failure."""
-    resolved: dict[str, list[str]] = {}
+    resolved: dict[str, list[tuple[str, pd.Timestamp]]] = {}
     failures: dict[str, Exception] = {}
     now = time.monotonic()
 

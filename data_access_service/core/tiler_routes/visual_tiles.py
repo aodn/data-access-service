@@ -29,7 +29,6 @@ from data_access_service.tiler.services.store.spatial import (
     default_bbox_from_store,
     native_resolution_in_bbox,
 )
-from data_access_service.tiler.utils.dates import parse_query_date
 from data_access_service.tiler.utils.image import (
     AnimatedFormat,
     ImageFormat,
@@ -601,9 +600,8 @@ async def get_animation(
             detail=f"No data available for product {product_id!r}.",
         )
 
-    parsed_available = [(d, parse_query_date(d)) for d in available]
-    earliest, latest = available[0], available[-1]
-    if from_ts < parsed_available[0][1] or to_ts > parsed_available[-1][1]:
+    earliest, latest = available[0][0], available[-1][0]
+    if from_ts < available[0][1] or to_ts > available[-1][1]:
         raise HTTPException(
             status_code=404,
             detail=(
@@ -611,7 +609,7 @@ async def get_animation(
                 f"for product {product_id!r} ([{earliest}, {latest}])."
             ),
         )
-    dates = [d for d, ts in parsed_available if from_ts <= ts <= to_ts]
+    dates = [d for d, ts in available if from_ts <= ts <= to_ts]
     if not dates:
         raise HTTPException(
             status_code=404,

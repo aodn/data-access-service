@@ -4,6 +4,7 @@ ogcapi-java fetches this global manifest on every getCollectionProducts call,
 so one unreachable store must not break the listing for every collection.
 """
 
+import pandas as pd
 import pytest
 
 import data_access_service.tiler.services.product.registry as registry
@@ -41,7 +42,11 @@ def catalogue(monkeypatch):
 
 
 def _patch_dates(monkeypatch, behaviour):
-    """Back get_available_dates with a per-store dict of dates or exceptions."""
+    """Back get_available_dates with a per-store dict of date strings or exceptions.
+
+    Wraps each date string into the (iso_string, timestamp) shape
+    get_available_dates itself returns, so test bodies can stay in plain strings.
+    """
     calls: list[str] = []
 
     def fake(store_url):
@@ -49,7 +54,7 @@ def _patch_dates(monkeypatch, behaviour):
         result = behaviour[store_url]
         if isinstance(result, BaseException):
             raise result
-        return result
+        return [(d, pd.Timestamp(d)) for d in result]
 
     monkeypatch.setattr(
         "data_access_service.core.tiler_routes.products.get_available_dates", fake

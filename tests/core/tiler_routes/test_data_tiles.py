@@ -2,6 +2,7 @@ import json
 from unittest.mock import patch
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 import data_access_service.tiler.services.product.registry as registry
@@ -382,6 +383,11 @@ def test_point_out_of_bounds(client):
 # --- /manifest (products availability) ---
 
 
+def _avail(dates: list[str]) -> list[tuple[str, pd.Timestamp]]:
+    """Build a get_available_dates-shaped [(iso_string, timestamp), ...] fixture."""
+    return [(d, pd.Timestamp(d)) for d in dates]
+
+
 def test_availability_ok(client):
     with (
         patch(
@@ -390,7 +396,7 @@ def test_availability_ok(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.products.get_available_dates",
-            return_value=["2024-06-01", "2024-07-01"],
+            return_value=_avail(["2024-06-01", "2024-07-01"]),
         ),
     ):
         # from=2000-01-01 bypasses the "start of last year" default so these
@@ -419,7 +425,7 @@ def test_availability_date_filters(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.products.get_available_dates",
-            return_value=all_dates,
+            return_value=_avail(all_dates),
         ),
     ):
         response = client.get(
@@ -443,7 +449,7 @@ def test_availability_default_from_excludes_dates_before_last_year(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.products.get_available_dates",
-            return_value=["2020-01-01"],
+            return_value=_avail(["2020-01-01"]),
         ),
     ):
         response = client.get("/api/v1/das/tiler/data_tiles/manifest")
@@ -463,7 +469,7 @@ def test_availability_explicit_from_overrides_the_default(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.products.get_available_dates",
-            return_value=["2020-01-01"],
+            return_value=_avail(["2020-01-01"]),
         ),
     ):
         response = client.get(
@@ -502,7 +508,7 @@ def test_availability_no_dates_in_range(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.products.get_available_dates",
-            return_value=["2020-01-01"],
+            return_value=_avail(["2020-01-01"]),
         ),
     ):
         response = client.get(
