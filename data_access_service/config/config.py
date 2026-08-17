@@ -12,10 +12,12 @@ from typing import Dict
 from botocore.client import BaseClient
 from dotenv import load_dotenv
 from data_access_service.models.pmtiles_types import (
-    ParquetsGenerationConfig,
     PmtilesGenerationConfig,
     HexLayerSpec,
+    TimeGroupBy,
 )
+from data_access_service.models.sites_types import ParquetsGenerationConfig
+from data_access_service.models.tiler_types import TilerConfig
 
 
 class EnvType(Enum):
@@ -128,10 +130,14 @@ class Config:
     def get_batch_client(self) -> BaseClient:
         return self.batch
 
-    def get_csv_bucket_name(self):
+    def get_subsetting_bucket_name(self):
+        name_env = os.getenv("AWS_S3_BUCKET_NAME_SUBSETTING")
+        if name_env:
+            return name_env
+
         if self.config is None:
             return None
-        val = self.config["aws"]["s3"]["bucket_name"]["csv"]
+        val = self.config["aws"]["s3"]["bucket_name"]["subsetting"]
         return val.strip() if isinstance(val, str) else val
 
     def get_wave_buoy_backup_bucket_name(self):
@@ -147,6 +153,14 @@ class Config:
         return val.strip() if isinstance(val, str) else val
 
     def get_job_queue_name(self):
+        """
+        Env name cannot start with AWS_BATCH_ as it is reserve and will never work
+        :return: The job definition
+        """
+        name_env = os.getenv("DAS_AWS_BATCH_JOB_QUEUE")
+        if name_env:
+            return name_env
+
         return (
             self.config["aws"]["batch"]["job_queue"]
             if self.config is not None
@@ -154,6 +168,13 @@ class Config:
         )
 
     def get_job_definition_name(self):
+        """
+        Env name cannot start with AWS_BATCH_ as it is reserve and will never work
+        :return: The job definition
+        """
+        name_env = os.getenv("DAS_AWS_BATCH_JOB_DEFINITION")
+        if name_env:
+            return name_env
         return (
             self.config["aws"]["batch"]["job_definition"]
             if self.config is not None
@@ -208,7 +229,24 @@ class Config:
 
     def get_pmtiles_config(self) -> PmtilesGenerationConfig:
         pmconfig = self.config.get("pmtiles", {}).get("config", {})
+        time_group_by_raw = pmconfig.get("time_group_by", TimeGroupBy.MONTH.value)
+        try:
+            time_group_by = TimeGroupBy(time_group_by_raw)
+        except ValueError as e:
+            allowed = ", ".join(repr(v.value) for v in TimeGroupBy)
+            raise ValueError(
+                f"Invalid pmtiles.config.time_group_by={time_group_by_raw!r}. "
+                f"Expected one of: {allowed}."
+            ) from e
+
+        bucket_name_env = os.getenv("AWS_S3_BUCKET_NAME_PORTAL_DATA")
+        if bucket_name_env:
+            bucket_name = bucket_name_env
+        else:
+            bucket_name = self.config["aws"]["s3"]["bucket_name"]["portal_data"]
+
         return PmtilesGenerationConfig(
+            co_bucket=pmconfig.get("co_bucket", "aodn-cloud-optimised"),
             output_pmtiles_dir=pmconfig["output_pmtiles_dir"],
             staged_parquet_dir=pmconfig["staged_parquet_dir"],
             geojsonseq_dir=pmconfig["geojsonseq_dir"],
@@ -217,7 +255,10 @@ class Config:
             memory_limit=pmconfig["memory_limit"],
             threads=pmconfig["threads"],
             fetch_size=pmconfig["fetch_size"],
-            bucket_name=pmconfig["bucket_name"],
+            bucket_name=bucket_name,
+            show_progress=pmconfig.get("show_progress", True),
+            time_group_by=time_group_by,
+            use_fork_process=bool(pmconfig.get("use_fork_process", True)),
         )
 
     def get_parquets_config(self) -> ParquetsGenerationConfig:
@@ -235,11 +276,34 @@ class Config:
         temp_dir = tempfile.mkdtemp(prefix=pqconfig["duckdb_temp_dir"])
         return ParquetsGenerationConfig(
             duckdb_database=os.path.join(temp_dir, pqconfig["duckdb_database"]),
+            co_bucket=pqconfig.get("co_bucket", "aodn-cloud-optimised"),
             memory_limit=pqconfig["memory_limit"],
             threads=pqconfig["threads"],
-            duckdb_temp_dir=temp_dir,
+            duckdb_temp_dir=str(temp_dir),
             region=pqconfig["region"],
             extensions=tuple(pqconfig["extensions"]),
+        )
+
+    def get_tiler_config(self) -> TilerConfig:
+        redis_env = os.getenv("CACHE_HOST")
+        tconfig = self.config.get("tiler", {}).get("config", {})
+        return TilerConfig(
+            tile_timezone=tconfig["tile_timezone"],
+            co_bucket=f"s3://{tconfig.get('co_bucket', 'aodn-cloud-optimised')}",
+            store_ttl_seconds=tconfig["store_ttl_seconds"],
+            store_prewarm_workers=tconfig["store_prewarm_workers"],
+            store_refresh_workers=tconfig["store_refresh_workers"],
+            thread_pool_size=tconfig["thread_pool_size"],
+            animation_workers=tconfig["animation_workers"],
+            cache_backend=tconfig["cache_backend"],
+            slice_cache_ttl_seconds=tconfig["slice_cache_ttl_seconds"],
+            redis_host=redis_env or tconfig.get("redis_host"),
+            redis_port=tconfig["redis_port"],
+            is_tls=redis_env is not None,
+            s3_anon=tconfig["s3_anon"],
+            s3_connect_timeout=tconfig["s3_connect_timeout"],
+            s3_read_timeout=tconfig["s3_read_timeout"],
+            s3_max_attempts=tconfig["s3_max_attempts"],
         )
 
     def get_hex_layer_specs(self, dname: str) -> List[HexLayerSpec] | None:

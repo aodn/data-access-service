@@ -79,3 +79,4 @@ cython_debug/
 *.iml
 node_modules/
 .vscode/
+.DS_Store

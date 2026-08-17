@@ -12,7 +12,7 @@ from aodn_cloud_optimised.lib import DataQuery
 
 from data_access_service import API
 from data_access_service.core.api import BaseAPI
-from data_access_service.utils.routes_helper import (
+from data_access_service.core.routes.helpers import (
     _generate_partial_json_array,
     _response_json,
 )
@@ -102,6 +102,71 @@ class TestApi(unittest.TestCase):
                 "TIME mapped to eventDate, LATITUDE mapped to decimalLatitude, LONGITUDE mapped to decimalLongitude",
             )
 
+    with open(
+        Path(__file__).resolve().parent.parent / "canned/catalog_uncached.json", "r"
+    ) as file:
+
+        @patch.object(
+            DataQuery.Metadata,
+            "metadata_catalog_uncached",
+            return_value=json.load(file),
+        )
+        def test_get_dataset_variables(self, get_metadata):
+            """The lightweight schema-key accessor: uuid -> dataset_name -> fields.
+
+            This is the index tiler product discovery matches configured gridded
+            variables against, so the per-dataset shape (name -> field names,
+            including the .zarr suffix) matters as much as the values.
+            """
+            api = API()
+            api.initialize_metadata()
+
+            zarr_uuid = "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
+            zarr_key = "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
+            parquet_uuid = "541d4f15-122a-443d-ab4e-2b5feb08d6a0"
+
+            full = api.get_dataset_variables()
+            self.assertIn(zarr_uuid, full)
+            self.assertIn(parquet_uuid, full)
+            self.assertIsInstance(full[zarr_uuid][zarr_key], frozenset)
+            # Real gridded variable names, preserved in their source spelling.
+            self.assertIn("analysed_sst", full[zarr_uuid][zarr_key])
+            self.assertIn("sea_ice_fraction", full[zarr_uuid][zarr_key])
+            self.assertNotIn("GSLA", full[zarr_uuid][zarr_key])
+
+    with open(
+        Path(__file__).resolve().parent.parent / "canned/catalog_uncached.json", "r"
+    ) as file:
+
+        @patch.object(
+            DataQuery.Metadata,
+            "metadata_catalog_uncached",
+            return_value=json.load(file),
+        )
+        def test_iter_zarr_dataset_variables(self, get_metadata):
+            """The tiler product-discovery entry point: pre-filtered to zarr,
+            with "global_attributes" excluded from the field-name set so
+            callers only ever see real variable/coordinate names.
+            """
+            api = API()
+            api.initialize_metadata()
+
+            zarr_uuid = "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
+            zarr_key = "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
+
+            entries = list(api.iter_zarr_dataset_variables())
+            dataset_names = {dname for _, dname, _ in entries}
+
+            # Parquet is in the same catalogue but never yielded here.
+            self.assertTrue(all(name.endswith(".zarr") for name in dataset_names))
+            self.assertIn(zarr_key, dataset_names)
+
+            uuid, fields = next((u, f) for u, dname, f in entries if dname == zarr_key)
+            self.assertEqual(uuid, zarr_uuid)
+            self.assertIn("analysed_sst", fields)
+            self.assertIn("sea_ice_fraction", fields)
+            self.assertNotIn("global_attributes", fields)
+
     def test_nan_to_none_conversion(self):
         # Create a sample pandas DataFrame with NaN values
         data = {
@@ -174,8 +239,8 @@ class TestApi(unittest.TestCase):
     def test_refresh_uuid_dataset_map_logs_dataset_failure_and_continues(self):
         api = API()
         api._metadata = MagicMock()
-        api._metadata.catalog = {}
-        api._metadata.metadata_catalog_uncached.return_value = {
+        # Prefer .catalog when it is a real dict; keep uncached as fallback.
+        catalog = {
             "bad_dataset.parquet": {},
             "good_dataset.parquet": {
                 "dataset_metadata": {
@@ -183,6 +248,8 @@ class TestApi(unittest.TestCase):
                 }
             },
         }
+        api._metadata.catalog = catalog
+        api._metadata.metadata_catalog_uncached.return_value = catalog
 
         def get_metadata_uuid(data):
             if data == {}:
@@ -207,6 +274,45 @@ class TestApi(unittest.TestCase):
         self.assertIn("good_dataset.parquet", api._raw["good-uuid"])
         self.assertIn("good-uuid", api._cached_metadata)
         self.assertIn("good_dataset.parquet", api._cached_metadata["good-uuid"])
+        self.assertIn("good-uuid", api._schema_keys)
+        self.assertIn("good_dataset.parquet", api._schema_keys["good-uuid"])
+
+    def test_release_memory_for_pmtiles_batch_drops_raw_and_non_parquet(self):
+        api = API()
+        from data_access_service.core.descriptor import Descriptor
+
+        api._cached_metadata = {
+            "u1": {
+                "a.parquet": Descriptor(uuid="u1", dname="a.parquet"),
+                "b.zarr": Descriptor(uuid="u1", dname="b.zarr"),
+            },
+            "u2": {
+                "c.zarr": Descriptor(uuid="u2", dname="c.zarr"),
+            },
+        }
+        api._schema_keys = {
+            "u1": {
+                "a.parquet": frozenset({"LATITUDE", "LONGITUDE", "TIME"}),
+                "b.zarr": frozenset({"x"}),
+            },
+            "u2": {"c.zarr": frozenset({"y"})},
+        }
+        api._raw = {"u1": {"a.parquet": b"blob", "b.zarr": b"zblob"}}
+        api._instance = object()
+
+        api.release_memory_for_pmtiles_batch()
+
+        self.assertEqual(api._raw, {})
+        self.assertIsNone(api._instance)
+        self.assertEqual(list(api._cached_metadata.keys()), ["u1"])
+        self.assertEqual(list(api._cached_metadata["u1"].keys()), ["a.parquet"])
+        self.assertEqual(
+            api._schema_keys["u1"]["a.parquet"],
+            frozenset({"LATITUDE", "LONGITUDE", "TIME"}),
+        )
+        # map_column_names still works from schema keys alone
+        cols = api.map_column_names("u1", "a.parquet", ["LATITUDE"])
+        self.assertEqual(cols, ["LATITUDE"])
 
     def test_normalize_lon(self):
         """Test None"""

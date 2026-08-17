@@ -1,0 +1,355 @@
+import os
+import tempfile
+from pathlib import Path
+from typing import List
+
+import gc
+import time
+import dask
+import psutil
+import xarray
+
+from data_access_service import init_log, Config, API
+from data_access_service.core.AWSHelper import AWSHelper
+from data_access_service.core.constants import STR_TIME_UPPER_CASE
+from data_access_service.utils.subset_request_resolver import (
+    ResolvedSubsetRequest,
+    resolve_subset_request,
+)
+from data_access_service.utils.subset_zarr_helper import selects_no_data, subset_zarr
+from data_access_service.utils.email_templates.download_email import (
+    get_download_email_html_body,
+)
+from data_access_service.utils.email_templates.no_data_email import (
+    NO_DATA_EMAIL_SUBJECT,
+)
+from data_access_service.models.subset_request import SubsetRequest
+from data_access_service.utils.format_utils import (
+    OUTPUT_FORMAT_GEOTIFF,
+    OUTPUT_FORMAT_NETCDF,
+)
+from data_access_service.utils import geotiff_export
+from data_access_service.utils.process_logger import ProcessLogger
+from data_access_service.batch.subsetting.helpers.zarr_chunking import (
+    get_available_thread_count,
+    get_time_steps_per_chunk,
+)
+from data_access_service.batch.subsetting.helpers.netcdf_compat import (
+    convert_object_dtype_variables,
+    ignore_invalid_unicode_in_attrs,
+)
+
+
+class ZarrProcessor:
+    def __init__(
+        self,
+        api: API,
+        job_id: str,
+        subset_request: SubsetRequest,
+        resolved: ResolvedSubsetRequest | None = None,
+    ):
+        self.aws = AWSHelper()
+        self.api = api
+        self.config = Config.get_config()
+        self.log = init_log(self.config)
+        self.job_id = job_id
+        self.subset_request = subset_request
+
+        if resolved is None:
+            resolved = resolve_subset_request(
+                api=api,
+                uuid=subset_request.uuid,
+                keys=subset_request.keys,
+                start_date_str=subset_request.start_date,
+                end_date_str=subset_request.end_date,
+                multi_polygon=subset_request.multi_polygon,
+                bboxes=subset_request.bboxes,  # already parsed; reuse
+            )
+        if not resolved.has_data:
+            # The caller (batch init) checks has_data and sends the "no data"
+            # email before constructing a processor; getting here is a bug.
+            raise ValueError(
+                f"Requested date range {subset_request.start_date}..{subset_request.end_date} "
+                f"has no data for dataset {subset_request.uuid}, keys {resolved.keys}"
+            )
+
+        self.keys = resolved.keys
+        self.start_date = resolved.start_date
+        self.end_date = resolved.end_date
+        self.bboxes = resolved.bboxes
+        self.geometry = resolved.geometry
+
+    # Read-through views onto subset_request — single source of truth, no drift.
+    @property
+    def uuid(self) -> str:
+        return self.subset_request.uuid
+
+    @property
+    def recipient(self) -> str:
+        return self.subset_request.recipient
+
+    @property
+    def output_format(self) -> str:
+        return self.subset_request.output_format
+
+    def process(self):
+        self.log.info(
+            f"Start processing zarr data for uuid: {self.uuid}, job id: {self.job_id}"
+        )
+        urls: List[str] = []
+
+        prepare, write = self.__format_handler()
+
+        self.log.info("Datasets to process: %s", self.keys)
+        for key in self.keys:
+            self.log.info("Processing dataset: %s", key)
+            dataset = self.__get_zarr_dataset_for_(key=key, prepare=prepare)
+            if dataset is None:
+                self.log.info("No data found for dataset: %s, skipping...", key)
+                continue
+
+            download_uri = write(dataset=dataset, key=key)
+            urls.extend(download_uri)
+
+        # No url means no key produced anything - get_download_email_html_body
+        # returns the "no data" body, so the subject must match it.
+        subject = (
+            f"Finish processing data file whose uuid is:  {self.uuid}"
+            if urls
+            else NO_DATA_EMAIL_SUBJECT
+        )
+
+        html_content = get_download_email_html_body(
+            subset_request=self.subset_request, object_urls=urls
+        )
+
+        self.aws.send_email(
+            recipient=self.recipient, subject=subject, html_body=html_content
+        )
+
+    def __format_handler(self):
+        """Return the (prepare, write) pair for the requested output format.
+
+        Each format is self-contained: prepare does any format-specific tweak to
+        the dataset before subsetting, write saves it and returns download URLs.
+        Add a new format by adding one entry here - no other code changes.
+        """
+        handlers = {
+            OUTPUT_FORMAT_NETCDF: (
+                self.__prepare_netcdf,
+                self.__write_to_s3_as_netcdf,
+            ),
+            OUTPUT_FORMAT_GEOTIFF: (
+                self.__prepare_geotiff,
+                self.__write_to_s3_as_geotiff,
+            ),
+        }
+        if self.output_format not in handlers:
+            raise ValueError(f"Unsupported format: {self.output_format}")
+        return handlers[self.output_format]
+
+    def __prepare_netcdf(self, zarr_store, key):
+        """NetCDF keeps the dataset as-is (2D coords are written losslessly)."""
+        return zarr_store
+
+    def __prepare_geotiff(self, zarr_store, key):
+        """GeoTIFF needs 1D axes, so reduce a regular grid (curvilinear stays 2D)."""
+        if not geotiff_export.has_ij_dims(zarr_store):
+            return zarr_store
+        lat_name, lon_name, _ = self.api.resolve_dim_names(self.uuid, key)
+        return geotiff_export.prepare_grid_for_geotiff(
+            zarr_store, lat_name, lon_name, self.log
+        )
+
+    def __get_zarr_dataset_for_(self, key: str, prepare) -> xarray.Dataset | None:
+
+        zarr_store = self.api._instance.get_dataset(key).zarr_store
+        zarr_store = prepare(zarr_store, key)  # format-specific prep, no `if format`
+
+        # Chunk once by time for memory-safe lazy processing. The store is the
+        # same for every bbox, so re-chunking per bbox would just repeat this.
+        time_dim = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
+        )[0]
+        time_per_chunk = get_time_steps_per_chunk(zarr_store, time_dim, self.log)
+        self.log.info("Chunking dataset with %d time steps per chunk", time_per_chunk)
+        zarr_store = zarr_store.chunk({time_dim: time_per_chunk})
+
+        # Apply ALL bboxes in one pass, then blank what falls outside the drawn
+        # polygons. subset_zarr is the single owner of the slicing, shared with
+        # the size estimate so both select the same region.
+        lat_name, lon_name, time_name = self.api.resolve_dim_names(self.uuid, key)
+        subset = subset_zarr(
+            zarr_store,
+            key,
+            lat_name,
+            lon_name,
+            time_name,
+            self.start_date,
+            self.end_date,
+            self.bboxes,
+            geometry=self.geometry,
+        )
+
+        if not isinstance(subset, xarray.Dataset):
+            raise TypeError(
+                f"Data for key: {key} is not an xarray.Dataset. This only support zarr format."
+            )
+
+        # The requested area may miss this store entirely. Writing that out
+        # would email the user an empty file; None makes process() skip the key
+        # so the "no data" email is sent instead.
+        if selects_no_data(
+            subset, lat_name, lon_name, time_name, self.bboxes, self.geometry
+        ):
+            return None
+        return subset
+
+    def __write_to_s3_as_netcdf(self, dataset: xarray.Dataset, key: str):
+        dataset = ignore_invalid_unicode_in_attrs(dataset)
+
+        # Convert object dtype variables to appropriate fixed-size strings, because NetCDF does not support object dtype
+        dataset = convert_object_dtype_variables(dataset, logger=self.log)
+
+        time_dim = self.api.map_column_names(
+            uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
+        )[0]
+        time_per_chunk = get_time_steps_per_chunk(dataset, time_dim, self.log)
+        self.log.info("Chunking dataset with %d time steps per chunk", time_per_chunk)
+        dataset = dataset.chunk({time_dim: time_per_chunk})
+        netcdf_compression = {
+            var: {"zlib": True, "complevel": 5}
+            for var, da in dataset.data_vars.items()
+            if da.dtype.kind in {"i", "u", "f"}  # integer, unsigned, float
+        }
+        thread_count = get_available_thread_count(self.log)
+
+        # set the thread count for dask, for the to_netcdf operation later
+        dask.config.set(num_workers=thread_count)
+        bucket_name = self.config.get_subsetting_bucket_name()
+
+        # Free memory before to_netcdf to prevent allocation errors.
+        # Don't skip this step even though most of the situations no memory is freed,
+        # There might be some edge cases that memory is not well managed.
+        # So it is safer to keep this step here.
+        self.log.info("Freeing memory before to_netcdf()...")
+        mem_before = psutil.Process(os.getpid()).memory_info().rss / (1024**3)
+        self.log.info(f"  Memory before cleanup: {mem_before:.2f} GB")
+        # Force garbage collection to free unused memory
+        gc.collect()
+        # Give Python a moment to release memory back to OS
+        time.sleep(0.5)
+
+        memory_after = psutil.Process(os.getpid()).memory_info().rss / (1024**3)
+        self.log.info(f"  Memory after cleanup: {memory_after:.2f} GB")
+        self.log.info(f"  Memory freed: {(mem_before - memory_after):.2f} GB")
+
+        with tempfile.TemporaryDirectory() as tempdirname:
+            # with ProcessLogger(logger=self.log, task_name="Writing to s3 as netcdf"):
+            temp_netcdf_path = Path(tempdirname) / key.replace(".zarr", ".nc")
+
+            # Write variables one by one to manage memory better
+            data_var_names = list(dataset.data_vars.keys())
+            self.log.info(
+                f"Writing {len(data_var_names)} variables incrementally: {data_var_names}"
+            )
+
+            with ProcessLogger(
+                logger=self.log, task_name="Step 1: Writing coordinates to NetCDF file"
+            ):
+                # First write: Create file with coordinates only (no data variables)
+                coords_only_ds = xarray.Dataset(
+                    coords=dataset.coords, attrs=dataset.attrs
+                )
+
+                # Compute coordinates to avoid OOM during write
+                coords_only_ds = coords_only_ds.compute()
+
+                coords_only_ds.to_netcdf(
+                    temp_netcdf_path,
+                    mode="w",
+                    engine="netcdf4",
+                    format="NETCDF4",
+                    compute=True,
+                )
+
+                # Clean up after writing coordinates to avoid edge case unexpected memory management
+                del coords_only_ds
+                gc.collect()
+
+            # Append each data variable one by one since xr.Dataset.to_netcdf() only supports mode "w" and "a"
+            # and "a" mode appends to existing file will overwrite existing variables.
+            # doc: https://docs.xarray.dev/en/stable/generated/xarray.Dataset.to_netcdf.html
+            for idx, var_name in enumerate(data_var_names, start=1):
+                with ProcessLogger(
+                    logger=self.log,
+                    task_name=f"Step {idx + 1}/{len(data_var_names) + 1}: Appending variable '{var_name}'",
+                ):
+
+                    # Create a dataset with only this variable
+                    # CRITICAL: Do NOT include coords when appending - they already exist in the file
+                    single_var_ds = xarray.Dataset({var_name: dataset[var_name]})
+
+                    # Apply compression encoding for this variable if applicable
+                    var_encoding = {}
+                    if var_name in netcdf_compression:
+                        var_encoding[var_name] = netcdf_compression[var_name]
+
+                    # Append this variable to the existing file
+                    single_var_ds.to_netcdf(
+                        temp_netcdf_path,
+                        mode="a",
+                        engine="netcdf4",
+                        format="NETCDF4",
+                        encoding=var_encoding,
+                        compute=True,
+                    )
+
+                    # Clean up after each variable
+                    del single_var_ds
+                    gc.collect()
+
+                    # Log memory usage
+                    current_mem = psutil.Process(os.getpid()).memory_info().rss / (
+                        1024**3
+                    )
+                    self.log.info(
+                        f"  Memory after writing '{var_name}': {current_mem:.2f} GB"
+                    )
+
+            self.log.info("All variables written successfully")
+
+            s3_key = f"{self.job_id}/{key.replace('.zarr', '.nc')}"
+            self.log.info(
+                "Start uploading to s3 bucket: %s, key: %s", bucket_name, s3_key
+            )
+            self.aws.upload_file_to_s3(str(temp_netcdf_path), bucket_name, s3_key)
+            region = self.aws.s3.meta.region_name
+            return [f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"]
+
+    def __write_to_s3_as_geotiff(self, dataset: xarray.Dataset, key: str) -> List[str]:
+        """Build the GeoTIFF ZIP for the dataset and upload it to S3."""
+        lat_name, lon_name, time_name = self.api.resolve_dim_names(self.uuid, key)
+        dataset_base = key.replace(".zarr", "")
+        zip_name = f"{dataset_base}_geotiff.zip"
+
+        with tempfile.TemporaryDirectory() as work_dir:
+            zip_path = Path(work_dir) / zip_name
+            geotiff_export.build_geotiff_zip(
+                dataset, zip_path, dataset_base, lat_name, lon_name, time_name, self.log
+            )
+            url = self.__upload_zip_to_s3(zip_path, zip_name)
+
+        self.log.info(f"Exported GeoTIFF ZIP for {key}")
+        return [url]
+
+    def __upload_zip_to_s3(self, zip_path: Path, zip_name: str) -> str:
+        """Upload a ZIP file to S3 and return the download URL."""
+        bucket_name = self.config.get_subsetting_bucket_name()
+        s3_key = f"{self.job_id}/{zip_name}"
+        self.aws.upload_file_to_s3(str(zip_path), bucket_name, s3_key)
+        region = self.aws.s3.meta.region_name
+        url = f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"
+        self.log.info(f"Uploaded: {s3_key}")
+        zip_path.unlink(missing_ok=True)
+        return url

@@ -40,11 +40,14 @@ jobs:
           #          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ vars.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:${{ github.ref_name }}
+          build-args: |
+            APP_VERSION=${{ github.ref_name }}
+            GIT_SHA=${{ github.sha }}
       - name: Generate App Token
         uses: actions/create-github-app-token@v3
         id: app-token
         with:
-          app-id: ${{ vars.DEPLOY_APP_ID }}
+          client-id: ${{ vars.DEPLOY_APP_CLIENT_ID }}
           private-key: ${{ secrets.DEPLOY_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
       - name: Upload Docker Metadata to Release

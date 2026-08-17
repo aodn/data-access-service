@@ -1,5 +1,5 @@
 # constants for test usage
-from data_access_service.batch.batch_enums import Parameters
+from data_access_service.batch.subsetting.enums import Parameters
 
 AWS_TEST_REGION = "us-east-1"
 

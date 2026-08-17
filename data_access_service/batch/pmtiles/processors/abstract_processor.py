@@ -3,7 +3,7 @@ import time
 import os
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 from aodn_cloud_optimised.lib.DataQuery import BUCKET_OPTIMISED_DEFAULT
 from data_access_service import Config, init_log
 from data_access_service.core.api import BaseAPI
@@ -39,7 +39,7 @@ class AbstractProcessor(ABC):
         ) or self.pmtiles_config.duckdb_temp_dir.startswith("/"):
             raise ValueError("dir must be a relative path")
 
-    def process(self) -> str:
+    def process(self) -> Tuple[str, str]:
 
         try:
             self.build_staging_parquet()
@@ -53,10 +53,26 @@ class AbstractProcessor(ABC):
                 f"Finished generating GeoJSONSeq files for dataset {self.dataset_name} with UUID {self.uuid}: {geojsonseq_paths}"
             )
 
-            # The staged parquet is only read while generating GeoJSONSeq files;
-            # remove it now so it does not sit on disk alongside the geojsonseq
-            # files and tippecanoe's temp files during the peak-disk step below.
+            # Capture min/max period from staging before it is removed.
+            # Written beside the eventual pmtiles path as {dname}.metadata.
+            metadata_path = self.generate_metadata_json()
+            self.logger.info(
+                f"Finished generating metadata for dataset {self.dataset_name} "
+                f"with UUID {self.uuid}: {metadata_path}"
+            )
+
+            # The staged parquet is only read while generating GeoJSONSeq files
+            # and metadata; remove it now so it does not sit on disk alongside
+            # the geojsonseq files and tippecanoe's temp files during the
+            # peak-disk step below.
             self._remove_staged_parquet()
+
+            # Release DuckDB *before* tippecanoe so the buffer pool (up to
+            # memory_limit) is returned to the OS and tippecanoe can use that
+            # headroom. Idempotent: finally will no-op if already shut down.
+            # The next dataset constructs a new PmTileDuckDBClient which lazily
+            # rebuilds a fresh connection via get_instance().
+            self._release_duckdb("before tippecanoe")
 
             # Fourth step, use all GeoJSONSeq files to generate PMTiles file.
             self.logger.info(
@@ -67,11 +83,12 @@ class AbstractProcessor(ABC):
                 f"Finished generating pmtiles file for dataset {self.dataset_name} with UUID {self.uuid}. Output path: {pmtile_path}"
             )
             self._remove_geojsonseq_files(geojsonseq_paths)
-            return pmtile_path
+            return pmtile_path, metadata_path
 
         finally:
-            self.pm_client.close()
-            self.logger.debug("DuckDB connection closed")
+            # Safe if already released before tippecanoe; still needed when
+            # process fails during staging/geojsonseq before that point.
+            self._release_duckdb("after process cleanup")
 
     # The s3 uri of the source parquet. It is not http URL of s3 objects.
     def get_s3_uri(self):
@@ -91,8 +108,50 @@ class AbstractProcessor(ABC):
             f"{self.dataset_name}.pmtiles",
         )
 
+    def get_metadata_path(self) -> str:
+        """Same folder as the pmtiles output: {dname}.metadata."""
+        return os.path.join(
+            self.work_dir,
+            self.pmtiles_config.output_pmtiles_dir,
+            f"{self.dataset_name}.metadata",
+        )
+
     def get_geojsonseq_dir(self) -> str:
         return os.path.join(self.work_dir, self.pmtiles_config.geojsonseq_dir)
+
+    def _release_duckdb(self, checkpoint: str) -> None:
+        """Close the client cursor and tear down the process-global DuckDB connection.
+
+        Idempotent: safe to call more than once (e.g. before tippecanoe and again
+        in ``process``'s ``finally``). After this, a new :class:`PmTileDuckDBClient`
+        (next dataset) rebuilds the connection lazily via ``get_instance``.
+
+        Step logs are intentional breadcrumbs: a native SIGSEGV during teardown
+        cannot be caught in Python, so the last line shows which close step ran.
+        """
+        self.logger.info("Releasing DuckDB (%s): closing client cursor", checkpoint)
+        try:
+            self.pm_client.close()
+        except Exception:
+            self.logger.exception(
+                "PmTileDuckDBClient.close() failed (%s); continuing to shutdown",
+                checkpoint,
+            )
+
+        self.logger.info(
+            "Releasing DuckDB (%s): shutting down process-global connection",
+            checkpoint,
+        )
+        try:
+            PmTileDuckDBClient.shutdown()
+        except Exception:
+            self.logger.exception(
+                "PmTileDuckDBClient.shutdown() failed (%s); continuing",
+                checkpoint,
+            )
+
+        self.logger.info("DuckDB released (%s)", checkpoint)
+        log_memory_usage(self.logger, f"after duckdb shutdown ({checkpoint})")
 
     def _remove_staged_parquet(self) -> None:
         staged_path = self.get_staged_path()
@@ -103,11 +162,16 @@ class AbstractProcessor(ABC):
             )
 
     def _remove_geojsonseq_files(self, geojsonseq_paths: List[str]) -> None:
+        removed = 0
         for path in geojsonseq_paths:
-            if os.path.exists(path):
-                os.remove(path)
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+                    removed += 1
+            except Exception as e:
+                self.logger.warning(f"Failed to remove {path}: {e}")
         self.logger.info(
-            f"Removed {len(geojsonseq_paths)} GeoJSONSeq file(s) after PMTiles generation"
+            f"Removed {removed}/{len(geojsonseq_paths)} GeoJSONSeq file(s)"
         )
 
     def get_lat_col_name(self) -> str:
@@ -130,14 +194,17 @@ class AbstractProcessor(ABC):
             )
         return lon_mapped[0]
 
-    def get_time_col_name(self) -> str:
+    def get_time_col_name(self) -> Optional[str]:
+        """Mapped TIME column name, or None when the dataset has no time field.
+
+        Callers that support timeless hexbins (synthetic single period) must
+        handle None; lat/lon remain required.
+        """
         time_mapped = self.api.map_column_names(
             uuid=self.uuid, key=self.dataset_name, columns=[STR_TIME_UPPER_CASE]
         )
         if not time_mapped:
-            raise ValueError(
-                f"Could not find timestamp column for dataset {self.dataset_name}"
-            )
+            return None
         return time_mapped[0]
 
     @time_it
@@ -148,7 +215,9 @@ class AbstractProcessor(ABC):
         max_threads: int = 1,
     ) -> str:
         output_pmtiles_path = self.get_output_pmtiles_path()
-        os.makedirs(os.path.dirname(os.path.abspath(output_pmtiles_path)))
+        os.makedirs(
+            os.path.dirname(os.path.abspath(output_pmtiles_path)), exist_ok=True
+        )
 
         # The memory usage increase linearly with the number of threads,
         # By default, Tippecanoe spins up as many parallel worker threads as you have CPU cores. Each concurrent thread
@@ -200,4 +269,10 @@ class AbstractProcessor(ABC):
     # All the GeoJSONSeq files are data source of the PMTiles.
     @abstractmethod
     def generate_geojsonseq_files(self) -> List[str]:
+        pass
+
+    # Write {dname}.metadata beside the pmtiles output from the staged parquet
+    # (min/max date). Must be called while the staged parquet still exists.
+    @abstractmethod
+    def generate_metadata_json(self) -> str:
         pass

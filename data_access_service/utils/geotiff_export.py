@@ -57,18 +57,7 @@ def build_geotiff_zip(
     Raises ValueError if no variable can be exported.
     """
     is_curvilinear = has_ij_dims(dataset)
-    if is_curvilinear:
-        # Curvilinear variables are indexed by (I, J); exclude the lat/lon arrays.
-        data_vars = [
-            var
-            for var in dataset.data_vars
-            if dataset[var].dtype.kind in ("i", "u", "f")
-            and "I" in dataset[var].dims
-            and "J" in dataset[var].dims
-            and var not in (lat_name, lon_name)
-        ]
-    else:
-        data_vars = get_geotiff_compatible_vars(dataset, lat_name, lon_name)
+    data_vars = geotiff_eligible_vars(dataset, lat_name, lon_name)
 
     if not data_vars:
         raise ValueError(
@@ -236,17 +225,23 @@ def _to_2d_float(slice_data: xarray.DataArray, keep_dims, log=None):
     return slice_data
 
 
-def get_geotiff_compatible_vars(
+def geotiff_eligible_vars(
     dataset: xarray.Dataset, lat_name: str, lon_name: str
 ) -> list:
-    """Filter variables that can be exported as GeoTIFF: must be numeric and have lat/lon dims."""
-    results = []
-    for var in dataset.data_vars:
-        is_numeric = dataset[var].dtype.kind in ("i", "u", "f")
-        has_latlon = lat_name in dataset[var].dims and lon_name in dataset[var].dims
-        if is_numeric and has_latlon:
-            results.append(var)
-    return results
+    """Variables the GeoTIFF export will write.
+
+    Must be numeric and gridded on both spatial axes - I/J for a curvilinear
+    grid, else lat/lon - excluding the lat/lon coordinate arrays themselves.
+    """
+    lat_dim, lon_dim = ("I", "J") if has_ij_dims(dataset) else (lat_name, lon_name)
+    return [
+        var
+        for var in dataset.data_vars
+        if var not in (lat_name, lon_name)
+        and dataset[var].dtype.kind in ("i", "u", "f")
+        and lat_dim in dataset[var].dims
+        and lon_dim in dataset[var].dims
+    ]
 
 
 def is_lat_ascending(dataset: xarray.Dataset, lat_name: str, log=None) -> bool:

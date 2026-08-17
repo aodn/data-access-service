@@ -5,14 +5,12 @@ csiro:
 aws:
   s3:
     bucket_name:
-      csv: aodn-cloud-optimized-subset-staging
+      subsetting: aodn-cloud-optimized-subset-staging
+      portal_data: aodnportal-staging-data
       wave_buoy_backup: datavis-apps-staging-data
       mooring_backup: datavis-apps-staging-data
   ses:
     sender_email: no.reply@aodn.org.au
   batch:
-    job_queue: generate-csv-data-file
-    job_definition: generate-csv-data-file
-pmtiles:
-  config:
-    bucket_name: aodnportal-staging-data
+    job_queue: data-access-service-batch-job-queue
+    job_definition: data-access-service-batch-job-definition

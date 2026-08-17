@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 from fastapi import HTTPException
-from data_access_service.utils.routes_helper import (
+from data_access_service.core.routes.helpers import (
     verify_datatime_param,
     parse_utc_datetime,
 )

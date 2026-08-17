@@ -1,20 +1,20 @@
 [tool.poetry]
 name = "data-access-service"
-version = "0.0.18"
+version = "0.0.40"
 description = ""
 authors = ["utas-raymondng <manfai.ng@utas.edu.au>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
 # Dependency from a GitHub repository, use tag = "v0.1.32" or branch = "xxx"
-aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", tag = "v1.2.2" }
-black = "^24.8.0"
+aodn_cloud_optimised = { git = "https://github.com/aodn/aodn_cloud_optimised.git", tag = "v1.3.19" }
+black = "26.5.1"
 blosc = "^1.11.3"
 boto3 = "^1.28.0"
 cartopy = "^0.24.1"
-cryptography = "<44.0.2"
+cryptography = "48.0.1"
 dask = {extras = ["dataframe"], version = ">=2024.9.1"}
-fastapi = "0.119.0"
+fastapi = "0.141.1"
 fuzzywuzzy = "^0.18.0"
 gsw = "^3.6.19"
 gunicorn = "23.0.0"
@@ -25,13 +25,14 @@ jsonify = "^0.5"
 logging = "^0.4.9.6"
 matplotlib = "3.10.0"
 pandas = "^2.2.3"
+pydeck=">=0.9.1"
 pyarrow = "22.0.0"
 python = ">=3.11.0, < 3.13"
 python-levenshtein = "^0.25.1"
 psutil = "^7.0.0"
 pre-commit = "^3.8.0"
-python-dotenv = "1.0.1"
-requests = "2.32.5"
+python-dotenv = "1.2.2"
+requests = "2.34.2"
 seaborn = "^0.13.2"
 uvicorn = "0.30.6"
 watchdog = "^4.0.1"
@@ -45,6 +46,10 @@ rioxarray = "^0.18.0"
 tqdm = "^4.67.1"
 h3 = "^4.4.2"
 pmtiles = "^3.7.0"
+rio-tiler = "^9.4.0"
+numba = "^0.66.0"
+redis = "^5.0"
+tenacity = "9.1.4"
 
 [tool.poetry.group.test.dependencies]
 pytest = "8.4.1"
@@ -52,6 +57,7 @@ pytest-mock = "*"
 pytest-xdist = "^3.8.0"
 pytest-asyncio = "1.2.0"
 testcontainers = "4.8.0"
+polars_h3 = "0.6.1"
 
 [tool.pytest.ini_options]
 addopts = "-vv"

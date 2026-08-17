@@ -13,7 +13,7 @@ from data_access_service.utils.sse_wrapper import format_sse
 
 logger = logging.getLogger(__name__)
 
-SSE_IT_INTERVAL: float = 30.0
+SSE_IT_INTERVAL: float = 20.0
 
 
 def _to_json_safe(value: Any) -> Any:

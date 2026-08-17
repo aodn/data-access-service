@@ -1,6 +1,5 @@
 import shutil
 
-import dask.dataframe
 import pandas as pd
 import pytest
 
@@ -9,8 +8,8 @@ from unittest.mock import patch, MagicMock
 from data_access_service.core.AWSHelper import AWSHelper
 from aodn_cloud_optimised.lib import DataQuery
 from data_access_service import Config, API
-from data_access_service.tasks.generate_dataset import (
-    process_data_files,
+from data_access_service.batch.subsetting.tasks.parquet_processor import (
+    process_parquet_files,
 )
 from tests.core.test_with_s3 import TestWithS3, REGION
 
@@ -60,7 +59,7 @@ class TestKeyMapping(TestWithS3):
             with patch.object(AWSHelper, "send_email") as mock_send_email:
                 try:
                     # Job 1, use different job id to avoid read same folder
-                    process_data_files(
+                    process_parquet_files(
                         api,
                         job_id_of_init="888",
                         job_index="1",
@@ -73,12 +72,12 @@ class TestKeyMapping(TestWithS3):
                         end_date=pd.Timestamp("2013-01-01 23:59:59.999999999"),
                     )
                     names = helper.list_s3_folders(
-                        config.get_csv_bucket_name(),
+                        config.get_subsetting_bucket_name(),
                         f"{config.get_s3_temp_folder_name('888')}argo.parquet",
                     )
                     assert "part-1" in names, "part-1 not exit!"
 
-                    target_path = f"s3://{config.get_csv_bucket_name()}/{config.get_s3_temp_folder_name('888')}argo.parquet"
+                    target_path = f"s3://{config.get_subsetting_bucket_name()}/{config.get_s3_temp_folder_name('888')}argo.parquet"
                     subset = helper.read_parquet_from_s3(target_path)
                     assert len(subset) == 77555
                 except Exception as ex:

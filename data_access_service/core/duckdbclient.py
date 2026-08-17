@@ -2,20 +2,33 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 from threading import Lock
-from typing import Any
+from typing import Any, Iterator
 
 import boto3
 import duckdb
+import logging
 
-from data_access_service.models.pmtiles_types import (
-    ParquetsGenerationConfig,
-    PmtilesGenerationConfig,
-)
+from data_access_service.config.config import IntTestConfig
+from data_access_service.models.pmtiles_types import PmtilesGenerationConfig
+from data_access_service.models.sites_types import ParquetsGenerationConfig
 from data_access_service import Config
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
+
+# How often to emit a progress log line while a long query is running.
+_PROGRESS_LOG_INTERVAL_SECONDS = 60
+
+log = logging.getLogger(__name__)
 
 
 class DuckDBClient(ABC):
@@ -44,6 +57,38 @@ class DuckDBClient(ABC):
     def close(self) -> None:
         """Release the connection or cursor held by this client."""
 
+    def create_s3_secret(self, bucket: str) -> None:
+        """Create a DuckDB S3 secret scoped to ``bucket`` from boto3 credentials."""
+        boto_session = boto3.Session()
+
+        # Not useful in testing
+        if (
+            boto_session is not None
+            and boto_session.get_credentials() is not None
+            and not isinstance(Config.get_config(), IntTestConfig)
+        ):
+            creds = boto_session.get_credentials().get_frozen_credentials()
+            region = boto_session.region_name or "ap-southeast-2"
+
+            def lit(value: str) -> str:
+                return "'" + value.replace("'", "''") + "'"
+
+            def ident(name: str) -> str:
+                return '"' + name.replace('"', '""') + '"'
+
+            self.execute(
+                f"""
+                CREATE OR REPLACE SECRET {ident(f"{bucket}_s3")} (
+                    TYPE S3,
+                    KEY_ID {lit(creds.access_key)},
+                    SECRET {lit(creds.secret_key)},
+                    SESSION_TOKEN {lit(creds.token or "")},
+                    REGION {lit(region)},
+                    SCOPE 's3://{bucket}'
+                )
+                """
+            )
+
 
 class PmTileDuckDBClient(DuckDBClient):
     # Process-global singletons
@@ -51,8 +96,26 @@ class PmTileDuckDBClient(DuckDBClient):
     _temp_dir_object = None
     _lock = Lock()
 
+    MAX_READ_ATTEMPTS = 3
+    MIN_WAIT_SECONDS = 120  # 2 minutes
+    MAX_WAIT_SECONDS = 300  # 5 minutes
+
+    def log_retry_attempt(self, retry_state):
+        # Extract metadata from tenacity's internal state
+        attempt_num = retry_state.attempt_number
+        exception_thrown = retry_state.outcome.exception()
+        next_wait_seconds = retry_state.next_action.sleep
+        next_wait_minutes = round(next_wait_seconds / 60, 1)
+
+        self._logger.warning(
+            f"[Retry Alert] DuckDB S3 read failed on attempt #{attempt_num}.\n"
+            f"Error details: {exception_thrown}\n"
+            f"Waiting {next_wait_minutes} minute(s) before attempt #{attempt_num + 1}..."
+        )
+
     def __init__(self):
         self._config: PmtilesGenerationConfig = Config.get_config().get_pmtiles_config()
+        self._logger = logging.getLogger(__name__)
         self._duckdb_client = None
         self._con = self.get_instance()
         self._lock = Lock()
@@ -102,53 +165,239 @@ class PmTileDuckDBClient(DuckDBClient):
 
                     PmTileDuckDBClient._global_db_connection = db
 
-        # CRITICAL: Return a thread-safe, independent cursor from the global connection
+        # CRITICAL: Return a thread-safe, independent cursor from the global connection.
+        # Progress-bar settings are LOCAL scope, so they must be set on this cursor
+        # (not the parent connection). Terminal print is off: DuckDB writes \r bars
+        # to stdout, which never reach uvicorn/app logs. Progress is logged from
+        # execute() via the Python logger instead.
         if self._duckdb_client is None:
             with self._lock:
                 if self._duckdb_client is None:
-                    self._duckdb_client = (
-                        PmTileDuckDBClient._global_db_connection.cursor()
-                    )
+                    cursor = PmTileDuckDBClient._global_db_connection.cursor()
+                    show = bool(self._config.show_progress)
+                    cursor.execute(f"SET enable_progress_bar = {show};")
+                    cursor.execute(f"SET enable_progress_bar_print = {show};")
+                    self._duckdb_client = cursor
+                    # Avoid NewRelic capture the log which is too huge and unless
+                    self.create_s3_secret(self._config.co_bucket)
         return self._duckdb_client
 
     def close(self):
-        if self._duckdb_client is not None:
-            with self._lock:
-                self._duckdb_client.close()
-        self._duckdb_client = None
+        """Close this client's cursor only (not the process-global connection)."""
+        with self._lock:
+            cursor = self._duckdb_client
+            self._duckdb_client = None
+            self._con = None
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    self._logger.exception(
+                        "Failed to close PmTileDuckDBClient cursor; continuing shutdown"
+                    )
 
+    @classmethod
+    def _shrink_connection_memory(cls, connection) -> None:
+        """Best-effort shrink of DuckDB buffer pool before native teardown.
+
+        Lowering ``memory_limit`` / threads can release cached pages without the
+        more aggressive (and historically crash-prone) module-level ``duckdb.close()``.
+        Failures are ignored: the connection is about to be closed anyway.
+        """
+        for sql in (
+            "SET threads TO 1",
+            "SET memory_limit = '64MB'",
+        ):
+            try:
+                connection.execute(sql)
+            except Exception:
+                log.debug("Pre-close DuckDB setting failed: %s", sql, exc_info=True)
+
+    @classmethod
+    def shutdown(cls) -> None:
+        """Close the process-global connection and remove its temp directory.
+
+        Idempotent when already shut down. Callers use this:
+
+        * After geojsonseq/metadata and **before tippecanoe**, so the buffer
+          pool (up to ``memory_limit``) is free for the tippecanoe subprocess
+          on memory-constrained Batch hosts.
+        * Between datasets in a multi-dataset batch run, so RSS does not
+          ratchet up via the HTTP metadata cache and buffer pool.
+
+        Any cursors from :meth:`get_instance` become invalid. The next
+        ``get_instance`` call (e.g. a new client for the next dataset) lazily
+        rebuilds a fresh connection.
+
+        Note: do **not** call module-level ``duckdb.close()`` after
+        ``connection.close()`` — that double-teardown path has been observed to
+        SIGSEGV the forked PMTiles worker after a long httpfs/h3 staging job.
+        """
+        with cls._lock:
+            connection = cls._global_db_connection
+            temp_dir = cls._temp_dir_object
+            # Drop the references first so a failure below can never leave
+            # later datasets reusing a half-closed connection.
+            cls._global_db_connection = None
+            cls._temp_dir_object = None
+
+        # Close outside the class lock so a slow/native close cannot stall
+        # another thread that only needs to observe "already shut down".
+        try:
+            if connection is not None:
+                log.info("DuckDB shutdown: shrinking buffer pool")
+                cls._shrink_connection_memory(connection)
+                log.info("DuckDB shutdown: closing connection")
+                try:
+                    connection.close()
+                except Exception:
+                    log.exception(
+                        "DuckDB connection.close() failed; continuing temp cleanup"
+                    )
+                log.info("DuckDB shutdown: connection closed")
+        finally:
+            if temp_dir is not None:
+                try:
+                    log.info("DuckDB shutdown: cleaning temp directory")
+                    temp_dir.cleanup()
+                except Exception:
+                    log.exception("DuckDB temp directory cleanup failed")
+
+    @retry(
+        stop=stop_after_attempt(MAX_READ_ATTEMPTS),
+        wait=wait_exponential(multiplier=1, min=MIN_WAIT_SECONDS, max=MAX_WAIT_SECONDS),
+        retry=retry_if_exception_type(duckdb.IOException),
+        before_sleep=lambda retry_state: retry_state.fn.__self__.log_retry_attempt(
+            retry_state
+        ),
+        reraise=True,
+    )
     def execute(
         self, sql: str, params: Sequence[Any] | None = None
     ) -> duckdb.DuckDBPyConnection:
-        if params is None:
-            return self._con.execute(sql)
-        return self._con.execute(sql, params)
+        if not self._config.show_progress:
+            if params is None:
+                return self._duckdb_client.execute(sql)
+            return self._duckdb_client.execute(sql, params)
+        with self._progress_logger(sql):
+            if params is None:
+                return self._duckdb_client.execute(sql)
+            return self._duckdb_client.execute(sql, params)
+
+    @contextmanager
+    def _progress_logger(self, sql: str) -> Iterator[None]:
+        """Periodically log DuckDB query progress while ``sql`` runs.
+
+        Uses :meth:`duckdb.DuckDBPyConnection.query_progress` on a background
+        thread so long ``COPY`` / aggregation queries emit heartbeat lines into
+        the app logger (visible under uvicorn) instead of silent multi-hour waits.
+        """
+        stop = threading.Event()
+        started = time.monotonic()
+        sql_preview = " ".join(sql.split())[:120]
+        connection = self._duckdb_client
+
+        def _poll() -> None:
+            while not stop.wait(_PROGRESS_LOG_INTERVAL_SECONDS):
+                elapsed = time.monotonic() - started
+                try:
+                    pct = connection.query_progress()
+                except Exception:
+                    pct = -1.0
+                if pct is not None and pct >= 0:
+                    self._logger.info(
+                        "DuckDB query progress: %.1f%% (%.0fs elapsed) — %s",
+                        pct,
+                        elapsed,
+                        sql_preview,
+                    )
+                else:
+                    self._logger.info(
+                        "DuckDB query still running (%.0fs elapsed) — %s",
+                        elapsed,
+                        sql_preview,
+                    )
+
+        poller = threading.Thread(target=_poll, name="duckdb-progress", daemon=True)
+        poller.start()
+        self._logger.info("DuckDB query started — %s", sql_preview)
+        try:
+            yield
+        finally:
+            stop.set()
+            poller.join(timeout=1.0)
+            self._logger.info(
+                "DuckDB query finished (%.1fs) — %s",
+                time.monotonic() - started,
+                sql_preview,
+            )
+
+    # Epoch values above this absolute magnitude are treated as milliseconds.
+    # Modern epoch-seconds are ~1e9; epoch-milliseconds are ~1e12. 1e11 is well
+    # above any realistic second-based timestamp (year ~5138) and below any
+    # modern millisecond timestamp (ms since ~1973).
+    _EPOCH_MS_ABS_THRESHOLD = 1e11
+
+    _TIMESTAMP_SQL_TYPES = frozenset(
+        {
+            "TIMESTAMP",
+            "TIMESTAMP_NS",
+            "TIMESTAMP_MS",
+            "TIMESTAMP_S",
+            "TIMESTAMP WITH TIME ZONE",
+            "TIMESTAMPTZ",
+            "DATE",
+            "INTERVAL",
+        }
+    )
+    _NUMERIC_SQL_TYPES = frozenset(
+        {
+            "TINYINT",
+            "SMALLINT",
+            "INTEGER",
+            "BIGINT",
+            "HUGEINT",
+            "UTINYINT",
+            "USMALLINT",
+            "UINTEGER",
+            "UBIGINT",
+            "FLOAT",
+            "DOUBLE",
+            "REAL",
+            "DECIMAL",
+            "NUMERIC",
+        }
+    )
 
     def detect_time_type(
         self,
         input_path: str,
         time_col: str,
     ) -> str:
-        col_quoted = PmTileDuckDBClient.quote_identifier(time_col)
+        """Infer how ``time_col`` stores time in the parquet dataset.
 
-        sample_path = input_path
-        if not (
-            input_path.endswith("_metadata") or input_path.endswith("_common_metadata")
-        ):
-            try:
-                files = self._con.execute(
-                    f"SELECT * FROM glob('{input_path}') LIMIT 1"
-                ).fetchall()
-                if files:
-                    sample_path = files[0][0]
-            except Exception:
-                pass
+        Returns one of ``"timestamp"``, ``"epoch_ms"``, ``"epoch_s"``.
+
+        Integer / numeric columns are classified by magnitude of sampled values
+        rather than DuckDB's SQL type alone: Hive partition keys are always
+        promoted to ``BIGINT``, so type-based heuristics mis-label epoch
+        *seconds* (e.g. ``timestamp=1764547200``) as milliseconds and produce
+        1970-01-21 date keys.
+        """
+        col_quoted = PmTileDuckDBClient.quote_identifier(time_col)
+        source_sql = self._parquet_source_sql(input_path)
 
         try:
             rows = self._con.execute(
-                f"DESCRIBE SELECT {col_quoted} FROM read_parquet('{sample_path}') LIMIT 0"
+                f"DESCRIBE SELECT {col_quoted} FROM {source_sql} LIMIT 0"
             ).fetchall()
         except Exception:
+            self._logger.warning(
+                "detect_time_type: failed to DESCRIBE %s in %s; defaulting to timestamp",
+                time_col,
+                input_path,
+                exc_info=True,
+            )
             return "timestamp"
 
         col_type = None
@@ -162,9 +411,65 @@ class PmTileDuckDBClient(DuckDBClient):
                 f"Column '{time_col}' not found in schema of '{input_path}'."
             )
 
-        if any(t in col_type for t in ("TIMESTAMP", "DATE", "INTERVAL")):
+        base_type = col_type.split("(", 1)[0].strip()
+
+        if base_type in self._TIMESTAMP_SQL_TYPES or base_type.startswith("TIMESTAMP"):
+            self._logger.info(
+                "detect_time_type: column=%s sql_type=%s -> timestamp",
+                time_col,
+                col_type,
+            )
             return "timestamp"
-        if any(t in col_type for t in ("BIGINT", "HUGEINT", "UBIGINT")):
+
+        if base_type in self._NUMERIC_SQL_TYPES:
+            time_type = self._detect_epoch_unit(source_sql, col_quoted)
+            self._logger.info(
+                "detect_time_type: column=%s sql_type=%s -> %s",
+                time_col,
+                col_type,
+                time_type,
+            )
+            return time_type
+
+        self._logger.info(
+            "detect_time_type: column=%s sql_type=%s (unhandled) -> timestamp",
+            time_col,
+            col_type,
+        )
+        return "timestamp"
+
+    def _parquet_source_sql(self, input_path: str) -> str:
+        """SQL table expression that exposes both file columns and Hive keys."""
+        # Prefer the full dataset glob with hive_partitioning so partition
+        # columns (e.g. timestamp=1764547200/) are part of the schema. A single
+        # file path without hive_partitioning would hide those keys.
+        if input_path.endswith("_metadata") or input_path.endswith("_common_metadata"):
+            return f"read_parquet('{input_path}')"
+        return (
+            f"read_parquet('{input_path}', hive_partitioning=true, union_by_name=true)"
+        )
+
+    def _detect_epoch_unit(self, source_sql: str, col_quoted: str) -> str:
+        """Classify numeric epoch values as seconds or milliseconds by magnitude."""
+        try:
+            max_abs = self._con.execute(
+                f"""
+                SELECT MAX(ABS(CAST({col_quoted} AS DOUBLE)))
+                FROM {source_sql}
+                WHERE {col_quoted} IS NOT NULL
+                """
+            ).fetchone()[0]
+        except Exception:
+            self._logger.warning(
+                "detect_time_type: failed to sample numeric values; defaulting to epoch_s",
+                exc_info=True,
+            )
+            return "epoch_s"
+
+        if max_abs is None:
+            return "epoch_s"
+
+        if float(max_abs) >= self._EPOCH_MS_ABS_THRESHOLD:
             return "epoch_ms"
         return "epoch_s"
 
@@ -173,21 +478,33 @@ class PmTileDuckDBClient(DuckDBClient):
         return '"' + name.replace('"', '""') + '"'
 
     @staticmethod
-    def build_ym_expression(time_col: str, time_type: str) -> str:
+    def _timestamp_sql(time_col: str, time_type: str) -> str:
         col = PmTileDuckDBClient.quote_identifier(time_col)
 
         if time_type == "timestamp":
-            ts = f"CAST({col} AS TIMESTAMP)"
-        elif time_type == "epoch_ms":
-            ts = f"to_timestamp(CAST({col} AS DOUBLE) / 1000.0)"
-        elif time_type == "epoch_s":
-            ts = f"to_timestamp(CAST({col} AS DOUBLE))"
-        else:
-            raise ValueError(
-                f"Unsupported time_type={time_type!r}. Expected one of: 'timestamp', 'epoch_ms', 'epoch_s'."
-            )
+            return f"CAST({col} AS TIMESTAMP)"
+        if time_type == "epoch_ms":
+            return f"to_timestamp(CAST({col} AS DOUBLE) / 1000.0)"
+        if time_type == "epoch_s":
+            return f"to_timestamp(CAST({col} AS DOUBLE))"
+        raise ValueError(
+            f"Unsupported time_type={time_type!r}. Expected one of: 'timestamp', 'epoch_ms', 'epoch_s'."
+        )
 
+    @staticmethod
+    def build_ym_expression(time_col: str, time_type: str) -> str:
+        ts = PmTileDuckDBClient._timestamp_sql(time_col, time_type)
         return f"CAST(strftime({ts}, '%Y%m') AS INTEGER)"
+
+    @staticmethod
+    def build_date_key_expression(time_col: str, time_type: str) -> str:
+        ts = PmTileDuckDBClient._timestamp_sql(time_col, time_type)
+        return f"CAST(strftime({ts}, '%Y%m%d') AS INTEGER)"
+
+    @staticmethod
+    def build_year_key_expression(time_col: str, time_type: str) -> str:
+        ts = PmTileDuckDBClient._timestamp_sql(time_col, time_type)
+        return f"CAST(strftime({ts}, '%Y') AS INTEGER)"
 
 
 class ParquetDuckDBClient(DuckDBClient):
@@ -271,31 +588,6 @@ class ParquetDuckDBClient(DuckDBClient):
         finally:
             with self._cursors_lock:
                 self._active_cursors.discard(cursor)
-
-    def create_s3_secret(self, bucket: str) -> None:
-        """Create a DuckDB S3 secret scoped to ``bucket`` from boto3 credentials."""
-        boto_session = boto3.Session()
-        creds = boto_session.get_credentials().get_frozen_credentials()
-        region = boto_session.region_name or "ap-southeast-2"
-
-        def lit(value: str) -> str:
-            return "'" + value.replace("'", "''") + "'"
-
-        def ident(name: str) -> str:
-            return '"' + name.replace('"', '""') + '"'
-
-        self.execute(
-            f"""
-            CREATE OR REPLACE SECRET {ident(f"{bucket}_s3")} (
-                TYPE S3,
-                KEY_ID {lit(creds.access_key)},
-                SECRET {lit(creds.secret_key)},
-                SESSION_TOKEN {lit(creds.token or "")},
-                REGION {lit(region)},
-                SCOPE 's3://{bucket}'
-            )
-        """
-        )
 
     def close(self) -> None:
         """Cancel any in-flight queries, then close the connection.

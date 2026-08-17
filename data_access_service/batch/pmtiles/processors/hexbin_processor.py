@@ -1,6 +1,8 @@
+import gzip
 import json
 import os
-from typing import Sequence, List, Optional, Dict
+from datetime import datetime, timezone
+from typing import Sequence, List, Optional, Dict, Tuple
 
 from data_access_service.batch.pmtiles.helpers.features_help import build_hex_feature
 from data_access_service.batch.pmtiles.processors.abstract_processor import (
@@ -8,11 +10,73 @@ from data_access_service.batch.pmtiles.processors.abstract_processor import (
 )
 from data_access_service.core.duckdbclient import PmTileDuckDBClient
 
-from data_access_service.models.pmtiles_types import HexLayerSpec
+from data_access_service.models.pmtiles_types import (
+    HexLayerSpec,
+    PmtilesSidecarMetadata,
+    TIMELESS_DATE_PERIOD,
+    TIMELESS_MONTH_PERIOD,
+    TIMELESS_YEAR_PERIOD,
+    TimeGroupBy,
+)
 from data_access_service.utils.memory_utils import log_memory_usage
 
 
 class HexbinProcessor(AbstractProcessor):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Set in build_staging_parquet: False when source has no TIME column.
+        self._has_time: bool = True
+
+    def _staged_period_column(self) -> str:
+        """Staging column alias for the active time grain (``d``, ``ym``, or ``yr``).
+
+        ``all`` stages at day grain (``d``) so month/year can be rolled up later.
+        Year uses ``yr`` (not ``y``) to avoid DuckDB binder issues with bare ``y``.
+        """
+        group_by = self.pmtiles_config.time_group_by
+        if group_by in (TimeGroupBy.DATE, TimeGroupBy.ALL):
+            return "d"
+        if group_by == TimeGroupBy.YEAR:
+            return "yr"
+        return "ym"
+
+    def _synthetic_period(self) -> int:
+        """Stable period int for datasets with no TIME column."""
+        group_by = self.pmtiles_config.time_group_by
+        if group_by in (TimeGroupBy.DATE, TimeGroupBy.ALL):
+            # ALL rolls up day → month/year, so store the day synthetic key.
+            return TIMELESS_DATE_PERIOD
+        if group_by == TimeGroupBy.YEAR:
+            return TIMELESS_YEAR_PERIOD
+        return TIMELESS_MONTH_PERIOD
+
+    def _time_key_sql_and_column(
+        self, time_col_name: str, time_type: str
+    ) -> Tuple[str, str]:
+        """Return (sql_expression, staged_column_alias) for the configured time bucket."""
+        group_by = self.pmtiles_config.time_group_by
+        if group_by in (TimeGroupBy.DATE, TimeGroupBy.ALL):
+            return (
+                PmTileDuckDBClient.build_date_key_expression(
+                    time_col=time_col_name, time_type=time_type
+                ),
+                "d",
+            )
+        if group_by == TimeGroupBy.YEAR:
+            return (
+                PmTileDuckDBClient.build_year_key_expression(
+                    time_col=time_col_name, time_type=time_type
+                ),
+                "yr",
+            )
+        # Default / month
+        return (
+            PmTileDuckDBClient.build_ym_expression(
+                time_col=time_col_name, time_type=time_type
+            ),
+            "ym",
+        )
 
     def build_staging_parquet(self):
         layers = self.get_layers()
@@ -24,41 +88,153 @@ class HexbinProcessor(AbstractProcessor):
         time_col_name = self.get_time_col_name()
         quoted_lon = PmTileDuckDBClient.quote_identifier(lon_name)
         quoted_lat = PmTileDuckDBClient.quote_identifier(lat_name)
-        quoted_time = PmTileDuckDBClient.quote_identifier(time_col_name)
-        time_type = self.pm_client.detect_time_type(
-            input_path=self.get_s3_uri(), time_col=time_col_name
-        )
-        ym = PmTileDuckDBClient.build_ym_expression(
-            time_col=time_col_name, time_type=time_type
-        )
 
-        self.logger.info("Staging high-res parquet file...")
+        if time_col_name is None:
+            self._has_time = False
+            time_col = self._staged_period_column()
+            synthetic = self._synthetic_period()
+            time_key_sql = str(int(synthetic))
+            time_null_filter = ""
+            self.logger.info(
+                "Dataset has no TIME column; using synthetic period=%s "
+                "(time_group_by=%s, column=%s, has_time=false)",
+                synthetic,
+                self.pmtiles_config.time_group_by.value,
+                time_col,
+            )
+        else:
+            self._has_time = True
+            quoted_time = PmTileDuckDBClient.quote_identifier(time_col_name)
+            time_type = self.pm_client.detect_time_type(
+                input_path=self.get_s3_uri(), time_col=time_col_name
+            )
+            time_key_sql, time_col = self._time_key_sql_and_column(
+                time_col_name, time_type
+            )
+            time_null_filter = f"AND {quoted_time} IS NOT NULL"
+            self.logger.info(
+                "Staging high-res parquet file (time_group_by=%s, column=%s, "
+                "time_col=%s, time_type=%s, has_time=true)...",
+                self.pmtiles_config.time_group_by.value,
+                time_col,
+                time_col_name,
+                time_type,
+            )
+
         log_memory_usage(self.logger, "before staging scan")
 
         sql = f"""
-                COPY (
+            COPY (
+                WITH casted_data AS (
                     SELECT
-                        printf('%x', h3_latlng_to_cell(
+                        h3_latlng_to_cell(
                             CAST({quoted_lat} AS DOUBLE),
                             CAST({quoted_lon} AS DOUBLE),
                             {int(self.__get_max_res())}
-                        )) AS h_high,
-                        {ym} AS ym,
-                        COUNT(*)::UBIGINT AS c
+                        ) AS h_cell,
+                        {time_key_sql} AS {time_col}
                     FROM read_parquet('{self.get_s3_uri()}', hive_partitioning=true, union_by_name=true)
-                    WHERE
-                        {quoted_lon} IS NOT NULL
-                        AND {quoted_lat} IS NOT NULL
-                        AND {quoted_time} IS NOT NULL
-                        AND CAST({quoted_lon} AS DOUBLE) BETWEEN -180 AND 180
-                        AND CAST({quoted_lat} AS DOUBLE) BETWEEN -90 AND 90
-                    GROUP BY h_high, ym
-                    HAVING h_high IS NOT NULL
-                ) TO '{self.get_staged_path()}' (FORMAT PARQUET)
-            """
+                    WHERE {quoted_lon} IS NOT NULL
+                      AND {quoted_lat} IS NOT NULL
+                      {time_null_filter}
+                      AND CAST({quoted_lon} AS DOUBLE) BETWEEN -180 AND 180
+                      AND CAST({quoted_lat} AS DOUBLE) BETWEEN -90 AND 90
+                )
+                SELECT
+                    printf('%x', h_cell) AS h_high,
+                    {time_col},
+                    COUNT(*)::UBIGINT AS c
+                FROM casted_data
+                WHERE h_cell IS NOT NULL
+                GROUP BY h_cell, {time_col}
+            ) TO '{self.get_staged_path()}' (FORMAT PARQUET)
+        """
         self.pm_client.execute(sql)
         self.logger.info("High-res parquet file complete.")
+        self._log_staged_parquet_preview(time_col=time_col)
         log_memory_usage(self.logger, "after staging scan")
+
+    def _log_staged_parquet_preview(self, time_col: str) -> None:
+        """Log staged table contents so month vs date aggregation can be compared.
+
+        Prints all rows when the table is small; otherwise a summary plus a
+        contiguous window covering at least one calendar month of time keys.
+        """
+        staged_path = self.get_staged_path()
+        try:
+            stats = self.pm_client.execute(
+                f"""
+                SELECT
+                    COUNT(*)::BIGINT AS n_rows,
+                    COUNT(DISTINCT h_high)::BIGINT AS n_hex,
+                    COUNT(DISTINCT {time_col})::BIGINT AS n_periods,
+                    MIN({time_col}) AS min_period,
+                    MAX({time_col}) AS max_period,
+                    SUM(c)::BIGINT AS total_c
+                FROM read_parquet('{staged_path}')
+                """
+            ).fetchone()
+            n_rows, n_hex, n_periods, min_period, max_period, total_c = stats
+            self.logger.info(
+                "Staged parquet summary (time_group_by=%s, column=%s): "
+                "rows=%s unique_hex=%s unique_periods=%s period_range=[%s, %s] total_count=%s",
+                self.pmtiles_config.time_group_by.value,
+                time_col,
+                f"{n_rows:,}",
+                f"{n_hex:,}",
+                f"{n_periods:,}",
+                min_period,
+                max_period,
+                f"{total_c:,}",
+            )
+
+            # Prefer full dump for small staging results (typical in tests).
+            # For larger tables, dump a window of periods that covers at least
+            # one month so daily keys can be compared to monthly buckets.
+            max_preview_rows = 500
+            if n_rows <= max_preview_rows:
+                preview_sql = f"""
+                    SELECT h_high, {time_col}, c
+                    FROM read_parquet('{staged_path}')
+                    ORDER BY {time_col}, h_high
+                """
+            else:
+                # Narrow preview to one calendar month when possible so daily
+                # keys can be compared to monthly buckets; year grain uses one year.
+                if time_col in ("ym", "yr"):
+                    period_filter = f"{time_col} = {int(min_period)}"
+                else:
+                    first_month = int(min_period) // 100  # YYYYMM from YYYYMMDD
+                    period_filter = f"({time_col} // 100) = {first_month}"
+                preview_sql = f"""
+                    SELECT h_high, {time_col}, c
+                    FROM read_parquet('{staged_path}')
+                    WHERE {period_filter}
+                    ORDER BY {time_col}, h_high
+                    LIMIT {max_preview_rows}
+                """
+
+            rows = self.pm_client.execute(preview_sql).fetchall()
+            if not rows:
+                self.logger.info("Staged parquet preview: (empty)")
+                print("Staged parquet preview: (empty)", flush=True)
+                return
+
+            header = f"{'h_high':<20} {time_col:<12} {'c':>12}"
+            lines = [
+                f"Staged parquet preview ({len(rows)} row(s), ordered by {time_col}, h_high):",
+                header,
+                "-" * len(header),
+            ]
+            for h_high, period, count in rows:
+                lines.append(f"{str(h_high):<20} {period:<12} {int(count):>12}")
+            # Log/print line-by-line so multi-line content is not truncated by
+            # formatters and is easy to copy for month-vs-date comparison.
+            for line in lines:
+                self.logger.info(line)
+            print("\n".join(lines), flush=True)
+        except Exception as e:
+            self.logger.warning("Failed to preview staged parquet: %s", e)
 
     def get_layers(self) -> Sequence[HexLayerSpec]:
         return self.config.get_hex_layer_specs(self.dataset_name)
@@ -84,48 +260,105 @@ class HexbinProcessor(AbstractProcessor):
 
         return geojsonseq_file_paths
 
+    def generate_metadata_json(self) -> str:
+        """Write min/max period from staging parquet to {dname}.metadata."""
+        staged_path = self.get_staged_path()
+        if not os.path.exists(staged_path):
+            raise FileNotFoundError(
+                f"Staged parquet not found at {staged_path!r}; "
+                "cannot generate metadata"
+            )
+
+        time_col = self._staged_period_column()
+        row = self.pm_client.execute(
+            f"""
+            SELECT MIN({time_col}), MAX({time_col})
+            FROM read_parquet('{staged_path}')
+            """
+        ).fetchone()
+        if row is None or row[0] is None or row[1] is None:
+            raise ValueError(
+                f"Staged parquet at {staged_path!r} has no period values; "
+                "cannot generate metadata"
+            )
+
+        metadata = PmtilesSidecarMetadata(
+            min_date=int(row[0]),
+            max_date=int(row[1]),
+            time_group_by=self.pmtiles_config.time_group_by,
+            last_updated=datetime.now(timezone.utc).isoformat(),
+            has_time=self._has_time,
+        )
+
+        metadata_path = self.get_metadata_path()
+        os.makedirs(os.path.dirname(os.path.abspath(metadata_path)), exist_ok=True)
+        with open(metadata_path, "w", encoding="utf-8") as f:
+            json.dump(metadata.to_dict(), f, separators=(",", ":"))
+
+        self.logger.info(
+            "Wrote metadata to %s (min_date=%s, max_date=%s, time_group_by=%s, "
+            "has_time=%s)",
+            metadata_path,
+            metadata.min_date,
+            metadata.max_date,
+            metadata.time_group_by.value,
+            metadata.has_time,
+        )
+        return metadata_path
+
     def __get_max_res(self) -> int:
         return max(layer.h3_resolution for layer in self.get_layers())
 
     def __generate_hex_geojsonseq_file(self, layer: HexLayerSpec, max_res: int) -> str:
-        self.pm_client.execute("DROP TABLE IF EXISTS monthly_counts")
+        time_col = self._staged_period_column()
+        grain = self.pmtiles_config.time_group_by
+        if grain in (TimeGroupBy.DATE, TimeGroupBy.ALL):
+            # ALL is staged at day grain; feature builder adds month/year rollups.
+            period_label = "day"
+        elif grain == TimeGroupBy.YEAR:
+            period_label = "year"
+        else:
+            period_label = "month"
+
+        self.pm_client.execute("DROP TABLE IF EXISTS period_counts")
 
         if layer.h3_resolution == max_res:
             sql = f"""
-                        CREATE TEMP TABLE monthly_counts AS
-                        SELECT h_high AS h, ym, c
+                        CREATE TEMP TABLE period_counts AS
+                        SELECT h_high AS h, {time_col}, c
                         FROM read_parquet('{self.get_staged_path()}')
                         WHERE h_high IS NOT NULL
-                        ORDER BY h, ym
+                        ORDER BY h, {time_col}
                     """
         else:
             sql = f"""
-                        CREATE TEMP TABLE monthly_counts AS
+                        CREATE TEMP TABLE period_counts AS
                         SELECT
                             printf('%x', h3_cell_to_parent(('0x' || h_high)::UBIGINT, {int(layer.h3_resolution)})) AS h,
-                            ym,
+                            {time_col},
                             SUM(c)::UBIGINT AS c
                         FROM read_parquet('{self.get_staged_path()}')
                         WHERE h_high IS NOT NULL
-                        GROUP BY h, ym
+                        GROUP BY h, {time_col}
                         HAVING h IS NOT NULL
-                        ORDER BY h, ym
+                        ORDER BY h, {time_col}
                     """
 
         self.pm_client.execute(sql)
 
-        monthly_rows = self.pm_client.execute(
-            "SELECT COUNT(*) FROM monthly_counts"
+        period_rows = self.pm_client.execute(
+            "SELECT COUNT(*) FROM period_counts"
         ).fetchone()[0]
         distinct_hexes = self.pm_client.execute(
-            "SELECT COUNT(DISTINCT h) FROM monthly_counts"
+            "SELECT COUNT(DISTINCT h) FROM period_counts"
         ).fetchone()[0]
         self.logger.info(
-            f"{layer.name} Aggregation result: {distinct_hexes:,} unique H3 cells, {monthly_rows:,} (cell, month) rows"
+            f"{layer.name} Aggregation result: {distinct_hexes:,} unique H3 cells, "
+            f"{period_rows:,} (cell, {period_label}) rows"
         )
 
         cursor = self.pm_client.execute(
-            "SELECT h, ym, c FROM monthly_counts ORDER BY h, ym"
+            f"SELECT h, {time_col}, c FROM period_counts ORDER BY h, {time_col}"
         )
 
         os.makedirs(
@@ -140,16 +373,16 @@ class HexbinProcessor(AbstractProcessor):
             raise ValueError("dir must be a relative path")
 
         geojsonseq_file_path = os.path.join(
-            self.get_geojsonseq_dir(), layer.layer_geojsonseq_file_name
+            self.get_geojsonseq_dir(), layer.layer_geojsonseq_file_name + ".gz"
         )
         os.makedirs(os.path.dirname(geojsonseq_file_path) or ".", exist_ok=True)
-        with open(geojsonseq_file_path, "w", encoding="utf-8") as output_file:
+        with gzip.open(geojsonseq_file_path, "wt", encoding="utf-8") as output_file:
             while True:
                 rows = cursor.fetchmany(self.pmtiles_config.fetch_size)
                 if not rows:
                     break
 
-                for h_cell, ym_value, count_value in rows:
+                for h_cell, period_value, count_value in rows:
                     if current_h is None:
                         current_h = h_cell
 
@@ -157,11 +390,12 @@ class HexbinProcessor(AbstractProcessor):
                         try:
                             feature = build_hex_feature(
                                 cell=current_h,
-                                month_counts=current_counts,
+                                period_counts=current_counts,
                                 layer_name=layer.name,
                                 minzoom=layer.minzoom,
                                 maxzoom=layer.maxzoom,
                                 include_tippecanoe_metadata=True,
+                                grain=grain,
                             )
                             output_file.write(
                                 json.dumps(feature, separators=(",", ":")) + "\n"
@@ -173,17 +407,18 @@ class HexbinProcessor(AbstractProcessor):
                         current_h = h_cell
                         current_counts = {}
 
-                    current_counts[int(ym_value)] = int(count_value)
+                    current_counts[int(period_value)] = int(count_value)
 
             if current_h is not None:
                 try:
                     feature = build_hex_feature(
                         cell=current_h,
-                        month_counts=current_counts,
+                        period_counts=current_counts,
                         layer_name=layer.name,
                         minzoom=layer.minzoom,
                         maxzoom=layer.maxzoom,
                         include_tippecanoe_metadata=True,
+                        grain=grain,
                     )
                     output_file.write(json.dumps(feature, separators=(",", ":")) + "\n")
                 except ValueError as e:
@@ -192,4 +427,9 @@ class HexbinProcessor(AbstractProcessor):
                     )
 
         log_memory_usage(self.logger, f"after {layer.name} geojsonseq written")
+
+        # After writing (before return)
+        size_mb = os.path.getsize(geojsonseq_file_path) / (1024 * 1024)
+        self.logger.info(f"Generated {geojsonseq_file_path}: {size_mb:.2f} MB")
+
         return geojsonseq_file_path

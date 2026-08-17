@@ -3,7 +3,6 @@ import gzip
 import math
 import os
 import gc
-
 import json
 import zlib
 
@@ -18,7 +17,7 @@ import xarray
 
 from datetime import timedelta, timezone
 from io import BytesIO
-from typing import Optional, Dict, Any, List, Tuple, Hashable
+from typing import Iterator, Optional, Dict, Any, List, Tuple, Hashable, overload
 from aodn_cloud_optimised.lib import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import (
     ParquetDataSource,
@@ -34,6 +33,10 @@ from data_access_service.core.constants import (
     STR_LONGITUDE_UPPER_CASE,
     STR_TIME_UPPER_CASE,
 )
+from data_access_service.models.subset_request import NON_SPECIFIED
+from data_access_service.utils.format_utils import SUPPORTED_OUTPUT_FORMATS
+from data_access_service.core.size_estimation import estimate_single_key_size
+from data_access_service.utils.subset_request_resolver import resolve_subset_request
 from data_access_service.core.descriptor import Depth, Descriptor, Coordinate
 
 from data_access_service.models.co_data_source.co_data_registory import CODataRegistry
@@ -57,7 +60,23 @@ class BaseAPI:
     ) -> Tuple[pd.Timestamp | None, pd.Timestamp | None]:
         pass
 
-    def get_mapped_meta_data(self, uuid: str | None) -> Dict[str, Descriptor]:
+    @overload
+    def get_mapped_meta_data(self, uuid: None) -> Dict[str, Dict[str, Descriptor]]: ...
+
+    @overload
+    def get_mapped_meta_data(self, uuid: str) -> Dict[str, Descriptor]: ...
+
+    def get_mapped_meta_data(
+        self, uuid: str | None
+    ) -> Dict[str, Descriptor] | Dict[str, Dict[str, Descriptor]]:
+        """Return dataset descriptors.
+
+        When ``uuid`` is a concrete id, returns ``{dataset_name: Descriptor}``
+        for that uuid (or a sentinel ``{"not_exist": ...}`` if missing).
+
+        When ``uuid`` is ``None``, returns the full map
+        ``{uuid: {dataset_name: Descriptor}}``.
+        """
         pass
 
     def has_data(
@@ -80,13 +99,73 @@ class BaseAPI:
     ) -> Optional[ddf.DataFrame]:
         pass
 
+    def estimate_datasets_size(
+        self,
+        uuid: str,
+        keys: list[str] = None,
+        start_date: str = NON_SPECIFIED,
+        end_date: str = NON_SPECIFIED,
+        multi_polygon=None,
+        columns: list[str] = None,
+        output_format: str = None,
+    ) -> Optional[dict]:
+        pass
+
     def get_api_status(self) -> bool:
         return False
+
+    async def wait_until_ready(self, timeout: float | None = 300) -> bool:
+        """Poll get_api_status() until it's ready or timeout elapses.
+
+        Used to hold off other CPU/memory-heavy startup work (repository refresh,
+        tiler startup) until metadata init has finished, so it isn't competing
+        with them for resources.
+
+        ``timeout=None`` waits indefinitely — tiler warmup uses this, since a
+        half-populated index would publish an incomplete catalogue. Returns
+        whether the API actually became ready.
+        """
+        waited = 0.0
+        while not self.get_api_status():
+            if timeout is not None and waited >= timeout:
+                log.warning("Timed out waiting for API to become ready")
+                return False
+            await asyncio.sleep(0.5)
+            waited += 0.5
+            # An indefinite wait still has to be observable.
+            if timeout is None and waited % 60 == 0:
+                log.info(f"Still waiting for API metadata init ({waited:.0f}s)")
+        log.info(f"API ready status = {self.get_api_status()} (waited {waited}s)")
+        return True
 
     def map_column_names(
         self, uuid: str, key: str, columns: list[str] | None
     ) -> list[str] | None:
         pass
+
+    def resolve_dim_names(
+        self, uuid: str, key: str
+    ) -> Tuple[str | None, str | None, str | None]:
+        """Return (latitude, longitude, time) dimension names for `key`, from the
+        dataset's own metadata. Any axis the dataset does not define comes back
+        as None."""
+
+        def _one(column: str) -> str | None:
+            mapped = self.map_column_names(uuid, key, [column]) or []
+            return mapped[0] if mapped else None
+
+        return (
+            _one(STR_LATITUDE_UPPER_CASE),
+            _one(STR_LONGITUDE_UPPER_CASE),
+            _one(STR_TIME_UPPER_CASE),
+        )
+
+    def release_memory_for_pmtiles_batch(self) -> None:
+        """Optional hook: free memory the PMTiles batch job no longer needs.
+
+        Default is a no-op. Concrete :class:`API` drops raw schemas, non-parquet
+        entries, and the GetAodn handle after the work list is materialised.
+        """
 
     def _extract_coordinate(
         self, data: dict, uuid: str, key: str, column: str
@@ -97,9 +176,6 @@ class BaseAPI:
             if mapped_col is None or len(mapped_col) == 0:
                 return None
             # Translate to the correct column name for dataset
-            mapped_col = self.map_column_names(uuid, key, [column])
-            if not mapped_col:
-                return None
             val = data.get(mapped_col[0])
 
             if val is not None:
@@ -373,6 +449,9 @@ class API(BaseAPI):
 
         self._raw: Dict[str, Dict[str, Any]] = dict()
         self._cached_metadata: Dict[str, Dict[str, Descriptor]] = dict()
+        # Top-level schema field names per dataset — enough for map_column_names
+        # without retaining full compressed schemas in memory.
+        self._schema_keys: Dict[str, Dict[str, frozenset[str]]] = dict()
 
         # UUID to metadata mapper
         # self._instance = DataQuery.GetAodn()
@@ -411,9 +490,12 @@ class API(BaseAPI):
         self._metadata = self._instance.get_metadata()
         self.refresh_uuid_dataset_map()
 
-        # Free up catalog metadata memory and trigger garbage collection
-        self._metadata = None
-        gc.collect()
+        # Drop the aodn Metadata object *and* its lru_cached catalog. Setting
+        # ``_metadata = None`` alone is not enough: ``Metadata.metadata_catalog``
+        # is ``@lru_cache(maxsize=None)`` on the class, which pins every
+        # (instance, full catalog dict) for the process lifetime.
+        self._release_library_metadata_cache()
+        self._log_retained_metadata_size("after init")
 
         process = psutil.Process()
         rss_mb = process.memory_info().rss / (1024 * 1024)
@@ -427,6 +509,81 @@ class API(BaseAPI):
         with open(HEALTH_JSON, "w") as f:
             f.write('{"status":"UP","status_code":200}')
 
+    def _release_library_metadata_cache(self) -> None:
+        """Free the cloud-optimised Metadata catalog held after init/refresh."""
+        md = self._metadata
+        if md is None:
+            return
+
+        # Instance attribute populated in Metadata.__init__
+        if isinstance(getattr(md, "catalog", None), dict):
+            md.catalog.clear()
+            md.catalog = None
+
+        # Class-level lru_cache retains Metadata instances + catalogs otherwise.
+        catalog_fn = getattr(type(md), "metadata_catalog", None)
+        cache_clear = getattr(catalog_fn, "cache_clear", None)
+        if callable(cache_clear):
+            cache_clear()
+            log.info("Cleared aodn Metadata.metadata_catalog lru_cache")
+
+        self._metadata = None
+        gc.collect()
+
+    def _log_retained_metadata_size(self, label: str) -> None:
+        raw_bytes = sum(
+            len(blob) for datasets in self._raw.values() for blob in datasets.values()
+        )
+        n_datasets = sum(len(ds) for ds in self._cached_metadata.values())
+        n_schema = sum(len(ds) for ds in self._schema_keys.values())
+        log.info(
+            "[memory] %s: datasets=%s schema_key_sets=%s _raw_compressed=%.1f MB",
+            label,
+            n_datasets,
+            n_schema,
+            raw_bytes / (1024 * 1024),
+        )
+
+    def release_memory_for_pmtiles_batch(self) -> None:
+        """Drop structures the PMTiles batch job does not need after listing work.
+
+        Retains parquet-only descriptors and schema field-name sets (for
+        ``map_column_names``). Drops full compressed raw schemas, non-parquet
+        entries, and the GetAodn handle — fork children inherit this slimmer
+        state via copy-on-write.
+        """
+        parquet_cached: Dict[str, Dict[str, Descriptor]] = {}
+        parquet_schema: Dict[str, Dict[str, frozenset[str]]] = {}
+
+        for uuid, datasets in self._cached_metadata.items():
+            kept = {
+                name: desc
+                for name, desc in datasets.items()
+                if name.endswith(".parquet")
+            }
+            if not kept:
+                continue
+            parquet_cached[uuid] = kept
+            src_keys = self._schema_keys.get(uuid, {})
+            parquet_schema[uuid] = {
+                name: src_keys[name] for name in kept if name in src_keys
+            }
+
+        self._cached_metadata = parquet_cached
+        self._schema_keys = parquet_schema
+        self._raw.clear()
+        # Data loading for PMTiles goes through DuckDB/S3, not GetAodn.
+        self._instance = None
+        self._release_library_metadata_cache()
+        self._log_retained_metadata_size("after pmtiles batch trim")
+
+        process = psutil.Process()
+        rss_mb = process.memory_info().rss / (1024 * 1024)
+        log.info(
+            "PMTiles batch memory trim complete. RSS = %.2f MB",
+            rss_mb,
+        )
+
     def get_api_status(self) -> bool:
         # used for checking if the API instance is ready
         return self._is_ready
@@ -439,8 +596,13 @@ class API(BaseAPI):
 
         cached_catalog = self._metadata.catalog
         # A map contains dataset name and Metadata class, which is not
-        # so useful in our case, we need UUID
-        catalog = self._metadata.metadata_catalog_uncached()
+        # so useful in our case, we need UUID.
+        # Prefer the catalog already built in Metadata.__init__ — calling
+        # metadata_catalog_uncached() again would double peak memory (second
+        # full catalog from S3) for the same data.
+        catalog = getattr(self._metadata, "catalog", None)
+        if not isinstance(catalog, dict):
+            catalog = self._metadata.metadata_catalog_uncached()
         if catalog == {}:
             log.error("Metadata catalog from cloud-optimised lib is empty.")
 
@@ -464,6 +626,10 @@ class API(BaseAPI):
                     self._raw[uuid][key] = zlib.compress(
                         json.dumps(data).encode("utf-8")
                     )
+                    # Field names alone are enough for map_column_names lookups.
+                    if uuid not in self._schema_keys:
+                        self._schema_keys[uuid] = dict()
+                    self._schema_keys[uuid][key] = frozenset(data.keys())
 
                     if uuid not in self._cached_metadata:
                         self._cached_metadata[uuid] = dict()
@@ -489,17 +655,54 @@ class API(BaseAPI):
                     e,
                 )
 
-    def get_mapped_meta_data(self, uuid: str | None):
-        if uuid is not None:
-            value = self._cached_metadata.get(uuid)
-        else:
-            # Return all values
-            value = self._cached_metadata
+    @overload
+    def get_mapped_meta_data(self, uuid: None) -> Dict[str, Dict[str, Descriptor]]: ...
 
+    @overload
+    def get_mapped_meta_data(self, uuid: str) -> Dict[str, Descriptor]: ...
+
+    def get_mapped_meta_data(
+        self, uuid: str | None
+    ) -> Dict[str, Descriptor] | Dict[str, Dict[str, Descriptor]]:
+        if uuid is None:
+            # Full catalog: uuid -> dataset_name -> Descriptor
+            return self._cached_metadata
+
+        value = self._cached_metadata.get(uuid)
         if value is not None:
             return value
-        else:
-            return {"not_exist": Descriptor(uuid=uuid if uuid is not None else "*")}
+        return {"not_exist": Descriptor(uuid=uuid)}
+
+    def get_dataset_variables(self) -> Dict[str, Dict[str, frozenset[str]]]:
+        """The ``uuid -> dataset_name -> frozenset(field names)`` index.
+
+        Cheap counterpart to get_raw_meta_data: never decompresses the raw
+        catalogue, which is what makes it usable for whole-catalogue scans
+        such as tiler product discovery. Live internal index, not a copy —
+        treat as read-only and as a snapshot of the moment it was read.
+        """
+        return self._schema_keys
+
+    def iter_zarr_dataset_variables(
+        self,
+    ) -> Iterator[Tuple[str, str, frozenset[str]]]:
+        """Yield (uuid, dataset_name, variable_names) for every zarr dataset
+        captured at init, skipping Parquet entries so callers matching zarr
+        variable specs (e.g. tiler product discovery) don't have to filter
+        dataset_name themselves.
+
+        variable_names is every top-level field name minus
+        "global_attributes" — every remaining key is a real zarr
+        variable/coordinate name. Reuses the already-fetched _schema_keys
+        index rather than calling self._instance.get_metadata() again, which
+        would re-trigger a full S3 catalog scan (see
+        _release_library_metadata_cache).
+        """
+        for uuid, datasets in self._schema_keys.items():
+            for dname, field_names in datasets.items():
+                if not dname.endswith(".zarr"):
+                    continue
+                yield uuid, dname, field_names - {"global_attributes"}
 
     def get_raw_meta_data(self, uuid: str) -> Dict[str, Any]:
         value = self._raw.get(uuid)
@@ -533,28 +736,35 @@ class API(BaseAPI):
         md: Dict[str, Descriptor] | None = self._cached_metadata.get(uuid)
         if md is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
-            start_date, end_date = ds.get_temporal_extent()
+            try:
+                start_date, end_date = ds.get_temporal_extent()
 
-            if start_date is not None:
-                start_date = start_date.replace(
-                    hour=0, minute=0, second=0, microsecond=0, nanosecond=0
-                )
+                if start_date is not None:
+                    start_date = start_date.replace(
+                        hour=0, minute=0, second=0, microsecond=0, nanosecond=0
+                    )
 
-            if end_date is not None:
-                # Some dataset has future date, we need to do a safety check
-                if end_date.tzinfo is None:
-                    now_compare = pd.Timestamp.now()
-                else:
-                    now_compare = pd.Timestamp.now(tz="UTC")
-                    end_date = end_date.tz_convert("UTC")
+                if end_date is not None:
+                    # Some dataset has future date, we need to do a safety check
+                    if end_date.tzinfo is None:
+                        now_compare = pd.Timestamp.now()
+                    else:
+                        now_compare = pd.Timestamp.now(tz="UTC")
+                        end_date = end_date.tz_convert("UTC")
 
-                end_date = end_date.replace(
-                    hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
-                )
+                    end_date = end_date.replace(
+                        hour=23,
+                        minute=59,
+                        second=59,
+                        microsecond=999999,
+                        nanosecond=999,
+                    )
 
-                if end_date > now_compare:
-                    end_date = now_compare
-            return start_date, end_date
+                    if end_date > now_compare:
+                        end_date = now_compare
+                return start_date, end_date
+            except ValueError as e:
+                return None, None
         else:
             return None, None
 
@@ -565,7 +775,12 @@ class API(BaseAPI):
         if columns is None:
             return columns
 
-        meta: Dict[str, Any] = self.get_raw_meta_data(uuid)[key]
+        # Prefer the slim field-name set (always populated at init). Fall back
+        # to full raw metadata when schema keys are absent (older/partial state).
+        field_names = self._schema_keys.get(uuid, {}).get(key)
+        if field_names is None:
+            field_names = self.get_raw_meta_data(uuid)[key]
+
         columns_map = Config.get_config().get_column_name_mapping()
         output = list()
         for column in columns:
@@ -574,7 +789,7 @@ class API(BaseAPI):
                 candidates = columns_map.get(column.casefold())
                 if candidates is not None:
                     for candidate in candidates:
-                        if candidate in meta:
+                        if candidate in field_names:
                             output.append(candidate)
                             break
                     else:
@@ -611,7 +826,7 @@ class API(BaseAPI):
         lon_max=None,
         scalar_filter=None,
         columns: list[str] = None,
-    ) -> Optional[ddf.DataFrame | xarray.Dataset]:
+    ) -> Optional[ddf.DataFrame]:
         """
         Get the data by calling cloud optimized data library aodn_cloud_optimised
         :param uuid: The UUID of the dataset
@@ -671,23 +886,40 @@ class API(BaseAPI):
                 # All precision to nanosecond
                 if isinstance(ds, ParquetDataSource):
                     # map variable names
-                    lat_mapped = self.map_column_names(
-                        uuid, key, [STR_LATITUDE_UPPER_CASE]
+                    lat_varname, lon_varname, time_varname = self.resolve_dim_names(
+                        uuid, key
                     )
-                    lon_mapped = self.map_column_names(
-                        uuid, key, [STR_LONGITUDE_UPPER_CASE]
-                    )
-                    time_mapped = self.map_column_names(
-                        uuid, key, [STR_TIME_UPPER_CASE]
-                    )
-                    lat_varname = lat_mapped[0] if lat_mapped else None
-                    lon_varname = lon_mapped[0] if lon_mapped else None
-                    time_varname = time_mapped[0] if time_mapped else None
+
+                    # A requested date range is ignored when the dataset has no
+                    # temporal extent (e.g. aggregated_seagrass_nonqc).
+                    temporal_start, temporal_end = self.get_temporal_extent(uuid, key)
+                    if temporal_start is None and temporal_end is None:
+                        log.info(
+                            "Dataset %s/%s has no temporal extent; "
+                            "ignoring date range %s to %s",
+                            uuid,
+                            key,
+                            date_start,
+                            date_end,
+                        )
+                        query_start = None
+                        query_end = None
+                        query_time_varname = None
+                    else:
+                        query_start = (
+                            f"{date_start.strftime('%Y-%m-%d %H:%M:%S.%f')}"
+                            f"{date_start.nanosecond:03d}"
+                        )
+                        query_end = (
+                            f"{date_end.strftime('%Y-%m-%d %H:%M:%S.%f')}"
+                            f"{date_end.nanosecond:03d}"
+                        )
+                        query_time_varname = time_varname
 
                     # Accuracy to nanoseconds
                     result = ds.get_data(
-                        f"{date_start.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_start.nanosecond:03d}",
-                        f"{date_end.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_end.nanosecond:03d}",
+                        query_start,
+                        query_end,
                         lat_min,
                         lat_max,
                         lon_min,
@@ -696,22 +928,11 @@ class API(BaseAPI):
                         self.map_column_names(uuid, key, columns),
                         lat_varname=lat_varname,
                         lon_varname=lon_varname,
-                        time_varname=time_varname,
+                        time_varname=query_time_varname,
                     )
 
                     return ddf.from_pandas(
                         result, npartitions=None, chunksize=None, sort=True
-                    )
-                elif isinstance(ds, ZarrDataSource):
-                    # Lib slightly different for Zar file
-                    return ds.get_data(
-                        f"{date_start.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_start.nanosecond:03d}",
-                        f"{date_end.strftime('%Y-%m-%d %H:%M:%S.%f')}{date_end.nanosecond:03d}",
-                        lat_min,
-                        lat_max,
-                        lon_min,
-                        lon_max,
-                        scalar_filter,
                     )
             except (ValueError, TypeError, IndexError, KeyError) as e:
                 err_msg = str(e)
@@ -738,6 +959,98 @@ class API(BaseAPI):
                 raise v
         else:
             return None
+
+    def estimate_datasets_size(
+        self,
+        uuid: str,
+        keys: list[str] = None,
+        start_date: str = NON_SPECIFIED,
+        end_date: str = NON_SPECIFIED,
+        multi_polygon=None,
+        columns: list[str] = None,
+        output_format: str = None,
+    ) -> Optional[dict]:
+        """
+        Estimate the total download size across one or more keys of a dataset.
+
+        The request is interpreted by the same resolve_subset_request the batch
+        download uses (key expansion, date defaults + extent trim, bboxes)
+
+        A key that cannot produce output_format (e.g. geotiff on non-gridded
+        data, csv on a zarr key) is skipped and reported in the notes instead
+        of failing the whole request.
+
+        :return: aggregated estimate dict, or None if no requested key exists
+        :raises ValueError: if output_format is none or not supported, the
+            dates are unparseable, or NO requested key can produce the format
+        """
+        if output_format is None or output_format not in SUPPORTED_OUTPUT_FORMATS:
+            raise ValueError(
+                f"output_format must be one of {sorted(SUPPORTED_OUTPUT_FORMATS)}, "
+                f"got '{output_format}'"
+            )
+
+        resolved_subset_request = resolve_subset_request(
+            api=self,
+            uuid=uuid,
+            keys=keys,
+            start_date_str=start_date,
+            end_date_str=end_date,
+            multi_polygon=multi_polygon,
+            columns=columns,
+        )
+
+        per_key: list[dict] = []
+        missing: list[str] = []
+        unsupported: list[str] = []
+        for key in resolved_subset_request.keys:
+            try:
+                single = estimate_single_key_size(
+                    self, key, resolved_subset_request, output_format=output_format
+                )
+            except ValueError as e:
+                # This key cannot download as output_format; skip it so the
+                # other keys still get an estimate. Only ValueError - real
+                # failures (S3, network) must still fail the request.
+                log.warning("size estimate skipped for %s/%s: %s", uuid, key, e)
+                unsupported.append(key)
+                continue
+            if single is None:
+                missing.append(key)
+                continue
+            per_key.append(single)
+
+        if not per_key:
+            if unsupported:
+                raise ValueError(
+                    f"'{output_format}' export not possible for any requested "
+                    f"key of {uuid}: {unsupported}"
+                )
+            # No requested key exists in this dataset -> 404 at the route.
+            return None
+
+        notes: list[str] = []
+        if missing:
+            notes.append(f"keys not found and skipped: {missing}")
+        if unsupported:
+            notes.append(
+                f"keys skipped ('{output_format}' not possible): {unsupported}"
+            )
+        if len(per_key) > 1:
+            notes.append(f"summed {len(per_key)} keys")
+
+        # Todo: we may not need so many fields, but keep it for now for debugging
+        return {
+            "uuid": uuid,
+            "keys": [r["key"] for r in per_key],
+            "format": output_format,
+            "estimated_uncompressed_bytes": sum(
+                r["estimated_uncompressed_bytes"] for r in per_key
+            ),
+            "estimated_output_bytes": sum(r["estimated_output_bytes"] for r in per_key),
+            "notes": "; ".join(notes),
+            "per_key": per_key,
+        }
 
     # TODO potential issue with UUID to dataset not 1 to 1
     @staticmethod

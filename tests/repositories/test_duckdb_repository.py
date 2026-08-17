@@ -13,7 +13,7 @@ from data_access_service.sites.sites_repository import (
     ParquetRepository,
     quote_ident,
 )
-from data_access_service.core.duckdbclient import ParquetDuckDBClient
+from data_access_service.core.duckdbclient import ParquetDuckDBClient, DuckDBClient
 
 
 class _GroupedRepo(ParquetRepository):
@@ -70,9 +70,7 @@ class _QcRepo(ParquetRepository):
 @pytest.fixture
 def session(monkeypatch):
     # No AWS in tests, and these repos never call load(), so stub the S3 secret.
-    monkeypatch.setattr(
-        ParquetDuckDBClient, "create_s3_secret", lambda self, bucket: None
-    )
+    monkeypatch.setattr(DuckDBClient, "create_s3_secret", lambda self, bucket: None)
     # The autouse memory_parquets_config fixture keeps this in-memory + offline.
     s = ParquetDuckDBClient()
     yield s

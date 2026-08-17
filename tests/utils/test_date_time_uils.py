@@ -9,11 +9,14 @@ from datetime import timezone
 import pytz
 
 from data_access_service.core.api import BaseAPI
+from data_access_service.batch.subsetting.helpers.parquet_date_ranges import (
+    check_rows_with_date_range,
+    trim_date_range,
+)
 from data_access_service.utils.date_time_utils import (
     parse_date,
     get_final_day_of_month_,
     next_month_first_day,
-    trim_date_range,
     get_monthly_utc_date_range_array_from_,
     get_boundary_of_year_month,
     transfer_date_range_into_yearmonth,
@@ -21,9 +24,11 @@ from data_access_service.utils.date_time_utils import (
     ensure_timezone,
     split_date_range,
     split_date_range_binary,
-    check_rows_with_date_range,
     supply_day_with_nano_precision,
+    resolve_non_specified_dates,
+    to_naive_utc,
 )
+from data_access_service.models.subset_request import NON_SPECIFIED
 
 
 class TestDateTimeUtils(unittest.TestCase):
@@ -1146,20 +1151,48 @@ class TestDateTimeUtils(unittest.TestCase):
         start = ensure_timezone(pd.Timestamp("2010-01-01"))
         end = ensure_timezone(pd.Timestamp("2010-01-03"))
 
-        split_start, split_mid, split_end = split_date_range_binary(start, end)
-        expected_split_start = pd.Timestamp("2010-01-01", tz="UTC")
-        expected_split_mid = pd.Timestamp("2010-01-02", tz="UTC")
-        expected_split_end = pd.Timestamp("2010-01-03", tz="UTC")
-        self.assertEqual(
-            (split_start, split_mid, split_end),
-            (expected_split_start, expected_split_mid, expected_split_end),
+        left_start, left_end, right_start, right_end = split_date_range_binary(
+            start, end
         )
+        expected_left_start = pd.Timestamp("2010-01-01", tz="UTC")
+        # Midpoint of [01-01, 01-03] → right starts at 01-02; left ends 1ns before.
+        expected_right_start = pd.Timestamp("2010-01-02", tz="UTC")
+        expected_left_end = expected_right_start - pd.Timedelta(nanoseconds=1)
+        expected_right_end = pd.Timestamp("2010-01-03", tz="UTC")
+        self.assertEqual(
+            (left_start, left_end, right_start, right_end),
+            (
+                expected_left_start,
+                expected_left_end,
+                expected_right_start,
+                expected_right_end,
+            ),
+        )
+        # Halves are adjacent and non-overlapping (inclusive ends).
+        self.assertEqual(left_end + pd.Timedelta(nanoseconds=1), right_start)
+        self.assertLess(left_end, right_start)
 
-    @patch("data_access_service.utils.date_time_utils.PARQUET_SUBSET_ROW_NUMBER", 1000)
-    @patch("data_access_service.utils.date_time_utils.MAX_PARQUET_SPLIT", 10)
-    @patch("data_access_service.utils.date_time_utils.create_time_filter")
-    @patch("data_access_service.utils.date_time_utils.split_date_range_binary")
-    @patch("data_access_service.utils.date_time_utils.log")
+    def test_split_date_range_binary_rejects_too_short_range(self):
+        start = ensure_timezone(pd.Timestamp("2010-01-01 00:00:00"))
+        end = start  # zero-width
+        with self.assertRaises(ValueError):
+            split_date_range_binary(start, end)
+
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
+        1000,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.MAX_PARQUET_SPLIT",
+        10,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_time_filter"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.split_date_range_binary"
+    )
+    @patch("data_access_service.batch.subsetting.helpers.parquet_date_ranges.log")
     def test_check_rows_with_date_range(self, mock_log, mock_split, mock_create_filter):
         mock_ds = Mock()
         mock_ds.dname = "test_data.parquet"
@@ -1187,8 +1220,10 @@ class TestDateTimeUtils(unittest.TestCase):
 
         start_date = mock_date_ranges[0]["start_date"]
         end_date = mock_date_ranges[0]["end_date"]
-        mid_date = datetime(2023, 1, 15, tzinfo=timezone.utc)
-        mock_split.return_value = (start_date, mid_date, end_date)
+        # Non-overlapping halves: left ends 1ns before right starts.
+        right_start = datetime(2023, 1, 15, tzinfo=timezone.utc)
+        left_end = right_start - pd.Timedelta(nanoseconds=1)
+        mock_split.return_value = (start_date, left_end, right_start, end_date)
 
         result = check_rows_with_date_range(
             api=mock_api,
@@ -1202,6 +1237,104 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(len(result), 2)
         mock_split.assert_called_once()
         mock_log.info.assert_called_once()
+        # Parent-replacement wording, not a bare "Splitting range".
+        log_msg = mock_log.info.call_args[0][0]
+        self.assertIn("discarding parent", log_msg)
+        self.assertIn("non-overlapping halves", log_msg)
+
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
+        1000,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_customised_time_filter"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_time_filter"
+    )
+    def test_check_rows_falls_back_on_date_out_of_range(
+        self, mock_create_filter, mock_custom_filter
+    ):
+        """create_time_filter raises DataQuery.DateOutOfRangeError; must fall back."""
+        from aodn_cloud_optimised.lib.DataQuery import DateOutOfRangeError
+
+        mock_ds = Mock()
+        mock_ds.dname = "test_data.parquet"
+        mock_ds.dataset = Mock()
+        mock_create_filter.side_effect = DateOutOfRangeError(
+            "date_start=2025-12-31 is out of range of dataset. "
+            "The maximum date_end is 1970-01-01 00:00:01."
+        )
+        mock_custom_filter.return_value = Mock()
+        mock_ds.dataset.count_rows.return_value = 50
+
+        mock_api = Mock()
+        mock_api.map_column_names.return_value = ["TIME"]
+
+        date_ranges = [
+            {
+                "start_date": datetime(2025, 12, 31, tzinfo=timezone.utc),
+                "end_date": datetime(2026, 5, 28, tzinfo=timezone.utc),
+            },
+        ]
+
+        result = check_rows_with_date_range(
+            api=mock_api,
+            uuid="mock_uuid",
+            key="mock_key",
+            ds=mock_ds,
+            date_ranges=date_ranges,
+        )
+
+        self.assertEqual(len(result), 1)
+        mock_custom_filter.assert_called_once()
+        mock_ds.dataset.count_rows.assert_called_once()
+
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
+        1000,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_customised_time_filter"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_time_filter"
+    )
+    def test_check_rows_skips_when_customised_filter_has_no_overlap(
+        self, mock_create_filter, mock_custom_filter
+    ):
+        """When both filters fail (true non-overlap), skip the range instead of crashing."""
+        from aodn_cloud_optimised.lib.DataQuery import DateOutOfRangeError
+
+        mock_ds = Mock()
+        mock_ds.dname = "test_data.parquet"
+        mock_ds.dataset = Mock()
+        mock_create_filter.side_effect = DateOutOfRangeError("out of range")
+        mock_custom_filter.side_effect = ValueError(
+            "Invalid time range after boundary adjustment: "
+            "2025-12-31 >= 1970-01-01 00:00:01"
+        )
+
+        mock_api = Mock()
+        mock_api.map_column_names.return_value = ["TIME"]
+
+        date_ranges = [
+            {
+                "start_date": datetime(2025, 12, 31, tzinfo=timezone.utc),
+                "end_date": datetime(2026, 5, 28, tzinfo=timezone.utc),
+            },
+        ]
+
+        result = check_rows_with_date_range(
+            api=mock_api,
+            uuid="mock_uuid",
+            key="mock_key",
+            ds=mock_ds,
+            date_ranges=date_ranges,
+        )
+
+        self.assertEqual(result, [])
+        mock_ds.dataset.count_rows.assert_not_called()
 
     def test_supply_day(self):
         # test supply day to a year-month string
@@ -1273,3 +1406,34 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(dt1.microsecond, dt2.microsecond)
         self.assertEqual(dt1.nanosecond, dt2.nanosecond)
         self.assertEqual(dt1.tzinfo, dt2.tzinfo)
+
+    def test_resolve_non_specified_dates_both_open(self):
+        # Both bounds open -> 1970-01-01 / today, matching batch init().
+        start, end = resolve_non_specified_dates(NON_SPECIFIED, NON_SPECIFIED)
+        self.assertEqual(start, "1970-01-01")
+        self.assertEqual(end, pd.Timestamp.today().strftime("%Y-%m-%d"))
+
+    def test_resolve_non_specified_dates_passthrough(self):
+        # Concrete values are returned unchanged.
+        start, end = resolve_non_specified_dates("2008-08-05", "2008-08-10")
+        self.assertEqual(start, "2008-08-05")
+        self.assertEqual(end, "2008-08-10")
+
+    def test_resolve_non_specified_dates_mixed(self):
+        # Only the open bound is replaced; the concrete one is left alone.
+        start, end = resolve_non_specified_dates("2008-08-05", NON_SPECIFIED)
+        self.assertEqual(start, "2008-08-05")
+        self.assertEqual(end, pd.Timestamp.today().strftime("%Y-%m-%d"))
+
+    def test_to_naive_utc_none_passes_through(self):
+        self.assertIsNone(to_naive_utc(None))
+
+    def test_to_naive_utc_aware_timestamp_becomes_naive_utc(self):
+        ts = pd.Timestamp("2024-01-01 10:00:00", tz="Australia/Hobart")
+        naive = to_naive_utc(ts)
+        self.assertIsNone(naive.tz)
+        self.assertEqual(naive, pd.Timestamp("2023-12-31 23:00:00"))
+
+    def test_to_naive_utc_naive_timestamp_unchanged(self):
+        ts = pd.Timestamp("2024-01-01 10:00:00")
+        self.assertEqual(to_naive_utc(ts), ts)

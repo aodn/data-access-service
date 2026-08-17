@@ -1,34 +1,20 @@
+import logging
 import re
+import time
+
 import pandas as pd
 import pytz
-import pyarrow
-import numpy as np
-import heapq
-import time
 
 from pandas import Timestamp
 from functools import wraps
-from pyarrow import compute as pc
 from typing import Tuple
 from datetime import datetime
 from inspect import iscoroutinefunction
 
-from aodn_cloud_optimised.lib.DataQuery import (
-    DataSource,
-    get_temporal_extent,
-    get_timestamps_boundary_values,
-    create_time_filter,
-)
-from aodn_cloud_optimised.lib.exceptions import DateOutOfRangeError
-
-from data_access_service import init_log, Config
 from dateutil.relativedelta import relativedelta
-from data_access_service.core.api import BaseAPI
-from data_access_service.core.constants import (
-    PARQUET_SUBSET_ROW_NUMBER,
-    MAX_PARQUET_SPLIT,
-    STR_TIME_UPPER_CASE,
-)
+from pandas._libs import NaTType
+
+from data_access_service.models.subset_request import NON_SPECIFIED
 
 YEAR_MONTH_DAY = "%Y-%m-%d"
 YEAR_MONTH_DAY_TIME_NANO = "%Y-%m-%d %H:%M:%S.fffffffff"
@@ -40,14 +26,13 @@ DATE_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 MIN_DATE = "1970-01-01T00:00:00Z"
 
 
-config: Config = Config.get_config()
-log = init_log(config)
+log = logging.getLogger(__name__)
 
 
 # parse all common format of date string into given format, such as "%Y-%m-%d"
 def parse_date(
-    date_string: str, format_to_convert: str = None, time_zone: str = pytz.UTC
-) -> pd.Timestamp:
+    date_string: str, format_to_convert: str | None = None, time_zone: str = pytz.UTC
+) -> pd.Timestamp | NaTType:
     if format_to_convert is None:
         return pd.Timestamp(date_string).tz_localize(time_zone)
     else:
@@ -63,19 +48,36 @@ def parse_date(
         return ts.tz_localize(time_zone)
 
 
-def get_final_day_of_month_(date: pd.Timestamp) -> pd.Timestamp:
-    if date.tz is None:
-        date = date.tz_localize(pytz.UTC)
+def start_of_day_nano(ts: pd.Timestamp) -> pd.Timestamp:
+    """Floor a timestamp to the first nanosecond of its day (00:00:00.000000000)."""
+    return ts.replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+        # pyrefly: ignore [unexpected-keyword]
+        nanosecond=0,
+    )
 
-    last_day = date + pd.offsets.MonthEnd(0)
-    # Replace do not set nano sec correctly
-    last_day = last_day.replace(
+
+def end_of_day_nano(ts: pd.Timestamp) -> pd.Timestamp:
+    """Ceil a timestamp to the final nanosecond of its day (23:59:59.999999999)."""
+    # a coarser-resolution timestamp (e.g. "us") silently drops the
+    # nanosecond=999 in replace(), so force nanosecond resolution first
+    return ts.as_unit("ns").replace(
         hour=23,
         minute=59,
         second=59,
         microsecond=999999,
+        # pyrefly: ignore [unexpected-keyword]
+        nanosecond=999,
     )
-    return last_day + pd.offsets.Nano(999)
+
+
+def get_final_day_of_month_(date: pd.Timestamp) -> pd.Timestamp:
+    if date.tz is None:
+        date = date.tz_localize(pytz.UTC)
+    return end_of_day_nano(date + pd.offsets.MonthEnd(0))
 
 
 def get_first_day_of_month(date: pd.Timestamp) -> pd.Timestamp:
@@ -95,175 +97,7 @@ def next_month_first_day(date: pd.Timestamp) -> pd.Timestamp:
     )
 
 
-def check_rows_with_date_range(
-    api: BaseAPI, uuid: str, key: str, ds: DataSource, date_ranges: list[dict]
-) -> list[dict]:
-    """
-    Count number of rows with specific monthly range. ignore bbox.
-    If rows number exceeds PARQUET_SUBSET_ROW_NUMBER, split this date range with binary division, until rows number
-    under the safe threshold.
-    If rows number is 0, remove this date range from the list of date_ranges so that to skip further querying data.
-    Args:
-        api: BaseAPI instance for column name mapping
-        uuid: Dataset UUID for metadata lookup
-        key: Metadata key for column mapping
-        ds: DataSource fetched from cloud optimised library
-        date_ranges: List of monthly intervals as dictionaries with 'start_date' and 'end_date' as UTC timestamps in
-                    'YYYY-MM-DD HH:MM:SS.fffffffff+00:00' format.
-    Returns:
-        List[dict]: List of dictionaries with 'start_date' and 'end_date' as UTC timestamps in
-                    'YYYY-MM-DD HH:MM:SS.fffffffff+00:00' format with row number check.
-    """
-    # apply on parquet dataset only
-    if ".parquet" not in ds.dname:
-        return date_ranges
-
-    dataset = ds.dataset
-    checked_date_ranges = []
-    q = []
-
-    time_dim = api.map_column_names(uuid=uuid, key=key, columns=[STR_TIME_UPPER_CASE])[
-        0
-    ]
-
-    # Go through monthly interval
-    for date_range in date_ranges:
-        month_start, month_end = date_range["start_date"], date_range["end_date"]
-        if month_end < month_start:
-            continue
-        heapq.heappush(q, (month_start, month_end, 0))
-
-    # check row count
-    while q:
-        start, end, times_of_split = heapq.heappop(q)
-        if times_of_split >= MAX_PARQUET_SPLIT:
-            checked_date_ranges.append({"start_date": start, "end_date": end})
-            continue
-
-        start_str = start.strftime("%Y-%m-%d")
-        end_str = end.strftime("%Y-%m-%d")
-
-        try:
-            time_filter = create_time_filter(
-                dataset=dataset,
-                date_start=start_str,
-                date_end=end_str,
-                time_varname=time_dim,
-            )
-        except DateOutOfRangeError:
-            time_filter = create_customised_time_filter(
-                dataset=dataset, start=start, end=end, time_varname=time_dim
-            )
-        try:
-            num_rows = dataset.count_rows(filter=time_filter)
-        except Exception as e:
-            log.warning(f"Could not count rows for range {start} to {end}: {e}")
-            continue
-
-        if num_rows == 0:
-            # skip the date range if no data in this range
-            continue
-        elif num_rows <= PARQUET_SUBSET_ROW_NUMBER:
-            checked_date_ranges.append(
-                {
-                    "start_date": start,
-                    "end_date": end,
-                }
-            )
-        else:
-            log.info(f"Splitting range {start} to {end} (rows: {num_rows})")
-            try:
-                split_start, split_mid, split_end = split_date_range_binary(start, end)
-                heapq.heappush(q, (split_start, split_mid, times_of_split + 1))
-                heapq.heappush(q, (split_mid, split_end, times_of_split + 1))
-
-            except Exception as e:
-                log.warning(f"Could not split range {start} to {end}: {e}")
-                checked_date_ranges.append(
-                    {
-                        "start_date": start,
-                        "end_date": end,
-                    }
-                )
-
-    return checked_date_ranges
-
-
-def create_customised_time_filter(
-    dataset: pyarrow.dataset.Dataset,
-    start: pd.Timestamp,
-    end: pd.Timestamp,
-    time_varname: str = None,
-) -> pyarrow.dataset.Expression:
-    """
-    Creates a time filter using actual dataset temporal extent instead of partition boundaries.
-
-    The original create_time_filter() validates against partition boundaries, which may be
-    more restrictive and ignore data less than the actual data range but larger than the partition boundaries.
-    This function validates against the real data temporal extent and create a time filter within the actual temporal range.
-
-    Args:
-        dataset: PyArrow dataset object
-        start: Query start timestamp
-        end: Query end timestamp
-        time_varname: time variable name (e.g., "JULD", "TIME", "detection_timestamp") if provided, otherwise is None
-
-    Returns:
-        PyArrow filter expression
-    """
-    if start.tz is None:
-        start = ensure_timezone(start)
-    if end.tz is None:
-        end = ensure_timezone(end)
-
-    timestamp_start, timestamp_end = get_temporal_extent(dataset, time_varname)
-    timestamp_start = pd.to_datetime(timestamp_start)
-    timestamp_end = pd.to_datetime(timestamp_end)
-
-    if timestamp_start.tz is None:
-        timestamp_start = ensure_timezone(timestamp_start)
-    if timestamp_end.tz is None:
-        timestamp_end = ensure_timezone(timestamp_end)
-
-    if start < timestamp_start:
-        start = timestamp_start
-    if end > timestamp_end:
-        end = timestamp_end
-
-    if start >= end:
-        raise ValueError(
-            f"Invalid time range after boundary adjustment: {start} >= {end}"
-        )
-
-    start_str = start.strftime("%Y-%m-%d")
-    end_str = end.strftime("%Y-%m-%d")
-
-    partition_start, partition_end = get_timestamps_boundary_values(
-        dataset, start_str, end_str
-    )
-
-    expr1 = pc.field("timestamp") >= np.int64(partition_start)
-    expr2 = pc.field("timestamp") <= np.int64(partition_end)
-
-    time_varname = "TIME"
-    if "TIME" in dataset.schema.names:
-        time_varname = "TIME"
-    elif "JULD" in dataset.schema.names:
-        time_varname = "JULD"
-    elif "detection_timestamp" in dataset.schema.names:
-        time_varname = "detection_timestamp"
-
-    start_naive = start.tz_localize(None) if start.tz is not None else start
-    end_naive = end.tz_localize(None) if end.tz is not None else end
-
-    expr3 = pc.field(time_varname) >= start_naive
-    expr4 = pc.field(time_varname) <= end_naive
-
-    expression = expr1 & expr2 & expr3 & expr4
-    return expression
-
-
-def ensure_timezone(dt: pd.Timestamp) -> pd.Timestamp:
+def ensure_timezone(dt: pd.Timestamp | NaTType) -> pd.Timestamp | NaTType:
     """
     Check if datetime has timezone info; if not, assume UTC.
 
@@ -273,37 +107,84 @@ def ensure_timezone(dt: pd.Timestamp) -> pd.Timestamp:
     Returns:
         Datetime object with timezone info (UTC if none was present)
     """
-    if dt.tz is None:
+    if dt.tz is None and not isinstance(dt, NaTType):
         return dt.tz_localize(pytz.UTC)
     return dt
 
 
+def to_naive_utc(ts: pd.Timestamp | None) -> pd.Timestamp | None:
+    """Convert a timestamp to naive UTC for slicing the zarr time coordinate, which cannot be compared against timezone-aware values.None passes through so an open slice stays open."""
+    if ts is None:
+        return None
+    if ts.tz is not None:
+        ts = ts.tz_convert("UTC").tz_localize(None)
+    return ts
+
+
 def split_date_range_binary(
     start_date: Timestamp, end_date: Timestamp
-) -> tuple[Timestamp, Timestamp, Timestamp]:
+) -> tuple[Timestamp, Timestamp | NaTType, Timestamp | NaTType, Timestamp]:
     """
-    A basic binary division to split date range
+    Binary-split a date range into two adjacent, non-overlapping inclusive halves.
+
+    Filters treat both ends as inclusive, so the split uses a 1ns gap at the mid
+    point: left is [start, mid_exclusive_end] and right is [right_start, end],
+    with mid_exclusive_end + 1ns == right_start. Together they cover [start, end]
+    without sharing any timestamp.
+
     Args:
-        start_date: The start date of the range. UTC string in 'YYYY-MM-DD HH:MM:SS.fffffffff+00:00' format.
-        end_date: The end date of the range. UTC string in 'YYYY-MM-DD HH:MM:SS.fffffffff+00:00' format.
+        start_date: Inclusive start of the range (UTC).
+        end_date: Inclusive end of the range (UTC).
+
     Returns:
-        tuple[str, str, str] The start date, mid date, and end date of the date range.
+        (left_start, left_end, right_start, right_end)
+
+    Raises:
+        ValueError: If the range is too short to split into two non-empty halves.
     """
     if not isinstance(start_date, pd.Timestamp):
         start_date = pd.Timestamp(start_date)
     if not isinstance(end_date, pd.Timestamp):
         end_date = pd.Timestamp(end_date)
 
-    duration_ns = (end_date - start_date).total_seconds() * 1e9
-    mid_ns = duration_ns / 2
-
-    mid_date = start_date + pd.Timedelta(nanoseconds=mid_ns)
-    # make sure the time zone is attached
     start_date = ensure_timezone(start_date)
-    mid_date = ensure_timezone(mid_date)
     end_date = ensure_timezone(end_date)
 
-    return start_date, mid_date, end_date
+    if isinstance(start_date, NaTType):
+        raise ValueError(f"Invalid start_date of type NaTType")
+
+    if isinstance(end_date, NaTType):
+        raise ValueError(f"Invalid end_date of type NaTType")
+
+    if end_date < start_date:
+        raise ValueError(f"Invalid range: end {end_date} is before start {start_date}")
+
+    # Need at least 2 distinct nanosecond ticks so each half is non-empty.
+    # Work in integer nanoseconds so we never hit pandas' Timestamp|NaTType
+    # arithmetic stubs (Timestamp ± Timedelta is typed as possibly NaT).
+    start_ns = int(start_date.value)
+    end_ns = int(end_date.value)
+    duration_ns = end_ns - start_ns
+    if duration_ns < 1:
+        raise ValueError(
+            f"Range too short to split without overlap: {start_date} to {end_date}"
+        )
+
+    # right_start is the first tick of the right half (ceiling of midpoint).
+    mid_offset_ns = (duration_ns + 1) // 2
+    right_start_ns = start_ns + mid_offset_ns
+    left_end_ns = right_start_ns - 1
+    tz = start_date.tz
+
+    right_start = pd.Timestamp(right_start_ns, unit="ns", tz=tz)
+    left_end = pd.Timestamp(left_end_ns, unit="ns", tz=tz)
+
+    if left_end < start_date or right_start > end_date:
+        raise ValueError(
+            f"Range too short to split without overlap: {start_date} to {end_date}"
+        )
+
+    return start_date, left_end, right_start, end_date
 
 
 def get_monthly_utc_date_range_array_from_(
@@ -393,62 +274,6 @@ def get_monthly_utc_date_range_array_from_(
     return result
 
 
-def trim_date_range(
-    api: BaseAPI,
-    uuid: str,
-    key: str,
-    requested_start_date: pd.Timestamp,
-    requested_end_date: pd.Timestamp,
-) -> Tuple[pd.Timestamp | None, pd.Timestamp | None]:
-
-    log.info(f"Original date range: {requested_start_date} to {requested_end_date}")
-    metadata_temporal_extent = api.get_temporal_extent(uuid=uuid, key=key)
-    if (
-        len(metadata_temporal_extent) != 2
-        or metadata_temporal_extent[0] is None
-        or metadata_temporal_extent[1] is None
-    ):
-        log.warning(f"Invalid metadata temporal extent: {metadata_temporal_extent}")
-        return requested_start_date, requested_end_date
-    metadata_start_date, metadata_end_date = metadata_temporal_extent
-
-    metadata_start_date = metadata_start_date.tz_localize(None)
-    metadata_end_date = metadata_end_date.tz_localize(None)
-
-    if requested_start_date.tz is not None:
-        requested_start_date = requested_start_date.tz_convert(pytz.UTC).tz_localize(
-            None
-        )
-
-    if requested_end_date.tzinfo is not None:
-        requested_end_date = requested_end_date.tz_convert(pytz.UTC).tz_localize(None)
-
-    # Check if start and end date have overlap with the metadata time range
-    if (metadata_start_date <= requested_start_date <= metadata_end_date) or (
-        metadata_start_date <= requested_end_date <= metadata_end_date
-    ):
-        # Either start or end is within range of metadata_start or metadata_end
-        if requested_start_date < metadata_start_date:
-            requested_start_date = metadata_start_date
-        if metadata_end_date < requested_end_date:
-            requested_end_date = metadata_end_date
-
-        log.info(f"Trimmed date range: {requested_start_date} to {requested_end_date}")
-        return requested_start_date, requested_end_date
-    elif (
-        requested_start_date <= metadata_start_date
-        and metadata_end_date <= requested_end_date
-    ):
-        # Request cover all the metadata range, so use metadata range due to smaller range
-        return metadata_start_date, metadata_end_date
-    else:
-        log.info(
-            f"Requested date range: {requested_start_date} to {requested_end_date} "
-            f"does not overlap with metadata range: {metadata_start_date} to {metadata_end_date}"
-        )
-        return None, None
-
-
 def get_boundary_of_year_month(
     year_month_str: str,
 ) -> Tuple[datetime, datetime]:
@@ -512,6 +337,18 @@ def split_yearmonths_into_dict(yearmonths, chunk_size: int):
     return result
 
 
+def resolve_non_specified_dates(start_date: str, end_date: str) -> Tuple[str, str]:
+    """
+    Resolve non-specified start and end dates to default values.
+    defaults: 1970-01-01 for an open start and today for an open end.
+    """
+    if start_date == NON_SPECIFIED:
+        start_date = "1970-01-01"
+    if end_date == NON_SPECIFIED:
+        end_date = pd.Timestamp.today().strftime("%Y-%m-%d")
+    return start_date, end_date
+
+
 def supply_day_with_nano_precision(
     start_date_str: str, end_date_str: str
 ) -> Tuple[pd.Timestamp, pd.Timestamp]:
@@ -529,17 +366,13 @@ def supply_day_with_nano_precision(
     if (not re.match(pattern, start_date_str)) or (not re.match(pattern, end_date_str)):
         # currently, if no date ranges selected in frontend, the start_date & end_date will be in this format: "yyyy-MM-dd",
         # so for this case, we don't need to supply the day
-        return parse_date(start_date_str), parse_date(end_date_str).replace(
-            hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
-        )
+        return parse_date(start_date_str), end_of_day_nano(parse_date(end_date_str))
 
     start_date = parse_date(start_date_str, format_to_convert="%m-%Y")
     end_date = parse_date(end_date_str, format_to_convert="%m-%Y")
 
     start_date = get_first_day_of_month(start_date)
-    end_date = get_final_day_of_month_(end_date).replace(
-        hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
-    )
+    end_date = end_of_day_nano(get_final_day_of_month_(end_date))
 
     return start_date, end_date
 

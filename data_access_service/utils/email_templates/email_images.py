@@ -6,14 +6,15 @@ from concurrent.futures import ThreadPoolExecutor
 IMG_DIR = Path(__file__).parent / "img"
 
 _IMAGE_FILES = {
-    "HEADER_IMG": "a0239805d37afe34cc5372f3ff2a0d2d.png",
-    "BBOX_IMG": "1419180c04931cd1e419efce2690d5b8.png",
-    "TIME_RANGE_IMG": "6a9d0202f46342bc6bc7c3998cfa42b7.png",
-    "ATTRIBUTES_IMG": "b274dfda8abcd8b25fba336b3005aea1.png",
-    "FACEBOOK_IMG": "61b8da3fc7dfb3c319f6ae1e199a7e21.png",
-    "INSTAGRAM_IMG": "61d7bf2cff5309382bd988da59d406db.png",
-    "BLUESKY_IMG": "e2ae815b8ce719a4026e08f7fb334b71.png",
-    "LINKEDIN_IMG": "82192244cf3677674fda6af8c471897d.png",
+    "HEADER_IMG": "header.png",
+    "BBOX_IMG": "bbox.png",
+    "POLYGON_IMG": "polygon.png",
+    "TIME_RANGE_IMG": "time-range.png",
+    "ATTRIBUTES_IMG": "attributes.png",
+    "FACEBOOK_IMG": "facebook.png",
+    "INSTAGRAM_IMG": "instagram.png",
+    "BLUESKY_IMG": "bluesky.png",
+    "LINKEDIN_IMG": "linkedin.png",
 }
 
 
@@ -34,6 +35,7 @@ with ThreadPoolExecutor(max_workers=10) as executor:
 # Export as module-level constants
 HEADER_IMG = _results["HEADER_IMG"]
 BBOX_IMG = _results["BBOX_IMG"]
+POLYGON_IMG = _results["POLYGON_IMG"]
 TIME_RANGE_IMG = _results["TIME_RANGE_IMG"]
 ATTRIBUTES_IMG = _results["ATTRIBUTES_IMG"]
 FACEBOOK_IMG = _results["FACEBOOK_IMG"]
@@ -47,6 +49,7 @@ EMAIL_IMAGES = _results
 __all__ = [
     "HEADER_IMG",
     "BBOX_IMG",
+    "POLYGON_IMG",
     "TIME_RANGE_IMG",
     "ATTRIBUTES_IMG",
     "FACEBOOK_IMG",

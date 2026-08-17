@@ -1,7 +1,7 @@
 import pytest
 
 from data_access_service.config.config import Config
-from data_access_service.models.pmtiles_types import ParquetsGenerationConfig
+from data_access_service.models.sites_types import ParquetsGenerationConfig
 
 
 @pytest.fixture(autouse=True)
@@ -15,6 +15,7 @@ def memory_parquets_config(monkeypatch):
     """
     cfg = ParquetsGenerationConfig(
         duckdb_database=":memory:",
+        co_bucket="aodn-cloud-optimised",
         memory_limit="800M",
         threads=8,
         duckdb_temp_dir="/tmp",

@@ -1,0 +1,338 @@
+import json
+import time
+import uuid as uuid_module
+from datetime import datetime, timezone
+from http import HTTPStatus
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response
+from xarray import Dataset
+
+from data_access_service import init_log
+from data_access_service.config.config import Config
+from data_access_service.config.http_cache import REVALIDATE_CACHE_HEADERS
+from data_access_service.core.api import API
+from data_access_service.core.constants import (
+    STR_LATITUDE_UPPER_CASE,
+    STR_LONGITUDE_UPPER_CASE,
+    STR_TIME_UPPER_CASE,
+)
+from data_access_service.models.estimate_size_request import EstimateSizeRequest
+from data_access_service.sites.site_feature_service import SiteFeatureService
+from data_access_service.sites.sites import (
+    LatestTime,
+    SiteDetailsFeature,
+    SiteFeatureCollection,
+)
+from data_access_service.core.routes.auth import api_key_auth
+from data_access_service.utils.date_time_utils import (
+    DATE_FORMAT,
+    MIN_DATE,
+    ensure_timezone,
+)
+from data_access_service.core.routes.helpers import (
+    async_response_json,
+    fetch_data,
+    generate_feature_collection,
+    get_site_service,
+    require_api_ready,
+    verify_datatime_param,
+)
+from data_access_service.utils.sse_utils import sse_it
+from data_access_service.utils.sse_wrapper import sse_wrapper
+
+router = APIRouter()
+config = Config.get_config()
+logger = init_log(config)
+
+
+@router.get("/data/{uuid}/notebook_url", dependencies=[Depends(api_key_auth)])
+async def get_notebook_url(uuid: str, request: Request):
+    i = API.get_notebook_from(uuid)
+    if isinstance(i, ValueError):
+        raise HTTPException(status_code=404, detail="Notebook URL not found")
+    return i
+
+
+@router.get("/data/{uuid}/{key}/has_data", dependencies=[Depends(api_key_auth)])
+async def has_data(
+    uuid: str,
+    key: str,
+    request: Request,
+    api_instance: API = Depends(require_api_ready),  # noqa: B008
+    start_date: str | None = MIN_DATE,
+    end_date: str | None = datetime.now(timezone.utc).strftime(DATE_FORMAT),
+):
+    logger.info(
+        "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
+    )
+    start_date = verify_datatime_param("start_date", start_date)
+    end_date = verify_datatime_param("end_date", end_date)
+    result = str(api_instance.has_data(uuid, key, start_date, end_date)).lower()
+    return Response(result, media_type="application/json")
+
+
+@router.get("/data/{uuid}/{key}/temporal_extent", dependencies=[Depends(api_key_auth)])
+async def get_temporal_extent(
+    uuid: str, key: str, api_instance: API = Depends(require_api_ready)  # noqa: B008
+):
+    try:
+        start_date, end_date = api_instance.get_temporal_extent(uuid, key)
+        result = [
+            {
+                "start_date": ensure_timezone(start_date).strftime(DATE_FORMAT),
+                "end_date": ensure_timezone(end_date).strftime(DATE_FORMAT),
+            }
+        ]
+        return Response(content=json.dumps(result), media_type="application/json")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=f"Temporal extent not found {e}")
+
+
+@router.get("/data/{uuid}/{key}/indexing_values", dependencies=[Depends(api_key_auth)])
+async def get_indexing_values(
+    uuid: str,
+    key: str,
+    start_date: str,
+    end_date: str,
+    api: API = Depends(require_api_ready),  # noqa: B008
+):
+    """
+    Get feature collection for a Zarr dataset with the given UUID and key.
+    This endpoint is an investigation endpoint. Will try to use it later it necessary, Not in use right now.
+    """
+    # if any parameter is not provided, is a bad request
+    if not all([uuid, key, start_date, end_date]):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Missing required parameters",
+        )
+    # the param "key" should contains the extension of the file, .parquet / .zarr.
+    if not key.endswith((".parquet", ".zarr")):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Invalid file format. Key must end with .parquet or .zarr",
+        )
+
+    # parquet might support in the future, but right now we only support zarr
+    if not key.endswith(".zarr"):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="This endpoint only supports zarr data format",
+        )
+
+    data_source = api.get_dataset(
+        uuid=uuid,
+        key=key,
+        date_start=verify_datatime_param("start_date", start_date),
+        date_end=verify_datatime_param("end_date", end_date),
+    )
+    if data_source is None:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"No data found with provided params for dataset {uuid} with key {key}",
+        )
+
+    if not isinstance(data_source, Dataset):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=f"Dataset {uuid} with key {key} is not a Zarr dataset. Please doublecheck or contact AODN",
+        )
+
+    lat_key = api.map_column_names(
+        uuid=uuid, key=key, columns=[STR_LATITUDE_UPPER_CASE]
+    )[0]
+    lon_key = api.map_column_names(
+        uuid=uuid, key=key, columns=[STR_LONGITUDE_UPPER_CASE]
+    )[0]
+    time_key = api.map_column_names(uuid=uuid, key=key, columns=[STR_TIME_UPPER_CASE])[
+        0
+    ]
+
+    if (
+        lat_key not in data_source.coords
+        or lon_key not in data_source.coords
+        or time_key not in data_source.coords
+    ):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=f"Dataset {uuid} with key {key} does not contain required coordinates: {lat_key}, {lon_key}, {time_key}",
+        )
+
+    feature_collection = generate_feature_collection(
+        dataset=data_source, lat_key=lat_key, lon_key=lon_key, time_key=time_key
+    )
+    return Response(
+        content=json.dumps(feature_collection), media_type="application/json"
+    )
+
+
+@router.get(
+    "/data/feature-collection/{product}",
+    dependencies=[Depends(api_key_auth), Depends(require_api_ready)],
+)
+def get_feature_collection_of_items_with_data_between_dates(
+    response: Response,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    service: SiteFeatureService = Depends(get_site_service),  # noqa: B008
+) -> SiteFeatureCollection:
+    """Sites with data in ``[start_date, end_date]`` as a ``SiteFeatureCollection``."""
+    response.headers.update(REVALIDATE_CACHE_HEADERS)
+    return service.sites_with_data_between(start_date, end_date)
+
+
+@router.get(
+    "/data/feature-collection/{product}/latest",
+    dependencies=[Depends(api_key_auth), Depends(require_api_ready)],
+)
+def get_feature_collection_of_items_latest_dates(
+    response: Response,
+    service: SiteFeatureService = Depends(get_site_service),  # noqa: B008
+) -> LatestTime:
+    """The single most recent observation time across all sites."""
+    response.headers.update(REVALIDATE_CACHE_HEADERS)
+    return service.latest_time()
+
+
+@router.get(
+    "/data/feature-collection/{product}/{site}",
+    dependencies=[Depends(api_key_auth), Depends(require_api_ready)],
+)
+def get_feature_collection_of_item_details(
+    site: str,
+    response: Response,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    service: SiteFeatureService = Depends(get_site_service),  # noqa: B008
+) -> SiteDetailsFeature:
+    """One site's observation timeseries as a single details ``Feature``."""
+    response.headers.update(REVALIDATE_CACHE_HEADERS)
+    return service.site_details(site, start_date, end_date)
+
+
+@router.get("/data/{uuid}/{key}", dependencies=[Depends(api_key_auth)])
+async def get_data(
+    request: Request,
+    uuid: str,
+    key: str,
+    api_instance: API = Depends(require_api_ready),  # noqa: B008
+    start_date: str | None = Query(default=MIN_DATE),
+    end_date: str | None = Query(
+        default=datetime.now(timezone.utc).strftime(DATE_FORMAT)
+    ),
+    columns: list[str] | None = Query(default=None),  # noqa: B008
+    start_depth: float | None = Query(default=-1.0),
+    end_depth: float | None = Query(default=-1.0),
+    f: str | None = Query(default="json"),
+):
+    # for debug purpose: track request with an assigned id which is ranomly generated
+    request_id = str(uuid_module.uuid4())
+    logger.debug("Receiving request: %s", request_id)
+
+    logger.info(
+        """
+        Request details:
+            uuid=%s,
+            columns=%s,
+            start_date=%s,
+            end_date=%s,
+            start_depth=%s,
+            end_depth=%s
+        """,
+        uuid,
+        columns,
+        start_date,
+        end_date,
+        start_depth,
+        end_depth,
+    )
+    start_date = verify_datatime_param("start_date", start_date)
+    end_date = verify_datatime_param("end_date", end_date)
+
+    sse = f.startswith("sse/")
+    compress = "gzip" in request.headers.get("Accept-Encoding", "")
+
+    if sse:
+        # for debug purpose, we need the request id as well
+        logger.debug("SSE request started, request_id=%s", request_id)
+        return await sse_wrapper(
+            request_id,
+            fetch_data,
+            api_instance,
+            uuid,
+            key,
+            start_date,
+            end_date,
+            start_depth,
+            end_depth,
+            columns,
+        )
+    else:
+        # for debug purpose, we need the request id as well
+        logger.debug("Not a SSE request, request_id=%s", request_id)
+        result = fetch_data(
+            api_instance,
+            uuid,
+            key,
+            start_date,
+            end_date,
+            start_depth,
+            end_depth,
+            columns,
+        )
+
+        if f == "json":
+            # Depends on whether receiver support gzip encoding
+            logger.info("Use compressed output %s", compress)
+            return async_response_json(result, compress)
+
+        return None
+
+
+@router.post("/data/{uuid}/estimate_size", dependencies=[Depends(api_key_auth)])
+@sse_it
+def estimate_size_multi(
+    uuid: str,
+    body: EstimateSizeRequest,
+    api_instance: API = Depends(require_api_ready),  # noqa: B008
+):
+    # sse_it streams this over SSE: it returns a 200 text/event-stream
+    # immediately, sends "processing" heartbeats while the (blocking) work runs
+    # in a worker thread, then emits the estimate dict in a final "result" event.
+    # Errors are raised below surface as SSE "error" events rather than HTTP status codes
+    logger.debug(
+        "estimate_size_multi start: uuid=%s key=%s start=%s end=%s f=%s "
+        "has_polygon=%s columns=%s",
+        uuid,
+        body.key,
+        body.start_date,
+        body.end_date,
+        body.output_format,
+        body.multi_polygon is not None,
+        body.columns,
+    )
+    t0 = (
+        time.perf_counter()
+    )  # for performance tracking of this endpoint (debug purpose)
+
+    result = api_instance.estimate_datasets_size(
+        uuid,
+        keys=body.get_keys(),
+        start_date=body.start_date,
+        end_date=body.end_date,
+        multi_polygon=body.multi_polygon,
+        columns=body.columns,
+        output_format=body.output_format,
+    )
+
+    elapsed = time.perf_counter() - t0
+    logger.info("estimate_size_multi done in %.3fs", elapsed)
+
+    if result is None:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"No matching keys found for uuid={uuid}, key={body.key}",
+        )
+
+    return result

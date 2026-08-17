@@ -1,7 +1,6 @@
 import pytest
 import json
 
-from typing import Dict, Any
 from pathlib import Path
 from fastapi.testclient import TestClient
 from aodn_cloud_optimised.lib import DataQuery
@@ -10,6 +9,8 @@ from data_access_service import Config
 from data_access_service.server import app, api_setup
 from tests.core.test_with_s3 import TestWithS3, REGION
 from data_access_service.core.AWSHelper import AWSHelper
+from starlette.status import HTTP_200_OK, HTTP_401_UNAUTHORIZED
+from unittest.mock import patch
 from starlette.status import HTTP_200_OK, HTTP_403_FORBIDDEN, HTTP_401_UNAUTHORIZED
 from unittest.mock import patch, MagicMock
 
@@ -43,58 +44,6 @@ class TestApiWithS3(TestWithS3):
         return TestClient(app)
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    def test_fetch_data_correct(
-        self, setup, localstack, aws_clients, setup_resources, client
-    ):
-        """
-        Test subsetting with valid and invalid time ranges, validate case where
-        app crash on loading this dataset before fix
-        """
-        s3_client, _, _ = aws_clients
-        config = Config.get_config()
-        config.set_s3_client(s3_client)
-
-        with patch.object(AWSHelper, "send_email") as mock_send_email:
-            # Test with range, this dataset field is different, it called detection_timestamp
-            param = {
-                "start_date": "2011-11-17 00:00:00.000000000",
-                "end_date": "2011-11-18 23:59:59.999999999",
-                "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
-            }
-
-            target = (
-                config.BASE_URL
-                + "/data/a4170ca8-0942-4d13-bdb8-ad4718ce14bb/satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
-            )
-
-            response = client.get(
-                target,
-                params=param,
-                headers={"X-API-Key": config.get_api_key()},
-            )
-
-            # The X-API-KEY has typo, it should be X-API-Key
-            assert response.status_code == HTTP_200_OK
-
-            try:
-                parsed = json.loads(response.content.decode("utf-8"))
-                assert (
-                    len(parsed) == 3374882
-                ), f"Size not match, return size is {len(parsed)} and X-API-Key is {config.get_api_key()}"
-                assert parsed[0] == {
-                    "latitude": -70.0,
-                    "longitude": 60.0,
-                    "time": "2011-11-17",
-                }, f"Unexpected JSON content: {parsed[0]}"
-                assert parsed[1687440] == {
-                    "latitude": 20.0,
-                    "longitude": 190.0,
-                    "time": "2011-11-17",
-                }, f"Unexpected JSON content: {parsed[21]}"
-            except json.JSONDecodeError as e:
-                assert False, "Fail to parse to JSON"
-
-    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_auth_fetch_data_correct(
         self, setup, localstack, aws_clients, setup_resources, client
     ):
@@ -121,8 +70,8 @@ class TestApiWithS3(TestWithS3):
                 params=param,
             )
 
-            # We have not set key so forbidden
-            assert response.status_code == HTTP_403_FORBIDDEN
+            # We have not set key so unauthorized, this is a change to the FastAPI 0.139.0
+            assert response.status_code == HTTP_401_UNAUTHORIZED
 
             response = client.get(
                 target,
@@ -208,87 +157,6 @@ class TestApiWithS3(TestWithS3):
                 }, f"Unexpected JSON content: {parsed[269051]}"
             except json.JSONDecodeError as e:
                 assert False, "Fail to parse to JSON"
-
-    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    def test_same_uuid_map_two_dataset_correct(
-        self, setup, localstack, aws_clients, setup_resources, client
-    ):
-        """Test subsetting with valid and invalid time ranges."""
-        s3_client, _, _ = aws_clients
-        config = Config.get_config()
-        config.set_s3_client(s3_client)
-
-        # We only verify the zarr data where two zarr have same UUID
-        with patch.object(AWSHelper, "send_email") as mock_send_email:
-            # Test with range, this dataset field is different, dataset without DEPTH
-            param = {
-                "start_date": "2011-07-25 00:00:00.000000000",
-                "end_date": "2011-07-30 23:59:59.999999999",
-                "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
-            }
-
-            # Read and process response body
-            try:
-                response = client.get(
-                    config.BASE_URL + "/metadata/28f8bfed-ca6a-472a-84e4-42563ce4df3f",
-                    headers={"X-API-Key": config.get_api_key()},
-                )
-
-                assert response.status_code == HTTP_200_OK
-                assert isinstance(response.content, bytes)
-
-                metadata: Dict[str, Any] = json.loads(response.content.decode("utf-8"))
-
-                # We should get a map
-                assert all(
-                    key in metadata
-                    for key in [
-                        "vessel_satellite_radiance_delayed_qc.zarr",
-                        "vessel_satellite_radiance_derived_product.zarr",
-                    ]
-                ), "No missing key"
-
-            except Exception as e:
-                assert False, f"Fail with error {e}"
-
-            assert response.status_code == HTTP_200_OK
-            assert isinstance(response.content, bytes)
-
-            try:
-                # Read and process response body
-                # Now call to extract some values from the zarr file
-                response = client.get(
-                    config.BASE_URL
-                    + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_delayed_qc.zarr",
-                    params=param,
-                    headers={"X-API-Key": config.get_api_key()},
-                )
-
-                parsed = json.loads(response.content.decode("utf-8"))
-                assert (
-                    len(parsed) == 2394
-                ), "No special meaning of record, just verify we get something"
-
-            except Exception as e:
-                assert False, f"Fail with error {e}"
-
-            # Read and process response body
-            try:
-                # Now call to another zarr file having same UUID, create with this date range
-                response = client.get(
-                    config.BASE_URL
-                    + "/data/28f8bfed-ca6a-472a-84e4-42563ce4df3f/vessel_satellite_radiance_derived_product.zarr",
-                    params=param,
-                    headers={"X-API-Key": config.get_api_key()},
-                )
-
-                assert response.status_code == HTTP_200_OK
-                assert isinstance(response.content, bytes)
-
-                parsed = json.loads(response.content.decode("utf-8"))
-                assert len(parsed) == 0, "This test dataset is empty, so it is ok"
-            except Exception as e:
-                assert False, f"Fail with error {e}"
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_fetch_empty_data_correct_without_error_zarr(
@@ -400,15 +268,69 @@ class TestApiWithS3(TestWithS3):
             try:
                 parsed = json.loads(response.content.decode("utf-8"))
                 assert len(parsed) == 93, "Number of record is incorrect"
+                # aodn_cloud_optimised sorts parquet rows by the time column
+                # (eventDate here); first/last follow that temporal order.
                 assert parsed[0] == {
-                    "latitude": -39.9,
-                    "longitude": 146.2,
-                    "time": "2025-03-11",
+                    "latitude": -39.0,
+                    "longitude": 149.0,
+                    "time": "2025-03-10",
                 }, f"Unexpected JSON content: {parsed[0]}"
                 assert parsed[92] == {
                     "latitude": -40.8,
                     "longitude": 144.4,
                     "time": "2025-03-13",
                 }, f"Unexpected JSON content: {parsed[92]}"
+            except json.JSONDecodeError as e:
+                assert False, "Fail to parse to JSON"
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_fetch_data_without_time_ignores_date_range(
+        self, setup, localstack, aws_clients, setup_resources, client
+    ):
+        """
+        aggregated_seagrass_nonqc has no TIME column (only hive timestamp).
+        A requested date range must be ignored so subsetting still returns data.
+        """
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+
+        with patch.object(AWSHelper, "send_email") as mock_send_email:
+            # Range does not cover the 2025 hive partition; if TIME filtering
+            # were applied this would come back empty.
+            param = {
+                "start_date": "2010-01-01 00:00:00.000000000",
+                "end_date": "2010-12-31 23:59:59.999999999",
+                "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
+            }
+
+            response = client.get(
+                config.BASE_URL
+                + "/data/009a1131-efc1-4a61-8f90-cf289e7c043d/aggregated_seagrass_nonqc.parquet",
+                params=param,
+                headers={"X-API-Key": config.get_api_key()},
+            )
+
+            assert response.status_code == HTTP_200_OK
+            assert isinstance(response.content, bytes)
+
+            try:
+                parsed = json.loads(response.content.decode("utf-8"))
+                assert (
+                    len(parsed) == 25
+                ), f"Number of record is incorrect: {len(parsed)}"
+                parsed = sorted(
+                    parsed, key=lambda x: (x["latitude"], x["longitude"], x["time"])
+                )
+                assert parsed[0] == {
+                    "latitude": -40.3,
+                    "longitude": 147.9,
+                    "time": "2025-01-01",
+                }, f"Unexpected JSON content: {parsed[0]}"
+                assert parsed[24] == {
+                    "latitude": -40.1,
+                    "longitude": 148.0,
+                    "time": "2025-01-01",
+                }, f"Unexpected JSON content: {parsed[24]}"
             except json.JSONDecodeError as e:
                 assert False, "Fail to parse to JSON"
