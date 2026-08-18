@@ -3,6 +3,7 @@
 import pytest
 
 from aodn_cloud_optimised.lib import DataQuery
+from unittest.mock import MagicMock
 
 from data_access_service.batch.subsetting.helpers.request_helper import (
     get_subset_request,
@@ -43,3 +44,28 @@ def subset_request_factory():
         return get_subset_request({**merged, "key": ",".join(keys)})
 
     return _factory
+
+
+@pytest.fixture(autouse=True)
+def mock_co_data_sources(mocker):
+    mock_aodn = MagicMock()
+    mock_aodn.get_name.return_value = "AODN"
+    mock_aodn.get_metadata.return_value.catalog = {}
+
+    mock_csiro = MagicMock()
+    mock_csiro.get_name.return_value = "CSIRO"
+    mock_csiro.get_metadata_catalog.return_value = {}
+
+    mocker.patch(
+        "data_access_service.models.co_data_source.co_data_registory.AodnDataSrc",
+        return_value=mock_aodn,
+    )
+    mocker.patch(
+        "data_access_service.models.co_data_source.co_data_registory.CsiroDataSrc",
+        return_value=mock_csiro,
+    )
+
+    return {
+        "aodn": mock_aodn,
+        "csiro": mock_csiro,
+    }
