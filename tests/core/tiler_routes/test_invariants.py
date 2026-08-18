@@ -13,7 +13,7 @@ import xarray as xr
 
 from data_access_service.config.tiler.constants import LOD, TILE
 from data_access_service.tiler.services.product.product import Product
-from data_access_service.tiler.utils.dates import parse_query_date
+from data_access_service.tiler.utils.dates import str_to_utc_timestamp
 
 
 # --- LOD / tile geometry contract -----------------------------------------
@@ -73,7 +73,7 @@ def test_date_from_manifest_is_accepted_by_tile_endpoint(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.products.get_available_dates",
-            return_value=[(d, parse_query_date(d)) for d in available],
+            return_value=[(d, str_to_utc_timestamp(d)) for d in available],
         ),
     ):
         manifest = client.get("/api/v1/das/tiler/data_tiles/manifest")

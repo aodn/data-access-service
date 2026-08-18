@@ -54,9 +54,9 @@ def test_each_timestamp_is_its_own_key_no_bucketing():
 def test_lookup_by_parsed_client_string_resolves_to_raw_value():
     times = pd.to_datetime(["2022-05-31 15:20:00"]).values
     index = _build_time_index(_ds(times))
-    from data_access_service.tiler.utils.dates import parse_query_date
+    from data_access_service.tiler.utils.dates import str_to_utc_timestamp
 
-    raw, _iso = index[parse_query_date("2022-05-31T15:20:00Z")]
+    raw, _iso = index[str_to_utc_timestamp("2022-05-31T15:20:00Z")]
     assert raw == times[0]
 
 

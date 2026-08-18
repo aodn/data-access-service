@@ -185,7 +185,7 @@ data_access_service/
     tiler_routes/
       __init__.py                 ← mounts data_tiles + visual_tiles routers under {Config.BASE_URL}/tiler/*, with api_key_auth + require_tiler_ready on every route
       shared.py                   ← PRODUCT_EX/DATE_EX examples, get_product_or_404, visual_product_or_400, load_slice_or_404,
-                                     validate_date, resolve_colormap_or_error, single_variable_or_400,
+                                     parse_date_or_422, resolve_colormap_or_error, single_variable_or_400,
                                      parse_rescale, mark_tiler_ready/require_tiler_ready — see §11
       products.py                  ← /products, /manifest, /{id}/point?date=... — included by both tile routers
       data_tiles.py                ← /data_tiles — raw value-encoded RGBA tiles for WebGL
@@ -222,7 +222,7 @@ data_access_service/
         slice_loader.py                ← load_slice / load_slice_uncached — fetch a 2-D slice from the Zarr store
         spatial.py                     ← bbox_to_wgs84 + native_resolution_in_bbox + default_bbox_from_store
     utils/
-      dates.py                        ← ts_to_utc_iso + parse_query_date
+      dates.py                        ← ts_to_utc_iso + str_to_utc_timestamp
       geo.py                           ← dataset_bounds + json_safe_float
       colors.py                       ← hex parsing + ramp/categorical LUT builders
       image.py                        ← encode_rgba(arr, fmt) + empty_tile(fmt) + media_type(fmt) — PNG/WebP encoders shared by both renderers
@@ -732,7 +732,7 @@ def ts_to_utc_iso(ts) -> str:
     """Format a raw (naive UTC) store timestamp as a canonical UTC ISO-8601 string."""
     return pd.Timestamp(ts).tz_localize("UTC").isoformat().replace("+00:00", "Z")
 
-def parse_query_date(date: str) -> pd.Timestamp:
+def str_to_utc_timestamp(date: str) -> pd.Timestamp:
     """Parse a client-supplied date/timestamp string into a naive-UTC instant."""
     ts = pd.Timestamp(date)
     if ts.tzinfo is not None:
@@ -741,9 +741,9 @@ def parse_query_date(date: str) -> pd.Timestamp:
 ```
 
 - **The store's time index** (`registry.py::_build_time_index`) — keys the store's raw `time` coordinate values by `pd.Timestamp(ts)` (naive, UTC-implied) for O(1) exact lookup, paired with each value's `ts_to_utc_iso`-formatted string: `{timestamp: (raw_timestamp, iso_string)}`. Both the key and the formatted string are computed once, at store open/refresh time — `get_available_dates` just reshapes this same dict into `[(iso_string, timestamp)]` (already sorted, since `_normalise_coords` sorts the source dataset before the index is built and dicts preserve insertion order), no per-request formatting or sorting.
-- **`validate_date`** (`core/tiler_routes/shared.py`) — the entry point for every date-shaped query param (`date`, `from`/`from_date`, `to`/`to_date`). Requires a full timestamp (rejects anything without a `T`, 422) before parsing via `parse_query_date`, and returns the parsed `pd.Timestamp` so the route handler doesn't have to parse the same string twice. A bare date like `2024-06-15` is always rejected, even for `from`/`to` — accepting it would let a request "succeed" only when the underlying store happens to have a timestamp at exact midnight for that day (true for some products, e.g. daily model output; false for others, e.g. satellite passes at an arbitrary time of day), which is not a distinction a client should have to know about per-product.
-- **`load_slice`** (`slice_loader.py::_fetch_slice_from_store`) — calls `resolve_timestamp`, which parses the requested `date` via `parse_query_date` and looks it up directly in the time index. No match → `FileNotFoundError` (mapped to 404 by `load_slice_or_404`). There is no "nearest" fallback and no first-of-several-matches selection: a request either names an exact instant in the store or it doesn't.
-- **`from`/`to` range filters** (`/manifest`, `/animation`) — after `validate_date`, both the bound and every candidate are compared as parsed `pd.Timestamp` values, not raw strings. Raw string comparison only sorts/bounds correctly when every value shares byte-identical formatting; the `pd.Timestamp` each candidate is compared against comes straight from `get_available_dates`'s precomputed list, so filtering never re-parses a date string it was just handed.
+- **`parse_date_or_422`** (`core/tiler_routes/shared.py`) — the entry point for every date-shaped query param (`date`, `from`/`from_date`, `to`/`to_date`). Requires a full timestamp (rejects anything without a `T`, 422) before parsing via `str_to_utc_timestamp`, and returns the parsed `pd.Timestamp` so the route handler doesn't have to parse the same string twice. A bare date like `2024-06-15` is always rejected, even for `from`/`to` — accepting it would let a request "succeed" only when the underlying store happens to have a timestamp at exact midnight for that day (true for some products, e.g. daily model output; false for others, e.g. satellite passes at an arbitrary time of day), which is not a distinction a client should have to know about per-product.
+- **`load_slice`** (`slice_loader.py::_fetch_slice_from_store`) — calls `resolve_timestamp`, which parses the requested `date` via `str_to_utc_timestamp` and looks it up directly in the time index. No match → `FileNotFoundError` (mapped to 404 by `load_slice_or_404`). There is no "nearest" fallback and no first-of-several-matches selection: a request either names an exact instant in the store or it doesn't.
+- **`from`/`to` range filters** (`/manifest`, `/animation`) — after `parse_date_or_422`, both the bound and every candidate are compared as parsed `pd.Timestamp` values, not raw strings. Raw string comparison only sorts/bounds correctly when every value shares byte-identical formatting; the `pd.Timestamp` each candidate is compared against comes straight from `get_available_dates`'s precomputed list, so filtering never re-parses a date string it was just handed.
 
 Because `resolve_timestamp` **parses** the incoming string rather than requiring an exact string match, a client doesn't need to reproduce `ts_to_utc_iso`'s exact serialisation — any full ISO-8601 timestamp `pandas` accepts that names the same instant resolves correctly.
 

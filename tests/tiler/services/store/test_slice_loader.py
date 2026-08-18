@@ -4,7 +4,7 @@ Existing tests in test_registry.py cover get_store + get_lod_grids. These cover
 the L1 cache interaction, get_data path, and multi-timestamp resolution.
 
 The tiler addresses data by exact UTC instant — the request date string must
-match a store timestamp exactly (via parse_query_date), not a calendar-day
+match a store timestamp exactly (via str_to_utc_timestamp), not a calendar-day
 bucket.
 """
 

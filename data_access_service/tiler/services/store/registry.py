@@ -37,7 +37,7 @@ from aodn_cloud_optimised.lib import DataQuery
 
 from data_access_service.config.config import Config
 from data_access_service.config.tiler.constants import COORD_NAMES
-from data_access_service.tiler.utils.dates import parse_query_date, ts_to_utc_iso
+from data_access_service.tiler.utils.dates import str_to_utc_timestamp, ts_to_utc_iso
 
 if TYPE_CHECKING:
     from aodn_cloud_optimised.lib.DataQuery import ZarrDataSource
@@ -226,7 +226,7 @@ class StoreRegistry:
         raw timestamp value, or None if no such instant exists.
         """
         try:
-            parsed = parse_query_date(date)
+            parsed = str_to_utc_timestamp(date)
         except ValueError:
             return None
         entry = self.time_index(store_url).get(parsed)

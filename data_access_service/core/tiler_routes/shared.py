@@ -10,7 +10,7 @@ from data_access_service.tiler.services.colormap.resolver import resolve_colorma
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.product.registry import get_product
 from data_access_service.tiler.services.store.slice_loader import load_slice
-from data_access_service.tiler.utils.dates import parse_query_date
+from data_access_service.tiler.utils.dates import str_to_utc_timestamp
 
 PRODUCT_EX: dict[str, Example] = {"default": Example(value="sea_level_anomaly")}
 DATE_EX: dict[str, Example] = {"default": Example(value="2024-02-24T00:00:00Z")}
@@ -60,7 +60,7 @@ def visual_product_or_400(product_id: str) -> Product:
     return product
 
 
-def validate_date(date: str) -> pd.Timestamp:
+def parse_date_or_422(date: str) -> pd.Timestamp:
     """Parse ``date`` as a full UTC timestamp, raising 422 on failure."""
     if "T" not in date:
         raise HTTPException(
@@ -72,7 +72,7 @@ def validate_date(date: str) -> pd.Timestamp:
             ),
         )
     try:
-        return parse_query_date(date)
+        return str_to_utc_timestamp(date)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=f"Invalid date: {date!r}") from e
 

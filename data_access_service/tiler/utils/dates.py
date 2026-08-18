@@ -9,8 +9,8 @@ def ts_to_utc_iso(ts) -> str:
     return pd.Timestamp(ts).tz_localize("UTC").isoformat().replace("+00:00", "Z")
 
 
-def parse_query_date(date: str) -> pd.Timestamp:
-    """Parse a client-supplied date/timestamp string into a naive-UTC instant."""
+def str_to_utc_timestamp(date: str) -> pd.Timestamp:
+    """Parse a date/timestamp string (any offset, or none) into a naive-UTC timestamp."""
     ts = pd.Timestamp(date)
     if ts.tzinfo is not None:
         ts = ts.tz_convert("UTC").tz_localize(None)

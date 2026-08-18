@@ -30,7 +30,7 @@ from .shared import (
     PRODUCT_EX,
     get_product_or_404,
     load_slice_or_404,
-    validate_date,
+    parse_date_or_422,
 )
 
 logger = logging.getLogger(__name__)
@@ -108,8 +108,8 @@ def get_products_availability(
         ),
     ),
 ):
-    from_ts = validate_date(from_date) if from_date else None
-    to_ts = validate_date(to_date) if to_date else None
+    from_ts = parse_date_or_422(from_date) if from_date else None
+    to_ts = parse_date_or_422(to_date) if to_date else None
 
     # iter_product_items returns a snapshot list so a concurrent reload can't
     # raise RuntimeError ("dictionary changed size during iteration") here.
@@ -214,7 +214,7 @@ def get_point(
     lon: float = Query(..., openapi_examples={"default": Example(value=151.2)}),
 ):
     product = get_product_or_404(product_id)
-    validate_date(date)
+    parse_date_or_422(date)
     variables = product.variables
     ds = load_slice_or_404(
         product.source_path, date, variables, ocean_masked=product.ocean_masked

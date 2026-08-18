@@ -44,7 +44,7 @@ from .shared import (
     parse_rescale,
     resolve_colormap_or_error,
     single_variable_or_400,
-    validate_date,
+    parse_date_or_422,
     visual_product_or_400,
 )
 
@@ -161,7 +161,7 @@ def get_tile(
     if colormap_name is not None:
         resolve_colormap_or_error(colormap_name)
     product = visual_product_or_400(product_id)
-    validate_date(date)
+    parse_date_or_422(date)
     variable = single_variable_or_400(product, context="visual tiles")
 
     if not (0 <= z <= _MAX_ZOOM):
@@ -426,7 +426,7 @@ def get_bbox(
     if colormap_name is not None:
         resolve_colormap_or_error(colormap_name)
     product = visual_product_or_400(product_id)
-    validate_date(date)
+    parse_date_or_422(date)
     variable = single_variable_or_400(product, context="visual tiles")
 
     bbox_tuple, bounds_crs, dst_crs = _parse_bbox_and_crs(
@@ -569,8 +569,8 @@ async def get_animation(
         200, ge=10, le=5000, description="Milliseconds per frame in the animation."
     ),
 ):
-    from_ts = validate_date(from_date)
-    to_ts = validate_date(to_date)
+    from_ts = parse_date_or_422(from_date)
+    to_ts = parse_date_or_422(to_date)
     if from_ts > to_ts:
         raise HTTPException(
             status_code=400,
