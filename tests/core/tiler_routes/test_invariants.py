@@ -76,11 +76,7 @@ def test_date_from_manifest_is_accepted_by_tile_endpoint(client):
             return_value=[(d, parse_query_date(d)) for d in available],
         ),
     ):
-        # from=2000-01-01 bypasses the "start of last year" default so these
-        # fixture dates aren't filtered out — not what this test is about.
-        manifest = client.get(
-            "/api/v1/das/tiler/data_tiles/manifest?from=2000-01-01T00:00:00Z"
-        )
+        manifest = client.get("/api/v1/das/tiler/data_tiles/manifest")
     assert manifest.status_code == 200
     dates = manifest.json()["products"]["sea_level_anomaly"]["available_dates"]
     assert dates, "manifest returned no dates — fixture broken"

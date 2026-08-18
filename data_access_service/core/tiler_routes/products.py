@@ -71,18 +71,12 @@ async def get_products(response: Response):
     return [ProductConfig.from_product(p) for p in iter_products()]
 
 
-def _default_from_ts() -> pd.Timestamp:
-    """Start of last calendar year (UTC), used when `from` is omitted."""
-    last_year = pd.Timestamp.now(tz="UTC").year - 1
-    return pd.Timestamp(year=last_year, month=1, day=1)
-
-
 @router.get(
     "/manifest",
     summary="Products availability",
     description=(
-        "Returns available dates for every product. "
-        "`from` defaults to the start of last calendar year; `to` is unbounded by default."
+        "Returns available dates for every product, or only products belonging to "
+        "a given metadata_uuid. `from` and `to` are unbounded by default."
     ),
     response_model=ManifestResponse,
 )
@@ -93,7 +87,7 @@ def get_products_availability(
         alias="from",
         description=(
             "Start instant (inclusive), full UTC ISO-8601 timestamp. "
-            "Defaults to the start of last calendar year."
+            "Defaults to no lower bound."
         ),
         openapi_examples={"default": Example(value="2024-01-01T00:00:00Z")},
     ),
@@ -106,13 +100,31 @@ def get_products_availability(
         ),
         openapi_examples={"default": Example(value="2024-12-31T00:00:00Z")},
     ),
+    metadata_uuid: str | None = Query(
+        None,
+        description=(
+            "Restrict results to products linked to this GeoNetwork/STAC collection "
+            "UUID. Defaults to every registered product. 404s if no product matches."
+        ),
+    ),
 ):
-    from_ts = validate_date(from_date) if from_date else _default_from_ts()
+    from_ts = validate_date(from_date) if from_date else None
     to_ts = validate_date(to_date) if to_date else None
 
     # iter_product_items returns a snapshot list so a concurrent reload can't
     # raise RuntimeError ("dictionary changed size during iteration") here.
     items = iter_product_items()
+    if metadata_uuid is not None:
+        items = [
+            (product_id, product)
+            for product_id, product in items
+            if product.metadata_uuid == metadata_uuid
+        ]
+        if not items:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No products found for metadata_uuid {metadata_uuid!r}.",
+            )
     dates_by_store = _available_dates_per_store(
         {product.source_path for _, product in items}
     )

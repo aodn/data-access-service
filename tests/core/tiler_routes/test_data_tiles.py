@@ -399,11 +399,7 @@ def test_availability_ok(client):
             return_value=_avail(["2024-06-01", "2024-07-01"]),
         ),
     ):
-        # from=2000-01-01 bypasses the "start of last year" default so these
-        # fixture dates aren't filtered out — not what this test is about.
-        response = client.get(
-            "/api/v1/das/tiler/data_tiles/manifest?from=2000-01-01T00:00:00Z"
-        )
+        response = client.get("/api/v1/das/tiler/data_tiles/manifest")
     assert response.status_code == 200
     body = response.json()
     assert body["products"] == {
@@ -438,10 +434,9 @@ def test_availability_date_filters(client):
     assert product["full_date_range"] == {"start": "2024-01-01", "end": "2024-12-01"}
 
 
-def test_availability_default_from_excludes_dates_before_last_year(client):
-    # With no `from`, dates older than the start of last year are excluded
-    # from available_dates — but full_date_range still reflects the full
-    # dataset, since it's independent of the from/to filter.
+def test_availability_no_from_is_unbounded(client):
+    # With no `from`, nothing is excluded on the lower end — from defaults to
+    # no lower bound, not a fixed window.
     with (
         patch(
             "data_access_service.core.tiler_routes.products.iter_product_items",
@@ -455,13 +450,57 @@ def test_availability_default_from_excludes_dates_before_last_year(client):
         response = client.get("/api/v1/das/tiler/data_tiles/manifest")
     assert response.status_code == 200
     product = response.json()["products"]["product_a"]
-    assert product["available_dates"] == []
+    assert product["available_dates"] == ["2020-01-01"]
     assert product["full_date_range"] == {"start": "2020-01-01", "end": "2020-01-01"}
 
 
-def test_availability_explicit_from_overrides_the_default(client):
-    # An explicit `from` reaches further back than the default, so it must
-    # still surface dates the default would have excluded.
+def test_availability_metadata_uuid_filters_to_matching_products(client):
+    products = {
+        "product_a": Product(
+            id="product_a",
+            source_path="s3://bucket/a.zarr",
+            variable="VAR",
+            metadata_uuid="uuid-1",
+        ),
+        "product_b": Product(
+            id="product_b",
+            source_path="s3://bucket/b.zarr",
+            variable="VAR",
+            metadata_uuid="uuid-2",
+        ),
+    }
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.products.iter_product_items",
+            return_value=list(products.items()),
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.products.get_available_dates",
+            return_value=_avail(["2024-01-01"]),
+        ),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/manifest?metadata_uuid=uuid-1"
+        )
+    assert response.status_code == 200
+    products_out = response.json()["products"]
+    assert "product_a" in products_out
+    assert "product_b" not in products_out
+
+
+def test_availability_metadata_uuid_no_match_is_404(client):
+    with patch(
+        "data_access_service.core.tiler_routes.products.iter_product_items",
+        return_value=list(_FAKE_PRODUCTS.items()),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/manifest?metadata_uuid=does-not-exist"
+        )
+    assert response.status_code == 404
+    assert "does-not-exist" in response.json()["detail"]
+
+
+def test_availability_no_metadata_uuid_returns_every_product(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.products.iter_product_items",
@@ -469,15 +508,12 @@ def test_availability_explicit_from_overrides_the_default(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.products.get_available_dates",
-            return_value=_avail(["2020-01-01"]),
+            return_value=_avail(["2024-01-01"]),
         ),
     ):
-        response = client.get(
-            "/api/v1/das/tiler/data_tiles/manifest?from=2000-01-01T00:00:00Z"
-        )
+        response = client.get("/api/v1/das/tiler/data_tiles/manifest")
     assert response.status_code == 200
-    product = response.json()["products"]["product_a"]
-    assert product["available_dates"] == ["2020-01-01"]
+    assert "product_a" in response.json()["products"]
 
 
 def test_availability_missing_store(client):

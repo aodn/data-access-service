@@ -11,10 +11,7 @@ import data_access_service.tiler.services.product.registry as registry
 from data_access_service.tiler.services.product.product import Product
 
 MANIFEST_BASE = "/api/v1/das/tiler/data_tiles/manifest"
-# from=2000-01-01 bypasses the "start of last year" default so these tests'
-# fixture dates (all 2024) aren't silently filtered out of available_dates —
-# this file is about per-store isolation, not the from/to default.
-MANIFEST = f"{MANIFEST_BASE}?from=2000-01-01T00:00:00Z"
+MANIFEST = MANIFEST_BASE
 
 STORE_A = "s3://test/a.zarr"
 STORE_B = "s3://test/b.zarr"

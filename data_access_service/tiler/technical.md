@@ -376,16 +376,17 @@ There is no per-LOD zoom-threshold field in the manifest today — the client is
 
 ```
 GET /{prefix}/products                                          → list all registered products
-GET /{prefix}/manifest?from=...&to=...                          → available dates for all products
+GET /{prefix}/manifest?from=...&to=...&metadata_uuid=...        → available dates for all (or matching) products
 GET /{prefix}/{product_id}/point?date=...&lat=&lon=              → variable value(s) at one instant, nearest grid cell
 ```
 
 `/manifest` parameters:
 
-| Parameter | Default                                | Description                       |
-| --------- | -------------------------------------- | --------------------------------- |
-| `from`    | start of last calendar year (UTC)      | Start instant inclusive, full UTC ISO-8601 timestamp |
-| `to`      | unbounded                              | End instant inclusive, full UTC ISO-8601 timestamp   |
+| Parameter       | Default    | Description                       |
+| --------------- | ---------- | --------------------------------- |
+| `from`          | unbounded  | Start instant inclusive, full UTC ISO-8601 timestamp |
+| `to`             | unbounded  | End instant inclusive, full UTC ISO-8601 timestamp   |
+| `metadata_uuid` | every product | Restrict results to products whose `Product.metadata_uuid` matches (see [§13](#13-adding-a-new-product)). `404` if no product matches. |
 
 ```json
 {
