@@ -227,6 +227,13 @@ def trim_date_range_for_keys(
             return requested_start_date, requested_end_date
         start_date = ensure_timezone(start_date)
         end_date = ensure_timezone(end_date)
+        logger.debug(
+            "temporal extent of uuid=%s key=%s: [%s..%s]",
+            uuid,
+            key,
+            start_date,
+            end_date,
+        )
         if start_date < min_date_of_keys:
             min_date_of_keys = start_date
         if end_date > max_date_of_keys:
@@ -239,6 +246,16 @@ def trim_date_range_for_keys(
 
     # if the requested date range is completely outside the available range, return None
     if requested_end_date < min_date_of_keys or requested_start_date > max_date_of_keys:
+        logger.warning(
+            "Requested [%s..%s] is outside the extent [%s..%s] of uuid=%s keys=%s; "
+            "estimate will be zero",
+            requested_start_date,
+            requested_end_date,
+            min_date_of_keys,
+            max_date_of_keys,
+            uuid,
+            keys,
+        )
         return None, None
 
     # if the requested date ranges are bigger the available range, trim them

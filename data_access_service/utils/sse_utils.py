@@ -20,23 +20,13 @@ logger = logging.getLogger(__name__)
 
 SSE_IT_INTERVAL: float = 20.0
 
-# A wrapped function that declares this parameter gets the request's Cancellation
-# passed in. It is hidden from FastAPI (see _public_signature), so it never shows
-# up as a request field.
 CANCELLATION_KWARG = "cancellation"
 
-# The disconnect is read off this request, so sse_it always asks FastAPI for one.
-# Polling it is the only signal we get: uvicorn advertises ASGI spec_version 2.4,
-# which makes Starlette drop its own disconnect watcher and trust send() to raise
-# instead - and uvicorn's send() silently discards writes to a gone client rather
-# than raising. Without this poll nothing ever closes the generator below.
 REQUEST_KWARG = "request"
 
 # How often the stream checks whether the client is still there.
 _DISCONNECT_POLL_INTERVAL: float = 0.1
 
-# Own pool instead of the default asyncio executor, so a queue of estimates
-# cannot starve every other to_thread caller in the service.
 _executor = ThreadPoolExecutor(
     max_workers=SSE_WORKER_THREADS, thread_name_prefix="sse-stream"
 )
@@ -63,12 +53,8 @@ def _declared_parameters(func: Callable) -> set[str]:
 
 def _public_signature(func: Callable):
     """
-    The signature FastAPI sees: cancellation taken out, request put in.
-
     FastAPI builds a route's request fields from the signature, so the injected
     cancellation has to be hidden or it would be treated as a query parameter.
-    The request goes the other way: the stream needs one to watch for the
-    disconnect, so ask for it even when the wrapped function does not.
     """
     sig = signature(func)
     parameters = [p for p in sig.parameters.values() if p.name != CANCELLATION_KWARG]
@@ -83,10 +69,7 @@ def _public_signature(func: Callable):
 
 async def _client_gone(request: Optional[Request]) -> bool:
     """
-    Has the client hung up? Peeks at the receive channel, never waits.
-
-    False when there is no request - a direct call from a test or a batch job has
-    no client that can go away.
+    Peeks at the receive channel. False when there is no request.
     """
     if request is None:
         return False
@@ -108,9 +91,6 @@ async def _run_wrapped_function(func: Callable, *args, **kwargs) -> Any:
 def _drop_task(task: asyncio.Task) -> None:
     """
     Stop awaiting the task and make sure its outcome is never left unretrieved.
-
-    Cancelling only stops the coroutine waiting on the worker thread - the thread
-    itself keeps running until it reaches a cancellation checkpoint.
     """
     if not task.done():
         task.cancel()
@@ -209,8 +189,7 @@ def sse_it(
                     raise
 
                 except ClientGoneError:
-                    # No error event: nobody is listening, and on the ogcapi-java
-                    # side it would be indistinguishable from a real failure.
+                    # No error event: nobody is listening
                     logger.info("[%s] stopped, client gone.", fn.__name__)
 
                 except Exception as e:

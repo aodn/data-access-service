@@ -40,6 +40,7 @@ from data_access_service.core.routes.helpers import (
 )
 from data_access_service.utils.cancellation import Cancellation
 from data_access_service.utils.single_flight import SingleFlight
+from data_access_service.utils.subset_request_resolver import resolve_bboxes
 from data_access_service.utils.sse_utils import sse_it
 from data_access_service.utils.sse_wrapper import sse_wrapper
 
@@ -326,17 +327,16 @@ def estimate_size_multi(
     # in a worker thread, then emits the estimate dict in a final "result" event.
     # Errors are raised below surface as SSE "error" events rather than HTTP status codes
     #
-    # `cancellation` is injected by sse_it and set when the client disconnects; it
-    # is hidden from FastAPI, so it is not part of the request body or query.
+    # `cancellation` is injected by sse_it and set when the client disconnects.
     logger.debug(
         "estimate_size_multi start: uuid=%s key=%s start=%s end=%s f=%s "
-        "has_polygon=%s columns=%s",
+        "bboxes=%d columns=%s",
         uuid,
         body.key,
         body.start_date,
         body.end_date,
         body.output_format,
-        body.multi_polygon is not None,
+        len(resolve_bboxes(body.multi_polygon)),
         body.columns,
     )
     t0 = (
