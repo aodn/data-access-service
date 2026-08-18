@@ -66,8 +66,11 @@ def convert_non_numeric_to_str(df: DataFrame) -> DataFrame:
 
 
 def lazy_to_records_fast(df):
-    for row in df.itertuples(index=False):
-        yield row._asdict()  # Returns an OrderedDict; use dict(row._asdict()) if plain dict needed
+    # name=None keeps column names that are not valid namedtuple fields
+    # (e.g. _temporal_extent). _asdict() would drop those names.
+    columns = df.columns
+    for row in df.itertuples(index=False, name=None):
+        yield dict(zip(columns, row))
 
 
 # Use to remap the field name back to column that we pass it, the raw data itself may name the field differently
@@ -113,6 +116,10 @@ def _generate_partial_json_array(
             elif "eventDate" in record:
                 filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
                     record["eventDate"]
+                )
+            elif "_temporal_extent" in record:
+                filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(
+                    record["_temporal_extent"]
                 )
             elif "timestamp" in record:
                 filtered_record[STR_TIME_LOWER_CASE] = _reformat_date(

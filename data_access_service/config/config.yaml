@@ -1,4 +1,6 @@
-# Order of values under each key matters, do not change it. Else you will get test errors.
+# Order of values under each key matters, do not change it. For example, _temporal_extent should be before the timestamp.
+# because seagrass dataset has _temporal_extent column, it will be used for time range query, instead of timestamp which
+# is hive column
 column_name_mapping:
   time:
     - TIME
@@ -6,6 +8,7 @@ column_name_mapping:
     - JULD
     - eventDate
     - detection_timestamp
+    - _temporal_extent
     - timestamp
   depth:
   latitude:
