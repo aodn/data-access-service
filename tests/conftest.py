@@ -48,24 +48,24 @@ def subset_request_factory():
 
 @pytest.fixture(autouse=True)
 def mock_co_data_sources(mocker):
-    mock_aodn = MagicMock()
-    mock_aodn.get_name.return_value = "AODN"
-    mock_aodn.get_metadata.return_value.catalog = {}
+    # mock_aodn = MagicMock()
+    # mock_aodn.get_name.return_value = "aodn"
+    # mock_aodn.get_metadata.return_value.catalog = {}
 
     mock_csiro = MagicMock()
-    mock_csiro.get_name.return_value = "CSIRO"
+    mock_csiro.get_name.return_value = "csiro"
     mock_csiro.get_metadata_catalog.return_value = {}
 
-    mocker.patch(
-        "data_access_service.models.co_data_source.co_data_registory.AodnDataSrc",
-        return_value=mock_aodn,
-    )
+    # mocker.patch(
+    #     "data_access_service.models.co_data_source.co_data_registory.AodnDataSrc",
+    #     return_value=mock_aodn,
+    # )
     mocker.patch(
         "data_access_service.models.co_data_source.co_data_registory.CsiroDataSrc",
         return_value=mock_csiro,
     )
 
     return {
-        "aodn": mock_aodn,
+        # "aodn": mock_aodn,
         "csiro": mock_csiro,
     }
