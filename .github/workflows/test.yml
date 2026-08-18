@@ -33,4 +33,4 @@ jobs:
       - name: Run tests
         shell: bash -el {0}
         run: |
-          if [ -z "$(find . -name 'test_*.py')" ]; then echo "No tests found"; else export PROFILE=testing && poetry run pytest; fi
+          if [ -z "$(find . -name 'test_*.py')" ]; then echo "No tests found"; else export PROFILE=testing && poetry run pytest --durations=0; fi
