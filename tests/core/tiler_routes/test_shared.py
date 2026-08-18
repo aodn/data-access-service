@@ -12,7 +12,10 @@ import pytest
 import xarray as xr
 from fastapi import HTTPException
 
-from data_access_service.core.tiler_routes.shared import resolve_timestamp_or_404
+from data_access_service.core.tiler_routes.shared import (
+    parse_date_or_422,
+    resolve_timestamp_or_404,
+)
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.store.registry import store_registry
 
@@ -57,6 +60,32 @@ def _ds_with_time(times: list[str]) -> xr.Dataset:
 
 
 _PRODUCT = Product(id="p", source_path="s3://b/x.zarr", variable="v")
+
+
+def test_parse_date_or_422_rejects_bare_date():
+    with pytest.raises(HTTPException) as exc_info:
+        parse_date_or_422("2024-06-15")
+
+    assert exc_info.value.status_code == 422
+
+
+def test_parse_date_or_422_rejects_naive_timestamp():
+    with pytest.raises(HTTPException) as exc_info:
+        parse_date_or_422("2024-06-15T23:00:00")
+
+    assert exc_info.value.status_code == 422
+
+
+def test_parse_date_or_422_accepts_z_suffixed_timestamp():
+    assert parse_date_or_422("2024-06-15T23:00:00Z") == pd.Timestamp(
+        "2024-06-15T23:00:00"
+    )
+
+
+def test_parse_date_or_422_normalizes_offset_to_utc():
+    assert parse_date_or_422("2024-06-16T09:00:00+10:00") == pd.Timestamp(
+        "2024-06-15T23:00:00"
+    )
 
 
 def test_resolve_timestamp_or_404_passes_for_a_known_date(monkeypatch):

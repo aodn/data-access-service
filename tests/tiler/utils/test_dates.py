@@ -52,6 +52,17 @@ def test_str_to_utc_timestamp_rejects_unparseable_string():
         dates_mod.str_to_utc_timestamp("not-a-date")
 
 
+def test_str_to_utc_timestamp_require_tz_rejects_naive_input():
+    with pytest.raises(ValueError):
+        dates_mod.str_to_utc_timestamp("2024-06-15T23:00:00", require_tz=True)
+
+
+def test_str_to_utc_timestamp_require_tz_accepts_offset_input():
+    assert dates_mod.str_to_utc_timestamp(
+        "2024-06-15T23:00:00Z", require_tz=True
+    ) == pd.Timestamp("2024-06-15T23:00:00")
+
+
 def test_round_trip_through_ts_to_utc_iso_and_str_to_utc_timestamp():
     """A client parsing back what the server formatted must land on the exact
     same instant — this is the invariant the whole exact-instant lookup relies on."""

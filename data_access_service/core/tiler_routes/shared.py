@@ -82,19 +82,17 @@ def visual_product_or_400(product_id: str) -> Product:
 
 def parse_date_or_422(date: str) -> pd.Timestamp:
     """Parse ``date`` as a full UTC timestamp, raising 422 on failure."""
-    if "T" not in date:
+    try:
+        return str_to_utc_timestamp(date, require_tz=True)
+    except ValueError as e:
         raise HTTPException(
             status_code=422,
             detail=(
-                f"Invalid date: {date!r} — expected a full UTC timestamp "
-                "(e.g. '2024-06-15T23:00:00Z'), not a bare date. Use one of "
-                "the exact values from /manifest's available_dates."
+                f"Invalid date: {date!r} ({e}) — expected a full UTC "
+                "timestamp (e.g. '2024-06-15T23:00:00Z'). Use one of the "
+                "exact values from /manifest's available_dates."
             ),
-        )
-    try:
-        return str_to_utc_timestamp(date)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=f"Invalid date: {date!r}") from e
+        ) from e
 
 
 def resolve_timestamp_or_404(product: Product, ts: pd.Timestamp) -> None:
