@@ -13,6 +13,14 @@ Single source of truth is the lib ``ZarrDataSource`` (opened with
 ``chunks=None`` so dask is not built at open time; native coord names for
 ``get_data``). Callers that need ``time``/``lat``/``lon`` use ``get_store``,
 which derives a normalised view on demand.
+
+``prewarm`` also decides whether a store is fit to serve tiler requests at
+all (grid shape, time dimension) and records the verdict in ``_failed_stores``
+— ``is_available`` is a plain membership check against it, meant to gate
+requests before they ever reach ``get_store``/``load_slice``. A store only
+leaves that set on a later successful prewarm; there is no per-request
+self-heal for a store once prewarm has marked it failed (that is a cron job's
+job, not a request's).
 """
 
 from __future__ import annotations
@@ -66,6 +74,10 @@ class NotGriddedStoreError(ValueError):
     """The store opened but is not a lat/lon grid. Retrying will not change it."""
 
 
+class NoTimeDimensionError(ValueError):
+    """The store opened but has no time dimension; every date request would 404."""
+
+
 def _dataset_key_from_url(store_url: str) -> str:
     """Map a product ``source_path`` to the lib dataset key (``name.zarr``).
 
@@ -84,7 +96,12 @@ def _dataset_key_from_url(store_url: str) -> str:
 
 
 def _normalise_coords(ds: xr.Dataset, store_url: str) -> xr.Dataset:
-    """Rename TIME/LATITUDE/LONGITUDE → time/lat/lon and validate spatial dims."""
+    """Rename TIME/LATITUDE/LONGITUDE → time/lat/lon and validate dims.
+
+    Every caller of ``_ensure_open`` — prewarm and lazy opens alike — needs a
+    grid with a time axis, so both checks live here rather than being
+    re-derived per caller.
+    """
     rename = {k: v for k, v in COORD_NAMES.items() if k in ds.dims or k in ds.coords}
     if rename:
         ds = ds.rename(rename)
@@ -92,9 +109,11 @@ def _normalise_coords(ds: xr.Dataset, store_url: str) -> xr.Dataset:
         raise NotGriddedStoreError(
             f"Store {store_url!r} missing lat/lon dims after rename (found: {list(ds.dims)})"
         )
-    if "time" in ds.dims:
-        ds = ds.sortby("time")
-    return ds
+    if "time" not in ds.dims:
+        raise NoTimeDimensionError(
+            f"Store {store_url!r} has no time dimension; every date request would 404"
+        )
+    return ds.sortby("time")
 
 
 def _resolve_zarr_source(store_url: str) -> ZarrDataSource:
@@ -167,6 +186,7 @@ class StoreRegistry:
         self._refreshing: set[str] = set()
         self._in_flight: dict[str, concurrent.futures.Future] = {}
         self._date_index: dict[str, dict[str, list]] = {}
+        self._failed_stores: dict[str, BaseException] = {}
         self._lock = threading.Lock()
 
     def _ensure_open(self, store_url: str) -> ZarrDataSource:
@@ -217,22 +237,31 @@ class StoreRegistry:
         """Return the long-lived ``ZarrDataSource`` for ``store_url`` (opens if needed)."""
         return self._ensure_open(store_url)
 
-    def cached(self, store_url: str) -> xr.Dataset | None:
-        """Already-open normalised dataset, or None. Never opens, never refreshes."""
-        with self._lock:
-            source = self._stores.get(store_url)
-        return source.zarr_store if source is not None else None
-
     def date_index(self, store_url: str) -> dict[str, list]:
         """Return the {local_date: [timestamps]} map for ``store_url`` (or empty dict)."""
         with self._lock:
             return self._date_index.get(store_url, {})
 
-    async def _prewarm_one(self, store_url: str) -> BaseException | None:
-        """Open one URL. None on success, else the exception.
+    def is_available(self, store_url: str) -> bool:
+        """True unless the last prewarm of ``store_url`` recorded a failure."""
+        with self._lock:
+            return store_url not in self._failed_stores
 
-        Not-a-grid and not-there are confirmed and not retried; anything else
-        gets bounded retries with backoff.
+    def _mark_failed(self, store_url: str, error: BaseException) -> None:
+        with self._lock:
+            self._failed_stores[store_url] = error
+
+    def _mark_healthy(self, store_url: str) -> None:
+        with self._lock:
+            self._failed_stores.pop(store_url, None)
+
+    async def _prewarm_one(self, store_url: str) -> BaseException | None:
+        """Open one URL and confirm it can serve tiler requests. None on
+        success, else the exception — also recorded via ``_mark_failed`` so
+        ``is_available`` reflects it immediately.
+
+        Not-a-grid, not-there, and no-time-dimension are confirmed and not
+        retried; anything else gets bounded retries with backoff.
         """
         last_error: BaseException | None = None
         for attempt in range(1, _PREWARM_MAX_ATTEMPTS + 1):
@@ -240,13 +269,20 @@ class StoreRegistry:
                 await anyio.to_thread.run_sync(
                     self._ensure_open, store_url, limiter=_STORE_PREWARM_LIMITER
                 )
+                self._mark_healthy(store_url)
                 return None
             except NotGriddedStoreError as e:
                 logger.info(f"Store is not a lat/lon grid, skipping: {store_url} ({e})")
+                self._mark_failed(store_url, e)
+                return e
+            except NoTimeDimensionError as e:
+                logger.info(f"Store has no time dimension, skipping: {store_url} ({e})")
+                self._mark_failed(store_url, e)
                 return e
             except FileNotFoundError as e:
                 # Usually an upstream rename the catalogue hasn't caught up with.
                 logger.warning(f"Store does not exist: {store_url} ({e})")
+                self._mark_failed(store_url, e)
                 return e
             except Exception as e:
                 last_error = e
@@ -263,6 +299,7 @@ class StoreRegistry:
                         f"{store_url}",
                         exc_info=e,
                     )
+        self._mark_failed(store_url, last_error)
         return last_error
 
     async def prewarm(self, store_urls: list[str]) -> dict[str, BaseException | None]:
@@ -285,18 +322,24 @@ class StoreRegistry:
             1 for e in outcomes.values() if isinstance(e, NotGriddedStoreError)
         )
         absent = sum(1 for e in outcomes.values() if isinstance(e, FileNotFoundError))
+        no_time = sum(
+            1 for e in outcomes.values() if isinstance(e, NoTimeDimensionError)
+        )
         unresolved = sum(
             1
             for e in outcomes.values()
             if e is not None
-            and not isinstance(e, (NotGriddedStoreError, FileNotFoundError))
+            and not isinstance(
+                e, (NotGriddedStoreError, FileNotFoundError, NoTimeDimensionError)
+            )
         )
         logger.info(
             "Store prewarm complete: %d opened, %d not gridded, %d absent, "
-            "%d unresolved (of %d)",
-            len(outcomes) - not_gridded - absent - unresolved,
+            "%d no time dimension, %d unresolved (of %d)",
+            len(outcomes) - not_gridded - absent - no_time - unresolved,
             not_gridded,
             absent,
+            no_time,
             unresolved,
             len(outcomes),
         )
@@ -311,6 +354,7 @@ class StoreRegistry:
             self._refreshing.clear()
             self._in_flight.clear()
             self._date_index.clear()
+            self._failed_stores.clear()
 
     def _publish(
         self,
@@ -351,8 +395,8 @@ def get_datasource(store_url: str) -> ZarrDataSource:
     return store_registry.get_datasource(store_url)
 
 
-def cached_store(store_url: str) -> xr.Dataset | None:
-    return store_registry.cached(store_url)
+def is_store_available(store_url: str) -> bool:
+    return store_registry.is_available(store_url)
 
 
 def get_available_dates(store_url: str) -> list[str]:

@@ -1,6 +1,10 @@
 """In-memory ``Product`` registry, published once at startup by tiler warmup.
 
-Products arrive already derived ([[discovery]]) and verified ([[verification]]).
+Products arrive already derived ([[discovery]]) but not yet store-verified —
+every discovered candidate is published unconditionally. Whether a product's
+backing store actually opened is tracked separately by
+``store.registry.is_store_available`` and enforced per-request, not by
+registry membership.
 """
 
 import logging
@@ -27,7 +31,7 @@ def iter_product_items() -> list[tuple[str, Product]]:
     return list(PRODUCTS.items())
 
 
-def publish_products(new_products: dict[str, Product]) -> None:
+def load_products(new_products: dict[str, Product]) -> None:
     # Additions before removals, so a reader never sees an empty dict.
     if not new_products:
         raise ValueError("Refusing to publish an empty product set")

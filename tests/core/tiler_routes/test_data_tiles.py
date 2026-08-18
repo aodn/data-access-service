@@ -194,6 +194,24 @@ def test_tile_missing_store(client):
     assert "s3://bucket/missing.zarr" in response.json()["detail"]
 
 
+def test_tile_store_failed_prewarm_is_404(client):
+    """A product stays registered even when its store failed to open; the
+    request-time guard is what turns that into a 404, before get_lod_grids
+    or load_slice ever run."""
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.shared.is_store_available",
+            return_value=False,
+        ),
+        patch("data_access_service.core.tiler_routes.data_tiles.get_lod_grids") as m,
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/1/0/0.png"
+        )
+        m.assert_not_called()
+    assert response.status_code == 404
+
+
 def test_tile_ok(client):
     with (
         patch(

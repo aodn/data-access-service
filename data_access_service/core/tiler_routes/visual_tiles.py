@@ -40,6 +40,7 @@ from .products import router as products_router
 from .shared import (
     DATE_EX,
     PRODUCT_EX,
+    is_store_available_or_404,
     load_slice_or_404,
     parse_rescale,
     resolve_colormap_or_error,
@@ -160,6 +161,7 @@ def get_tile(
     if colormap_name is not None:
         resolve_colormap_or_error(colormap_name)
     product = visual_product_or_400(product_id)
+    is_store_available_or_404(product)
     validate_date(date)
     variable = single_variable_or_400(product, context="visual tiles")
 
@@ -424,6 +426,7 @@ def get_bbox(
     if colormap_name is not None:
         resolve_colormap_or_error(colormap_name)
     product = visual_product_or_400(product_id)
+    is_store_available_or_404(product)
     validate_date(date)
     variable = single_variable_or_400(product, context="visual tiles")
 
@@ -576,6 +579,7 @@ async def get_animation(
     if colormap_name is not None:
         resolve_colormap_or_error(colormap_name)
     product = visual_product_or_400(product_id)
+    is_store_available_or_404(product)
     variable = single_variable_or_400(product, context="animation")
 
     # Offloaded: each may call get_store, which can block on lib open on

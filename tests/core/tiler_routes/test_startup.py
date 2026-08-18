@@ -1,9 +1,10 @@
 """Tiler warmup sequencing and readiness.
 
-The shape being defended: nothing is published before it is verified, and every
-fatal path leaves the tiler unready rather than serving a catalogue that is
-quietly wrong. No product is privileged here — that the original five ids still
-derive correctly is pinned against the derivation formula in test_discovery.
+The shape being defended: every discovered candidate is published up front —
+nothing waits on its store opening — but the tiler still exits unready,
+without ``mark_tiler_ready()``, if every store fails to open. No product is
+privileged here — that the original five ids still derive correctly is
+pinned against the derivation formula in test_discovery.
 """
 
 import asyncio
@@ -13,7 +14,6 @@ import pytest
 from data_access_service.core.tiler_routes import shared, startup
 from data_access_service.core.tiler_routes.startup import run_tiler_warmup
 from data_access_service.tiler.services.product.product import Product
-from data_access_service.tiler.services.product.verification import VerificationResult
 
 # --- warmup sequencing ------------------------------------------------------
 
@@ -41,11 +41,9 @@ def warmup_env(monkeypatch):
             "a:v": Product(id="a:v", source_path="s3://b/a.zarr", variable="v")
         },
         "outcomes": {"s3://b/a.zarr": None},
-        "result": None,
         "published": None,
         "ready": False,
     }
-    state["result"] = VerificationResult(products=dict(state["candidates"]))
 
     def record(name, value=None):
         def _fn(*args, **kwargs):
@@ -58,10 +56,6 @@ def warmup_env(monkeypatch):
         calls.append("prewarm")
         state["prewarm_urls"] = urls
         return state["outcomes"]
-
-    def fake_verify(candidates, outcomes):
-        calls.append("verify")
-        return state["result"]
 
     def fake_publish(products):
         calls.append("publish")
@@ -80,24 +74,23 @@ def warmup_env(monkeypatch):
     monkeypatch.setattr(startup, "warmup_resample", record("resample"))
     monkeypatch.setattr(startup, "warmup_visual", record("visual"))
     monkeypatch.setattr(startup, "prewarm_stores", fake_prewarm)
-    monkeypatch.setattr(startup, "verify_candidate_products", fake_verify)
-    monkeypatch.setattr(startup, "publish_products", fake_publish)
+    monkeypatch.setattr(startup, "load_products", fake_publish)
     monkeypatch.setattr(startup, "mark_tiler_ready", fake_mark_ready)
 
     return calls, state
 
 
 @pytest.mark.asyncio
-async def test_happy_path_publishes_then_marks_ready(warmup_env):
+async def test_happy_path_publishes_then_prewarms_then_marks_ready(warmup_env):
     calls, state = warmup_env
     await run_tiler_warmup(FakeAPI())
 
     assert state["ready"] is True
-    assert state["published"] == state["result"].products
-    # Verification precedes publication precedes readiness.
-    assert calls.index("prewarm") < calls.index("verify")
-    assert calls.index("verify") < calls.index("publish")
-    assert calls.index("publish") < calls.index("mark_ready")
+    assert state["published"] == state["candidates"]
+    # Publication does not wait on store health.
+    assert calls.index("discover") < calls.index("publish")
+    assert calls.index("publish") < calls.index("prewarm")
+    assert calls.index("prewarm") < calls.index("mark_ready")
 
 
 @pytest.mark.asyncio
@@ -127,28 +120,55 @@ async def test_prewarm_receives_every_unique_candidate_source_path(warmup_env):
         "a:w": Product(id="a:w", source_path="s3://b/a.zarr", variable="w"),
         "b:v": Product(id="b:v", source_path="s3://b/b.zarr", variable="v"),
     }
-    state["result"] = VerificationResult(products=dict(state["candidates"]))
     state["outcomes"] = {"s3://b/a.zarr": None, "s3://b/b.zarr": None}
 
     await run_tiler_warmup(FakeAPI())
 
-    # Deduplicated and sorted — 85 products but only 60 opens.
+    # Deduplicated and sorted — 3 products but only 2 opens.
     assert state["prewarm_urls"] == ["s3://b/a.zarr", "s3://b/b.zarr"]
 
 
 @pytest.mark.asyncio
-async def test_verification_dropping_everything_leaves_the_tiler_unready(
-    warmup_env, caplog
-):
+async def test_all_candidates_are_published_even_with_a_failed_store(warmup_env):
+    """A store failing prewarm no longer withholds its products from the
+    registry — that is now enforced per-request, not by publication."""
     calls, state = warmup_env
-    state["result"] = VerificationResult(products={})
+    state["outcomes"] = {"s3://b/a.zarr": RuntimeError("s3 down")}
+
+    await run_tiler_warmup(FakeAPI())
+
+    assert state["published"] == state["candidates"]
+    assert "publish" in calls
+
+
+@pytest.mark.asyncio
+async def test_every_store_failing_leaves_the_tiler_unready(warmup_env, caplog):
+    calls, state = warmup_env
+    state["outcomes"] = {"s3://b/a.zarr": RuntimeError("s3 down")}
 
     with caplog.at_level("CRITICAL"):
         await run_tiler_warmup(FakeAPI())
 
     assert state["ready"] is False
-    assert state["published"] is None
-    assert "publish" not in calls
+    # Publication already happened — only readiness is withheld.
+    assert "publish" in calls
+    assert "mark_ready" not in calls
+    assert any(r.levelname == "CRITICAL" for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_a_partial_store_failure_still_reaches_ready(warmup_env):
+    calls, state = warmup_env
+    state["candidates"] = {
+        "a:v": Product(id="a:v", source_path="s3://b/a.zarr", variable="v"),
+        "b:v": Product(id="b:v", source_path="s3://b/b.zarr", variable="v"),
+    }
+    state["outcomes"] = {"s3://b/a.zarr": None, "s3://b/b.zarr": RuntimeError("down")}
+
+    await run_tiler_warmup(FakeAPI())
+
+    assert state["ready"] is True
+    assert "mark_ready" in calls
 
 
 @pytest.mark.asyncio
@@ -156,7 +176,7 @@ async def test_verification_dropping_everything_leaves_the_tiler_unready(
     "failing_step",
     [
         "discover_products",
-        "publish_products",
+        "load_products",
     ],
 )
 async def test_any_fatal_step_leaves_readiness_false(

@@ -30,16 +30,6 @@ def seed_products():
         PRODUCTS.pop(p.id, None)
 
 
-@pytest.fixture(autouse=True)
-def clear_store_failure_cooldown():
-    """The manifest's failure cooldown is module state; keep it out of other tests."""
-    from data_access_service.core.tiler_routes import products
-
-    products._recent_store_failures.clear()
-    yield
-    products._recent_store_failures.clear()
-
-
 @pytest.fixture
 def client():
     """Entering TestClient as a context manager triggers lifespan / api_setup.
