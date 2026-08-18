@@ -14,7 +14,7 @@ from data_access_service.tiler.services.product.registry import (
     get_product,
     iter_product_items,
     iter_products,
-    publish_products,
+    load_products,
 )
 
 
@@ -36,27 +36,27 @@ def _product(product_id="p1", source="s3://bucket/x.zarr", variable="V", **kwarg
 
 
 def test_publish_populates_products(isolated_products):
-    publish_products({"p1": _product("p1")})
+    load_products({"p1": _product("p1")})
     assert PRODUCTS["p1"].source_path == "s3://bucket/x.zarr"
 
 
 def test_publish_replaces_the_previous_set(isolated_products):
-    publish_products({"old": _product("old")})
-    publish_products({"new": _product("new", source="s3://bucket/y.zarr")})
+    load_products({"old": _product("old")})
+    load_products({"new": _product("new", source="s3://bucket/y.zarr")})
     assert set(PRODUCTS) == {"new"}
 
 
 def test_publish_preserves_dict_identity(isolated_products):
     before = registry.PRODUCTS
-    publish_products({"p1": _product("p1")})
+    load_products({"p1": _product("p1")})
     assert registry.PRODUCTS is before
     assert PRODUCTS is before
 
 
 def test_publish_rejects_an_empty_set(isolated_products):
-    publish_products({"p1": _product("p1")})
+    load_products({"p1": _product("p1")})
     with pytest.raises(ValueError, match="empty product set"):
-        publish_products({})
+        load_products({})
     # The previous set is untouched by the refusal.
     assert set(PRODUCTS) == {"p1"}
 
@@ -80,7 +80,7 @@ def test_publish_never_exposes_empty_state(isolated_products, monkeypatch):
     spy["b"] = _product("b", source="s3://bucket/y.zarr")
     monkeypatch.setattr(registry, "PRODUCTS", spy)
 
-    publish_products({"c": _product("c", source="s3://bucket/z.zarr")})
+    load_products({"c": _product("c", source="s3://bucket/z.zarr")})
 
     assert observed_snapshots, "expected at least one removal during publish"
     for snapshot in observed_snapshots:
@@ -95,7 +95,7 @@ def test_publish_never_exposes_empty_state(isolated_products, monkeypatch):
 
 
 def test_read_facades_reflect_published_state(isolated_products):
-    publish_products({"p1": _product("p1"), "p2": _product("p2")})
+    load_products({"p1": _product("p1"), "p2": _product("p2")})
 
     assert get_product("p1").id == "p1"
     assert get_product("absent") is None
@@ -104,11 +104,11 @@ def test_read_facades_reflect_published_state(isolated_products):
 
 
 def test_iter_facades_return_snapshots_not_views(isolated_products):
-    publish_products({"p1": _product("p1")})
+    load_products({"p1": _product("p1")})
     products = iter_products()
     items = iter_product_items()
 
-    publish_products({"p2": _product("p2")})
+    load_products({"p2": _product("p2")})
 
     assert [p.id for p in products] == ["p1"]
     assert [pid for pid, _ in items] == ["p1"]

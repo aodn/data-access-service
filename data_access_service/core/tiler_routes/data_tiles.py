@@ -12,6 +12,7 @@ from .shared import (
     DATE_EX,
     PRODUCT_EX,
     get_product_or_404,
+    is_store_available_or_404,
     load_slice_or_404,
     parse_date_or_422,
 )
@@ -38,6 +39,7 @@ def get_tile(
     y: int = Path(openapi_examples={"default": Example(value=0)}),
 ):
     product = get_product_or_404(product_id)
+    is_store_available_or_404(product)
     parse_date_or_422(date)
     lod_grids = get_lod_grids(product)
 
@@ -97,6 +99,7 @@ def get_manifest(
     date: str = Query(openapi_examples=DATE_EX),
 ):
     product = get_product_or_404(product_id)
+    is_store_available_or_404(product)
     parse_date_or_422(date)
     get_lod_grids(product)
     variables = product.variables

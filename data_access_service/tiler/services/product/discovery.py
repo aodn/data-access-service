@@ -3,8 +3,7 @@
 Dataset names and UUIDs come from live metadata, not config, so a rename changes
 the derived id instead of leaving a stale one. Candidates carry plain defaults
 only — [[apply_product_overrides]] layers products.json on top by id, as a
-separate step, so identity-derivation and config-resolution never mix. Then
-[[verification]] checks the result against the real stores.
+separate step, so identity-derivation and config-resolution never mix.
 """
 
 import dataclasses

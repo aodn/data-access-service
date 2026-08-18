@@ -19,9 +19,13 @@ def _make_ds() -> xr.Dataset:
     return xr.Dataset(
         {
             "var": xr.DataArray(
-                np.zeros((2, 2)),
-                dims=("lat", "lon"),
-                coords={"lat": [0.0, 1.0], "lon": [0.0, 1.0]},
+                np.zeros((1, 2, 2)),
+                dims=("time", "lat", "lon"),
+                coords={
+                    "time": np.array([0], dtype="datetime64[ns]"),
+                    "lat": [0.0, 1.0],
+                    "lon": [0.0, 1.0],
+                },
             )
         }
     )

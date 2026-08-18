@@ -195,6 +195,24 @@ def test_tile_missing_store(client):
     assert "s3://bucket/missing.zarr" in response.json()["detail"]
 
 
+def test_tile_store_failed_prewarm_is_404(client):
+    """A product stays registered even when its store failed to open; the
+    request-time guard is what turns that into a 404, before get_lod_grids
+    or load_slice ever run."""
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.shared.is_store_available",
+            return_value=False,
+        ),
+        patch("data_access_service.core.tiler_routes.data_tiles.get_lod_grids") as m,
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/1/0/0.png"
+        )
+        m.assert_not_called()
+    assert response.status_code == 404
+
+
 def test_tile_ok(client):
     with (
         patch(
@@ -516,24 +534,20 @@ def test_availability_no_metadata_uuid_returns_every_product(client):
     assert "product_a" in response.json()["products"]
 
 
-def test_availability_missing_store(client):
-    # get_available_dates opens the store directly and is never wrapped by
-    # load_slice_or_404, so a missing store must still 404, not 500.
+def test_availability_skips_products_whose_store_failed_prewarm(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.products.iter_product_items",
             return_value=list(_FAKE_PRODUCTS.items()),
         ),
         patch(
-            "data_access_service.core.tiler_routes.products.get_available_dates",
-            side_effect=FileNotFoundError(
-                "No such file or directory: 's3://bucket/missing.zarr'"
-            ),
+            "data_access_service.core.tiler_routes.products.is_store_available",
+            return_value=False,
         ),
     ):
         response = client.get("/api/v1/das/tiler/data_tiles/manifest")
-    assert response.status_code == 404
-    assert "s3://bucket/missing.zarr" in response.json()["detail"]
+    assert response.status_code == 200
+    assert "product_a" not in response.json()["products"]
 
 
 def test_availability_no_dates_in_range(client):

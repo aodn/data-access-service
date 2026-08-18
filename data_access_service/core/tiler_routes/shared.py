@@ -9,6 +9,7 @@ from fastapi.openapi.models import Example
 from data_access_service.tiler.services.colormap.resolver import resolve_colormap
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.product.registry import get_product
+from data_access_service.tiler.services.store.registry import is_store_available
 from data_access_service.tiler.services.store.slice_loader import load_slice
 from data_access_service.tiler.utils.dates import str_to_utc_timestamp
 
@@ -43,6 +44,21 @@ def get_product_or_404(product_id: str) -> Product:
     if product is None:
         raise HTTPException(status_code=404, detail=f"Unknown product: {product_id}")
     return product
+
+
+def is_store_available_or_404(product: Product) -> None:
+    """Reject a product whose backing store failed its last prewarm.
+
+    The registry holds every discovered candidate regardless of store health
+    (see product/registry.py), so this is what keeps a product with a known-
+    bad store (not gridded, absent, no time dimension) from reaching
+    load_slice at all.
+    """
+    if not is_store_available(product.source_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Product {product.id!r} is temporarily unavailable: its store failed to open",
+        )
 
 
 def visual_product_or_400(product_id: str) -> Product:

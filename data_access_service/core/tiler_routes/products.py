@@ -1,9 +1,6 @@
 import logging
 import math
-import time
-from http import HTTPStatus
 
-import pandas as pd
 import xarray as xr
 from fastapi import APIRouter, HTTPException, Path, Query, Response
 from fastapi.openapi.models import Example
@@ -22,13 +19,17 @@ from data_access_service.tiler.services.product.registry import (
     iter_product_items,
     iter_products,
 )
-from data_access_service.tiler.services.store.registry import get_available_dates
+from data_access_service.tiler.services.store.registry import (
+    get_available_dates,
+    is_store_available,
+)
 from data_access_service.tiler.utils.geo import dataset_bounds
 
 from .shared import (
     DATE_EX,
     PRODUCT_EX,
     get_product_or_404,
+    is_store_available_or_404,
     load_slice_or_404,
     parse_date_or_422,
 )
@@ -36,11 +37,6 @@ from .shared import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# StoreRegistry doesn't cache failed opens, so without this every /manifest
-# call re-attempts every broken store at full S3 timeout.
-_STORE_FAILURE_COOLDOWN_SECONDS = 60.0
-_recent_store_failures: dict[str, tuple[float, Exception]] = {}
 
 
 def _require_point_in_bounds(ds: xr.Dataset, lat: float, lon: float) -> None:
@@ -125,13 +121,15 @@ def get_products_availability(
                 status_code=404,
                 detail=f"No products found for metadata_uuid {metadata_uuid!r}.",
             )
-    dates_by_store = _available_dates_per_store(
-        {product.source_path for _, product in items}
-    )
 
     products = {}
     for product_id, product in items:
-        all_dates = dates_by_store[product.source_path]
+        if not is_store_available(product.source_path):
+            continue
+
+        all_dates = get_available_dates(product.source_path)
+        if not all_dates:
+            continue
         # full_date_range is the product's full dataset bounds, independent of from/to;
         # available_dates below is the from/to-filtered subset.
         dates = [
@@ -151,52 +149,6 @@ def get_products_availability(
     return {"products": products}
 
 
-def _available_dates_per_store(
-    store_urls: set[str],
-) -> dict[str, list[tuple[str, pd.Timestamp]]]:
-    """Resolve available dates once per unique store, isolating per-store failure."""
-    resolved: dict[str, list[tuple[str, pd.Timestamp]]] = {}
-    failures: dict[str, Exception] = {}
-    now = time.monotonic()
-
-    for store_url in sorted(store_urls):
-        recent = _recent_store_failures.get(store_url)
-        if recent and now - recent[0] < _STORE_FAILURE_COOLDOWN_SECONDS:
-            # Replay it, so the answer stays stable across the window.
-            resolved[store_url] = []
-            failures[store_url] = recent[1]
-            continue
-        try:
-            resolved[store_url] = get_available_dates(store_url)
-            _recent_store_failures.pop(store_url, None)
-        except Exception as e:
-            if isinstance(e, FileNotFoundError):
-                logger.warning(f"Availability store is absent: {store_url} ({e})")
-            else:
-                logger.exception(f"Availability lookup failed for store: {store_url}")
-            _recent_store_failures[store_url] = (now, e)
-            resolved[store_url] = []
-            failures[store_url] = e
-
-    if failures and len(failures) == len(store_urls):
-        # Absent: let the app's FileNotFoundError handler 404 with the store name.
-        if all(isinstance(e, FileNotFoundError) for e in failures.values()):
-            raise next(iter(failures.values()))
-        raise HTTPException(
-            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            detail="No product store could be opened; availability is unknown.",
-        )
-    if failures:
-        logger.warning(
-            "%d of %d stores failed to resolve availability; their products report "
-            "empty date ranges: %s",
-            len(failures),
-            len(store_urls),
-            ", ".join(sorted(failures)),
-        )
-    return resolved
-
-
 @router.get(
     "/{product_id}/point",
     summary="Point value lookup",
@@ -214,6 +166,7 @@ def get_point(
     lon: float = Query(..., openapi_examples={"default": Example(value=151.2)}),
 ):
     product = get_product_or_404(product_id)
+    is_store_available_or_404(product)
     parse_date_or_422(date)
     variables = product.variables
     ds = load_slice_or_404(
