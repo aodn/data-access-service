@@ -38,12 +38,18 @@ from data_access_service.core.routes.helpers import (
     require_api_ready,
     verify_datatime_param,
 )
+from data_access_service.utils.cancellation import Cancellation
+from data_access_service.utils.single_flight import SingleFlight
+from data_access_service.utils.subset_request_resolver import resolve_bboxes
 from data_access_service.utils.sse_utils import sse_it
 from data_access_service.utils.sse_wrapper import sse_wrapper
 
 router = APIRouter()
 config = Config.get_config()
 logger = init_log(config)
+
+# Shared by every estimate_size request in this process.
+_estimate_size_single_flight = SingleFlight()
 
 
 @router.get("/data/{uuid}/notebook_url", dependencies=[Depends(api_key_auth)])
@@ -290,40 +296,69 @@ async def get_data(
         return None
 
 
+def _estimate_dedup_key(uuid: str, body: EstimateSizeRequest) -> str:
+    """Identifies the work, so two identical requests share one estimate."""
+    return json.dumps(
+        {
+            "uuid": uuid,
+            # Same keys in a different order are the same request.
+            "keys": sorted(body.get_keys()),
+            "start_date": body.start_date,
+            "end_date": body.end_date,
+            "columns": sorted(body.columns) if body.columns else body.columns,
+            "output_format": body.output_format,
+            "multi_polygon": body.multi_polygon,
+        },
+        sort_keys=True,
+        default=str,
+    )
+
+
 @router.post("/data/{uuid}/estimate_size", dependencies=[Depends(api_key_auth)])
 @sse_it
 def estimate_size_multi(
     uuid: str,
     body: EstimateSizeRequest,
     api_instance: API = Depends(require_api_ready),  # noqa: B008
+    cancellation: Cancellation | None = None,
 ):
     # sse_it streams this over SSE: it returns a 200 text/event-stream
     # immediately, sends "processing" heartbeats while the (blocking) work runs
     # in a worker thread, then emits the estimate dict in a final "result" event.
     # Errors are raised below surface as SSE "error" events rather than HTTP status codes
+    #
+    # `cancellation` is injected by sse_it and set when the client disconnects.
     logger.debug(
         "estimate_size_multi start: uuid=%s key=%s start=%s end=%s f=%s "
-        "has_polygon=%s columns=%s",
+        "bboxes=%d columns=%s",
         uuid,
         body.key,
         body.start_date,
         body.end_date,
         body.output_format,
-        body.multi_polygon is not None,
+        len(resolve_bboxes(body.multi_polygon)),
         body.columns,
     )
     t0 = (
         time.perf_counter()
     )  # for performance tracking of this endpoint (debug purpose)
 
-    result = api_instance.estimate_datasets_size(
-        uuid,
-        keys=body.get_keys(),
-        start_date=body.start_date,
-        end_date=body.end_date,
-        multi_polygon=body.multi_polygon,
-        columns=body.columns,
-        output_format=body.output_format,
+    # An identical request already running is joined rather than started again.
+    # The work checks the SHARED cancellation, so it only stops once every
+    # attached client has gone.
+    result = _estimate_size_single_flight.run(
+        _estimate_dedup_key(uuid, body),
+        lambda group_cancellation: api_instance.estimate_datasets_size(
+            uuid,
+            keys=body.get_keys(),
+            start_date=body.start_date,
+            end_date=body.end_date,
+            multi_polygon=body.multi_polygon,
+            columns=body.columns,
+            output_format=body.output_format,
+            cancellation=group_cancellation,
+        ),
+        cancellation=cancellation,
     )
 
     elapsed = time.perf_counter() - t0

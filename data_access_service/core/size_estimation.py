@@ -54,6 +54,7 @@ from data_access_service.core.constants import (
     MAX_FRAGMENT_FOOTER_READS,
 )
 from data_access_service.models.bounding_box import BoundingBox
+from data_access_service.utils.cancellation import Cancellation, raise_if_client_gone
 from data_access_service.utils.format_utils import (
     OUTPUT_FORMAT_GEOTIFF,
     check_datasource_supports_format,
@@ -79,6 +80,7 @@ def estimate_single_key_size(
     key: str,
     resolved_subset_request: ResolvedSubsetRequest,
     output_format: str,
+    cancellation: Optional[Cancellation] = None,
 ) -> Optional[dict]:
     """
     Estimate the download size of ONE key.
@@ -88,8 +90,11 @@ def estimate_single_key_size(
         expanded, bboxes parsed); this function re-trims the dates to THIS key's
         own extent
     :param output_format: one of SUPPORTED_OUTPUT_FORMATS (netcdf/geotiff/csv)
+    :param cancellation: set when the SSE client disconnects; None outside an SSE
+        request (batch jobs, tests), which disables the checkpoints
     :return: dict with the estimate, or None if the key is not found
     :raises ValueError: if the key can never produce output_format
+    :raises ClientGoneError: if the client disconnected
     """
     uuid = resolved_subset_request.uuid
     ds = api.get_datasource(uuid, key)
@@ -100,6 +105,9 @@ def estimate_single_key_size(
 
     if not resolved_subset_request.has_data:
         return _empty_estimate(uuid, key, output_format)
+
+    # get_datasource above and the date trim below are both slow, so check between them.
+    raise_if_client_gone(cancellation)
 
     # Re-trim to THIS key's own extent
     date_start, date_end = trim_date_range_for_keys(
@@ -124,6 +132,7 @@ def estimate_single_key_size(
             resolved_subset_request.columns,
             output_format,
             resolved_subset_request.geometry,
+            cancellation,
         )
     elif isinstance(ds, ParquetDataSource):
         return _estimate_parquet_size(
@@ -136,6 +145,7 @@ def estimate_single_key_size(
             resolved_subset_request.bboxes,
             resolved_subset_request.columns,
             output_format,
+            cancellation,
         )
     else:
         return None
@@ -152,6 +162,7 @@ def _estimate_zarr_size(
     columns: list[str] | None,
     output_format: str,
     geometry: BaseGeometry | None = None,
+    cancellation: Optional[Cancellation] = None,
 ) -> dict:
     """Estimate the download size of one zarr key.
 
@@ -165,6 +176,8 @@ def _estimate_zarr_size(
     :param output_format: "netcdf" or "geotiff"
     :param geometry: the drawn area the bboxes came from; the download blanks
         the cells outside it, which is why the output figure is an upper bound
+    :param cancellation: set when the SSE client disconnects; checked around the
+        subset_zarr call, which is the only slow step here
     :return: dict with uuid, key, format, estimated_uncompressed_bytes,
         estimated_output_bytes and notes
     :raises ValueError: if geotiff is requested and no variable is gridded
@@ -203,6 +216,10 @@ def _estimate_zarr_size(
         len(bboxes),
         output_format,
     )
+
+    # Last chance to stop before the one slow call in this function. Everything
+    # after it is metadata arithmetic and finishes in milliseconds.
+    raise_if_client_gone(cancellation)
 
     # subset_zarr returns a lazily-sliced xarray.Dataset - the SAME region the
     # batch download writes (all bboxes in one pass). apply_mask=False skips the
@@ -409,6 +426,7 @@ def _estimate_parquet_size(
     bboxes: list[BoundingBox],
     columns: list[str] | None,
     output_format: str,
+    cancellation: Optional[Cancellation] = None,
 ) -> dict:
     """Estimate the download size of one parquet key, from metadata only.
 
@@ -489,6 +507,10 @@ def _estimate_parquet_size(
 
     rows = 0
     for fragment in fragments:
+        # One S3 GET per iteration, up to MAX_FRAGMENT_FOOTER_READS of them, so
+        # this is where a cancelled estimate spends its time. Checking here keeps
+        # the stop latency down to a single footer read.
+        raise_if_client_gone(cancellation)
         # .metadata reads the file FOOTER only. It is re-read per access, so it
         # is not retained beyond this iteration.
         metadata = fragment.metadata

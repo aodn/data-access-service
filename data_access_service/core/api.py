@@ -30,6 +30,7 @@ from data_access_service.core.constants import (
     STR_TIME_UPPER_CASE,
 )
 from data_access_service.models.subset_request import NON_SPECIFIED
+from data_access_service.utils.cancellation import Cancellation, raise_if_client_gone
 from data_access_service.utils.format_utils import SUPPORTED_OUTPUT_FORMATS
 from data_access_service.core.size_estimation import estimate_single_key_size
 from data_access_service.utils.subset_request_resolver import resolve_subset_request
@@ -101,6 +102,7 @@ class BaseAPI:
         multi_polygon=None,
         columns: list[str] = None,
         output_format: str = None,
+        cancellation: Optional[Cancellation] = None,
     ) -> Optional[dict]:
         pass
 
@@ -953,6 +955,7 @@ class API(BaseAPI):
         multi_polygon=None,
         columns: list[str] = None,
         output_format: str = None,
+        cancellation: Optional[Cancellation] = None,
     ) -> Optional[dict]:
         """
         Estimate the total download size across one or more keys of a dataset.
@@ -964,9 +967,12 @@ class API(BaseAPI):
         data, csv on a zarr key) is skipped and reported in the notes instead
         of failing the whole request.
 
+        :param cancellation: set when the SSE client disconnects; None outside an
+            SSE request (batch jobs, tests), which disables the checkpoints
         :return: aggregated estimate dict, or None if no requested key exists
         :raises ValueError: if output_format is none or not supported, the
             dates are unparseable, or NO requested key can produce the format
+        :raises ClientGoneError: if the client disconnected
         """
         if output_format is None or output_format not in SUPPORTED_OUTPUT_FORMATS:
             raise ValueError(
@@ -988,9 +994,15 @@ class API(BaseAPI):
         missing: list[str] = []
         unsupported: list[str] = []
         for key in resolved_subset_request.keys:
+            # One key can take minutes, so stop between keys as well as inside them.
+            raise_if_client_gone(cancellation)
             try:
                 single = estimate_single_key_size(
-                    self, key, resolved_subset_request, output_format=output_format
+                    self,
+                    key,
+                    resolved_subset_request,
+                    output_format=output_format,
+                    cancellation=cancellation,
                 )
             except ValueError as e:
                 # This key cannot download as output_format; skip it so the
