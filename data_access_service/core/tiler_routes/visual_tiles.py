@@ -44,6 +44,7 @@ from .shared import (
     load_slice_or_404,
     parse_rescale,
     resolve_colormap_or_error,
+    resolve_timestamp_or_404,
     single_variable_or_400,
     parse_date_or_422,
     visual_product_or_400,
@@ -163,7 +164,8 @@ def get_tile(
         resolve_colormap_or_error(colormap_name)
     product = visual_product_or_400(product_id)
     is_store_available_or_404(product)
-    parse_date_or_422(date)
+    ts = parse_date_or_422(date)
+    resolve_timestamp_or_404(product, ts)
     variable = single_variable_or_400(product, context="visual tiles")
 
     if not (0 <= z <= _MAX_ZOOM):
@@ -195,7 +197,7 @@ def get_tile(
 
     def _do_render() -> bytes:
         ds = load_slice_or_404(
-            product.source_path, date, [variable], ocean_masked=product.ocean_masked
+            product.source_path, ts, [variable], ocean_masked=product.ocean_masked
         )
         return render_tile(
             ds,
@@ -429,7 +431,8 @@ def get_bbox(
         resolve_colormap_or_error(colormap_name)
     product = visual_product_or_400(product_id)
     is_store_available_or_404(product)
-    parse_date_or_422(date)
+    ts = parse_date_or_422(date)
+    resolve_timestamp_or_404(product, ts)
     variable = single_variable_or_400(product, context="visual tiles")
 
     bbox_tuple, bounds_crs, dst_crs = _parse_bbox_and_crs(
@@ -454,7 +457,7 @@ def get_bbox(
 
     def _do_render() -> bytes:
         ds = load_slice_or_404(
-            product.source_path, date, [variable], ocean_masked=product.ocean_masked
+            product.source_path, ts, [variable], ocean_masked=product.ocean_masked
         )
         return render_bbox(
             ds,
@@ -613,8 +616,8 @@ async def get_animation(
                 f"for product {product_id!r} ([{earliest}, {latest}])."
             ),
         )
-    dates = [d for d, ts in available if from_ts <= ts <= to_ts]
-    if not dates:
+    frames = [(d, ts) for d, ts in available if from_ts <= ts <= to_ts]
+    if not frames:
         raise HTTPException(
             status_code=404,
             detail=(
@@ -622,14 +625,15 @@ async def get_animation(
                 f"(available range: [{earliest}, {latest}])."
             ),
         )
-    if len(dates) > _MAX_ANIMATION_FRAMES:
+    if len(frames) > _MAX_ANIMATION_FRAMES:
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Date range yields {len(dates)} frames; max is {_MAX_ANIMATION_FRAMES}. "
+                f"Date range yields {len(frames)} frames; max is {_MAX_ANIMATION_FRAMES}. "
                 "Narrow the range and retry."
             ),
         )
+    dates = [d for d, _ts in frames]
 
     resolved_w, resolved_h = await anyio.to_thread.run_sync(
         _resolve_resolution, product.source_path, bbox_tuple, bounds_crs, width, height
@@ -638,17 +642,20 @@ async def get_animation(
     # Fan out the per-frame S3 reads in parallel on the anyio pool, gated by
     # _ANIMATION_LIMITER so a many-frame request does not consume tile-handler
     # slots. asyncio.gather preserves input order so frames stay in date order.
+    # Pass the already-parsed ts (not d) — resolve_timestamp needs a
+    # pd.Timestamp, and these came straight from get_available_dates, so
+    # re-parsing the string would just redo work already done.
     datasets = await asyncio.gather(
         *(
             anyio.to_thread.run_sync(
                 load_slice_uncached,
                 product.source_path,
-                d,
+                ts,
                 [variable],
                 product.ocean_masked,
                 limiter=_ANIMATION_LIMITER,
             )
-            for d in dates
+            for _d, ts in frames
         )
     )
 

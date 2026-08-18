@@ -9,7 +9,11 @@ from fastapi.openapi.models import Example
 from data_access_service.tiler.services.colormap.resolver import resolve_colormap
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.product.registry import get_product
-from data_access_service.tiler.services.store.registry import is_store_available
+from data_access_service.tiler.services.store.registry import (
+    is_store_available,
+    resolve_timestamp,
+    unavailable_date_message,
+)
 from data_access_service.tiler.services.store.slice_loader import load_slice
 from data_access_service.tiler.utils.dates import str_to_utc_timestamp
 
@@ -93,11 +97,27 @@ def parse_date_or_422(date: str) -> pd.Timestamp:
         raise HTTPException(status_code=422, detail=f"Invalid date: {date!r}") from e
 
 
+def resolve_timestamp_or_404(product: Product, ts: pd.Timestamp) -> None:
+    """Fail fast if ``ts`` does not name an exact instant in the store's time index.
+
+    A cheap dict-lookup mirror of the check ``_fetch_slice_from_store`` performs
+    deep in ``load_slice`` (which still needs to run it there too, to get the
+    raw timestamp for the actual fetch — this doesn't replace that, it just lets
+    a bad date 404 before any further per-request work, e.g. LOD grids, tile
+    bounds).
+    """
+    if resolve_timestamp(product.source_path, ts) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=unavailable_date_message(product.source_path, ts),
+        )
+
+
 def load_slice_or_404(
-    store_url: str, date: str, variables: list[str], ocean_masked: bool = False
+    store_url: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
 ):
     try:
-        return load_slice(store_url, date, variables, ocean_masked)
+        return load_slice(store_url, ts, variables, ocean_masked)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 

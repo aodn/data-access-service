@@ -32,6 +32,7 @@ from .shared import (
     is_store_available_or_404,
     load_slice_or_404,
     parse_date_or_422,
+    resolve_timestamp_or_404,
 )
 
 logger = logging.getLogger(__name__)
@@ -167,10 +168,11 @@ def get_point(
 ):
     product = get_product_or_404(product_id)
     is_store_available_or_404(product)
-    parse_date_or_422(date)
+    ts = parse_date_or_422(date)
+    resolve_timestamp_or_404(product, ts)
     variables = product.variables
     ds = load_slice_or_404(
-        product.source_path, date, variables, ocean_masked=product.ocean_masked
+        product.source_path, ts, variables, ocean_masked=product.ocean_masked
     )
 
     _require_point_in_bounds(ds, lat, lon)

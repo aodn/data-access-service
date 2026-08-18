@@ -213,6 +213,18 @@ def test_tile_store_failed_prewarm_is_404(client):
     assert response.status_code == 404
 
 
+def test_tile_bad_date_is_404_before_lod_grids(client, resolve_timestamp_mock):
+    """A date absent from the store's time index must 404 via the request-time
+    guard, before get_lod_grids or load_slice ever run."""
+    resolve_timestamp_mock.return_value = None
+    with patch("data_access_service.core.tiler_routes.data_tiles.get_lod_grids") as m:
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/1/0/0.png?date=9999-01-01T00:00:00Z"
+        )
+        m.assert_not_called()
+    assert response.status_code == 404
+
+
 def test_tile_ok(client):
     with (
         patch(

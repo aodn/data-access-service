@@ -15,6 +15,7 @@ from .shared import (
     is_store_available_or_404,
     load_slice_or_404,
     parse_date_or_422,
+    resolve_timestamp_or_404,
 )
 
 router = APIRouter()
@@ -40,7 +41,8 @@ def get_tile(
 ):
     product = get_product_or_404(product_id)
     is_store_available_or_404(product)
-    parse_date_or_422(date)
+    ts = parse_date_or_422(date)
+    resolve_timestamp_or_404(product, ts)
     lod_grids = get_lod_grids(product)
 
     if z not in lod_grids:
@@ -59,7 +61,7 @@ def get_tile(
     png_bytes = render_tile(
         product,
         lambda: load_slice_or_404(
-            product.source_path, date, variables, ocean_masked=product.ocean_masked
+            product.source_path, ts, variables, ocean_masked=product.ocean_masked
         ),
         z,
         x,
@@ -71,17 +73,6 @@ def get_tile(
     )
 
 
-# TODO: investigate why response of satellite_austemp_sst_8day_sst is so slow, taking 5 seconds for cold hit after deployed in ec2.
-# Findings (cold/uncached path): the cost is the S3 Zarr slice fetch (~13-15s measured against the
-# live store), NOT rendering — resample/normalize/PNG are <100ms combined, and adding dask read
-# workers doesn't help (15.3s -> 14.0s), so it's read volume, not concurrency. The store
-# (satellite_austemp_sst_8day.zarr) is lat=1890 x lon=2685, float64 (~40MB/slice), chunked
-# (time=5, lat=270, lon=179): reading one date pulls the whole 5-timestep time-chunk across 105
-# spatial chunk objects (~203MB uncompressed, 5x over-read). The SLA model store (351x641, single
-# spatial chunk) is fast by comparison. L1 in-memory caching pays this once per warm slice, but
-# every other date — and every cold start — pays the full S3 fetch.
-# Real fix is an infra change, not code: a derived store re-chunked to time=1 + cast to float32
-# (LOD-aligned spatial chunks) would drop cold reads to ~2-3s.
 @router.get(
     "/{product_id}/manifest.json",
     summary="Data tile manifest",
@@ -100,11 +91,12 @@ def get_manifest(
 ):
     product = get_product_or_404(product_id)
     is_store_available_or_404(product)
-    parse_date_or_422(date)
+    ts = parse_date_or_422(date)
+    resolve_timestamp_or_404(product, ts)
     get_lod_grids(product)
     variables = product.variables
     ds = load_slice_or_404(
-        product.source_path, date, variables, ocean_masked=product.ocean_masked
+        product.source_path, ts, variables, ocean_masked=product.ocean_masked
     )
     response.headers.update(IMMUTABLE_CACHE_HEADERS)
     return DataTileManifestResponse(**render_manifest(product, ds))

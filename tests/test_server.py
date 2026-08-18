@@ -59,6 +59,10 @@ def test_gzip_skips_image_tiles(client):
     with (
         patch("data_access_service.core.tiler_routes.shared.load_slice"),
         patch(
+            "data_access_service.core.tiler_routes.shared.resolve_timestamp",
+            return_value="raw-ts",
+        ),
+        patch(
             "data_access_service.core.tiler_routes.visual_tiles.render_tile",
             return_value=_BIG_PNG,
         ),

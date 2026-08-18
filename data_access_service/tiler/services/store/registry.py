@@ -45,7 +45,7 @@ from aodn_cloud_optimised.lib import DataQuery
 
 from data_access_service.config.config import Config
 from data_access_service.config.tiler.constants import COORD_NAMES
-from data_access_service.tiler.utils.dates import str_to_utc_timestamp, ts_to_utc_iso
+from data_access_service.tiler.utils.dates import ts_to_utc_iso
 
 if TYPE_CHECKING:
     from aodn_cloud_optimised.lib.DataQuery import ZarrDataSource
@@ -235,15 +235,11 @@ class StoreRegistry:
         with self._lock:
             return self._time_index.get(store_url, {})
 
-    def resolve_timestamp(self, store_url: str, date: str) -> object | None:
-        """Parse a client-supplied date/timestamp and resolve it to the store's
-        raw timestamp value, or None if no such instant exists.
+    def resolve_timestamp(self, store_url: str, ts: pd.Timestamp) -> object | None:
+        """Resolve an already-parsed UTC timestamp to the store's raw
+        timestamp value, or None if no such instant exists.
         """
-        try:
-            parsed = str_to_utc_timestamp(date)
-        except ValueError:
-            return None
-        entry = self.time_index(store_url).get(parsed)
+        entry = self.time_index(store_url).get(ts)
         return entry[0] if entry is not None else None
 
     def is_available(self, store_url: str) -> bool:
@@ -410,9 +406,26 @@ def get_available_dates(store_url: str) -> list[tuple[str, pd.Timestamp]]:
     return [(iso, ts) for ts, (_raw, iso) in index.items()]
 
 
-def resolve_timestamp(store_url: str, date: str) -> object | None:
+def resolve_timestamp(store_url: str, ts: pd.Timestamp) -> object | None:
     get_store(store_url)  # ensures the time index for this URL is populated
-    return store_registry.resolve_timestamp(store_url, date)
+    return store_registry.resolve_timestamp(store_url, ts)
+
+
+def unavailable_date_message(store_url: str, ts: pd.Timestamp) -> str:
+    """ "No data for date ..." message, with a latest-available-date hint.
+
+    Shared by the route-level fail-fast guard (``shared.resolve_timestamp_or_404``)
+    and the deep check in ``slice_loader._fetch_slice_from_store``, so the two
+    call sites can't drift apart.
+    """
+    index = store_registry.time_index(store_url)
+    latest = index[max(index)][1] if index else None
+    hint = (
+        f" Latest available date is {latest!r}."
+        if latest
+        else " No dates are available."
+    )
+    return f"No data for date {ts_to_utc_iso(ts)!r}.{hint}"
 
 
 async def prewarm_stores(store_urls: list[str]) -> dict[str, BaseException | None]:

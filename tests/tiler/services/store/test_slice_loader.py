@@ -3,9 +3,9 @@
 Existing tests in test_registry.py cover get_store + get_lod_grids. These cover
 the L1 cache interaction, get_data path, and multi-timestamp resolution.
 
-The tiler addresses data by exact UTC instant — the request date string must
-match a store timestamp exactly (via str_to_utc_timestamp), not a calendar-day
-bucket.
+The tiler addresses data by exact UTC instant — callers pass an already-parsed
+pd.Timestamp (as core.tiler_routes.shared.parse_date_or_422 produces), and it
+must match a store timestamp exactly, not a calendar-day bucket.
 """
 
 import threading
@@ -74,7 +74,9 @@ def test_load_slice_returns_dataset_for_known_date(monkeypatch):
     ds = _ds_with_time(["2024-01-15T13:00:00"])
     _patch_source(monkeypatch, ds)
 
-    result = loader.load_slice("s3://b/x.zarr", "2024-01-15T13:00:00Z", ["v"])
+    result = loader.load_slice(
+        "s3://b/x.zarr", pd.Timestamp("2024-01-15T13:00:00"), ["v"]
+    )
     assert "v" in result.data_vars
     assert result["v"].shape == (2, 2)
 
@@ -86,7 +88,7 @@ def test_load_slice_unknown_date_raises_file_not_found(monkeypatch):
     with pytest.raises(
         FileNotFoundError, match="Latest available date is '2024-01-15T13:00:00Z'"
     ):
-        loader.load_slice("s3://b/x.zarr", "1999-01-01", ["v"])
+        loader.load_slice("s3://b/x.zarr", pd.Timestamp("1999-01-01"), ["v"])
 
 
 def test_load_slice_unknown_variable_names_the_variable_not_the_date(monkeypatch):
@@ -96,7 +98,9 @@ def test_load_slice_unknown_variable_names_the_variable_not_the_date(monkeypatch
     _patch_source(monkeypatch, ds)
 
     with pytest.raises(FileNotFoundError, match=r"NOT_A_REAL_VAR"):
-        loader.load_slice("s3://b/x.zarr", "2024-01-15T13:00:00Z", ["NOT_A_REAL_VAR"])
+        loader.load_slice(
+            "s3://b/x.zarr", pd.Timestamp("2024-01-15T13:00:00"), ["NOT_A_REAL_VAR"]
+        )
 
 
 def test_load_slice_resolves_exact_timestamp_among_several(monkeypatch):
@@ -105,7 +109,9 @@ def test_load_slice_resolves_exact_timestamp_among_several(monkeypatch):
     ds = _ds_with_time(["2024-01-15T13:00:00", "2024-01-15T14:00:00"])
     _patch_source(monkeypatch, ds)
 
-    result = loader.load_slice("s3://b/x.zarr", "2024-01-15T14:00:00Z", ["v"])
+    result = loader.load_slice(
+        "s3://b/x.zarr", pd.Timestamp("2024-01-15T14:00:00"), ["v"]
+    )
 
     assert np.array_equal(result["v"].values, ds["v"].isel(time=1).values)
 
@@ -123,7 +129,7 @@ def test_load_slice_calls_get_data(monkeypatch):
 
     source.get_data = tracking_get_data  # type: ignore[method-assign]
 
-    loader.load_slice("s3://b/x.zarr", "2024-01-15T13:00:00Z", ["v"])
+    loader.load_slice("s3://b/x.zarr", pd.Timestamp("2024-01-15T13:00:00"), ["v"])
     assert len(calls) == 1
     assert calls[0][1].get("date_start") is not None
     assert calls[0][1].get("date_end") is not None
@@ -154,7 +160,7 @@ def test_load_slice_ocean_masked_nulls_invalid_cells(monkeypatch):
     _patch_source(monkeypatch, ds)
 
     result = loader.load_slice(
-        "s3://b/x.zarr", "2024-01-15T13:00:00Z", ["v"], ocean_masked=True
+        "s3://b/x.zarr", pd.Timestamp("2024-01-15T13:00:00"), ["v"], ocean_masked=True
     )
     # Open-ocean cell survives; the New Guinea land cell is nulled.
     assert float(result["v"].sel(lat=-40.0, lon=150.0)) == 1.0
@@ -166,7 +172,7 @@ def test_load_slice_without_ocean_masked_keeps_all_cells(monkeypatch):
     _patch_source(monkeypatch, ds)
 
     result = loader.load_slice(
-        "s3://b/x.zarr", "2024-01-15T13:00:00Z", ["v"]
+        "s3://b/x.zarr", pd.Timestamp("2024-01-15T13:00:00"), ["v"]
     )  # flag defaults off
     assert not np.isnan(result["v"]).any()
 
@@ -198,7 +204,9 @@ def test_concurrent_identical_loads_share_one_compute(monkeypatch):
 
     def worker():
         results.append(
-            loader.load_slice("s3://b/x.zarr", "2024-01-15T13:00:00Z", ["v"])
+            loader.load_slice(
+                "s3://b/x.zarr", pd.Timestamp("2024-01-15T13:00:00"), ["v"]
+            )
         )
 
     threads = [threading.Thread(target=worker) for _ in range(4)]
