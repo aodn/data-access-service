@@ -12,6 +12,8 @@ from data_access_service.models.co_data_source.abstract_data_src import (
 class AodnDataSrc(AbstractDataSrc):
 
     def __init__(self):
+        self.__metadata = None
+        self.__metadata_catalog = None
         self.name = AODN
         self.__data_src = GetAodn()
 
@@ -19,10 +21,14 @@ class AodnDataSrc(AbstractDataSrc):
         return self.name
 
     def get_metadata(self) -> Metadata:
-        return self.__data_src.get_metadata()
+        if not self.__metadata:
+            self.__metadata = self.__data_src.get_metadata()
+        return self.__metadata
 
     def get_metadata_catalog(self) -> dict:
-        return self.__data_src.get_metadata().catalog
+        if not self.__metadata_catalog:
+            self.__metadata_catalog = self.get_metadata().catalog
+        return self.__metadata_catalog
 
     def get_dataset(self, dataset_name_with_ext: str) -> DataSource:
         return super().get_dataset(dataset_name_with_ext=dataset_name_with_ext)
