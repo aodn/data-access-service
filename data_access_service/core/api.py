@@ -19,7 +19,11 @@ from datetime import timedelta, timezone
 from io import BytesIO
 from typing import Iterator, Optional, Dict, Any, List, Tuple, Hashable, overload
 from aodn_cloud_optimised.lib import DataQuery
-from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
+from aodn_cloud_optimised.lib.DataQuery import (
+    ParquetDataSource,
+    ZarrDataSource,
+    Metadata,
+)
 from aodn_cloud_optimised.lib.config import get_notebook_url
 from bokeh.server.tornado import psutil
 from xarray.core.utils import Frozen
@@ -35,6 +39,9 @@ from data_access_service.utils.format_utils import SUPPORTED_OUTPUT_FORMATS
 from data_access_service.core.size_estimation import estimate_single_key_size
 from data_access_service.utils.subset_request_resolver import resolve_subset_request
 from data_access_service.core.descriptor import Depth, Descriptor, Coordinate
+
+from data_access_service.models.co_data_source.co_data_registory import CODataRegistry
+from data_access_service.models.co_data_source.csiro_data_src import CsiroDataSrc
 
 log = logging.getLogger(__name__)
 
@@ -449,8 +456,9 @@ class API(BaseAPI):
         self._schema_keys: Dict[str, Dict[str, frozenset[str]]] = dict()
 
         # UUID to metadata mapper
-        self._instance = DataQuery.GetAodn()
-        self._metadata = None
+        # self._instance = DataQuery.GetAodn()
+        self._instance = CODataRegistry()
+        self._metadata: Metadata | None = None
 
     def destroy(self):
         log.info("Destroying API instance")
@@ -587,6 +595,8 @@ class API(BaseAPI):
 
     # Do not use cache, so that we can refresh it again
     def refresh_uuid_dataset_map(self):
+
+        cached_catalog = self._metadata.catalog
         # A map contains dataset name and Metadata class, which is not
         # so useful in our case, we need UUID.
         # Prefer the catalog already built in Metadata.__init__ — calling
@@ -598,6 +608,9 @@ class API(BaseAPI):
         if catalog == {}:
             log.error("Metadata catalog from cloud-optimised lib is empty.")
 
+        # Metadata_catalog_uncached() is not working for external data resources right now.
+        # So we use the cached catalog which is working for all data sources, and merge with the uncached one
+        catalog = cached_catalog | catalog
         for key in catalog:
             uuid = None
             try:
@@ -1060,6 +1073,7 @@ class API(BaseAPI):
             return data.get("dataset_metadata").get("metadata_uuid")
         elif data.get("global_attributes") is not None:
             # For zarr data, uuid is found in here
+            ga = data.get("global_attributes")
             return data.get("global_attributes").get("metadata_uuid")
         else:
             return None
