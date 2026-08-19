@@ -204,7 +204,7 @@ data_access_service/
       colormap/
         registry.py                ← colormaps.json read + in-memory colormap registry + ColormapMode
         resolver.py                ← resolve_colormap() — custom→rio-tiler→matplotlib fallback chain
-        legend.py                  ← render_legend() — color bar + tick labels
+        legend.py                  ← render_legend() — colour bar + tick labels
         categorical.py              ← CF flag_values helpers (is_categorical_variable, parse_flag_values_and_meanings)
       product/
         product.py                  ← Product dataclass (+ DataTileConfig/VisualTileConfig/CoastalFill) + LOD algorithm + get_lod_grids lazy-init
@@ -425,7 +425,7 @@ The three product-consuming endpoints here (tile, `/bbox`, `/animation`) go thro
 
 ```
 GET /visual_tiles/colormaps                                            → all supported colormap names
-GET /visual_tiles/colormaps/{name}/legend                              → color legend PNG for a colormap
+GET /visual_tiles/legend                                               → colour legend PNG; colormap is an optional query param
 GET /visual_tiles/{product_id}/{date}/{z}/{x}/{y}.{ext}                  → colourised Web Mercator image (.png or .webp)
 GET /visual_tiles/{product_id}/{date}/bbox.{ext}?bbox=minx,miny,maxx,maxy → colourised image for arbitrary bbox (.png or .webp)
 GET /visual_tiles/{product_id}/{from_date}/{to_date}/animation.{ext}    → animated bbox across a date range (.gif, .apng, .webp)
@@ -435,12 +435,13 @@ GET /visual_tiles/{product_id}/{from_date}/{to_date}/animation.{ext}    → anim
 
 | Query param   | Default      | Description                                                                        |
 | ------------- | ------------ | ---------------------------------------------------------------------------------- |
+| `colormap`    | `viridis`    | Colormap name — rio-tiler built-in, matplotlib name, or custom registered name. Omit for the default. |
 | `rescale`     | _(none)_     | Value range as `min,max`. When provided, tick labels at lo, mid, and hi are drawn. |
 | `width`       | `256`        | Image width in pixels (10–2048)                                                    |
 | `height`      | `40`         | Image height in pixels (10–2048)                                                   |
 | `orientation` | `horizontal` | `horizontal` (bar runs left→right) or `vertical` (bar runs top→bottom, hi at top)  |
 
-Without `rescale`, only the color bar is rendered. With `rescale`, 20 pixels alongside the bar are reserved for labels. Categorical colormaps render discrete equal-width color blocks (one per active LUT entry) rather than a smooth gradient, and reject `rescale` (400) since discrete categories have no continuous scale to label.
+Without `rescale`, only the colour bar is rendered. With `rescale`, 20 pixels alongside the bar are reserved for labels. Categorical colormaps render discrete equal-width colour blocks (one per active LUT entry) rather than a smooth gradient, and reject `rescale` (400) since discrete categories have no continuous scale to label.
 
 **Visual tile query parameters:**
 
@@ -647,7 +648,7 @@ Visual tiles support any colormap name that resolves through `resolve_colormap()
 2. **rio-tiler built-ins** — e.g. `viridis`, `plasma`, `inferno`.
 3. **matplotlib** — any name from `matplotlib.colormaps`, including diverging maps like `RdBu_r`, `coolwarm`.
 
-An unrecognised name raises `ValueError`, mapped by the router to `400` (query-param usage) or `404` (the legend endpoint's `{name}` path segment) via `resolve_colormap_or_error`.
+An unrecognised name raises `ValueError`, mapped by the router to `400` via `resolve_colormap_or_error`.
 
 **Listing supported colormaps.** `GET /visual_tiles/colormaps` returns all supported names grouped by source, with higher-priority sources excluding duplicate names from lower ones:
 

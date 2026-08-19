@@ -91,17 +91,12 @@ def load_slice_or_404(
         raise HTTPException(status_code=404, detail=str(e)) from e
 
 
-def resolve_colormap_or_error(name: str, *, status_code: int = 400) -> None:
-    """Validate a colormap name, raising HTTPException on failure.
-
-    Defaults to 400 (colormap usually arrives as a query param, so an unknown
-    name is a malformed request). Callers exposing it as a path segment pass
-    status_code=404 — the URL points at a resource that does not exist.
-    """
+def resolve_colormap_or_error(name: str) -> None:
+    """Validate a colormap name, raising HTTPException(400) on failure."""
     try:
         resolve_colormap(name)
     except ValueError as e:
-        raise HTTPException(status_code=status_code, detail=str(e)) from e
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 def single_variable_or_400(product: Product, *, context: str) -> str:

@@ -9,6 +9,8 @@ import numpy as np
 
 from data_access_service.tiler.services.colormap.registry import get_colormap
 
+DEFAULT_CONTINUOUS_COLORMAP_NAME = "viridis"
+
 
 def resolve_colormap(name: str) -> dict[int, tuple[int, int, int, int]]:
     """Return a rio-tiler colormap dict for the given name.

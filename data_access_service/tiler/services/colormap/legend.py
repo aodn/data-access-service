@@ -1,6 +1,6 @@
-"""Color-legend PNG rendering.
+"""Colour-legend PNG rendering.
 
-A legend is a colored bar plus, optionally, three tick labels (lo, mid, hi).
+A legend is a coloured bar plus, optionally, three tick labels (lo, mid, hi).
 Continuous colormaps render as a smooth gradient; categorical colormaps render
 as equal-width blocks, one per registered category.
 """
@@ -11,24 +11,31 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from data_access_service.tiler.services.colormap.registry import is_categorical
-from data_access_service.tiler.services.colormap.resolver import resolve_colormap
+from data_access_service.tiler.services.colormap.resolver import (
+    DEFAULT_CONTINUOUS_COLORMAP_NAME,
+    resolve_colormap,
+)
 
 _LABEL_PX = 20  # pixels reserved alongside the bar for tick labels
 
 
 def render_legend(
-    colormap_name: str,
+    colormap_name: str | None = None,
     rescale: tuple[float, float] | None = None,
     width: int = 256,
     height: int = 40,
     orientation: str = "horizontal",
 ) -> bytes:
-    """Render a linear color legend PNG for the given colormap.
+    """Render a linear colour legend PNG for the given colormap.
+
+    ``colormap_name`` omitted (``None``) renders the default (viridis) legend.
 
     Raises ``ValueError`` (mapped to HTTP 400 by the router) when ``rescale`` is
     given for a categorical colormap: lo/mid/hi tick labels describe a continuous
     scale that discrete categories do not have, so the combination is incoherent.
     """
+    if colormap_name is None:
+        colormap_name = DEFAULT_CONTINUOUS_COLORMAP_NAME
     categorical = is_categorical(colormap_name)
     if categorical and rescale is not None:
         raise ValueError(

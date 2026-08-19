@@ -121,6 +121,17 @@ def test_categorical_legend_rejects_rescale(monkeypatch):
         )
 
 
+def test_none_colormap_matches_viridis_default():
+    """Omitting colormap_name (None) must render identically to explicit 'viridis'."""
+    default_png = legend_renderer.render_legend(
+        None, rescale=(0.0, 1.0), width=128, height=40
+    )
+    viridis_png = legend_renderer.render_legend(
+        "viridis", rescale=(0.0, 1.0), width=128, height=40
+    )
+    assert default_png == viridis_png
+
+
 def test_horizontal_height_too_small_for_labels_does_not_crash():
     """Edge case: height < _LABEL_PX (20) leaves bar_h=1 — should still render."""
     png = legend_renderer.render_legend(

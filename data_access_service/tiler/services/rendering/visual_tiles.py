@@ -30,7 +30,10 @@ from data_access_service.tiler.services.colormap.registry import (
     get_category_values,
     is_categorical,
 )
-from data_access_service.tiler.services.colormap.resolver import resolve_colormap
+from data_access_service.tiler.services.colormap.resolver import (
+    DEFAULT_CONTINUOUS_COLORMAP_NAME,
+    resolve_colormap,
+)
 from data_access_service.tiler.services.product.product import CoastalFill
 from data_access_service.tiler.services.rendering.masks import (
     inpaint_nearest,
@@ -390,7 +393,7 @@ def render_tile(
         return empty_tile(fmt)
     vmin, vmax = vrange
     span = vmax - vmin or 1.0
-    cm = resolve_colormap(colormap_name or "viridis")
+    cm = resolve_colormap(colormap_name or DEFAULT_CONTINUOUS_COLORMAP_NAME)
     result: np.ndarray | None = None
 
     for da in parts:
@@ -500,7 +503,7 @@ def render_bbox(
         return empty_tile(fmt)
     vmin, vmax = vrange
     span = vmax - vmin or 1.0
-    cm = resolve_colormap(colormap_name or "viridis")
+    cm = resolve_colormap(colormap_name or DEFAULT_CONTINUOUS_COLORMAP_NAME)
 
     result = _bbox_parts_to_rgba(
         parts, bbox_wgs84, width, height, vmin, span, cm, dst_crs=dst_crs
@@ -588,7 +591,7 @@ def render_bbox_animation(
         vmin, vmax = vrange
 
     span = vmax - vmin or 1.0
-    cm = resolve_colormap(colormap_name or "viridis")
+    cm = resolve_colormap(colormap_name or DEFAULT_CONTINUOUS_COLORMAP_NAME)
 
     frames: list[np.ndarray] = []
     for parts in parts_per_frame:

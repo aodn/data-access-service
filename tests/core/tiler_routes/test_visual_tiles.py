@@ -495,10 +495,30 @@ def test_categorical_legend_rejects_rescale(client):
     # meaningless — the legend endpoint rejects the combination with 400.
     with _registered_categorical("legend_cat", [0, 1, 2, 3, 4]):
         response = client.get(
-            "/api/v1/das/tiler/visual_tiles/colormaps/legend_cat/legend?rescale=0,4"
+            "/api/v1/das/tiler/visual_tiles/legend?colormap=legend_cat&rescale=0,4"
         )
     assert response.status_code == 400
     assert "rescale" in response.json()["detail"].lower()
+
+
+def test_legend_default_colormap_returns_png(client):
+    response = client.get("/api/v1/das/tiler/visual_tiles/legend")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+
+
+def test_legend_unknown_colormap_returns_400(client):
+    response = client.get(
+        "/api/v1/das/tiler/visual_tiles/legend?colormap=not_a_real_colormap"
+    )
+    assert response.status_code == 400
+
+
+def test_legend_empty_colormap_returns_400_not_default(client):
+    # An explicit empty value is distinct from omitted — it must not silently
+    # fall back to the default, so it still needs to fail colormap validation.
+    response = client.get("/api/v1/das/tiler/visual_tiles/legend?colormap=")
+    assert response.status_code == 400
 
 
 def test_categorical_colormap_on_continuous_variable_rejected(client):

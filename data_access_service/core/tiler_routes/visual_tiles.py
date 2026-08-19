@@ -82,18 +82,26 @@ async def get_colormaps(response: Response):
 
 
 @router.get(
-    "/colormaps/{name}/legend",
-    summary="Color legend",
+    "/legend",
+    summary="Colour legend",
     description=(
-        "Returns a PNG color legend for the named colormap. "
-        "The name must be one returned by GET /visual_tiles/colormaps. "
+        "Returns a PNG colour legend for a colormap. "
+        "colormap must be one returned by GET /visual_tiles/colormaps; omit it to use the "
+        "default (viridis). "
         "If rescale=min,max is provided, tick labels at lo, mid, and hi are drawn alongside the bar. "
-        "Without rescale, only the color bar is rendered (no labels). "
-        "Categorical colormaps render discrete equal-width color blocks instead of a smooth gradient."
+        "Without rescale, only the colour bar is rendered (no labels). "
+        "Categorical colormaps render discrete equal-width colour blocks instead of a smooth gradient."
     ),
 )
 def get_legend(
-    name: str,
+    colormap_name: str | None = Query(
+        None,
+        alias="colormap",
+        description=(
+            "Matplotlib or rio-tiler colormap name, e.g. viridis, plasma, RdBu_r. "
+            "Omit to use the default (viridis)."
+        ),
+    ),
     rescale: str | None = Query(
         None,
         description=(
@@ -105,14 +113,15 @@ def get_legend(
     height: int = Query(40, ge=10, le=2048, description="Image height in pixels."),
     orientation: str = Query(
         "horizontal",
-        description="'horizontal' (color bar left→right) or 'vertical' (color bar top→bottom).",
+        description="'horizontal' (colour bar left→right) or 'vertical' (colour bar top→bottom).",
         pattern="^(horizontal|vertical)$",
     ),
 ):
-    resolve_colormap_or_error(name, status_code=404)
+    if colormap_name is not None:
+        resolve_colormap_or_error(colormap_name)
     rescale_range = parse_rescale(rescale)
     try:
-        png = render_legend(name, rescale_range, width, height, orientation)
+        png = render_legend(colormap_name, rescale_range, width, height, orientation)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return Response(
