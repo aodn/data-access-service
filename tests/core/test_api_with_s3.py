@@ -284,53 +284,58 @@ class TestApiWithS3(TestWithS3):
                 assert False, "Fail to parse to JSON"
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    def test_fetch_data_without_time_ignores_date_range(
+    def test_fetch_data_uses_temporal_extent_column(
         self, setup, localstack, aws_clients, setup_resources, client
     ):
         """
-        aggregated_seagrass_nonqc has no TIME column (only hive timestamp).
-        A requested date range must be ignored so subsetting still returns data.
+        aggregated_seagrass_nonqc dates live in _temporal_extent (date32).
+        A matching date range must return rows; a non-overlapping range empty.
         """
         s3_client, _, _ = aws_clients
         config = Config.get_config()
         config.set_s3_client(s3_client)
 
         with patch.object(AWSHelper, "send_email") as mock_send_email:
-            # Range does not cover the 2025 hive partition; if TIME filtering
-            # were applied this would come back empty.
-            param = {
-                "start_date": "2010-01-01 00:00:00.000000000",
-                "end_date": "2010-12-31 23:59:59.999999999",
-                "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
-            }
-
-            response = client.get(
+            seagrass_url = (
                 config.BASE_URL
-                + "/data/009a1131-efc1-4a61-8f90-cf289e7c043d/aggregated_seagrass_nonqc.parquet",
-                params=param,
-                headers={"X-API-Key": config.get_api_key()},
+                + "/data/009a1131-efc1-4a61-8f90-cf289e7c043d/aggregated_seagrass_nonqc.parquet"
             )
+            headers = {"X-API-Key": config.get_api_key()}
 
-            assert response.status_code == HTTP_200_OK
-            assert isinstance(response.content, bytes)
+            miss = client.get(
+                seagrass_url,
+                params={
+                    "start_date": "2010-01-01 00:00:00.000000000",
+                    "end_date": "2010-12-31 23:59:59.999999999",
+                    "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
+                },
+                headers=headers,
+            )
+            assert miss.status_code == HTTP_200_OK
+            assert json.loads(miss.content.decode("utf-8")) == []
 
-            try:
-                parsed = json.loads(response.content.decode("utf-8"))
-                assert (
-                    len(parsed) == 25
-                ), f"Number of record is incorrect: {len(parsed)}"
-                parsed = sorted(
-                    parsed, key=lambda x: (x["latitude"], x["longitude"], x["time"])
-                )
-                assert parsed[0] == {
-                    "latitude": -40.3,
-                    "longitude": 147.9,
-                    "time": "2025-01-01",
-                }, f"Unexpected JSON content: {parsed[0]}"
-                assert parsed[24] == {
-                    "latitude": -40.1,
-                    "longitude": 148.0,
-                    "time": "2025-01-01",
-                }, f"Unexpected JSON content: {parsed[24]}"
-            except json.JSONDecodeError as e:
-                assert False, "Fail to parse to JSON"
+            hit = client.get(
+                seagrass_url,
+                params={
+                    "start_date": "2025-02-01 00:00:00.000000000",
+                    "end_date": "2025-02-28 23:59:59.999999999",
+                    "columns": ["TIME", "DEPTH", "LATITUDE", "LONGITUDE"],
+                },
+                headers=headers,
+            )
+            assert hit.status_code == HTTP_200_OK
+            parsed = json.loads(hit.content.decode("utf-8"))
+            assert len(parsed) == 25, f"Number of record is incorrect: {len(parsed)}"
+            parsed = sorted(
+                parsed, key=lambda x: (x["latitude"], x["longitude"], x["time"])
+            )
+            assert parsed[0] == {
+                "latitude": -40.3,
+                "longitude": 147.9,
+                "time": "2025-02-23",
+            }, f"Unexpected JSON content: {parsed[0]}"
+            assert parsed[24] == {
+                "latitude": -40.1,
+                "longitude": 148.0,
+                "time": "2025-02-23",
+            }, f"Unexpected JSON content: {parsed[24]}"

@@ -719,13 +719,26 @@ class API(BaseAPI):
     Given a time range, we find if this uuid temporal cover the whole range
     """
 
+    def _source_temporal_extent(
+        self, ds: DataQuery.DataSource, uuid: str, key: str
+    ) -> Tuple[pd.Timestamp, pd.Timestamp]:
+        """Read min/max time from the cloud-optimised source.
+
+        Parquet extent lookup needs the mapped time column (e.g.
+        ``_temporal_extent``). Zarr does not take that argument.
+        """
+        if isinstance(ds, ParquetDataSource):
+            _, _, time_varname = self.resolve_dim_names(uuid, key)
+            return ds.get_temporal_extent(time_varname=time_varname)
+        return ds.get_temporal_extent()
+
     def has_data(
         self, uuid: str, key: str, start_date: pd.Timestamp, end_date: pd.Timestamp
     ):
         md: Dict[str, Descriptor] | None = self._cached_metadata.get(uuid)
         if md is not None and md[key] is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
-            tes, tee = ds.get_temporal_extent()
+            tes, tee = self._source_temporal_extent(ds, uuid, key)
             return start_date <= tes and tee <= end_date
         return False
 
@@ -736,7 +749,7 @@ class API(BaseAPI):
         if md is not None:
             ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
             try:
-                start_date, end_date = ds.get_temporal_extent()
+                start_date, end_date = self._source_temporal_extent(ds, uuid, key)
 
                 if start_date is not None:
                     start_date = start_date.replace(

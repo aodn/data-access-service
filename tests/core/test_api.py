@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from aodn_cloud_optimised.lib import DataQuery
+from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
 
 from data_access_service import API
 from data_access_service.core.api import BaseAPI
@@ -101,6 +102,28 @@ class TestApi(unittest.TestCase):
                 ["eventDate", "decimalLatitude", "decimalLongitude"],
                 "TIME mapped to eventDate, LATITUDE mapped to decimalLatitude, LONGITUDE mapped to decimalLongitude",
             )
+
+    def test_map_column_names_prefers_temporal_extent_over_timestamp(self):
+        api = API()
+        api._schema_keys = {
+            "u": {
+                "seagrass.parquet": frozenset(
+                    {
+                        "_temporal_extent",
+                        "timestamp",
+                        "decimalLatitude",
+                        "decimalLongitude",
+                    }
+                )
+            }
+        }
+        col = api.map_column_names(
+            "u", "seagrass.parquet", ["TIME", "LATITUDE", "LONGITUDE"]
+        )
+        self.assertListEqual(
+            col,
+            ["_temporal_extent", "decimalLatitude", "decimalLongitude"],
+        )
 
     with open(
         Path(__file__).resolve().parent.parent / "canned/catalog_uncached.json", "r"
@@ -232,6 +255,32 @@ class TestApi(unittest.TestCase):
                     "time": "2016-02-07",
                     "longitude": 147.1,
                     "latitude": -43.0,
+                }
+            ],
+        )
+
+    def test_generate_partial_json_array_maps_temporal_extent(self):
+        df = ddf.from_pandas(
+            pd.DataFrame(
+                {
+                    "_temporal_extent": ["2025-02-23"],
+                    "timestamp": [1735689600],
+                    "decimalLongitude": [147.9],
+                    "decimalLatitude": [-40.3],
+                }
+            ),
+            npartitions=1,
+        )
+
+        result = list(_generate_partial_json_array(df, None))
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    "time": "2025-02-23",
+                    "longitude": 147.9,
+                    "latitude": -40.3,
                 }
             ],
         )
@@ -455,3 +504,38 @@ class TestApi(unittest.TestCase):
         start_res, end_res = api.get_temporal_extent("non-existent-uuid", key)
         self.assertIsNone(start_res)
         self.assertIsNone(end_res)
+
+    def test_get_temporal_extent_passes_mapped_time_varname_for_parquet(self):
+        api = API()
+        uuid = "test-uuid"
+        key = "test-key"
+
+        mock_descriptor = MagicMock()
+        mock_descriptor.dname = "test-dname"
+        api._cached_metadata = {uuid: {key: mock_descriptor}}
+        api.resolve_dim_names = MagicMock(return_value=(None, None, "_temporal_extent"))
+
+        class _FakeParquet(ParquetDataSource):
+            def __init__(self):
+                pass
+
+        mock_ds = _FakeParquet.__new__(_FakeParquet)
+        mock_ds.get_temporal_extent = MagicMock(
+            return_value=(
+                pd.Timestamp("2025-02-23 12:00:00"),
+                pd.Timestamp("2025-02-23 12:00:00"),
+            )
+        )
+        api._instance = MagicMock()
+        api._instance.get_dataset.return_value = mock_ds
+
+        start_res, end_res = api.get_temporal_extent(uuid, key)
+
+        mock_ds.get_temporal_extent.assert_called_once_with(
+            time_varname="_temporal_extent"
+        )
+        self.assertEqual(start_res, pd.Timestamp("2025-02-23 00:00:00"))
+        expected_end = pd.Timestamp("2025-02-23 12:00:00").replace(
+            hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
+        )
+        self.assertEqual(end_res, expected_end)
