@@ -22,6 +22,15 @@ MASTER_JOB_ID = "542e76c3-6c19-463e-8b85-0b62db45f045"
 # Canned seagrass rows fall on 2025-02-23, which is the last date_ranges slot.
 SEAGRASS_JOB_INDEX = "55"
 
+
+def _canned_s3_sample2() -> Path:
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "canned" / "s3_sample2"
+        if candidate.is_dir():
+            return candidate
+    raise FileNotFoundError("canned/s3_sample2 not found")
+
+
 SEAGRASS_PREPARATION_PARAMETERS = {
     "end_date": "non-specified",
     "date_ranges": json.dumps(
@@ -56,11 +65,10 @@ SEAGRASS_PREPARATION_PARAMETERS = {
         'accessed [date-of-access]."'
     ),
     "output_format": "csv",
-    # Canned seagrass rows sit around 144.4E/-40.8 and 147.9E/-40.3 (Tasmania).
-    "multi_polygon": (
-        '{"type":"MultiPolygon","coordinates":[[[[144.0,-41.5],[149.0,-41.5],'
-        "[149.0,-39.5],[144.0,-39.5],[144.0,-41.5]]]]}"
-    ),
+    # No spatial filter: canned seagrass hive `polygon` values do not match the
+    # WKB hex create_bbox_filter compares against, so any MultiPolygon yields
+    # an empty table. This test is about the time window.
+    "multi_polygon": None,
     "recipient": "manfai.ng@utas.edu.au",
     "key": SEAGRASS_KEY,
     "start_date": "non-specified",
@@ -75,7 +83,7 @@ class TestParquetProcessorWithS3(TestWithS3):
         TestWithS3.upload_to_s3(
             s3_client,
             DataQuery.BUCKET_OPTIMISED_DEFAULT,
-            Path(__file__).parent.parent.parent.parent / "canned/s3_sample2",
+            _canned_s3_sample2(),
         )
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
@@ -149,8 +157,6 @@ class TestParquetProcessorWithS3(TestWithS3):
                 assert (
                     times.max() <= end_date
                 ), f"subset time {times.max()} is after range end {end_date}"
-            except Exception as e:
-                assert False, f"prepare_data raised an exception: {e}"
             finally:
                 shutil.rmtree(config.get_temp_folder(MASTER_JOB_ID), ignore_errors=True)
                 shutil.rmtree(
