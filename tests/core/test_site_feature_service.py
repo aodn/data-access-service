@@ -67,7 +67,7 @@ def test_sites_with_data_between_normalizes_dates_and_shapes_rows():
 
 def test_latest_time_wraps_value():
     repo = _FakeRepo(latest=pd.Timestamp("2024-05-06T07:08:09"))
-    assert SiteFeatureService(repo).latest_time() == {"time": "2024-05-06T07:08:09"}
+    assert SiteFeatureService(repo).latest_time() == {"time": "2024-05-06T07:08:09Z"}
 
 
 def test_latest_time_none_passthrough():

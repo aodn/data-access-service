@@ -27,6 +27,7 @@ spec and Mapbox GL.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import timezone
 from typing import Any
 
 from data_access_service.sites.sites import (
@@ -45,9 +46,14 @@ def _native(value: Any) -> Any:
 
 
 def _iso(value: Any) -> str:
-    """Render a timestamp as an ISO 8601 string (frontend ``date`` field)."""
+    """Render a timestamp as an ISO 8601 string with an explicit UTC marker.
+    """
     iso = getattr(value, "isoformat", None)
-    return iso() if callable(iso) else str(value)
+    if not callable(iso):
+        return str(value)
+    if getattr(value, "tzinfo", None) is not None:
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return f"{iso()}Z"
 
 
 def _point(longitude: Any, latitude: Any) -> SitePoint:
