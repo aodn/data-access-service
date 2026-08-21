@@ -162,6 +162,9 @@ class PmTileDuckDBClient(DuckDBClient):
 
                     db.execute("INSTALL httpfs; LOAD httpfs;")
                     db.execute("INSTALL h3 FROM community; LOAD h3;")
+                    # GLOBAL, not session: queries run on cursor() children,
+                    # which do not inherit session-scope settings.
+                    db.execute("SET GLOBAL TimeZone = 'UTC';")
 
                     PmTileDuckDBClient._global_db_connection = db
 
@@ -566,6 +569,7 @@ class ParquetDuckDBClient(DuckDBClient):
                     for ext in self._extensions:
                         db.execute(f"INSTALL {ext}; LOAD {ext};")
                     db.execute(f"SET GLOBAL s3_region = '{self._region}';")
+                    db.execute("SET GLOBAL TimeZone = 'UTC';")
                     self._duckdb_client = db
         return self._duckdb_client
 

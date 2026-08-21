@@ -9,6 +9,7 @@ fork tests verify the native teardown path actually survives.
 import os
 import tempfile
 import threading
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -246,7 +247,6 @@ def test_detect_time_type_epoch_seconds_as_bigint():
         )
         assert client.detect_time_type(str(path), "timestamp") == "epoch_s"
 
-        client.execute("SET TimeZone = 'UTC'")
         d_sql = PmTileDuckDBClient.build_date_key_expression("timestamp", "epoch_s")
         keys = {
             r[0]
@@ -272,7 +272,6 @@ def test_detect_time_type_epoch_milliseconds_as_bigint():
         )
         assert client.detect_time_type(str(path), "timestamp") == "epoch_ms"
 
-        client.execute("SET TimeZone = 'UTC'")
         d_sql = PmTileDuckDBClient.build_date_key_expression("timestamp", "epoch_ms")
         key = client.execute(f"SELECT {d_sql} FROM read_parquet('{path}')").fetchone()[
             0
@@ -304,7 +303,6 @@ def test_detect_time_type_hive_partition_epoch_seconds():
         glob_path = str(root / "**" / "*.parquet")
         assert client.detect_time_type(glob_path, "timestamp") == "epoch_s"
 
-        client.execute("SET TimeZone = 'UTC'")
         d_sql = PmTileDuckDBClient.build_date_key_expression("timestamp", "epoch_s")
         key = client.execute(
             f"""
@@ -321,3 +319,39 @@ def test_build_date_key_epoch_s_vs_epoch_ms_expression():
     assert "/ 1000.0" not in s
     assert "/ 1000.0" in ms
     assert "%Y%m%d" in s and "%Y%m%d" in ms
+
+
+def test_date_key_stays_utc_on_a_non_utc_host(monkeypatch):
+    """PMTiles day keys must not follow the host clock - issue 9059.
+
+    to_timestamp() returns TIMESTAMP WITH TIME ZONE, so strftime() renders it in
+    the connection's TimeZone. A pass stored as 2024-05-31 15:20 UTC is
+    2024-06-01 01:20 AEST, so an Australian host would bucket it a day late.
+    """
+    monkeypatch.setenv("TZ", "Australia/Sydney")
+    time.tzset()
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "epoch_s.parquet"
+            client = _make_local_pmtiles_client()
+            assert (
+                client.execute("SELECT current_setting('TimeZone')").fetchone()[0]
+                == "UTC"
+            )
+
+            client.execute(
+                f"""
+                COPY (
+                    SELECT 1717168800::BIGINT AS timestamp
+                ) TO '{path}' (FORMAT PARQUET)
+                """
+            )
+            d_sql = PmTileDuckDBClient.build_date_key_expression("timestamp", "epoch_s")
+            key = client.execute(
+                f"SELECT {d_sql} FROM read_parquet('{path}')"
+            ).fetchone()[0]
+            assert key == 20240531, "day key followed the host timezone, not UTC"
+    finally:
+        # monkeypatch restores TZ itself, but only tzset() makes libc notice.
+        os.environ["TZ"] = "UTC"
+        time.tzset()
