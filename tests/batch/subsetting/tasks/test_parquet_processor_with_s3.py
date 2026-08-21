@@ -56,11 +56,10 @@ SEAGRASS_PREPARATION_PARAMETERS = {
         'accessed [date-of-access]."'
     ),
     "output_format": "csv",
+    # Canned seagrass rows sit around 144.4E/-40.8 and 147.9E/-40.3 (Tasmania).
     "multi_polygon": (
-        '{"type":"MultiPolygon","coordinates":[[[[112.70564094065327,'
-        "-36.745916664617],[122.80975767996352,-36.745916664617],"
-        "[122.80975767996352,-32.30062368843088],[112.70564094065327,"
-        "-32.30062368843088],[112.70564094065327,-36.745916664617]]]]}"
+        '{"type":"MultiPolygon","coordinates":[[[[144.0,-41.5],[149.0,-41.5],'
+        "[149.0,-39.5],[144.0,-39.5],[144.0,-41.5]]]]}"
     ),
     "recipient": "manfai.ng@utas.edu.au",
     "key": SEAGRASS_KEY,
