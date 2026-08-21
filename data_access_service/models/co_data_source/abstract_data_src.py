@@ -18,9 +18,17 @@ class AbstractDataSrc(ABC):
     def get_metadata_catalog(self) -> dict:
         pass
 
+    def get_dataset_names(self) -> frozenset[str]:
+        """Names of the datasets held by this source, e.g. {"argo.parquet"}.
+
+        Only used to check whether a name exists, so a source with an expensive
+        catalog should override this with a cheaper listing.
+        """
+        return frozenset(self.get_metadata_catalog())
+
     @abstractmethod
     def get_dataset(self, dataset_name_with_ext: str) -> DataSource:
-        if dataset_name_with_ext not in self.get_metadata_catalog():
+        if dataset_name_with_ext not in self.get_dataset_names():
             raise DatasetNotFoundError(
                 dataset_name=dataset_name_with_ext, data_source_name=self.get_name()
             )
