@@ -46,8 +46,7 @@ def _native(value: Any) -> Any:
 
 
 def _iso(value: Any) -> str:
-    """Render a timestamp as an ISO 8601 string with an explicit UTC marker.
-    """
+    """Render a timestamp as an ISO 8601 string with an explicit UTC marker."""
     iso = getattr(value, "isoformat", None)
     if not callable(iso):
         return str(value)
