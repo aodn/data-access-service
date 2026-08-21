@@ -7,6 +7,11 @@ ARG GIT_SHA=unknown
 # Set it as an environment variable for Python to read
 ENV APP_VERSION=$APP_VERSION
 ENV GIT_SHA=$GIT_SHA
+
+# Pin the process timezone so "local time" is UTC wherever the container runs.
+# Read by glibc, so it covers Python, DuckDB and the supervisord/nginx logs.
+ENV TZ=UTC
+
 # Using micromamba (a fast alternative to conda) to build the exact environment
 
 # Temp work around due to deps in cloud optimized lib use xarray lib that is fork by Loz with some fix

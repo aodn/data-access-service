@@ -1,5 +1,23 @@
 import logging
 import os
+import time
+
+
+def set_process_timezone_utc() -> None:
+    """Force UTC as the process timezone, so "local time" is always UTC.
+
+    Python asks the C library, which reads TZ. Without this, naive calls like
+    datetime.now() and pd.Timestamp.today() follow the host clock, so an AWS
+    host outside UTC can resolve "today" to the wrong date.
+    """
+    os.environ["TZ"] = "UTC"
+    if hasattr(time, "tzset"):  # POSIX only; absent on Windows
+        time.tzset()
+
+
+# Run on import so every entry point (server, AWS Batch entry_point, pytest)
+# gets it before any module reads the clock.
+set_process_timezone_utc()
 
 from data_access_service.config.config import Config
 from data_access_service.core.api import API
