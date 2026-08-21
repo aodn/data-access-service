@@ -41,6 +41,8 @@ def _make_mock_get_aodn(catalog: dict | None = None) -> MagicMock:
     mock_metadata = MagicMock()
     mock_metadata.catalog = catalog or {KNOWN_DATASET: {}}
     mock_aodn.get_metadata.return_value = mock_metadata
+    # The cheap listing AodnDataSrc uses instead of the metadata catalog.
+    mock_aodn.list_datasets.return_value = list(mock_metadata.catalog)
     return mock_aodn
 
 
@@ -134,6 +136,21 @@ class TestAodnDataSrc:
         src, _ = self._make_src()
         with pytest.raises(DatasetNotFoundError):
             src.get_dataset(UNKNOWN_DATASET)
+
+    def test_get_dataset_does_not_build_the_metadata_catalog(self):
+        # Building the catalog reads every dataset's metadata from S3, so the
+        # name check must not touch it.
+        src, mock_aodn = self._make_src()
+        src.get_dataset(KNOWN_DATASET)
+        mock_aodn.get_metadata.assert_not_called()
+
+    def test_dataset_names_are_listed_once_and_reused(self):
+        src, mock_aodn = self._make_src()
+        src.get_dataset(KNOWN_DATASET)
+        src.get_dataset(KNOWN_DATASET)
+        with pytest.raises(DatasetNotFoundError):
+            src.get_dataset(UNKNOWN_DATASET)
+        mock_aodn.list_datasets.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
