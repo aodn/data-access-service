@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from data_access_service import set_default_timezone_utc
+from data_access_service import set_process_timezone_utc
 
 
 @pytest.fixture(autouse=True)
@@ -45,19 +45,19 @@ def test_sets_utc_when_tz_is_not_configured(monkeypatch):
     monkeypatch.delenv("TZ", raising=False)
     time.tzset()
 
-    set_default_timezone_utc()
+    set_process_timezone_utc()
 
     assert time.strftime("%Z") == "UTC"
 
 
-def test_keeps_an_explicitly_configured_tz(monkeypatch):
-    """setdefault, not overwrite - a deliberate TZ must still win."""
+def test_overrides_a_non_utc_tz(monkeypatch):
+    """Overwrite, not setdefault - a host TZ must never win over UTC."""
     monkeypatch.setenv("TZ", "Australia/Sydney")
     time.tzset()
 
-    set_default_timezone_utc()
+    set_process_timezone_utc()
 
-    assert time.strftime("%Z") in ("AEST", "AEDT")
+    assert time.strftime("%Z") == "UTC"
 
 
 def test_package_import_applies_utc_on_a_non_utc_host():
