@@ -31,7 +31,15 @@ def test_native_passes_through_plain_scalar():
 
 
 def test_iso_uses_isoformat_when_available():
-    assert _iso(pd.Timestamp("2024-01-01T00:00:00")) == "2024-01-01T00:00:00"
+    assert _iso(pd.Timestamp("2024-01-01T00:00:00")) == "2024-01-01T00:00:00Z"
+
+
+def test_iso_normalizes_a_utc_offset_to_z():
+    assert _iso(pd.Timestamp("2024-01-01T00:00:00+00:00")) == "2024-01-01T00:00:00Z"
+
+
+def test_iso_converts_a_non_utc_offset_to_utc():
+    assert _iso(pd.Timestamp("2024-01-01T10:00:00+10:00")) == "2024-01-01T00:00:00Z"
 
 
 def test_iso_falls_back_to_str():
@@ -91,7 +99,7 @@ def test_site_feature_collection_one_feature_per_site():
 
     first = fc["features"][0]
     assert first["type"] == "Feature"
-    assert first["properties"] == {"date": "2024-01-02T00:00:00", "site": "A"}
+    assert first["properties"] == {"date": "2024-01-02T00:00:00Z", "site": "A"}
     # GeoJSON is [lon, lat]
     assert first["geometry"]["coordinates"] == [150.0, -30.0]
     # _id is injected by the frontend, never part of the payload

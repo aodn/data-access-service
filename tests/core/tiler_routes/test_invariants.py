@@ -2,7 +2,7 @@
 
 These tests guard contracts that span the server and the frontend WebGL shader,
 or that depend on environment configuration that has historically caused silent
-failures (timezone handling, the two tile coordinate systems). If any of these
+failures (date round-tripping, the two tile coordinate systems). If any of these
 fail, the change needs a coordinated review — not a test update.
 """
 
@@ -13,6 +13,7 @@ import xarray as xr
 
 from data_access_service.config.tiler.constants import LOD, TILE
 from data_access_service.tiler.services.product.product import Product
+from data_access_service.tiler.utils.dates import str_to_utc_timestamp
 
 
 # --- LOD / tile geometry contract -----------------------------------------
@@ -32,11 +33,11 @@ def test_tile_geometry_matches_frontend_shader_contract(client):
     assert TILE.padding == 1
 
 
-# --- Date / timezone round-trip ------------------------------------------
+# --- Date round-trip -------------------------------------------------------
 #
-# API dates are TILE_TIMEZONE local (default Australia/Sydney), not UTC. The
-# Zarr store is UTC. A date pulled from /manifest must be acceptable when sent
-# back to /data_tiles — clients are required to round-trip the strings unchanged.
+# The tiler addresses data by exact UTC instant, not by calendar day. A date
+# pulled from /manifest must be acceptable when sent back to /data_tiles —
+# clients are required to round-trip the strings unchanged.
 
 
 _LOD_GRIDS = {1: (1, 1)}
@@ -62,7 +63,9 @@ def _make_ds() -> xr.Dataset:
 
 
 def test_date_from_manifest_is_accepted_by_tile_endpoint(client):
-    available = ["2024-06-01", "2024-07-01"]
+    # available_dates are always full timestamps in production (ts_to_utc_iso);
+    # mock accordingly so the round-trip below exercises the real contract.
+    available = ["2024-06-01T00:00:00Z", "2024-07-01T00:00:00Z"]
     with (
         patch(
             "data_access_service.core.tiler_routes.products.iter_product_items",
@@ -70,7 +73,7 @@ def test_date_from_manifest_is_accepted_by_tile_endpoint(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.products.get_available_dates",
-            return_value=available,
+            return_value=[(d, str_to_utc_timestamp(d)) for d in available],
         ),
     ):
         manifest = client.get("/api/v1/das/tiler/data_tiles/manifest")
@@ -79,7 +82,7 @@ def test_date_from_manifest_is_accepted_by_tile_endpoint(client):
     assert dates, "manifest returned no dates — fixture broken"
     date_str = dates[0]
 
-    # Send that date back unchanged. If the server's local-vs-UTC handling
+    # Send that date back unchanged. If the server's parsing/formatting ever
     # silently drifts, this round-trip will start returning 404.
     with (
         patch(
@@ -96,7 +99,7 @@ def test_date_from_manifest_is_accepted_by_tile_endpoint(client):
         ),
     ):
         tile = client.get(
-            f"/api/v1/das/tiler/data_tiles/sea_level_anomaly/{date_str}/1/0/0.png"
+            f"/api/v1/das/tiler/data_tiles/sea_level_anomaly/1/0/0.png?date={date_str}"
         )
     assert (
         tile.status_code == 200
@@ -137,10 +140,10 @@ def test_data_and_visual_tiles_route_to_different_renderers(client):
         ),
     ):
         data_resp = client.get(
-            f"/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/{z}/{x}/{y}.png"
+            f"/api/v1/das/tiler/data_tiles/sea_level_anomaly/{z}/{x}/{y}.png?date=2024-01-01T00:00:00Z"
         )
         visual_resp = client.get(
-            f"/api/v1/das/tiler/visual_tiles/sea_level_anomaly/2024-01-01/{z}/{x}/{y}.png"
+            f"/api/v1/das/tiler/visual_tiles/sea_level_anomaly/{z}/{x}/{y}.png?date=2024-01-01T00:00:00Z"
         )
 
     assert data_resp.status_code == 200, data_resp.text

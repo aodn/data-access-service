@@ -2,6 +2,7 @@ import json
 from unittest.mock import patch
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 import data_access_service.tiler.services.product.registry as registry
@@ -112,12 +113,12 @@ def _make_ds() -> xr.Dataset:
     )
 
 
-# --- /{product}/{date}/{z}/{x}/{y}.png ---
+# --- /{product}/{z}/{x}/{y}.png?date=... ---
 
 
 def test_tile_unknown_product(client):
     response = client.get(
-        "/api/v1/das/tiler/data_tiles/nonexistent/2024-01-01/1/0/0.png"
+        "/api/v1/das/tiler/data_tiles/nonexistent/1/0/0.png?date=2024-01-01T00:00:00Z"
     )
     assert response.status_code == 404
 
@@ -134,7 +135,7 @@ def test_tile_bad_lod(client):
         ),
     ):
         response = client.get(
-            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/99/0/0.png"
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/99/0/0.png?date=2024-01-01T00:00:00Z"
         )
     assert response.status_code == 404
 
@@ -151,7 +152,7 @@ def test_tile_out_of_bounds(client):
         ),
     ):
         response = client.get(
-            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/1/5/5.png"
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/1/5/5.png?date=2024-01-01T00:00:00Z"
         )
     assert response.status_code == 404
 
@@ -172,7 +173,7 @@ def test_tile_missing_date(client):
         ),
     ):
         response = client.get(
-            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/9999-01-01/1/0/0.png"
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/1/0/0.png?date=9999-01-01T00:00:00Z"
         )
     assert response.status_code == 404
 
@@ -188,7 +189,7 @@ def test_tile_missing_store(client):
         ),
     ):
         response = client.get(
-            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/1/0/0.png"
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/1/0/0.png?date=2024-01-01T00:00:00Z"
         )
     assert response.status_code == 404
     assert "s3://bucket/missing.zarr" in response.json()["detail"]
@@ -212,6 +213,18 @@ def test_tile_store_failed_prewarm_is_404(client):
     assert response.status_code == 404
 
 
+def test_tile_bad_date_is_404_before_lod_grids(client, resolve_timestamp_mock):
+    """A date absent from the store's time index must 404 via the request-time
+    guard, before get_lod_grids or load_slice ever run."""
+    resolve_timestamp_mock.return_value = None
+    with patch("data_access_service.core.tiler_routes.data_tiles.get_lod_grids") as m:
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/1/0/0.png?date=9999-01-01T00:00:00Z"
+        )
+        m.assert_not_called()
+    assert response.status_code == 404
+
+
 def test_tile_ok(client):
     with (
         patch(
@@ -228,18 +241,18 @@ def test_tile_ok(client):
         ),
     ):
         response = client.get(
-            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/1/0/0.png"
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/1/0/0.png?date=2024-01-01T00:00:00Z"
         )
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
 
 
-# --- /{product}/{date}/manifest.json ---
+# --- /{product}/manifest.json?date=... ---
 
 
 def test_manifest_unknown_product(client):
     response = client.get(
-        "/api/v1/das/tiler/data_tiles/nonexistent/2024-01-01/manifest.json"
+        "/api/v1/das/tiler/data_tiles/nonexistent/manifest.json?date=2024-01-01T00:00:00Z"
     )
     assert response.status_code == 404
 
@@ -256,7 +269,7 @@ def test_manifest_missing_date(client):
         ),
     ):
         response = client.get(
-            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/9999-01-01/manifest.json"
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/manifest.json?date=9999-01-01T00:00:00Z"
         )
     assert response.status_code == 404
 
@@ -269,7 +282,7 @@ def test_manifest_missing_store(client):
         ),
     ):
         response = client.get(
-            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/manifest.json"
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/manifest.json?date=2024-01-01T00:00:00Z"
         )
     assert response.status_code == 404
     assert "s3://bucket/missing.zarr" in response.json()["detail"]
@@ -303,7 +316,7 @@ def test_manifest_ok(client):
         ),
     ):
         response = client.get(
-            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/manifest.json"
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/manifest.json?date=2024-01-01T00:00:00Z"
         )
     assert response.status_code == 200
     assert response.json() == payload
@@ -341,7 +354,7 @@ def test_manifest_categorical_flag_fields_pass_through(client):
         ),
     ):
         response = client.get(
-            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/manifest.json"
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/manifest.json?date=2024-01-01T00:00:00Z"
         )
     assert response.status_code == 200
     body = response.json()
@@ -349,12 +362,12 @@ def test_manifest_categorical_flag_fields_pass_through(client):
     assert body["flagMeanings"] == ["none", "moderate", "strong", "severe", "extreme"]
 
 
-# --- /{product}/{date}/point ---
+# --- /{product}/point?date=... ---
 
 
 def test_point_unknown_product(client):
     response = client.get(
-        "/api/v1/das/tiler/data_tiles/nonexistent/2024-01-01/point?lat=-35&lon=145"
+        "/api/v1/das/tiler/data_tiles/nonexistent/point?date=2024-01-01T00:00:00Z&lat=-35&lon=145"
     )
     assert response.status_code == 404
 
@@ -365,7 +378,7 @@ def test_point_missing_date(client):
         side_effect=FileNotFoundError("No data"),
     ):
         response = client.get(
-            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/9999-01-01/point?lat=-35&lon=145"
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/point?date=9999-01-01T00:00:00Z&lat=-35&lon=145"
         )
     assert response.status_code == 404
 
@@ -376,7 +389,7 @@ def test_point_ok(client):
         return_value=_make_ds(),
     ):
         response = client.get(
-            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/point?lat=-35&lon=145"
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/point?date=2024-01-01T00:00:00Z&lat=-35&lon=145"
         )
     assert response.status_code == 200
     body = response.json()
@@ -392,12 +405,17 @@ def test_point_out_of_bounds(client):
         return_value=_make_ds(),
     ):
         response = client.get(
-            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/point?lat=-55.46&lon=145"
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/point?date=2024-01-01T00:00:00Z&lat=-55.46&lon=145"
         )
     assert response.status_code == 404
 
 
 # --- /manifest (products availability) ---
+
+
+def _avail(dates: list[str]) -> list[tuple[str, pd.Timestamp]]:
+    """Build a get_available_dates-shaped [(iso_string, timestamp), ...] fixture."""
+    return [(d, pd.Timestamp(d)) for d in dates]
 
 
 def test_availability_ok(client):
@@ -408,7 +426,7 @@ def test_availability_ok(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.products.get_available_dates",
-            return_value=["2024-06-01", "2024-07-01"],
+            return_value=_avail(["2024-06-01", "2024-07-01"]),
         ),
     ):
         response = client.get("/api/v1/das/tiler/data_tiles/manifest")
@@ -433,11 +451,11 @@ def test_availability_date_filters(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.products.get_available_dates",
-            return_value=all_dates,
+            return_value=_avail(all_dates),
         ),
     ):
         response = client.get(
-            "/api/v1/das/tiler/data_tiles/manifest?from=2024-06-01&to=2024-09-01"
+            "/api/v1/das/tiler/data_tiles/manifest?from=2024-06-01T00:00:00Z&to=2024-09-01T00:00:00Z"
         )
     assert response.status_code == 200
     product = response.json()["products"]["product_a"]
@@ -446,9 +464,9 @@ def test_availability_date_filters(client):
     assert product["full_date_range"] == {"start": "2024-01-01", "end": "2024-12-01"}
 
 
-def test_availability_default_from_is_dataset_start(client):
-    # With no `from`, dates are not clipped to a recent window — even old dates
-    # (well before 3 months ago) are returned, starting from the dataset's earliest.
+def test_availability_no_from_is_unbounded(client):
+    # With no `from`, nothing is excluded on the lower end — from defaults to
+    # no lower bound, not a fixed window.
     with (
         patch(
             "data_access_service.core.tiler_routes.products.iter_product_items",
@@ -456,7 +474,7 @@ def test_availability_default_from_is_dataset_start(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.products.get_available_dates",
-            return_value=["2020-01-01"],
+            return_value=_avail(["2020-01-01"]),
         ),
     ):
         response = client.get("/api/v1/das/tiler/data_tiles/manifest")
@@ -466,9 +484,53 @@ def test_availability_default_from_is_dataset_start(client):
     assert product["full_date_range"] == {"start": "2020-01-01", "end": "2020-01-01"}
 
 
-def test_availability_missing_store(client):
-    # get_available_dates opens the store directly and is never wrapped by
-    # load_slice_or_404, so a missing store must still 404, not 500.
+def test_availability_metadata_uuid_filters_to_matching_products(client):
+    products = {
+        "product_a": Product(
+            id="product_a",
+            source_path="s3://bucket/a.zarr",
+            variable="VAR",
+            metadata_uuid="uuid-1",
+        ),
+        "product_b": Product(
+            id="product_b",
+            source_path="s3://bucket/b.zarr",
+            variable="VAR",
+            metadata_uuid="uuid-2",
+        ),
+    }
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.products.iter_product_items",
+            return_value=list(products.items()),
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.products.get_available_dates",
+            return_value=_avail(["2024-01-01"]),
+        ),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/manifest?metadata_uuid=uuid-1"
+        )
+    assert response.status_code == 200
+    products_out = response.json()["products"]
+    assert "product_a" in products_out
+    assert "product_b" not in products_out
+
+
+def test_availability_metadata_uuid_no_match_is_404(client):
+    with patch(
+        "data_access_service.core.tiler_routes.products.iter_product_items",
+        return_value=list(_FAKE_PRODUCTS.items()),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/manifest?metadata_uuid=does-not-exist"
+        )
+    assert response.status_code == 404
+    assert "does-not-exist" in response.json()["detail"]
+
+
+def test_availability_no_metadata_uuid_returns_every_product(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.products.iter_product_items",
@@ -476,14 +538,28 @@ def test_availability_missing_store(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.products.get_available_dates",
-            side_effect=FileNotFoundError(
-                "No such file or directory: 's3://bucket/missing.zarr'"
-            ),
+            return_value=_avail(["2024-01-01"]),
         ),
     ):
         response = client.get("/api/v1/das/tiler/data_tiles/manifest")
-    assert response.status_code == 404
-    assert "s3://bucket/missing.zarr" in response.json()["detail"]
+    assert response.status_code == 200
+    assert "product_a" in response.json()["products"]
+
+
+def test_availability_skips_products_whose_store_failed_prewarm(client):
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.products.iter_product_items",
+            return_value=list(_FAKE_PRODUCTS.items()),
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.products.is_store_available",
+            return_value=False,
+        ),
+    ):
+        response = client.get("/api/v1/das/tiler/data_tiles/manifest")
+    assert response.status_code == 200
+    assert "product_a" not in response.json()["products"]
 
 
 def test_availability_no_dates_in_range(client):
@@ -494,10 +570,12 @@ def test_availability_no_dates_in_range(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.products.get_available_dates",
-            return_value=["2020-01-01"],
+            return_value=_avail(["2020-01-01"]),
         ),
     ):
-        response = client.get("/api/v1/das/tiler/data_tiles/manifest?to=2019-01-01")
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/manifest?to=2019-01-01T00:00:00Z"
+        )
     assert response.status_code == 200
     product = response.json()["products"]["product_a"]
     assert product["available_dates"] == []

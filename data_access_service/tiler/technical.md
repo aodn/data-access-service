@@ -143,7 +143,7 @@ Solid arrows: request/data flow. Dotted arrows: read a shared static asset or fa
 
 ### Request flow
 
-**Data tiles** (`/data_tiles/{product_id}/{date}/{z}/{x}/{y}.png`)
+**Data tiles** (`/data_tiles/{product_id}/{z}/{x}/{y}.png?date=...`)
 
 `load_slice` is lazy — the route handler passes a callable to `render_tile`, which only invokes it when `_get_processed`'s in-flight dedup doesn't already have a concurrent compute running for the same key.
 
@@ -153,7 +153,7 @@ slice warm     → get_lod_grids (already set) → _get_processed computes → l
 S3 cold        → get_lod_grids (already set) → _get_processed computes → load_slice (S3 .compute())       → resample → _extract_chunk → PNG encode
 ```
 
-**Visual tiles** (`/visual_tiles/{product_id}/{date}/{z}/{x}/{y}.{ext}` or `/bbox.{ext}` — `ext ∈ {png, webp}`)
+**Visual tiles** (`/visual_tiles/{product_id}/{z}/{x}/{y}.{ext}?date=...` or `/bbox.{ext}?date=...` — `ext ∈ {png, webp}`)
 
 No processed-grid cache. Every request calls `load_slice`, optionally shares an in-flight fill compute via `_fill_dedup` if `coastal_fill` is set, then `XarrayReader` reprojects to Web Mercator.
 
@@ -185,9 +185,9 @@ data_access_service/
     tiler_routes/
       __init__.py                 ← mounts data_tiles + visual_tiles routers under {Config.BASE_URL}/tiler/*, with api_key_auth + require_tiler_ready on every route
       shared.py                   ← PRODUCT_EX/DATE_EX examples, get_product_or_404, visual_product_or_400, load_slice_or_404,
-                                     validate_date, resolve_colormap_or_error, single_variable_or_400,
+                                     parse_date_or_422, resolve_timestamp_or_404, resolve_colormap_or_error, single_variable_or_400,
                                      parse_rescale, mark_tiler_ready/require_tiler_ready — see §11
-      products.py                  ← /products, /manifest, /{id}/{date}/point — included by both tile routers
+      products.py                  ← /products, /manifest, /{id}/point?date=... — included by both tile routers
       data_tiles.py                ← /data_tiles — raw value-encoded RGBA tiles for WebGL
       visual_tiles.py              ← /visual_tiles — colourised Web Mercator XYZ tiles + bbox + animation + colormaps/legend
       startup.py                   ← run_tiler_warmup() — the tiler's startup sequence, see §11
@@ -218,11 +218,11 @@ data_access_service/
         visual_tiles.py               ← render_tile / render_bbox / render_bbox_animation — Web Mercator (visual tiles)
         masks.py                      ← inpaint_nearest, land_mask_for_grid/land_mask_for_coords, apply_ocean_mask
       store/
-        registry.py                   ← StoreRegistry (stale-while-revalidate) + per-URL date index + get_available_dates
+        registry.py                   ← StoreRegistry (stale-while-revalidate) + per-URL time index + get_available_dates
         slice_loader.py                ← load_slice / load_slice_uncached — fetch a 2-D slice from the Zarr store
         spatial.py                     ← bbox_to_wgs84 + native_resolution_in_bbox + default_bbox_from_store
     utils/
-      dates.py                        ← LOCAL_TZ + ts_to_local_date
+      dates.py                        ← ts_to_utc_iso + str_to_utc_timestamp
       geo.py                           ← dataset_bounds + json_safe_float
       colors.py                       ← hex parsing + ramp/categorical LUT builders
       image.py                        ← encode_rgba(arr, fmt) + empty_tile(fmt) + media_type(fmt) — PNG/WebP encoders shared by both renderers
@@ -252,7 +252,7 @@ These paths are constants in `data_access_service/config/tiler/paths.py`, resolv
 
 ## 5. Tile coordinate systems and projection pipeline
 
-The server produces tiles in **two different coordinate reference systems** depending on the endpoint. The two pipelines share the URL shape `/{product_id}/{date}/{z}/{x}/{y}.{ext}` but interpret `z`, `x`, `y` in entirely different coordinate systems. Mixing them up is the most common cause of "why is my tile blank / 404 / off-by-one" bugs.
+The server produces tiles in **two different coordinate reference systems** depending on the endpoint. The two pipelines share the URL shape `/{product_id}/{z}/{x}/{y}.{ext}?date=...` but interpret `z`, `x`, `y` in entirely different coordinate systems. Mixing them up is the most common cause of "why is my tile blank / 404 / off-by-one" bugs.
 
 ### 5.1 Which API should I use?
 
@@ -271,7 +271,7 @@ The server produces tiles in **two different coordinate reference systems** depe
 | **Pixel content**               | Raw value packed into RGBA bytes (24-bit normalised uint or two 8-bit U/V channels) | Colourised RGBA image after applying a colormap LUT                                                                |
 | **Reprojection happens…**       | In the **WebGL fragment shader** on the client, on the GPU                          | On the **server**, by `rio-tiler`'s `XarrayReader.tile(...)`                                                       |
 | **Multi-variable support**      | Yes (UV products such as `ucur+vcur`)                                               | No (single-variable products only; enforced by `single_variable_or_400`)                                           |
-| **Per-tile decode manifest**    | Required (`/{product_id}/{date}/manifest.json`)                                     | Not applicable                                                                                                     |
+| **Per-tile decode manifest**    | Required (`/{product_id}/manifest.json?date=...`)                                   | Not applicable                                                                                                     |
 | **Extra non-tile endpoints**    | —                                                                                   | `/bbox` (arbitrary region), `/animation` (date-range GIF/APNG/WebP)                                                |
 
 This table describes the `{z}/{x}/{y}` tile endpoints specifically. `/bbox` and `/animation` output the same **EPSG:3857 (Web Mercator)** by default, since their `?crs=` query parameter defaults to `EPSG:3857` — see [§5.4](#54-visual-tiles--generated-in-epsg3857-web-mercator) for how `?crs=` drives both the input bbox's coordinates and the output projection together.
@@ -364,9 +364,9 @@ There is no per-LOD zoom-threshold field in the manifest today — the client is
 
 `z`/`x`/`y` mean different things in each tile API — see [§5](#5-tile-coordinate-systems-and-projection-pipeline).
 
-**Mount path and auth.** Every path below is relative to the actual mount point: `{Config.BASE_URL}/tiler/data_tiles/...` and `{Config.BASE_URL}/tiler/visual_tiles/...` (`core/tiler_routes/__init__.py`), where `BASE_URL = "/api/v1/das"` today — e.g. the data-tile endpoint's real path is `GET /api/v1/das/tiler/data_tiles/{product_id}/{date}/{z}/{x}/{y}.png`. This doc uses the shorthand `/data_tiles/...` / `/visual_tiles/...` throughout to keep examples readable. **Every tiler route also requires an `X-API-Key` header** — the whole `tiler_router` carries `dependencies=[Depends(api_key_auth), Depends(require_tiler_ready)]`, so a request is rejected with `401` (wrong/missing key, `core/routes/auth.py`) or `503` (tiler still starting up, [§11.3](#113-readiness-gate)) before it ever reaches a route handler.
+**Mount path and auth.** Every path below is relative to the actual mount point: `{Config.BASE_URL}/tiler/data_tiles/...` and `{Config.BASE_URL}/tiler/visual_tiles/...` (`core/tiler_routes/__init__.py`), where `BASE_URL = "/api/v1/das"` today — e.g. the data-tile endpoint's real path is `GET /api/v1/das/tiler/data_tiles/{product_id}/{z}/{x}/{y}.png?date=...`. This doc uses the shorthand `/data_tiles/...` / `/visual_tiles/...` throughout to keep examples readable. **Every tiler route also requires an `X-API-Key` header** — the whole `tiler_router` carries `dependencies=[Depends(api_key_auth), Depends(require_tiler_ready)]`, so a request is rejected with `401` (wrong/missing key, `core/routes/auth.py`) or `503` (tiler still starting up, [§11.3](#113-readiness-gate)) before it ever reaches a route handler.
 
-**HTTP caching.** All tile-shaped bytes (`.png`/`.webp`/`.gif`/`.apng`, manifest, point) are served with `IMMUTABLE_CACHE_HEADERS` (`config/http_cache.py`): `Cache-Control: public, s-maxage=31536000, max-age=0, must-revalidate` — a year at the CDN, `must-revalidate` on the browser (relying on `s-maxage` so CloudFront still serves cached bytes for a year). This works because every such URL is fully determined by its path — the date is in the URL, so once a date's data exists the URL → bytes mapping never changes; there is no separate cache-busting version constant. Listing endpoints whose body can change without the URL changing (`/products`, `/manifest`, `/colormaps`, and the sites `/data/feature-collection/*` endpoints) instead use `REVALIDATE_CACHE_HEADERS` (`max-age=300, must-revalidate`): a short CDN/browser TTL with no ETag — the payloads are small enough that revalidation-by-freshness beats the upkeep of a conditional-request round trip.
+**HTTP caching.** All tile-shaped bytes (`.png`/`.webp`/`.gif`/`.apng`, manifest, point) are served with `IMMUTABLE_CACHE_HEADERS` (`config/http_cache.py`): `Cache-Control: public, s-maxage=31536000, max-age=0, must-revalidate` — a year at the CDN, `must-revalidate` on the browser (relying on `s-maxage` so CloudFront still serves cached bytes for a year). This works because every such URL is fully determined by its full URL (path + query) — `date` is one of the query params, so once a given instant's data exists the URL → bytes mapping never changes; there is no separate cache-busting version constant. Listing endpoints whose body can change without the URL changing (`/products`, `/manifest`, `/colormaps`, and the sites `/data/feature-collection/*` endpoints) instead use `REVALIDATE_CACHE_HEADERS` (`max-age=300, must-revalidate`): a short CDN/browser TTL with no ETag — the payloads are small enough that revalidation-by-freshness beats the upkeep of a conditional-request round trip.
 
 **Response compression.** `configure_gzip_middleware` (`core/middleware.py`, applied in `server.py`) adds Starlette's `GZipMiddleware` (`minimum_size=1000`, `compresslevel=5`) app-wide — this targets the JSON endpoints above (`/manifest`, `/products`, `/colormaps`), where large date arrays compress well. Image tiles (PNG/GIF/WebP/APNG) are excluded: they're already compressed, so re-gzipping them is pure CPU waste on the hot tile path. The exclusion works by appending `"image/"` to Starlette's `DEFAULT_EXCLUDED_CONTENT_TYPES`; `tests/test_server.py::test_gzip_skips_image_tiles` fails loudly if a Starlette upgrade ever drops that behaviour.
 
@@ -376,43 +376,44 @@ There is no per-LOD zoom-threshold field in the manifest today — the client is
 
 ```
 GET /{prefix}/products                                          → list all registered products
-GET /{prefix}/manifest?from=YYYY-MM-DD&to=YYYY-MM-DD             → available dates for all products
-GET /{prefix}/{product_id}/{date}/point?lat=&lon=                → variable value(s) at one date, nearest grid cell
+GET /{prefix}/manifest?from=...&to=...&metadata_uuid=...        → available dates for all (or matching) products
+GET /{prefix}/{product_id}/point?date=...&lat=&lon=              → variable value(s) at one instant, nearest grid cell
 ```
 
 `/manifest` parameters:
 
-| Parameter | Default                                | Description                       |
-| --------- | -------------------------------------- | --------------------------------- |
-| `from`    | each product's earliest available date | Start date inclusive (YYYY-MM-DD) |
-| `to`      | unbounded                              | End date inclusive (YYYY-MM-DD)   |
+| Parameter       | Default    | Description                       |
+| --------------- | ---------- | --------------------------------- |
+| `from`          | unbounded  | Start instant inclusive, full UTC ISO-8601 timestamp |
+| `to`             | unbounded  | End instant inclusive, full UTC ISO-8601 timestamp   |
+| `metadata_uuid` | every product | Restrict results to products whose `Product.metadata_uuid` matches (see [§13](#13-adding-a-new-product)). `404` if no product matches. |
 
 ```json
 {
   "products": {
     "model_sea_level_anomaly_gridded_realtime:gsla": {
-      "available_dates": ["2024-02-01", "2024-02-02"],
-      "full_date_range": { "start": "2011-01-01", "end": "2024-02-28" }
+      "available_dates": ["2024-02-01T03:00:00Z", "2024-02-02T03:00:00Z"],
+      "full_date_range": { "start": "2011-01-01T02:30:00Z", "end": "2024-02-28T03:15:00Z" }
     }
   }
 }
 ```
 
-`available_dates` is the `from`/`to`-filtered list. `full_date_range` is the product's full dataset bounds (earliest/latest available date) **independent of the filter**, so a client can show the full extent of a product while only listing the slice it asked for. Both `start` and `end` are `null` when the product has no dates at all.
+`available_dates` is the `from`/`to`-filtered list of **exact UTC instants**, not calendar days — matching the store's native `time` coordinate values verbatim (see [§9](#9-date-timezone-and-coordinate-normalisation)). `full_date_range` is the product's full dataset bounds (earliest/latest available instant) **independent of the filter**, so a client can show the full extent of a product while only listing the slice it asked for. Both `start` and `end` are `null` when the product has no dates at all.
 
-**Performance**: dates are read from the `time` coordinate of each Zarr store — a 1-D array held in the store singleton, resolved via its per-URL `{local_date: [timestamps]}` index. No spatial data chunks are touched. Availability is a property of the **store**, not the product, so it is resolved once per unique `source_path` and reused by every product sharing it — 85 products, 60 lookups.
+**Performance**: dates are read from the `time` coordinate of each Zarr store — a 1-D array held in the store singleton, in the per-URL `{timestamp: (raw_timestamp, iso_string)}` index (`_build_time_index`). `iso_string` is formatted once per store open/refresh, not recomputed per request — reformatting every timestamp on every `/manifest` call was measurably slow once addressing moved from bucketed calendar days to exact instants (more, smaller entries). `get_available_dates` just reshapes the already-sorted index into a list, no formatting or sorting at request time. No spatial data chunks are touched. Availability is a property of the **store**, not the product, so it is resolved once per unique `source_path` and reused by every product sharing it — 85 products, 60 lookups.
 
 **Fault isolation**: each unique store's lookup is wrapped individually. A store that cannot be opened yields `available_dates: []` and a null `full_date_range` **for its own products only**, logged once, while every other product answers normally; the route returns 200 whenever at least one store resolved, and 503 only when none did. This is not an optimisation — ogcapi-java fetches this global manifest on _every_ collection-products call, so an unisolated failure would break the product listing for every collection, a global outage wearing the costume of a local degradation. It is also what makes the graded prewarm policy in [§11.2](#112-run_tiler_warmup-coretiler_routesstartuppy) safe: keeping an unresolved store's products registered is only reasonable when one bad store cannot fail `/manifest`.
 
 **`GET /products`** returns one `ProductConfig` (`schemas/products.py`) per registered product, built from the live `Product` via `ProductConfig.from_product` — so it reflects each product's fully resolved configuration (`ocean_masked`, `visual`, tile settings) rather than what the variable config literally spells out. `lod_grids` is deliberately excluded (computed lazily from the store, not config — see [§13](#13-adding-a-new-product)).
 
-**`/point` cache headers — immutable**, same rationale as tile endpoints: the date is in the path, so the URL → bytes mapping is pinned once that date's data exists.
+**`/point` cache headers — immutable**, same rationale as tile endpoints: `date` is a query param, so the URL → bytes mapping is pinned once that instant's data exists.
 
 ### 6.2 Data tiles (`/data_tiles`)
 
 ```
-GET /data_tiles/{product_id}/{date}/{z}/{x}/{y}.png       → raw RGBA PNG tile
-GET /data_tiles/{product_id}/{date}/manifest.json         → bounds + value ranges + LOD grid config
+GET /data_tiles/{product_id}/{z}/{x}/{y}.png?date=...      → raw RGBA PNG tile
+GET /data_tiles/{product_id}/manifest.json?date=...        → bounds + value ranges + LOD grid config
 ```
 
 `z` = LOD level, `x` = chunk column (`0` = westernmost), `y` = chunk row (`0` = northernmost).
@@ -426,9 +427,9 @@ The three product-consuming endpoints here (tile, `/bbox`, `/animation`) go thro
 ```
 GET /visual_tiles/colormaps                                            → all supported colormap names
 GET /visual_tiles/colormaps/{name}/legend                              → color legend PNG for a colormap
-GET /visual_tiles/{product_id}/{date}/{z}/{x}/{y}.{ext}                  → colourised Web Mercator image (.png or .webp)
-GET /visual_tiles/{product_id}/{date}/bbox.{ext}?bbox=minx,miny,maxx,maxy → colourised image for arbitrary bbox (.png or .webp)
-GET /visual_tiles/{product_id}/{from_date}/{to_date}/animation.{ext}    → animated bbox across a date range (.gif, .apng, .webp)
+GET /visual_tiles/{product_id}/{z}/{x}/{y}.{ext}?date=...                   → colourised Web Mercator image (.png or .webp)
+GET /visual_tiles/{product_id}/bbox.{ext}?date=...&bbox=minx,miny,maxx,maxy → colourised image for arbitrary bbox (.png or .webp)
+GET /visual_tiles/{product_id}/animation.{ext}?from_date=...&to_date=...   → animated bbox across a date range (.gif, .apng, .webp)
 ```
 
 **Legend query parameters:**
@@ -463,7 +464,7 @@ Without `rescale`, only the color bar is rendered. With `rescale`, 20 pixels alo
 Renders the same bbox across every available date in `[from_date, to_date]` and assembles them into a single animated image. Intended for demos and quick visualisations — **not** a hot-path endpoint.
 
 ```
-GET /visual_tiles/{product_id}/{from_date}/{to_date}/animation.{ext}
+GET /visual_tiles/{product_id}/animation.{ext}?from_date=...&to_date=...
 ```
 
 `ext` ∈ `gif`, `apng`, `webp`. Single-variable products only. `from_date` must be ≤ `to_date`.
@@ -686,10 +687,10 @@ Colormap resolution and legend rendering are **not** cached in-process today (no
 The tile and bbox endpoints take the output format as a `.{ext}` path-param suffix:
 
 ```
-GET /visual_tiles/{id}/{date}/{z}/{x}/{y}.png         → image/png
-GET /visual_tiles/{id}/{date}/{z}/{x}/{y}.webp        → image/webp
-GET /visual_tiles/{id}/{date}/bbox.png?bbox=...       → image/png
-GET /visual_tiles/{id}/{date}/bbox.webp?bbox=...      → image/webp
+GET /visual_tiles/{id}/{z}/{x}/{y}.png?date=...         → image/png
+GET /visual_tiles/{id}/{z}/{x}/{y}.webp?date=...        → image/webp
+GET /visual_tiles/{id}/bbox.png?date=...&bbox=...       → image/png
+GET /visual_tiles/{id}/bbox.webp?date=...&bbox=...      → image/webp
 ```
 
 Why both formats:
@@ -709,47 +710,52 @@ Why both formats:
 
 ## 9. Date, timezone, and coordinate normalisation
 
-Conventions applied at store-open and date-parsing time so that all downstream code sees a uniform shape regardless of what the source Zarr store happens to use natively. **The timezone rule is the most critical invariant in this system** — getting it wrong causes silent 404s or data served for the wrong day.
+Conventions applied at store-open and date-parsing time so that all downstream code sees a uniform shape regardless of what the source Zarr store happens to use natively.
 
-### 9.1 The timezone rule
+### 9.1 UTC-only, exact-instant addressing
 
-| Layer                        | Representation                                                                        |
-| ---------------------------- | ------------------------------------------------------------------------------------- |
-| Zarr store `time` coordinate | UTC — numpy `datetime64[ns]` is always UTC by convention                              |
-| API request/response dates   | Local time in `tile_timezone` (default `Australia/Sydney`, AEST UTC+10 / AEDT UTC+11) |
+| Layer                         | Representation                                                         |
+| ------------------------------ | ------------------------------------------------------------------------ |
+| Zarr store `time` coordinate  | UTC — numpy `datetime64[ns]` is always UTC by convention                |
+| API request/response dates    | The same UTC instant, verbatim — no timezone conversion, no bucketing   |
 
-`tile_timezone` is an IANA timezone name in the `tiler:` block of `config/config.yaml`, read once via `Config.get_config().get_tiler_config().tile_timezone`. To deploy this server for a different region, edit that value and restart — no code changes needed. All date conversion (manifest output, tile request matching, error messages) uses the configured timezone automatically.
+The tiler has no notion of "day" as a unit of addressing and no configured timezone. `date` (and `from_date`/`to_date`) mean an **exact UTC instant** — the client gets a list of them from `/manifest`'s `available_dates` and passes one back unchanged. There is no calendar-day bucketing anywhere in the pipeline, so there is nothing for two conversion points to silently disagree about.
 
-All satellite passes over Australia occur during Australian daytime. Their UTC timestamps typically fall on the **previous UTC day** (e.g. a pass at `2022-06-01 01:20 AEST` is `2022-05-31 15:20 UTC`). Comparing UTC dates to local request dates directly would return a 404 for every such record.
-
-**Why not just bucket everything by UTC day and avoid a timezone rule entirely?** Because the API is day-granularity — every date-bearing endpoint request identifies one calendar day, and "which day" is a matter of interpretation, not a fixed instant. `Australia/Sydney`'s midnight-to-midnight window is offset from UTC's by +10/+11 hours, so a Sydney day and a UTC day are different 24-hour spans of the same underlying timestamps. The problem isn't that UTC is the wrong choice — it's that whichever convention is chosen, it must be the _same_ convention everywhere a day boundary is drawn. `tile_timezone` exists to name that single convention explicitly, and `LOCAL_TZ` (`utils/dates.py`) being one module-level constant, imported everywhere, is what keeps `get_available_dates` (day boundaries drawn when building the index) and `load_slice` (day boundaries drawn when resolving a request) from silently disagreeing.
+This is a deliberate simplification over bucketing by calendar day (local or UTC). Any day-bucketing scheme requires deciding, for every timestamp, which day it "belongs to" — and that decision is an interpretation, not a fact: a local-time bucketing needs a timezone (and correctly handling DST, and — since the tiler serves many products from different sensors, each with its own characteristic pass time — no single fixed offset generalises across products); even bucketing by the timestamp's own UTC calendar date is still a choice that collapses distinct instants (multiple passes on the same UTC day) into one addressable key. Addressing by exact instant sidesteps the question entirely: a request either names a timestamp that exists in the store, or it doesn't.
 
 ### 9.2 How the server handles dates
 
-`LOCAL_TZ` is built once at import time from `tile_timezone` in `utils/dates.py`:
+`utils/dates.py` has two functions, and every date-touching code path goes through one of them — never a hand-rolled conversion or a raw string comparison:
 
 ```python
-LOCAL_TZ = ZoneInfo(Config.get_config().get_tiler_config().tile_timezone)
+def ts_to_utc_iso(ts) -> str:
+    """Format a raw (naive UTC) store timestamp as a canonical UTC ISO-8601 string."""
+    return pd.Timestamp(ts).tz_localize("UTC").isoformat().replace("+00:00", "Z")
 
-def ts_to_local_date(ts) -> str:
-    return str(pd.Timestamp(ts).tz_localize("UTC").tz_convert(LOCAL_TZ).strftime("%Y-%m-%d"))
+def str_to_utc_timestamp(date: str) -> pd.Timestamp:
+    """Parse a client-supplied date/timestamp string into a naive-UTC instant."""
+    ts = pd.Timestamp(date)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert("UTC").tz_localize(None)
+    return ts
 ```
 
-Every point where a UTC timestamp is exposed or compared is converted via `ts_to_local_date`:
+- **The store's time index** (`registry.py::_build_time_index`) — keys the store's raw `time` coordinate values by `pd.Timestamp(ts)` (naive, UTC-implied) for O(1) exact lookup, paired with each value's `ts_to_utc_iso`-formatted string: `{timestamp: (raw_timestamp, iso_string)}`. Both the key and the formatted string are computed once, at store open/refresh time — `get_available_dates` just reshapes this same dict into `[(iso_string, timestamp)]` (already sorted, since `_normalise_coords` sorts the source dataset before the index is built and dicts preserve insertion order), no per-request formatting or sorting.
+- **`parse_date_or_422`** (`core/tiler_routes/shared.py`) — the entry point for every date-shaped query param (`date`, `from`/`from_date`, `to`/`to_date`). Requires a full timestamp (rejects anything without a `T`, 422) before parsing via `str_to_utc_timestamp`, and returns the parsed `pd.Timestamp` so the route handler doesn't have to parse the same string twice. A bare date like `2024-06-15` is always rejected, even for `from`/`to` — accepting it would let a request "succeed" only when the underlying store happens to have a timestamp at exact midnight for that day (true for some products, e.g. daily model output; false for others, e.g. satellite passes at an arbitrary time of day), which is not a distinction a client should have to know about per-product.
+- **`resolve_timestamp_or_404`** (`core/tiler_routes/shared.py`) — every single-date route handler (data/visual tile, manifest, point) calls this immediately after `parse_date_or_422`, so a date absent from the store's time index 404s before any further per-request work (LOD grids, tile bounds, colormap/rescale parsing). It's a thin wrapper around `registry.resolve_timestamp` (an O(1) dict lookup, cheap since prewarm already opened the store) — it does *not* replace the check inside `load_slice`, because that one also needs the resolved raw timestamp to actually fetch the slice, not just confirm it exists. Both call sites build their 404/`FileNotFoundError` message via the same `registry.unavailable_date_message`, so the two can't drift apart. Range-filtered call sites (`/manifest`'s `from`/`to`, `/animation`) skip this guard entirely — a range bound isn't a single-instant lookup, and `/animation`'s per-frame dates come straight from `get_available_dates`, so they're already guaranteed to resolve.
+- **`load_slice`** (`slice_loader.py::_fetch_slice_from_store`) — takes an already-parsed `pd.Timestamp`, not a date string. Every route handler calls `parse_date_or_422` exactly once and threads the result through `load_slice_or_404` → `load_slice`/`load_slice_uncached` → `resolve_timestamp`, which just does a dict lookup — no re-parsing anywhere on this path. No match → `FileNotFoundError` (mapped to 404 by `load_slice_or_404`). There is no "nearest" fallback and no first-of-several-matches selection: a request either names an exact instant in the store or it doesn't.
+- **`from`/`to` range filters** (`/manifest`, `/animation`) — after `parse_date_or_422`, both the bound and every candidate are compared as parsed `pd.Timestamp` values, not raw strings. Raw string comparison only sorts/bounds correctly when every value shares byte-identical formatting; the `pd.Timestamp` each candidate is compared against comes straight from `get_available_dates`'s precomputed list, so filtering never re-parses a date string it was just handed. `/animation`'s per-frame fan-out passes that same `pd.Timestamp` straight to `load_slice_uncached` too, rather than re-deriving it from the frame's date string.
 
-- **`get_available_dates` / the store's date index** — converts store timestamps to local date strings, keyed for O(1) lookup. The manifest always returns values the client can round-trip back unchanged as request dates.
-- **`load_slice`** — resolves a requested local date against that index. If multiple timestamps map to the same local date (e.g. sub-daily data), the first is used. If no timestamp maps to the requested local date, `FileNotFoundError` is raised (mapped to 404 by `load_slice_or_404`). This avoids `method="nearest"` silently serving data from an adjacent day.
-
-**Critical constraint** — every consumer must go through `LOCAL_TZ`; never hardcode a timezone string. Changing `tile_timezone` without restarting (or having some code path cache an old value) would cause dates to silently mismatch: the manifest would return dates the client cannot successfully request.
+Because `parse_date_or_422`/`str_to_utc_timestamp` **parse** the incoming string rather than requiring an exact string match, a client doesn't need to reproduce `ts_to_utc_iso`'s exact serialisation — any full ISO-8601 timestamp `pandas` accepts that names the same instant resolves correctly, and it's parsed exactly once per request regardless of how many internal layers the value passes through afterward.
 
 ### 9.3 Client contract
 
-Dates in the API are **opaque keys**, not calendar dates in the client's local timezone. Clients must:
+Dates in the API are **exact instants**, not calendar dates. Clients must:
 
-1. Fetch available dates from `/manifest`.
-2. Pass those exact date strings back in tile/point requests.
+1. Fetch available dates from `/manifest`'s `available_dates`.
+2. Pass one of those exact timestamp strings back in tile/point/animation requests, as the `date` (or `from_date`/`to_date`) query parameter.
 
-Do not construct date strings from the client's local clock — the server interprets them as `tile_timezone` local dates, and a client in a different timezone would produce strings that do not exist in the manifest.
+A client that wants to show a user-facing "day" label (e.g. in the local timezone of the region a product covers) is free to do so — it has the full instant, so it can convert with full precision — but that is a display-only concern local to the client. The server has no opinion on it and does not need to agree with it, since the server never buckets by day at all.
 
 ### 9.4 Coordinate name normalisation
 
@@ -784,7 +790,7 @@ Uses a **stale-while-revalidate** strategy to pick up newly appended time steps 
 
 Re-opening is cheap — `xr.open_zarr` reads only metadata and coordinate arrays, no data chunks. In-flight `load_slice` calls hold a direct Python reference to the old dataset object and complete normally.
 
-Alongside the dataset, the registry builds a per-URL `{local_date: [timestamps]}` index so `load_slice` / `get_available_dates` can resolve a local date in O(1).
+Alongside the dataset, the registry builds a per-URL `{timestamp: (raw_timestamp, iso_string)}` index so `load_slice` can resolve a requested timestamp in O(1) and `get_available_dates` can list it directly, rather than re-sorting and reformatting every timestamp on every request.
 
 ### 10.2 L1 — Slice cache (`services/caching/slice_cache.py` wiring, `services/store/slice_loader.py` fetch logic)
 
@@ -898,8 +904,8 @@ The server combines an **asyncio event loop** (for FastAPI/Uvicorn request multi
 ### 12.1 Why most endpoints are `def`, not `async def`
 
 ```python
-@router.get("/{product_id}/{date}/{z}/{x}/{y}.{ext}")
-def get_tile(...):
+@router.get("/{product_id}/{z}/{x}/{y}.{ext}")
+def get_tile(date: str = Query(...), ...):
     ...
 ```
 
@@ -1097,7 +1103,6 @@ A wrong-layer choice has real costs: making `LOD.max_lods` a freely-edited opera
 
 | Key                       | Default            | Description                                                                                                                                                                  |
 | ------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tile_timezone`           | `Australia/Sydney` | IANA timezone for date conversion. See [§9](#9-date-timezone-and-coordinate-normalisation).                                                                                  |
 | `store_ttl_seconds`       | `600`              | Stale-while-revalidate window for the Zarr store singleton.                                                                                                                  |
 | `store_prewarm_workers`   | `6`                | Capacity-limiter cap for concurrent `xr.open_zarr` opens during startup store prewarm. Sized to the S3 connection pool.                                                      |
 | `thread_pool_size`        | `20`               | Anyio thread-pool size, shared with the rest of `data-access-service`. Each in-flight sync tiler request uses one slot. See [§12](#12-concurrency-event-loop-and-threading). |
