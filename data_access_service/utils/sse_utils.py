@@ -19,6 +19,7 @@ from data_access_service.utils.sse_wrapper import format_sse
 logger = logging.getLogger(__name__)
 
 SSE_IT_INTERVAL: float = 20.0
+SSE_ESTIMATE_INTERVAL: float = 5.0
 
 CANCELLATION_KWARG = "cancellation"
 
@@ -199,7 +200,13 @@ def sse_it(
             return StreamingResponse(
                 sse_stream(),
                 media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    # nginx buffers proxied responses by default, which holds
+                    # back the heartbeats. This turns it off for this response.
+                    "X-Accel-Buffering": "no",
+                },
             )
 
         wrapper.__signature__ = _public_signature(fn)

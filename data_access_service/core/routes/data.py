@@ -41,7 +41,7 @@ from data_access_service.core.routes.helpers import (
 from data_access_service.utils.cancellation import Cancellation
 from data_access_service.utils.single_flight import SingleFlight
 from data_access_service.utils.subset_request_resolver import resolve_bboxes
-from data_access_service.utils.sse_utils import sse_it
+from data_access_service.utils.sse_utils import SSE_ESTIMATE_INTERVAL, sse_it
 from data_access_service.utils.sse_wrapper import sse_wrapper
 
 router = APIRouter()
@@ -315,7 +315,7 @@ def _estimate_dedup_key(uuid: str, body: EstimateSizeRequest) -> str:
 
 
 @router.post("/data/{uuid}/estimate_size", dependencies=[Depends(api_key_auth)])
-@sse_it
+@sse_it(interval=SSE_ESTIMATE_INTERVAL)
 def estimate_size_multi(
     uuid: str,
     body: EstimateSizeRequest,
