@@ -7,7 +7,6 @@ class TilerConfig:
     the ``tiler:`` section of config.yaml (see Config.get_tiler_config()).
     """
 
-    tile_timezone: str
     co_bucket: str
     store_ttl_seconds: int
     store_prewarm_workers: int

@@ -13,7 +13,6 @@ from typing import ClassVar
 
 from data_access_service.config.config import Config
 from data_access_service.core.duckdbclient import ParquetDuckDBClient
-from data_access_service.models.sites_types import ParquetsGenerationConfig
 
 
 def quote_ident(name: str) -> str:

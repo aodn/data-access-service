@@ -19,9 +19,12 @@ BASE = "/api/v1/das/tiler/visual_tiles"
 
 # Every product-consuming endpoint under the visual-tiles router.
 VISUAL_ROUTES = [
-    pytest.param(f"{BASE}/{{pid}}/2024-01-01/5/0/0.png", id="tile"),
-    pytest.param(f"{BASE}/{{pid}}/2024-01-01/bbox.png", id="bbox"),
-    pytest.param(f"{BASE}/{{pid}}/2024-01-01/2024-01-02/animation.gif", id="animation"),
+    pytest.param(f"{BASE}/{{pid}}/5/0/0.png?date=2024-01-01T00:00:00Z", id="tile"),
+    pytest.param(f"{BASE}/{{pid}}/bbox.png?date=2024-01-01T00:00:00Z", id="bbox"),
+    pytest.param(
+        f"{BASE}/{{pid}}/animation.gif?from_date=2024-01-01T00:00:00Z&to_date=2024-01-02T00:00:00Z",
+        id="animation",
+    ),
 ]
 
 
@@ -92,8 +95,8 @@ def test_point_endpoint_stays_open_to_data_capable_products(client, monkeypatch)
     )
 
     response = client.get(
-        f"/api/v1/das/tiler/visual_tiles/{NON_VISUAL_ID}/2024-01-01/point"
-        "?lat=-34.5&lon=150.5"
+        f"/api/v1/das/tiler/visual_tiles/{NON_VISUAL_ID}/point"
+        "?date=2024-01-01T00:00:00Z&lat=-34.5&lon=150.5"
     )
 
     assert response.status_code == 200
@@ -123,4 +126,4 @@ def test_visual_capable_scalar_is_not_rejected_by_the_new_check(client, monkeypa
     )
 
     with pytest.raises(RuntimeError, match="reached rendering"):
-        client.get(f"{BASE}/{VISUAL_ID}/2024-01-01/5/0/0.png")
+        client.get(f"{BASE}/{VISUAL_ID}/5/0/0.png?date=2024-01-01T00:00:00Z")

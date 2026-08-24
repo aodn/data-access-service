@@ -31,7 +31,8 @@ from .shared import (
     get_product_or_404,
     is_store_available_or_404,
     load_slice_or_404,
-    validate_date,
+    parse_date_or_422,
+    resolve_timestamp_or_404,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,8 +72,8 @@ async def get_products(response: Response):
     "/manifest",
     summary="Products availability",
     description=(
-        "Returns available dates for every product. "
-        "`from` defaults to each product's earliest available date; `to` is unbounded by default."
+        "Returns available dates for every product, or only products belonging to "
+        "a given metadata_uuid. `from` and `to` are unbounded by default."
     ),
     response_model=ManifestResponse,
 )
@@ -81,22 +82,49 @@ def get_products_availability(
     from_date: str | None = Query(
         None,
         alias="from",
-        pattern=r"^\d{4}-\d{2}-\d{2}$",
-        description="Start date (inclusive), YYYY-MM-DD. Defaults to each product's earliest available date.",
-        openapi_examples={"default": Example(value="2024-01-01")},
+        description=(
+            "Start instant (inclusive), full UTC ISO-8601 timestamp. "
+            "Defaults to no lower bound."
+        ),
+        openapi_examples={"default": Example(value="2024-01-01T00:00:00Z")},
     ),
     to_date: str | None = Query(
         None,
         alias="to",
-        pattern=r"^\d{4}-\d{2}-\d{2}$",
-        description="End date (inclusive), YYYY-MM-DD. Defaults to no upper bound.",
-        openapi_examples={"default": Example(value="2024-12-31")},
+        description=(
+            "End instant (inclusive), full UTC ISO-8601 timestamp. "
+            "Defaults to no upper bound."
+        ),
+        openapi_examples={"default": Example(value="2024-12-31T00:00:00Z")},
+    ),
+    metadata_uuid: str | None = Query(
+        None,
+        description=(
+            "Restrict results to products linked to this GeoNetwork/STAC collection "
+            "UUID. Defaults to every registered product. 404s if no product matches."
+        ),
     ),
 ):
-    products = {}
+    from_ts = parse_date_or_422(from_date) if from_date else None
+    to_ts = parse_date_or_422(to_date) if to_date else None
+
     # iter_product_items returns a snapshot list so a concurrent reload can't
     # raise RuntimeError ("dictionary changed size during iteration") here.
-    for product_id, product in iter_product_items():
+    items = iter_product_items()
+    if metadata_uuid is not None:
+        items = [
+            (product_id, product)
+            for product_id, product in items
+            if product.metadata_uuid == metadata_uuid
+        ]
+        if not items:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No products found for metadata_uuid {metadata_uuid!r}.",
+            )
+
+    products = {}
+    for product_id, product in items:
         if not is_store_available(product.source_path):
             continue
 
@@ -105,16 +133,16 @@ def get_products_availability(
             continue
         # full_date_range is the product's full dataset bounds, independent of from/to;
         # available_dates below is the from/to-filtered subset.
-        dates = all_dates
-        if from_date:
-            dates = [d for d in dates if d >= from_date]
-        if to_date:
-            dates = [d for d in dates if d <= to_date]
+        dates = [
+            d
+            for d, ts in all_dates
+            if (from_ts is None or ts >= from_ts) and (to_ts is None or ts <= to_ts)
+        ]
         products[product_id] = {
             "available_dates": dates,
             "full_date_range": {
-                "start": all_dates[0] if all_dates else None,
-                "end": all_dates[-1] if all_dates else None,
+                "start": all_dates[0][0] if all_dates else None,
+                "end": all_dates[-1][0] if all_dates else None,
             },
         }
 
@@ -123,24 +151,28 @@ def get_products_availability(
 
 
 @router.get(
-    "/{product_id}/{date}/point",
+    "/{product_id}/point",
     summary="Point value lookup",
-    description="Returns the value(s) of all product variables at the nearest grid cell to the given lat/lon.",
+    description=(
+        "Returns the value(s) of all product variables at the nearest grid cell to the given lat/lon. "
+        "`date` must be one of the exact UTC timestamps returned by `/manifest`'s `available_dates`."
+    ),
     response_model=PointResponse,
 )
 def get_point(
     response: Response,
     product_id: str = Path(openapi_examples=PRODUCT_EX),
-    date: str = Path(pattern=r"^\d{4}-\d{2}-\d{2}$", openapi_examples=DATE_EX),
+    date: str = Query(openapi_examples=DATE_EX),
     lat: float = Query(..., openapi_examples={"default": Example(value=-33.8)}),
     lon: float = Query(..., openapi_examples={"default": Example(value=151.2)}),
 ):
     product = get_product_or_404(product_id)
     is_store_available_or_404(product)
-    validate_date(date)
+    ts = parse_date_or_422(date)
+    resolve_timestamp_or_404(product, ts)
     variables = product.variables
     ds = load_slice_or_404(
-        product.source_path, date, variables, ocean_masked=product.ocean_masked
+        product.source_path, ts, variables, ocean_masked=product.ocean_masked
     )
 
     _require_point_in_bounds(ds, lat, lon)

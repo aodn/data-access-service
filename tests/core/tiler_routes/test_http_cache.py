@@ -6,9 +6,7 @@ from .test_data_tiles import _make_ds
 
 _FAKE_PRODUCTS = {}
 
-_POINT_URL = (
-    "/api/v1/das/tiler/data_tiles/sea_level_anomaly/2024-01-01/point?lat=-35&lon=145"
-)
+_POINT_URL = "/api/v1/das/tiler/data_tiles/sea_level_anomaly/point?date=2024-01-01T00:00:00Z&lat=-35&lon=145"
 
 
 def test_immutable_endpoint_disables_browser_caching_but_not_cdn(client):

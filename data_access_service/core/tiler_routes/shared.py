@@ -1,19 +1,24 @@
 """Helpers shared across the three routers (products, data_tiles, visual_tiles)."""
 
-from datetime import date as _Date
 from http import HTTPStatus
 
+import pandas as pd
 from fastapi import HTTPException
 from fastapi.openapi.models import Example
 
 from data_access_service.tiler.services.colormap.resolver import resolve_colormap
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.product.registry import get_product
-from data_access_service.tiler.services.store.registry import is_store_available
+from data_access_service.tiler.services.store.registry import (
+    is_store_available,
+    resolve_timestamp,
+    unavailable_date_message,
+)
 from data_access_service.tiler.services.store.slice_loader import load_slice
+from data_access_service.tiler.utils.dates import str_to_utc_timestamp
 
 PRODUCT_EX: dict[str, Example] = {"default": Example(value="sea_level_anomaly")}
-DATE_EX: dict[str, Example] = {"default": Example(value="2024-02-24")}
+DATE_EX: dict[str, Example] = {"default": Example(value="2024-02-24T00:00:00Z")}
 
 
 _tiler_ready = False
@@ -75,18 +80,42 @@ def visual_product_or_400(product_id: str) -> Product:
     return product
 
 
-def validate_date(date: str) -> None:
+def parse_date_or_422(date: str) -> pd.Timestamp:
+    """Parse ``date`` as a full UTC timestamp, raising 422 on failure."""
     try:
-        _Date.fromisoformat(date)
+        return str_to_utc_timestamp(date, require_tz=True)
     except ValueError as e:
-        raise HTTPException(status_code=422, detail=f"Invalid date: {date!r}") from e
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Invalid date: {date!r} ({e}) — expected a full UTC "
+                "timestamp (e.g. '2024-06-15T23:00:00Z'). Use one of the "
+                "exact values from /manifest's available_dates."
+            ),
+        ) from e
+
+
+def resolve_timestamp_or_404(product: Product, ts: pd.Timestamp) -> None:
+    """Fail fast if ``ts`` does not name an exact instant in the store's time index.
+
+    A cheap dict-lookup mirror of the check ``_fetch_slice_from_store`` performs
+    deep in ``load_slice`` (which still needs to run it there too, to get the
+    raw timestamp for the actual fetch — this doesn't replace that, it just lets
+    a bad date 404 before any further per-request work, e.g. LOD grids, tile
+    bounds).
+    """
+    if resolve_timestamp(product.source_path, ts) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=unavailable_date_message(product.source_path, ts),
+        )
 
 
 def load_slice_or_404(
-    store_url: str, date: str, variables: list[str], ocean_masked: bool = False
+    store_url: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
 ):
     try:
-        return load_slice(store_url, date, variables, ocean_masked)
+        return load_slice(store_url, ts, variables, ocean_masked)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 

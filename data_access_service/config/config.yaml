@@ -86,9 +86,6 @@ pmtiles:
       maxzoom: 12
 tiler:
   config:
-    # Local dates in the API are computed in this timezone. Zarr store timestamps
-    # are always UTC.
-    tile_timezone: "Australia/Sydney"
     # Seconds before a Zarr store is re-opened to pick up newly appended time steps.
     store_ttl_seconds: 600
     # Capacity gate for concurrent store opens during startup prewarm.
