@@ -79,6 +79,18 @@ class TestDateTimeUtils(unittest.TestCase):
             parse_date(date_string, format_to_convert="%Y-%m-%d"), expected_date
         )
 
+    def test_parse_date_iso_z_suffix(self):
+        expected = pd.Timestamp("2024-04-05T00:00:00", tz=pytz.UTC)
+        self.assertEqual(parse_date("2024-04-05T00:00:00Z"), expected)
+        self.assertEqual(parse_date("2024-04-05T00:00:00z"), expected)
+
+    def test_parse_date_iso_offset_converted_to_utc(self):
+        # 2024-04-05T10:00:00+10:00 is 2024-04-05T00:00:00Z
+        self.assertEqual(
+            parse_date("2024-04-05T10:00:00+10:00"),
+            pd.Timestamp("2024-04-05T00:00:00", tz=pytz.UTC),
+        )
+
     def test_get_final_day_of_(self):
         date = pd.Timestamp(year=2023, month=2, day=15)
         expected_date = pd.Timestamp(
