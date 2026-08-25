@@ -216,7 +216,7 @@ class TestParquetProcessorWithS3(TestWithS3):
             # WKB hex create_bbox_filter compares against, so any MultiPolygon yields
             # an empty table. This test is about the time window.
             "multi_polygon": None,
-            "recipient": "manfai.ng@utas.edu.au",
+            "recipient": "someone@utas.edu.au",
             "key": ANIMAL_METADATA_KEY,
             "start_date": "non-specified",
         }

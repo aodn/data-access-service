@@ -8,6 +8,7 @@ import pytz
 
 from typing import Tuple
 import pyarrow.dataset as ds
+from pandas._libs import NaTType
 from pyarrow import compute as pc
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -263,8 +264,8 @@ def trim_date_range(
     api: BaseAPI,
     uuid: str,
     key: str,
-    requested_start_date: pd.Timestamp,
-    requested_end_date: pd.Timestamp,
+    requested_start_date: pd.Timestamp | NaTType,
+    requested_end_date: pd.Timestamp | NaTType,
 ) -> Tuple[pd.Timestamp | None, pd.Timestamp | None]:
 
     log.info(f"Original date range: {requested_start_date} to {requested_end_date}")
