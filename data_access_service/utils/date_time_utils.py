@@ -8,7 +8,7 @@ import pytz
 from pandas import Timestamp
 from functools import wraps
 from typing import Tuple
-from datetime import datetime
+from datetime import datetime, tzinfo
 from inspect import iscoroutinefunction
 
 from dateutil.relativedelta import relativedelta
@@ -29,12 +29,23 @@ MIN_DATE = "1970-01-01T00:00:00Z"
 log = logging.getLogger(__name__)
 
 
+def _to_timezone(
+    ts: pd.Timestamp | NaTType, time_zone: str | tzinfo
+) -> Timestamp | NaTType:
+    """Attach ``time_zone`` to a naive timestamp, or convert an aware one to it."""
+    if ts.tz is None:
+        return ts.tz_localize(time_zone)
+    return ts.tz_convert(time_zone)
+
+
 # parse all common format of date string into given format, such as "%Y-%m-%d"
 def parse_date(
-    date_string: str, format_to_convert: str | None = None, time_zone: str = pytz.UTC
+    date_string: str,
+    format_to_convert: str | None = None,
+    time_zone: str | tzinfo = pytz.UTC,
 ) -> pd.Timestamp | NaTType:
     if format_to_convert is None:
-        return pd.Timestamp(date_string).tz_localize(time_zone)
+        return _to_timezone(pd.Timestamp(date_string), time_zone)
     else:
         # Custom format
         ts = pd.to_datetime(date_string, format=format_to_convert)
@@ -45,7 +56,7 @@ def parse_date(
                 nano_str = frac_part[6:9]
                 nanosec = int(nano_str) if nano_str else 0
                 ts = ts + pd.Timedelta(nanoseconds=nanosec)
-        return ts.tz_localize(time_zone)
+        return _to_timezone(ts, time_zone)
 
 
 def start_of_day_nano(ts: pd.Timestamp) -> pd.Timestamp:
