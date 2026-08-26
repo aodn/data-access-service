@@ -21,7 +21,6 @@ from data_access_service.utils.email_templates.coordinate_format import (
 )
 from data_access_service.models.bounding_box import BoundingBox
 
-
 # ---------------------------------------------------------------------------
 # The user draws an area on the map; the email shows it back to them.
 #
@@ -150,6 +149,29 @@ class TestSubsettingPolygon(unittest.TestCase):
 
         self.assertIn("Polygon Selection", html)
         self.assertNotIn("Date Range", html)
+
+    def test_default_dates_are_suppressed_in_iso_form(self):
+        # resolve_non_specified_dates now writes the defaults at full precision.
+        # The check compares instants, so both spellings must be recognised;
+        # a string comparison against "1970-01-01" missed this one and the
+        # email rendered a bogus "1970 - today" range.
+        end = pandas.Timestamp.now(tz="UTC")
+        html = form_subsetting_divs(
+            "1970-01-01T00:00:00Z",
+            end.strftime("%Y-%m-%dT23:59:59.999999999+00:00"),
+            FREEFORM_POLYGON,
+        )
+
+        self.assertIn("Polygon Selection", html)
+        self.assertNotIn("Date Range", html)
+
+    def test_real_range_still_renders_in_iso_form(self):
+        # The suppression must not swallow a range the user actually chose.
+        html = form_subsetting_divs(
+            "2024-01-05T00:00:00Z", "2024-12-31T23:59:59.999999999+00:00", None
+        )
+
+        self.assertIn("Date Range", html)
 
     def test_default_dates_without_area_returns_empty(self):
         # Default dates and no spatial selection means nothing to show at all.

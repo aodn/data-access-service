@@ -141,9 +141,21 @@ class TestInit(TestWithS3):
                 with patch.object(AWSHelper, "submit_a_job") as submit_a_job:
                     get_month_count_per_job.return_value = 1200  # Set a very high month count to ensure no splitting occurs
                     # Mock the get_temporal_extent method to return a fixed value
+                    # Shaped like the real API.get_temporal_extent, which
+                    # reports its bounds day-aligned: start at the first
+                    # nanosecond of the day, end at the last.
                     get_temporal_extent.return_value = (
                         pd.Timestamp(year=1970, month=1, day=1),
-                        pd.Timestamp(year=2024, month=12, day=31),
+                        pd.Timestamp(
+                            year=2024,
+                            month=12,
+                            day=31,
+                            hour=23,
+                            minute=59,
+                            second=59,
+                            microsecond=999999,
+                            nanosecond=999,
+                        ),
                     )
 
                     submit_a_job.return_value = "test-job-id-returned"

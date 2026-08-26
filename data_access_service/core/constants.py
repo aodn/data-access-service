@@ -4,6 +4,11 @@ import pandas as pd
 
 from data_access_service.models.bounding_box import BoundingBox
 
+# Marker value for an optional field the user did not provide (dates,
+# multi_polygon, ...). AWS Batch job parameters are plain strings and cannot
+# carry None, so absent values travel as this literal instead.
+NON_SPECIFIED = "non-specified"
+
 # The Unix epoch; earliest timestamp the service works with
 UNIX_EPOCH_UTC: pd.Timestamp = pd.Timestamp("1970-01-01 00:00:00.000000000", tz="UTC")
 

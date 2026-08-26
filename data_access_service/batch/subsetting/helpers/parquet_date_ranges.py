@@ -29,6 +29,7 @@ from data_access_service.core.constants import (
 from data_access_service.utils.date_time_utils import (
     ensure_timezone,
     split_date_range_binary,
+    to_naive_utc_string,
 )
 
 log = logging.getLogger(__name__)
@@ -109,8 +110,12 @@ def check_rows_with_date_range(
             checked_date_ranges.append({"start_date": start, "end_date": end})
             continue
 
-        start_str = start.strftime("%Y-%m-%d")
-        end_str = end.strftime("%Y-%m-%d")
+        # Full timestamps, not "%Y-%m-%d": create_time_filter compares against
+        # pd.to_datetime(end_str), so a day-only end becomes midnight and the
+        # count covers one instant instead of the range. Counting 0 makes the
+        # loop below drop the range, and that data is never downloaded.
+        start_str = to_naive_utc_string(start)
+        end_str = to_naive_utc_string(end)
 
         try:
             time_filter = create_time_filter(
@@ -240,8 +245,8 @@ def create_customised_time_filter(
             f"Invalid time range after boundary adjustment: {start} >= {end}"
         )
 
-    start_str = start.strftime("%Y-%m-%d")
-    end_str = end.strftime("%Y-%m-%d")
+    start_str = to_naive_utc_string(start)
+    end_str = to_naive_utc_string(end)
 
     partition_start, partition_end = get_timestamps_boundary_values(
         dataset, start_str, end_str

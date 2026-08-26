@@ -16,11 +16,9 @@ from data_access_service.core.constants import UNIX_EPOCH_UTC
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.date_time_utils import (
-    end_of_day_nano,
     ensure_timezone,
     resolve_non_specified_dates,
-    start_of_day_nano,
-    supply_day_with_nano_precision,
+    to_utc_bounds,
 )
 from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
 
@@ -143,15 +141,15 @@ def resolve_date_range(
 
     Steps:
     1. resolve "non-specified" dates to defaults
-    2. parse with day + nano precision supplied (end date becomes the final
-       nanosecond)
+    2. parse into UTC bounds (the end date becomes the final nanosecond of the
+       precision it was given)
     3. when api and keys are given, trim to the union temporal extent of the
        keys - (None, None) means the request is entirely outside it
 
     Without api/keys it is a pure string-to-Timestamp conversion (steps 1-2).
     """
     start_str, end_str = resolve_non_specified_dates(start_date_str, end_date_str)
-    start_date, end_date = supply_day_with_nano_precision(start_str, end_str)
+    start_date, end_date = to_utc_bounds(start_str, end_str)
 
     if api is not None and keys:
         start_date, end_date = trim_date_range_for_keys(
@@ -266,6 +264,7 @@ def trim_date_range_for_keys(
     if requested_end_date > max_date_of_keys:
         trimmed_end_date = max_date_of_keys
 
-    # keep full-day semantics: floor the start and ceil the end to the
-    # first/final nanosecond of their days
-    return start_of_day_nano(trimmed_start_date), end_of_day_nano(trimmed_end_date)
+    # Returned as-is. Rounding out to whole days here would throw away a time
+    # the caller asked for, and would be redundant anyway: get_temporal_extent
+    # already reports its bounds day-aligned, so a clamped bound is aligned too.
+    return trimmed_start_date, trimmed_end_date

@@ -1,7 +1,8 @@
 import logging
 import pandas
 from datetime import datetime
-from data_access_service.models.subset_request import NON_SPECIFIED
+from data_access_service.core.constants import NON_SPECIFIED, UNIX_EPOCH_UTC
+from data_access_service.utils.date_time_utils import ensure_timezone
 from data_access_service.utils.email_templates.subsetting_geometry import (
     split_bboxes_and_polygons,
 )
@@ -27,6 +28,24 @@ def _to_display_date(value):
         return value
 
 
+def _is_default_range(start_date, end_date) -> bool:
+    """True when the range is the portal's "no date filter" default - the epoch
+    through today - which must not render as if the user had chosen it.
+
+    Compares instants, not strings: the defaults are written with full
+    nanosecond precision, so "1970-01-01" and "1970-01-01T00:00:00Z" are the
+    same bound and both have to be recognised here.
+    """
+    try:
+        start = ensure_timezone(pandas.Timestamp(start_date))
+        end = ensure_timezone(pandas.Timestamp(end_date))
+    except (ValueError, TypeError):
+        return False
+    return (
+        start <= UNIX_EPOCH_UTC and end.date() >= pandas.Timestamp.now(tz="UTC").date()
+    )
+
+
 def form_subsetting_divs(start_date, end_date, multi_polygon):
     """Form subsetting section with date range, bounding boxes and polygons"""
 
@@ -38,12 +57,8 @@ def form_subsetting_divs(start_date, end_date, multi_polygon):
 
         # Check if not NON_SPECIFIED and not default values
         is_non_specified = start_str == NON_SPECIFIED or end_str == NON_SPECIFIED
-        is_default = (
-            start_str == "1970-01-01"
-            and end_str == pandas.Timestamp.today().strftime("%Y-%m-%d").lower()
-        )
 
-        has_dates = not is_non_specified and not is_default
+        has_dates = not is_non_specified and not _is_default_range(start_date, end_date)
 
     # Split the spatial selection into bounding boxes (<=4 vertices) and freeform polygons (>4).
     # Never let a malformed geometry break the whole email - omit the spatial section instead.

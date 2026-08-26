@@ -183,6 +183,18 @@ def _round_5_decimal(value: float) -> float:
     return round(value, 5)
 
 
+def resolve_end_date_param(req_date: str | None) -> pd.Timestamp:
+    """Validate an optional end_date query param, defaulting to now in UTC.
+
+    "Now" has to be worked out per request. A module-level default is evaluated
+    once at import, so a long-running server keeps answering with the date it
+    started on.
+    """
+    if req_date is None:
+        return pd.Timestamp.now(tz=pytz.UTC)
+    return verify_datatime_param("end_date", req_date)
+
+
 def verify_datatime_param(name: str, req_date: str) -> pd.Timestamp:
     _date = None
 
