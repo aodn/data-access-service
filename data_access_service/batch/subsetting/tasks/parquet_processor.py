@@ -29,6 +29,7 @@ from data_access_service.utils.date_time_utils import (
     get_monthly_utc_date_range_array_from_,
 )
 from data_access_service.utils.multi_polygon_helper import merge_polygons
+from pandas._libs import NaTType
 
 efs_mount_point = "/mount/efs/"
 
@@ -42,8 +43,8 @@ def process_parquet_files(
     job_index: str,
     intermediate_output_folder: str,
     subset_request: SubsetRequest,
-    start_date: pd.Timestamp,
-    end_date: pd.Timestamp,
+    start_date: pd.Timestamp | NaTType,
+    end_date: pd.Timestamp | NaTType,
 ) -> str | None:
     uuid = subset_request.uuid
     keys = subset_request.keys
@@ -125,8 +126,8 @@ def _generate_partition_output(
     job_index: str,
     uuid: str,
     key: str,
-    start_date: pd.Timestamp,
-    end_date: pd.Timestamp,
+    start_date: pd.Timestamp | NaTType,
+    end_date: pd.Timestamp | NaTType,
     polygon: Optional[ShapelyPolygon] = None,
 ):
     has_data = False
@@ -238,8 +239,8 @@ def _generate_partition_output_with_polygon(
     array_index: str,
     uuid: str,
     key: str,
-    start_date: pd.Timestamp,
-    end_date: pd.Timestamp,
+    start_date: pd.Timestamp | NaTType,
+    end_date: pd.Timestamp | NaTType,
     multi_polygon: MultiPolygon | None,
 ) -> bool:
 

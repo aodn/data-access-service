@@ -139,9 +139,9 @@ def prepare_data(api: API, job_index: str | None, parameters) -> str | None:
     intermediate_output_folder = parameters[Parameters.INTERMEDIATE_OUTPUT_FOLDER.value]
 
     if job_index is None:
-        job_index = 0
+        job_index = "0"
 
-    start_date_str, end_date_str = date_ranges_dict[str(job_index)]
+    start_date_str, end_date_str = date_ranges_dict[job_index]
     start_date = parse_date(start_date_str)
     end_date = parse_date(end_date_str)
 
