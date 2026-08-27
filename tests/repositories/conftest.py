@@ -18,6 +18,7 @@ def memory_parquets_config(monkeypatch):
         co_bucket="aodn-cloud-optimised",
         memory_limit="800M",
         threads=8,
+        full_load_threads=8,
         duckdb_temp_dir="/tmp",
         region="ap-southeast-2",
         extensions=(),

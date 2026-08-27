@@ -408,3 +408,44 @@ def test_load_incremental_only_touches_recent_rows(incremental_repo):
     assert refreshed.loc[refreshed["site_code"] == "A", "TEMP"].item() == 10.0
     # Recent row: replaced with the new value.
     assert refreshed.loc[refreshed["site_code"] == "B", "TEMP"].item() == 999.0
+
+
+def test_load_uses_full_load_threads_then_restores_default(tmp_path, monkeypatch):
+    from data_access_service.config.config import Config
+    from data_access_service.models.sites_types import ParquetsGenerationConfig
+
+    monkeypatch.setattr(DuckDBClient, "create_s3_secret", lambda self, bucket: None)
+    cfg = ParquetsGenerationConfig(
+        duckdb_database=":memory:",
+        co_bucket="aodn-cloud-optimised",
+        memory_limit="800M",
+        threads=4,
+        full_load_threads=8,
+        duckdb_temp_dir="/tmp",
+        region="ap-southeast-2",
+        extensions=(),
+    )
+    monkeypatch.setattr(Config, "get_parquets_config", lambda self: cfg)
+
+    session = ParquetDuckDBClient()
+    try:
+        repo = _IncrementalRepo(session)
+        repo.dataset = str(tmp_path)
+        con = session.get_instance()
+        _write_file(
+            con,
+            repo.dataset,
+            "d.parquet",
+            _rows("A", pd.Timestamp.now(tz="UTC").tz_localize(None), 1.0),
+        )
+
+        assert session.threads == 4
+        assert session.full_load_threads == 8
+        assert con.execute("SELECT current_setting('threads')").fetchone()[0] == 4
+
+        repo.load()
+
+        # Restored to the steady-state value once the full reload finishes.
+        assert con.execute("SELECT current_setting('threads')").fetchone()[0] == 4
+    finally:
+        session.close()

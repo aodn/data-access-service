@@ -141,18 +141,27 @@ class ParquetRepository(ABC):
         Raises if the read fails; because ``CREATE OR REPLACE TABLE`` is atomic,
         a failed read rolls back and leaves any existing table intact. Returns
         ``self`` so callers can chain ``Repo(session).load()``.
+
+        Temporarily raises the shared connection's thread count to
+        ``full_load_threads`` for this heavier, infrequent read, then restores
+        it — this is a GLOBAL DuckDB setting, so it also applies to any
+        concurrent live API read for the duration.
         """
         cols = ", ".join(quote_ident(c) for c in self.load_columns)
-        self.session.execute(
-            f"""
-            CREATE OR REPLACE TABLE {quote_ident(self.table)} AS
-            SELECT {cols}
-            FROM read_parquet(
-                '{self.dataset}/**/*.parquet',
-                hive_partitioning=true,
-                union_by_name=true
-            )"""
-        )
+        self.session.set_threads(self.session.full_load_threads)
+        try:
+            self.session.execute(
+                f"""
+                CREATE OR REPLACE TABLE {quote_ident(self.table)} AS
+                SELECT {cols}
+                FROM read_parquet(
+                    '{self.dataset}/**/*.parquet',
+                    hive_partitioning=true,
+                    union_by_name=true
+                )"""
+            )
+        finally:
+            self.session.set_threads(self.session.threads)
         return self
 
     def _incremental_cutoff(self, lookback_days: int) -> pd.Timestamp:

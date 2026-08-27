@@ -38,7 +38,9 @@ parquet:
     duckdb_temp_dir: "parquet_duckdb_tmp"
     co_bucket: "aodn-cloud-optimised"
     memory_limit: "800M"
-    threads: 8
+    threads: 4
+    # Bumped up to only while a full parquet load runs
+    full_load_threads: 8
     region: "ap-southeast-2"
     extensions:
       - httpfs

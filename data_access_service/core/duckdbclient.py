@@ -573,6 +573,26 @@ class ParquetDuckDBClient(DuckDBClient):
                     self._duckdb_client = db
         return self._duckdb_client
 
+    @property
+    def threads(self) -> int:
+        """The configured steady-state thread count (``parquet.config.threads``)."""
+        return self._config.threads
+
+    @property
+    def full_load_threads(self) -> int:
+        """Thread count to use for a full reload (``parquet.config.full_load_threads``)."""
+        return self._config.full_load_threads
+
+    def set_threads(self, threads: int) -> None:
+        """Change the connection's thread count.
+
+        ``threads`` is a GLOBAL DuckDB setting, so this affects every cursor
+        on this connection immediately — including any concurrent live API
+        read. Used to temporarily raise parallelism for a full reload
+        (see ``ParquetRepository.load``) and restore it afterward.
+        """
+        self._con.execute(f"SET GLOBAL threads = {int(threads)}")
+
     def execute(self, sql: str, params: Sequence[Any] | None = None):
         """Run ``sql`` (optionally with bound ``params``) and return the relation.
 

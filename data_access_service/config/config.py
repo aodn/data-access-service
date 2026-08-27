@@ -279,6 +279,7 @@ class Config:
             co_bucket=pqconfig.get("co_bucket", "aodn-cloud-optimised"),
             memory_limit=pqconfig["memory_limit"],
             threads=pqconfig["threads"],
+            full_load_threads=pqconfig["full_load_threads"],
             duckdb_temp_dir=str(temp_dir),
             region=pqconfig["region"],
             extensions=tuple(pqconfig["extensions"]),
