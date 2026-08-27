@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 import re
-import tempfile
 import threading
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -20,8 +19,8 @@ import xarray
 import xarray as xr
 from dask.dataframe import DataFrame
 from dateutil import parser
-from fastapi import Depends, HTTPException, Request, BackgroundTasks
-from fastapi.responses import Response, FileResponse
+from fastapi import Depends, HTTPException, Request
+from fastapi.responses import Response
 from geojson import Feature, FeatureCollection
 from pydantic import BaseModel
 
@@ -180,12 +179,6 @@ def _reformat_date(date: str):
     return formatted_date
 
 
-# Not called anywhere, left over from the unfinished feature-collection work.
-def _round_5_decimal(value: float) -> float:
-    # as they are only used for the frontend map display, so we don't need to have too many decimals
-    return round(value, 5)
-
-
 def resolve_end_date_param(req_date: str | None) -> pd.Timestamp:
     """Validate an optional end_date query param, defaulting to now in UTC.
 
@@ -280,14 +273,6 @@ def _verify_depth_param(
         return req_value
 
 
-# Not called anywhere, left over from the unfinished feature-collection work.
-def _verify_to_index_flag_param(flag: str | bool | None) -> bool:
-    if (flag is not None) and bool(flag):
-        return True
-    else:
-        return False
-
-
 # Parallel process records and map the field back to standard name
 def async_response_json(result: AsyncGenerator[dict, None], compress: bool):
     # Thread-safe queue to collect results
@@ -341,49 +326,6 @@ def async_response_json(result: AsyncGenerator[dict, None], compress: bool):
         return response
     else:
         return Response(json.dumps(json_results), media_type="application/json")
-
-
-# Not called by any route, only by tests; get_data uses async_response_json.
-def _response_json(result: Generator[dict, None, None], compress: bool):
-    json_array = json.dumps([x for x in result])
-
-    if compress:
-        response = Response(gzip_compress(json_array), media_type="application/json")
-        response.headers["Content-Encoding"] = "gzip"
-        return response
-    else:
-        return Response(json_array, media_type="application/json")
-
-
-# Not called by any route: get_data only serves f=json.
-# TODO: Need to use the metadata to assign correct type to netcdf, right now field type is wrong
-def _response_netcdf(filtered: pd.DataFrame, background_tasks: BackgroundTasks):
-    # Convert the DataFrame to an xarray Dataset
-    ds = xr.Dataset.from_dataframe(filtered)
-
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".nc") as tmp_file:
-        tmp_file_name = tmp_file.name
-        ds.to_netcdf(tmp_file_name)
-
-    # Send the file as a response to the client
-    response = FileResponse(
-        path=tmp_file_name,
-        filename="output.nc",
-        media_type="application/x-netcdf",
-    )
-
-    # Clean up the temporary file after sending the response
-    def _remove_file_if_exists(file_path):
-        """Helper function to remove file if it exists"""
-        try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-        except Exception as e:
-            logger.error(f"Error removing file {file_path}: {e}")
-
-    background_tasks.add_task(lambda: _remove_file_if_exists(tmp_file_name))
-    return response
 
 
 async def fetch_data(
@@ -523,12 +465,6 @@ def get_site_service(repo: ParquetRepository = Depends(get_repo)):
     from data_access_service.sites.site_feature_service import SiteFeatureService
 
     return SiteFeatureService(repo)
-
-
-# Not called anywhere, and the body was never finished (it returns nothing).
-def calculate_cell_coordinates(lat_min, lat_max, lon_min, lon_max):
-    precision = COORDINATE_INDEX_PRECISION
-    dividing_lats = 10**precision
 
 
 def get_memory_usage_percentage():
