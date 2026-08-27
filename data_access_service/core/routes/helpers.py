@@ -47,7 +47,9 @@ from data_access_service.sites.sites_repository import (
 )
 from data_access_service.utils.date_time_utils import (
     DATE_FORMAT,
-    ensure_timezone,
+    YEAR_MONTH_DAY,
+    parse_date,
+    to_naive_utc,
 )
 
 logger = init_log(Config.get_config())
@@ -174,10 +176,11 @@ def _generate_partial_json_array(
 # currently only want year, month and date.
 def _reformat_date(date: str):
     parsed_date = parser.isoparse(date)
-    formatted_date = parsed_date.strftime("%Y-%m-%d")
+    formatted_date = parsed_date.strftime(YEAR_MONTH_DAY)
     return formatted_date
 
 
+# Not called anywhere, left over from the unfinished feature-collection work.
 def _round_5_decimal(value: float) -> float:
     # as they are only used for the frontend map display, so we don't need to have too many decimals
     return round(value, 5)
@@ -196,6 +199,11 @@ def resolve_end_date_param(req_date: str | None) -> pd.Timestamp:
 
 
 def verify_datatime_param(name: str, req_date: str) -> pd.Timestamp:
+    """Validate a date query param and return it as a UTC-aware Timestamp.
+
+    Raises HTTP 400 rather than letting a bad string reach the data layer.
+    None passes through, the routes read that as "no bound".
+    """
     _date = None
 
     if req_date is not None and name == "end_date":
@@ -212,9 +220,7 @@ def verify_datatime_param(name: str, req_date: str) -> pd.Timestamp:
 
     try:
         if req_date is not None:
-            _date = pd.Timestamp(req_date)
-            if _date.tz is None:
-                _date = _date.tz_localize(pytz.UTC)
+            _date = parse_date(req_date)
 
     except (ValueError, TypeError):
         error_message = ErrorResponse(
@@ -247,14 +253,14 @@ def parse_utc_datetime(name: str, value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
     try:
-        ts = pd.Timestamp(value)
+        ts = parse_date(value)
     except (ValueError, TypeError):
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=f"Invalid datetime for [{name}]: {value!r}. "
             "Expected ISO 8601, e.g. 2024-01-01T00:00:00Z",
         )
-    return ensure_timezone(ts).tz_convert("UTC").tz_localize(None).isoformat()
+    return to_naive_utc(ts).isoformat()
 
 
 def _verify_depth_param(
@@ -274,6 +280,7 @@ def _verify_depth_param(
         return req_value
 
 
+# Not called anywhere, left over from the unfinished feature-collection work.
 def _verify_to_index_flag_param(flag: str | bool | None) -> bool:
     if (flag is not None) and bool(flag):
         return True
@@ -336,6 +343,7 @@ def async_response_json(result: AsyncGenerator[dict, None], compress: bool):
         return Response(json.dumps(json_results), media_type="application/json")
 
 
+# Not called by any route, only by tests; get_data uses async_response_json.
 def _response_json(result: Generator[dict, None, None], compress: bool):
     json_array = json.dumps([x for x in result])
 
@@ -347,6 +355,7 @@ def _response_json(result: Generator[dict, None, None], compress: bool):
         return Response(json_array, media_type="application/json")
 
 
+# Not called by any route: get_data only serves f=json.
 # TODO: Need to use the metadata to assign correct type to netcdf, right now field type is wrong
 def _response_netcdf(filtered: pd.DataFrame, background_tasks: BackgroundTasks):
     # Convert the DataFrame to an xarray Dataset
@@ -516,6 +525,7 @@ def get_site_service(repo: ParquetRepository = Depends(get_repo)):
     return SiteFeatureService(repo)
 
 
+# Not called anywhere, and the body was never finished (it returns nothing).
 def calculate_cell_coordinates(lat_min, lat_max, lon_min, lon_max):
     precision = COORDINATE_INDEX_PRECISION
     dividing_lats = 10**precision
@@ -529,6 +539,7 @@ def get_memory_usage_percentage():
     return (memory_info.rss / total_memory) * 100
 
 
+# Only reached from the /data/{uuid}/{key}/indexing_values investigation endpoint.
 def round_coordinate_list(coordinate_list: List[float]) -> List[ValueCount]:
     """
     Round a list of coordinates to according to the precision and return a list of ValueCount objects.
@@ -551,6 +562,7 @@ def round_coordinate_list(coordinate_list: List[float]) -> List[ValueCount]:
     return rounded_list
 
 
+# Only reached from the /data/{uuid}/{key}/indexing_values investigation endpoint.
 def round_dates(date_list: List[pandas.Timestamp]):
     """
     Round a list of dates to format YYYY-mm
@@ -576,6 +588,7 @@ def round_dates(date_list: List[pandas.Timestamp]):
     return rounded_dates
 
 
+# Only used by the /data/{uuid}/{key}/indexing_values investigation endpoint.
 def generate_feature_collection(
     dataset: xarray.Dataset,
     lat_key: str,
