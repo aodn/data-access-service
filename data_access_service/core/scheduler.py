@@ -43,22 +43,36 @@ class TaskScheduler:
         self.repositories = repositories
         self.scheduler = AsyncIOScheduler()
 
-    def _refresh_repository(self, name: str, repo: ParquetRepository):
+    def _refresh_repository(
+        self, name: str, repo: ParquetRepository, *, incremental: bool = False
+    ):
         """Reload one repository from its primary dataset, then refresh its backup.
 
-        ``CREATE OR REPLACE TABLE`` (inside ``repo.load``) is atomic, so readers
-        keep seeing the previous table until the new one is committed; a failed
-        read rolls back and leaves the existing table intact. The backup write is
-        best-effort — a failure there does not affect the freshly loaded table.
+        ``incremental=False`` uses ``repo.load()`` (full reload): its
+        ``CREATE OR REPLACE TABLE`` is atomic, so readers keep seeing the
+        previous table until the new one is committed, and a failed read rolls
+        back and leaves the existing table intact.
+
+        ``incremental=True`` uses ``repo.load_incremental()`` instead, which
+        only touches the most recent partitions (see that method's docstring
+        for why this is exact rather than approximate, and for the tradeoff of
+        not being wrapped in one atomic statement like the full reload).
+
+        The backup write is best-effort either way — a failure there does not
+        affect the freshly loaded table.
         """
         # Refresh the S3 secrets before each run so they never expire. ECS task
         # role credentials are valid for ~6 hours and boto3 always returns fresh
         # ones, so re-creating the secrets every refresh keeps them current.
         repo._configure_s3()
         repo._configure_backup_s3()
+        verb = "Incrementally refreshing" if incremental else "Refreshing"
         try:
-            logger.info(f"Refreshing repository '{name}' from primary dataset...")
-            repo.load()
+            logger.info(f"{verb} repository '{name}' from primary dataset...")
+            if incremental:
+                repo.load_incremental()
+            else:
+                repo.load()
             logger.info(f"Repository '{name}' refreshed successfully")
         except Exception as e:
             logger.error(
@@ -76,7 +90,13 @@ class TaskScheduler:
             )
 
     def _refresh_task(self):
-        """Refresh every registered repository (the scheduled job)."""
+        """Full reload of every registered repository (the weekly scheduled job).
+
+        Runs on a slower cadence than :meth:`_incremental_refresh_task` because
+        it is the only one that can catch a retroactive correction to data
+        older than the incremental job's lookback window — see
+        ``ParquetRepository.load_incremental``.
+        """
         if not Config.is_profile_in(
             EnvType.EDGE,
             EnvType.STAGING,
@@ -90,8 +110,31 @@ class TaskScheduler:
             return
         logger.info("Refresh task is running...")
         for name, repo in self.repositories.items():
-            self._refresh_repository(name, repo)
+            self._refresh_repository(name, repo, incremental=False)
         logger.info("Refresh task completed")
+
+    def _incremental_refresh_task(self):
+        """Incremental reload of every registered repository (the frequent job).
+
+        Only re-reads the most recent Hive partitions instead of the whole
+        dataset — see ``ParquetRepository.load_incremental``.
+        """
+        if not Config.is_profile_in(
+            EnvType.EDGE,
+            EnvType.STAGING,
+            EnvType.PRODUCTION,
+            EnvType.DEV,
+            EnvType.TESTING,
+        ):
+            logger.info(
+                "Skipping incremental refresh task on '%s' profile",
+                Config.resolve_profile(),
+            )
+            return
+        logger.info("Incremental refresh task is running...")
+        for name, repo in self.repositories.items():
+            self._refresh_repository(name, repo, incremental=True)
+        logger.info("Incremental refresh task completed")
 
     def _preload_from_backup(self):
         """Seed every repository from its S3 backup so endpoints work during the refresh.
@@ -110,12 +153,27 @@ class TaskScheduler:
                 )
 
     def _start(self):
-        """Start the scheduler and add the recurring refresh job."""
+        """Start the scheduler and add the recurring refresh jobs.
+
+        Full reload once a week (an odd hour, so it never coincides with the
+        every-2-hours incremental job below) as a safety net for retroactive
+        corrections; incremental reload the rest of the time for the low
+        memory/CPU cost.
+        """
         self.scheduler.add_job(
             self._refresh_task,
-            trigger=CronTrigger(hour="*/2", minute="0"),  # Every 2 hours at :00
+            trigger=CronTrigger(day_of_week="sun", hour="3", minute="0"),  # Weekly, Sunday 03:00 UTC
             id="refresh_task",
-            name="Repository data refresh task",
+            name="Repository data full refresh task",
+            replace_existing=True,
+            coalesce=True,
+            misfire_grace_time=None,
+        )
+        self.scheduler.add_job(
+            self._incremental_refresh_task,
+            trigger=CronTrigger(hour="*/2", minute="0"),  # Every 2 hours at :00
+            id="incremental_refresh_task",
+            name="Repository data incremental refresh task",
             replace_existing=True,
             coalesce=True,
             misfire_grace_time=None,

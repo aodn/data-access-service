@@ -11,6 +11,8 @@ from abc import ABC
 from collections.abc import Sequence
 from typing import ClassVar
 
+import pandas as pd
+
 from data_access_service.config.config import Config
 from data_access_service.core.duckdbclient import ParquetDuckDBClient
 
@@ -54,6 +56,7 @@ class ParquetRepository(ABC):
     value_columns: ClassVar[Sequence[str]]
     group_column: ClassVar[str | None] = None
     value_columns_quality_control_columns: ClassVar[Sequence[str]] = ()
+    incremental_lookback_days: ClassVar[int] = 3
 
     def __init_subclass__(cls, **kwargs) -> None:
         """Require every subclass to define the no-default class attributes.
@@ -149,6 +152,53 @@ class ParquetRepository(ABC):
                 hive_partitioning=true,
                 union_by_name=true
             )"""
+        )
+        return self
+
+    def _incremental_cutoff(self, lookback_days: int) -> pd.Timestamp:
+        """Point in time ``lookback_days`` before now.
+
+        "Now" is UTC: this codebase treats naive timestamps as UTC throughout
+        (see the ``TIME`` column), and the container's own clock is pinned to
+        UTC (``ENV TZ=UTC`` in the Dockerfile), but the tz-naive local
+        conversion is made explicit here so this does not silently depend on
+        that.
+        """
+        now = pd.Timestamp.now(tz="UTC").tz_localize(None)
+        return now - pd.Timedelta(days=lookback_days)
+
+    def load_incremental(self, lookback_days: int | None = None) -> ParquetRepository:
+        """Reload only the last ``lookback_days`` of data instead of the whole dataset.
+
+        Deletes and re-reads rows at or after the cutoff, filtered on
+        ``time_column`` directly. Assumes older data is immutable; run
+        :meth:`load` (a full reload) on a slower cadence to catch retroactive
+        corrections. Unlike :meth:`load`'s atomic ``CREATE OR REPLACE TABLE``,
+        the ``DELETE`` and re-``INSERT`` here are separate statements, so a
+        failed re-insert leaves the cutoff window empty until the next run.
+        """
+        n = self.incremental_lookback_days if lookback_days is None else lookback_days
+        cutoff = self._incremental_cutoff(n)
+        cutoff_iso = cutoff.isoformat()
+
+        cols = ", ".join(quote_ident(c) for c in self.load_columns)
+        time = quote_ident(self.time_column)
+
+        self.session.execute(
+            f"DELETE FROM {quote_ident(self.table)} WHERE {time} >= ?",
+            [cutoff_iso],
+        )
+        self.session.execute(
+            f"""
+            INSERT INTO {quote_ident(self.table)}
+            SELECT {cols}
+            FROM read_parquet(
+                '{self.dataset}/**/*.parquet',
+                hive_partitioning=true,
+                union_by_name=true
+            )
+            WHERE {time} >= ?""",
+            [cutoff_iso],
         )
         return self
 

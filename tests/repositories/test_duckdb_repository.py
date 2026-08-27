@@ -6,6 +6,8 @@ in-memory DuckDB seeded from a DataFrame, so no S3 / load() is needed. The
 session's S3-secret creation is patched out (no AWS credentials in tests).
 """
 
+import os
+
 import pandas as pd
 import pytest
 
@@ -316,3 +318,93 @@ def test_site_details_nulls_bad_quality_values_only(session, qc_rows):
     # QC columns themselves aren't exposed in the output
     assert "TEMP_quality_control" not in rows.columns
     assert "PSAL_quality_control" not in rows.columns
+
+
+# --- load_incremental ---------------------------------------------------------
+
+
+class _IncrementalRepo(ParquetRepository):
+    """For load_incremental() tests. ``dataset`` is set per-test to a local
+    tmp dir standing in for the S3 prefix — read_parquet globs local paths the
+    same way it globs s3:// ones."""
+
+    table = "test_incremental"
+    bucket = "test-bucket"
+    backup_bucket = "test-backup"
+    dataset = ""
+    backup_dataset = "s3://test-backup/test_incremental.parquet"
+    time_column = "TIME"
+    site_column = "site_code"
+    latitude_column = "LATITUDE"
+    longitude_column = "LONGITUDE"
+    value_columns = ("TEMP",)
+    incremental_lookback_days = 5
+
+
+def _write_file(con, root: str, name: str, rows: pd.DataFrame) -> None:
+    con.register("_seed_df", rows)
+    con.execute(
+        f"COPY (SELECT * FROM _seed_df) TO '{os.path.join(root, name)}' (FORMAT PARQUET)"
+    )
+    con.unregister("_seed_df")
+
+
+def _rows(site: str, time: pd.Timestamp, temp: float) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "site_code": [site],
+            "TIME": [time],
+            "LATITUDE": [-30.0],
+            "LONGITUDE": [150.0],
+            "TEMP": [temp],
+        }
+    )
+
+
+@pytest.fixture
+def incremental_repo(session, tmp_path):
+    repo = _IncrementalRepo(session)
+    repo.dataset = str(tmp_path)
+    return repo
+
+
+def test_incremental_cutoff_matches_lookback_days(session):
+    repo = _IncrementalRepo(session)
+    now = pd.Timestamp.now(tz="UTC").tz_localize(None)
+    cutoff = repo._incremental_cutoff(5)
+    assert abs((now - pd.Timedelta(days=5) - cutoff).total_seconds()) < 1
+
+
+def test_load_incremental_only_touches_recent_rows(incremental_repo):
+    con = incremental_repo.session.get_instance()
+    now = pd.Timestamp.now(tz="UTC").tz_localize(None)
+    old_time = now - pd.Timedelta(days=30)  # outside default lookback=5 days
+    recent_time = now - pd.Timedelta(days=1)  # inside lookback
+
+    _write_file(con, incremental_repo.dataset, "old.parquet", _rows("A", old_time, 10.0))
+    _write_file(
+        con, incremental_repo.dataset, "recent.parquet", _rows("B", recent_time, 20.0)
+    )
+
+    incremental_repo.load()
+    loaded = con.execute(
+        f'SELECT * FROM {quote_ident(incremental_repo.table)} ORDER BY site_code'
+    ).df()
+    assert list(loaded["site_code"]) == ["A", "B"]
+
+    # Overwrite the recent file as if new/corrected data arrived upstream;
+    # leave the old (out-of-lookback) file untouched.
+    _write_file(
+        con, incremental_repo.dataset, "recent.parquet", _rows("B", recent_time, 999.0)
+    )
+
+    incremental_repo.load_incremental()  # default lookback_days=5
+    refreshed = con.execute(
+        f'SELECT * FROM {quote_ident(incremental_repo.table)} ORDER BY site_code'
+    ).df()
+
+    assert list(refreshed["site_code"]) == ["A", "B"]
+    # Old row: untouched by the incremental refresh.
+    assert refreshed.loc[refreshed["site_code"] == "A", "TEMP"].item() == 10.0
+    # Recent row: replaced with the new value.
+    assert refreshed.loc[refreshed["site_code"] == "B", "TEMP"].item() == 999.0
