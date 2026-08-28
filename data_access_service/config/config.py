@@ -283,6 +283,7 @@ class Config:
             duckdb_temp_dir=str(temp_dir),
             region=pqconfig["region"],
             extensions=tuple(pqconfig["extensions"]),
+            incremental_lookback_days=pqconfig["incremental_lookback_days"],
         )
 
     def get_tiler_config(self) -> TilerConfig:

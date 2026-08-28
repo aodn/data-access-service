@@ -599,6 +599,7 @@ def test_load_uses_full_load_threads_then_restores_default(tmp_path, monkeypatch
         duckdb_temp_dir="/tmp",
         region="ap-southeast-2",
         extensions=(),
+        incremental_lookback_days=10,
     )
     monkeypatch.setattr(Config, "get_parquets_config", lambda self: cfg)
 

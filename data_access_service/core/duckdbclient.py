@@ -583,6 +583,11 @@ class ParquetDuckDBClient(DuckDBClient):
         """Thread count to use for a full reload (``parquet.config.full_load_threads``)."""
         return self._config.full_load_threads
 
+    @property
+    def incremental_lookback_days(self) -> int:
+        """How far back an incremental load re-reads (``parquet.config.incremental_lookback_days``)."""
+        return self._config.incremental_lookback_days
+
     def set_threads(self, threads: int) -> None:
         """Change the connection's thread count.
 

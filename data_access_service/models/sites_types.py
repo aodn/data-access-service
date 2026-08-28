@@ -22,3 +22,4 @@ class ParquetsGenerationConfig:
     duckdb_temp_dir: str
     region: str
     extensions: tuple[str, ...]
+    incremental_lookback_days: int

@@ -152,6 +152,60 @@ class TaskScheduler:
                     f"will rely on initial S3 refresh: {_format_exception(e)}"
                 )
 
+    @staticmethod
+    def _backup_is_fresh(repo: ParquetRepository) -> bool:
+        """Whether ``repo``'s just-preloaded backup is recent enough to skip a full reload.
+
+        ``write_backup`` always snapshots the *entire* current table, not just
+        the recent window, so a backup whose latest row falls inside
+        ``incremental_lookback_days`` already holds everything a full reload
+        would for data older than that window — an incremental catch-up is
+        then enough to bring the recent window (and only that window) up to
+        date, far cheaper than re-reading the whole dataset. False (fall back
+        to a full reload) when there's no backup at all, it loaded empty, or
+        it's older than the lookback window.
+        """
+        if not repo.is_loaded():
+            return False
+        latest = repo.latest_time()
+        if latest is None:
+            return False
+        cutoff = repo._incremental_cutoff(repo.incremental_lookback_days)
+        return latest >= cutoff.to_pydatetime()
+
+    def _initial_refresh_task(self):
+        """Startup refresh: full reload only where the preloaded backup needs it.
+
+        Runs once, from :meth:`start_with_initial_run`, after
+        :meth:`_preload_from_backup`. Per repository: an incremental catch-up
+        if the preloaded backup is fresh enough (see :meth:`_backup_is_fresh`),
+        otherwise the same full reload startup always did before. This is what
+        makes routine restarts/deploys cheap while still self-healing a
+        missing/stale backup, or a first-ever run, with a full reload.
+        """
+        if not Config.is_profile_in(
+            EnvType.EDGE,
+            EnvType.STAGING,
+            EnvType.PRODUCTION,
+            EnvType.DEV,
+            EnvType.TESTING,
+        ):
+            logger.info(
+                "Skipping initial refresh task on '%s' profile",
+                Config.resolve_profile(),
+            )
+            return
+        logger.info("Initial refresh task is running...")
+        for name, repo in self.repositories.items():
+            incremental = self._backup_is_fresh(repo)
+            verb = "incremental catch-up" if incremental else "full reload"
+            logger.info(
+                f"Repository '{name}': backup {'is' if incremental else 'is not'} "
+                f"fresh enough, running {verb}"
+            )
+            self._refresh_repository(name, repo, incremental=incremental)
+        logger.info("Initial refresh task completed")
+
     def _start(self):
         """Start the scheduler and add the recurring refresh jobs.
 
@@ -192,12 +246,12 @@ class TaskScheduler:
         """Start the scheduler and run the refresh task immediately."""
         loop = asyncio.get_running_loop()
         with ThreadPoolExecutor() as executor:
-            # Pre-load from backup so the endpoints are available while the full S3
+            # Pre-load from backup so the endpoints are available while the initial S3
             # refresh runs. Both are blocking S3 reads — run in an executor to
             # avoid blocking the event loop.
             logger.info("Running refresh task on startup...")
             await loop.run_in_executor(executor, self._preload_from_backup)
-            await loop.run_in_executor(executor, self._refresh_task)
+            await loop.run_in_executor(executor, self._initial_refresh_task)
         self._start()
 
     def shutdown(self):

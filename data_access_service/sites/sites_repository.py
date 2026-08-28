@@ -57,7 +57,6 @@ class ParquetRepository(ABC):
     value_columns: ClassVar[Sequence[str]]
     group_column: ClassVar[str | None] = None
     value_columns_quality_control_columns: ClassVar[Sequence[str]] = ()
-    incremental_lookback_days: ClassVar[int] = 10
     partition_column: ClassVar[str | None] = "timestamp"
 
     def __init_subclass__(cls, **kwargs) -> None:
@@ -95,6 +94,16 @@ class ParquetRepository(ABC):
         self.session = session
         self._configure_s3()
         self._configure_backup_s3()
+
+    @property
+    def incremental_lookback_days(self) -> int:
+        """How far back :meth:`load_incremental` re-reads by default.
+
+        A shared value from ``parquet.config.incremental_lookback_days``
+        (via the bound session), not per-dataset -- every repository is
+        expected to use the same lookback window.
+        """
+        return self.session.incremental_lookback_days
 
     @property
     def value_quality_control_map(self) -> dict[str, str]:

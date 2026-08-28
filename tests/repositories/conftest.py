@@ -22,5 +22,6 @@ def memory_parquets_config(monkeypatch):
         duckdb_temp_dir="/tmp",
         region="ap-southeast-2",
         extensions=(),
+        incremental_lookback_days=10,
     )
     monkeypatch.setattr(Config, "get_parquets_config", lambda self: cfg)
