@@ -56,7 +56,7 @@ class TestEmailBodies(unittest.TestCase):
         self.assertIn("Format", html)
         self.assertIn("CSV", html)
         self.assertIn("Bounding Box Selection", html)
-        self.assertIn("01 Jan 2020 - 30 Jun 2020", html)
+        self.assertIn("01 Jan 2020 00:00:00 UTC - 30 Jun 2020 23:59:59 UTC", html)
         self.assertIn("Metadata", html)
         self.assertIn("https://example.com/metadata", html)
         self.assertIn("Suggested Citation", html)

@@ -178,17 +178,52 @@ class TestSubsettingPolygon(unittest.TestCase):
         today = pandas.Timestamp.today().strftime("%Y-%m-%d")
         self.assertEqual(form_subsetting_divs("1970-01-01", today, None), "")
 
-    def test_date_range_uses_day_month_year_format(self):
+    def test_date_range_uses_day_month_year_time_utc_format(self):
+        # A bare date stands for the whole day, so the range is shown as the
+        # instants it actually means, in UTC.
         html = form_subsetting_divs("2024-01-05", "2024-12-31", None)
 
-        self.assertIn("05 Jan 2024 - 31 Dec 2024", html)
+        self.assertIn(
+            "05 Jan 2024 00:00:00 UTC - 31 Dec 2024 23:59:59 UTC",
+            html,
+        )
+
+    def test_date_range_formats_iso_bounds_the_same_way(self):
+        # The portal sends ISO bounds with a time; they used to leak into the
+        # email as the raw string.
+        html = form_subsetting_divs(
+            "2024-01-05T00:00:00Z", "2024-12-31T23:59:59Z", None
+        )
+
+        self.assertIn(
+            "05 Jan 2024 00:00:00 UTC - 31 Dec 2024 23:59:59 UTC",
+            html,
+        )
+
+    def test_date_range_formats_legacy_month_bounds(self):
+        # The legacy "MM-YYYY" bound also used to leak in unchanged.
+        html = form_subsetting_divs("01-2024", "12-2024", None)
+
+        self.assertIn(
+            "01 Jan 2024 00:00:00 UTC - 31 Dec 2024 23:59:59 UTC",
+            html,
+        )
+
+    def test_unparseable_dates_are_shown_unchanged(self):
+        # One bad date must not break the whole email.
+        html = form_subsetting_divs("not-a-date", "also-bad", None)
+
+        self.assertIn("not-a-date - also-bad", html)
 
     def test_malformed_geometry_does_not_crash(self):
         # A malformed multi_polygon must not break the email; the spatial section
         # is simply omitted while the rest of the email still renders.
         html = form_subsetting_divs("2024-01-05", "2024-12-31", "not-valid-geojson")
 
-        self.assertIn("05 Jan 2024 - 31 Dec 2024", html)
+        self.assertIn(
+            "05 Jan 2024 00:00:00 UTC - 31 Dec 2024 23:59:59 UTC",
+            html,
+        )
         self.assertNotIn("Bounding Box", html)
         self.assertNotIn("Polygon Selection", html)
 

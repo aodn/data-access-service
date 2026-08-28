@@ -1,8 +1,7 @@
 import logging
 import pandas
-from datetime import datetime
 from data_access_service.core.constants import NON_SPECIFIED, UNIX_EPOCH_UTC
-from data_access_service.utils.date_time_utils import ensure_timezone
+from data_access_service.utils.date_time_utils import ensure_timezone, to_utc_bounds
 from data_access_service.utils.email_templates.subsetting_geometry import (
     split_bboxes_and_polygons,
 )
@@ -17,15 +16,40 @@ from data_access_service.utils.email_templates.email_images import (
 )
 
 
-def _to_display_date(value):
-    """Format an ISO date (YYYY-MM-DD) as DD MMM YYYY, e.g. 05 Jan 2024.
+def _to_display_dates(start_date, end_date):
+    """Format the requested bounds as "05 Jan 2024 00:00:00 UTC".
 
-    Any value that is not a plain ISO date is returned unchanged.
+    Reads the raw request strings through to_utc_bounds, the same
+    interpretation the subset itself uses, so a bare date shows the whole day
+    it stands for - 00:00:00 to 23:59:59. This is still what the user asked
+    for; to_utc_bounds only parses, it never trims to the dataset's extent.
+
+    The two bounds must be converted together: the end is widened to the
+    precision its own raw string carried, which only that string can tell us.
+
+    :param start_date: raw start bound as the request gave it, ISO-8601 or
+        legacy "MM-YYYY"
+    :param end_date: raw end bound, same formats
+    :return: (start, end) display strings; the pair is returned unchanged when
+        it cannot be parsed, so one bad date cannot break the whole email
+
+    Example:
+        _to_display_dates("2024-01-05", "2024-12-31")
+        -> ("05 Jan 2024 00:00:00 UTC", "31 Dec 2024 23:59:59 UTC")
+        _to_display_dates("01-2024", "not-a-date")
+        -> ("01-2024", "not-a-date")   (unparseable, shown as given)
     """
     try:
-        return datetime.strptime(value, "%Y-%m-%d").strftime("%d %b %Y")
+        start, end = to_utc_bounds(str(start_date), str(end_date))
     except (ValueError, TypeError):
-        return value
+        return start_date, end_date
+    if pandas.isna(start) or pandas.isna(end):
+        return start_date, end_date
+    # strftime truncates, so the end's trailing .999999999 shows as 23:59:59
+    return (
+        start.strftime("%d %b %Y %H:%M:%S UTC"),
+        end.strftime("%d %b %Y %H:%M:%S UTC"),
+    )
 
 
 def _is_default_range(start_date, end_date) -> bool:
@@ -81,11 +105,10 @@ def form_subsetting_divs(start_date, end_date, multi_polygon):
     bbox_divs = form_bbox_divs(bboxes) if has_bboxes else ""
     polygon_divs = form_polygon_divs(polygons) if has_polygons else ""
 
-    # Form date range section if dates exist (DD MMM YYYY display format)
+    # Form date range section if dates exist (DD MMM YYYY HH:MM:SS UTC format)
     time_range_section = ""
     if has_dates:
-        display_start = _to_display_date(start_date)
-        display_end = _to_display_date(end_date)
+        display_start, display_end = _to_display_dates(start_date, end_date)
         time_range_section = f"""
     <!--[if mso | IE]></td></tr></table></td></tr><tr><td width="600px"><table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:568px;" width="568"><tr><td style="line-height:0;font-size:0;mso-line-height-rule:exactly;"><![endif]-->
     <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:568px;">
