@@ -1,12 +1,9 @@
 """TaskScheduler's startup-refresh decision: full reload vs. incremental catch-up.
 
-``_backup_is_fresh`` and ``_initial_refresh_task`` decide, per repository,
-whether a preloaded S3 backup is recent enough that an incremental catch-up
-is enough on startup, instead of always paying for a full reload (see
-``TaskScheduler.start_with_initial_run``). ``_refresh_repository`` itself
-(and the S3 calls inside ``load``/``load_incremental``/``write_backup``) are
-exercised elsewhere -- these tests isolate the decision logic by monkeypatching
-it out with a spy.
+Tests ``_backup_is_fresh`` and ``_initial_refresh_task`` -- whether a
+preloaded S3 backup is fresh enough to skip a full reload on startup.
+``_refresh_repository`` and the underlying S3 calls are exercised
+elsewhere; here it's monkeypatched with a spy to isolate the decision.
 """
 
 from typing import ClassVar
@@ -105,10 +102,9 @@ def test_backup_is_fresh_true_when_latest_row_inside_lookback(session):
 
 
 def test_backup_is_fresh_true_at_exact_cutoff_boundary(session, monkeypatch):
-    """load_incremental treats the cutoff as inclusive (TIME >= cutoff), so
-    freshness should agree at the exact boundary. "Now" is frozen so the
-    cutoff computed here and the one _backup_is_fresh computes internally
-    (a separate call, moments later) land on the exact same instant."""
+    """load_incremental's cutoff is inclusive (TIME >= cutoff), so freshness
+    should agree at the exact boundary. "Now" is frozen so the cutoff
+    computed here and _backup_is_fresh's internal one land on the same instant."""
     fixed_now = pd.Timestamp("2026-01-15T00:00:00", tz="UTC")
     monkeypatch.setattr(pd.Timestamp, "now", staticmethod(lambda tz=None: fixed_now))
 
@@ -121,24 +117,36 @@ def test_backup_is_fresh_true_at_exact_cutoff_boundary(session, monkeypatch):
 # --- _initial_refresh_task -----------------------------------------------------
 
 
-def test_initial_refresh_task_uses_incremental_for_fresh_repos_full_for_stale(session, monkeypatch):
+def test_initial_refresh_task_uses_incremental_for_fresh_repos_full_for_stale(
+    session, monkeypatch
+):
     fresh_repo = _Repo(session)
-    _materialize(fresh_repo, _row(pd.Timestamp.now(tz="UTC").tz_localize(None) - pd.Timedelta(days=1)))
+    _materialize(
+        fresh_repo,
+        _row(pd.Timestamp.now(tz="UTC").tz_localize(None) - pd.Timedelta(days=1)),
+    )
 
     class _StaleRepo(_Repo):
         table = "test_repo_stale"
 
     stale_repo = _StaleRepo(session)
-    _materialize(stale_repo, _row(pd.Timestamp.now(tz="UTC").tz_localize(None) - pd.Timedelta(days=30)))
+    _materialize(
+        stale_repo,
+        _row(pd.Timestamp.now(tz="UTC").tz_localize(None) - pd.Timedelta(days=30)),
+    )
 
     calls = []
     monkeypatch.setattr(
         TaskScheduler,
         "_refresh_repository",
-        lambda self, name, repo, *, incremental=False: calls.append((name, incremental)),
+        lambda self, name, repo, *, incremental=False: calls.append(
+            (name, incremental)
+        ),
     )
 
-    scheduler = TaskScheduler(api=None, repositories={"fresh": fresh_repo, "stale": stale_repo})
+    scheduler = TaskScheduler(
+        api=None, repositories={"fresh": fresh_repo, "stale": stale_repo}
+    )
     scheduler._initial_refresh_task()
 
     assert dict(calls) == {"fresh": True, "stale": False}
@@ -151,7 +159,9 @@ def test_initial_refresh_task_full_reload_for_never_loaded_repo(session, monkeyp
     monkeypatch.setattr(
         TaskScheduler,
         "_refresh_repository",
-        lambda self, name, repo, *, incremental=False: calls.append((name, incremental)),
+        lambda self, name, repo, *, incremental=False: calls.append(
+            (name, incremental)
+        ),
     )
 
     scheduler = TaskScheduler(api=None, repositories={"never_loaded": never_loaded})

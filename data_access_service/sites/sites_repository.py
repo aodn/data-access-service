@@ -97,12 +97,8 @@ class ParquetRepository(ABC):
 
     @property
     def incremental_lookback_days(self) -> int:
-        """How far back :meth:`load_incremental` re-reads by default.
-
-        A shared value from ``parquet.config.incremental_lookback_days``
-        (via the bound session), not per-dataset -- every repository is
-        expected to use the same lookback window.
-        """
+        """How far back :meth:`load_incremental` re-reads by default — shared
+        across all repositories (``parquet.config.incremental_lookback_days``)."""
         return self.session.incremental_lookback_days
 
     @property

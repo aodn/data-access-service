@@ -46,21 +46,6 @@ class TaskScheduler:
     def _refresh_repository(
         self, name: str, repo: ParquetRepository, *, incremental: bool = False
     ):
-        """Reload one repository from its primary dataset, then refresh its backup.
-
-        ``incremental=False`` uses ``repo.load()`` (full reload): its
-        ``CREATE OR REPLACE TABLE`` is atomic, so readers keep seeing the
-        previous table until the new one is committed, and a failed read rolls
-        back and leaves the existing table intact.
-
-        ``incremental=True`` uses ``repo.load_incremental()`` instead, which
-        only touches the most recent partitions (see that method's docstring
-        for why this is exact rather than approximate, and for the tradeoff of
-        not being wrapped in one atomic statement like the full reload).
-
-        The backup write is best-effort either way — a failure there does not
-        affect the freshly loaded table.
-        """
         # Refresh the S3 secrets before each run so they never expire. ECS task
         # role credentials are valid for ~6 hours and boto3 always returns fresh
         # ones, so re-creating the secrets every refresh keeps them current.
@@ -154,17 +139,7 @@ class TaskScheduler:
 
     @staticmethod
     def _backup_is_fresh(repo: ParquetRepository) -> bool:
-        """Whether ``repo``'s just-preloaded backup is recent enough to skip a full reload.
-
-        ``write_backup`` always snapshots the *entire* current table, not just
-        the recent window, so a backup whose latest row falls inside
-        ``incremental_lookback_days`` already holds everything a full reload
-        would for data older than that window — an incremental catch-up is
-        then enough to bring the recent window (and only that window) up to
-        date, far cheaper than re-reading the whole dataset. False (fall back
-        to a full reload) when there's no backup at all, it loaded empty, or
-        it's older than the lookback window.
-        """
+        """Whether the preloaded backup is recent enough to skip a full reload."""
         if not repo.is_loaded():
             return False
         latest = repo.latest_time()
@@ -174,15 +149,7 @@ class TaskScheduler:
         return latest >= cutoff.to_pydatetime()
 
     def _initial_refresh_task(self):
-        """Startup refresh: full reload only where the preloaded backup needs it.
-
-        Runs once, from :meth:`start_with_initial_run`, after
-        :meth:`_preload_from_backup`. Per repository: an incremental catch-up
-        if the preloaded backup is fresh enough (see :meth:`_backup_is_fresh`),
-        otherwise the same full reload startup always did before. This is what
-        makes routine restarts/deploys cheap while still self-healing a
-        missing/stale backup, or a first-ever run, with a full reload.
-        """
+        """Startup refresh: full reload only where the preloaded backup needs it."""
         if not Config.is_profile_in(
             EnvType.EDGE,
             EnvType.STAGING,
