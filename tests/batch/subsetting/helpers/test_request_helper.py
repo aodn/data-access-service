@@ -10,7 +10,7 @@ from data_access_service.batch.subsetting.helpers.request_helper import (
 from data_access_service.utils.subset_request_resolver import (
     trim_date_range_for_keys,
 )
-from data_access_service.utils.date_time_utils import supply_day_with_nano_precision
+from data_access_service.utils.date_time_utils import to_utc_bounds
 
 _GLOBAL_POLYGON = (
     '{"type":"MultiPolygon","coordinates":'
@@ -101,7 +101,7 @@ class TestTrimDateRangeForKeys(unittest.TestCase):
         requested_start = "1970-01-01"
         requested_end = pd.Timestamp.now().strftime("%Y-%m-%d")
 
-        requested_start, requested_end = supply_day_with_nano_precision(
+        requested_start, requested_end = to_utc_bounds(
             requested_start,
             requested_end,
         )
@@ -165,7 +165,7 @@ class TestTrimDateRangeForKeys(unittest.TestCase):
         requested_start = "1970-01-01"
         requested_end = "1971-01-01"
 
-        requested_start, requested_end = supply_day_with_nano_precision(
+        requested_start, requested_end = to_utc_bounds(
             requested_start,
             requested_end,
         )

@@ -3,13 +3,14 @@ from typing import Optional
 
 import pandas as pd
 
+from data_access_service.core.constants import NON_SPECIFIED
 from data_access_service.models.bounding_box import BoundingBox
+from data_access_service.utils.date_time_utils import parse_date
 from data_access_service.utils.format_utils import SUPPORTED_OUTPUT_FORMATS
 
-# Marker value for an optional field the user did not provide (dates,
-# multi_polygon, ...). AWS Batch job parameters are plain strings and cannot
-# carry None, so absent values travel as this literal instead.
-NON_SPECIFIED = "non-specified"
+# Re-exported: NON_SPECIFIED lives in core.constants so date_time_utils can read
+# it without importing this module back (that would be a circular import).
+__all__ = ["NON_SPECIFIED", "SubsetRequest"]
 
 
 @dataclass(frozen=True)
@@ -80,7 +81,10 @@ class SubsetRequest:
         if value == NON_SPECIFIED:
             return None
         try:
-            return pd.Timestamp(value)
+            # parse_date, not pd.Timestamp: it returns UTC-aware either way, so
+            # comparing a bare "2024-01-15" against "2024-01-16T00:00:00Z" below
+            # cannot raise "Cannot compare tz-naive and tz-aware timestamps".
+            return parse_date(value)
         except (ValueError, TypeError) as exc:
             raise ValueError(
                 f"{field_name} must be a parseable date or "

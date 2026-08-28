@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 import re
-import tempfile
 import threading
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -20,8 +19,8 @@ import xarray
 import xarray as xr
 from dask.dataframe import DataFrame
 from dateutil import parser
-from fastapi import Depends, HTTPException, Request, BackgroundTasks
-from fastapi.responses import Response, FileResponse
+from fastapi import Depends, HTTPException, Request
+from fastapi.responses import Response
 from geojson import Feature, FeatureCollection
 from pydantic import BaseModel
 
@@ -47,7 +46,9 @@ from data_access_service.sites.sites_repository import (
 )
 from data_access_service.utils.date_time_utils import (
     DATE_FORMAT,
-    ensure_timezone,
+    YEAR_MONTH_DAY,
+    parse_date,
+    to_naive_utc,
 )
 
 logger = init_log(Config.get_config())
@@ -174,16 +175,28 @@ def _generate_partial_json_array(
 # currently only want year, month and date.
 def _reformat_date(date: str):
     parsed_date = parser.isoparse(date)
-    formatted_date = parsed_date.strftime("%Y-%m-%d")
+    formatted_date = parsed_date.strftime(YEAR_MONTH_DAY)
     return formatted_date
 
 
-def _round_5_decimal(value: float) -> float:
-    # as they are only used for the frontend map display, so we don't need to have too many decimals
-    return round(value, 5)
+def resolve_end_date_param(req_date: str | None) -> pd.Timestamp:
+    """Validate an optional end_date query param, defaulting to now in UTC.
+
+    "Now" has to be worked out per request. A module-level default is evaluated
+    once at import, so a long-running server keeps answering with the date it
+    started on.
+    """
+    if req_date is None:
+        return pd.Timestamp.now(tz=pytz.UTC)
+    return verify_datatime_param("end_date", req_date)
 
 
 def verify_datatime_param(name: str, req_date: str) -> pd.Timestamp:
+    """Validate a date query param and return it as a UTC-aware Timestamp.
+
+    Raises HTTP 400 rather than letting a bad string reach the data layer.
+    None passes through, the routes read that as "no bound".
+    """
     _date = None
 
     if req_date is not None and name == "end_date":
@@ -200,9 +213,7 @@ def verify_datatime_param(name: str, req_date: str) -> pd.Timestamp:
 
     try:
         if req_date is not None:
-            _date = pd.Timestamp(req_date)
-            if _date.tz is None:
-                _date = _date.tz_localize(pytz.UTC)
+            _date = parse_date(req_date)
 
     except (ValueError, TypeError):
         error_message = ErrorResponse(
@@ -235,14 +246,14 @@ def parse_utc_datetime(name: str, value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
     try:
-        ts = pd.Timestamp(value)
+        ts = parse_date(value)
     except (ValueError, TypeError):
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=f"Invalid datetime for [{name}]: {value!r}. "
             "Expected ISO 8601, e.g. 2024-01-01T00:00:00Z",
         )
-    return ensure_timezone(ts).tz_convert("UTC").tz_localize(None).isoformat()
+    return to_naive_utc(ts).isoformat()
 
 
 def _verify_depth_param(
@@ -260,13 +271,6 @@ def _verify_depth_param(
         )
     else:
         return req_value
-
-
-def _verify_to_index_flag_param(flag: str | bool | None) -> bool:
-    if (flag is not None) and bool(flag):
-        return True
-    else:
-        return False
 
 
 # Parallel process records and map the field back to standard name
@@ -322,47 +326,6 @@ def async_response_json(result: AsyncGenerator[dict, None], compress: bool):
         return response
     else:
         return Response(json.dumps(json_results), media_type="application/json")
-
-
-def _response_json(result: Generator[dict, None, None], compress: bool):
-    json_array = json.dumps([x for x in result])
-
-    if compress:
-        response = Response(gzip_compress(json_array), media_type="application/json")
-        response.headers["Content-Encoding"] = "gzip"
-        return response
-    else:
-        return Response(json_array, media_type="application/json")
-
-
-# TODO: Need to use the metadata to assign correct type to netcdf, right now field type is wrong
-def _response_netcdf(filtered: pd.DataFrame, background_tasks: BackgroundTasks):
-    # Convert the DataFrame to an xarray Dataset
-    ds = xr.Dataset.from_dataframe(filtered)
-
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".nc") as tmp_file:
-        tmp_file_name = tmp_file.name
-        ds.to_netcdf(tmp_file_name)
-
-    # Send the file as a response to the client
-    response = FileResponse(
-        path=tmp_file_name,
-        filename="output.nc",
-        media_type="application/x-netcdf",
-    )
-
-    # Clean up the temporary file after sending the response
-    def _remove_file_if_exists(file_path):
-        """Helper function to remove file if it exists"""
-        try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-        except Exception as e:
-            logger.error(f"Error removing file {file_path}: {e}")
-
-    background_tasks.add_task(lambda: _remove_file_if_exists(tmp_file_name))
-    return response
 
 
 async def fetch_data(
@@ -504,11 +467,6 @@ def get_site_service(repo: ParquetRepository = Depends(get_repo)):
     return SiteFeatureService(repo)
 
 
-def calculate_cell_coordinates(lat_min, lat_max, lon_min, lon_max):
-    precision = COORDINATE_INDEX_PRECISION
-    dividing_lats = 10**precision
-
-
 def get_memory_usage_percentage():
     process = psutil.Process(os.getpid())
     memory_info = process.memory_info()
@@ -517,6 +475,7 @@ def get_memory_usage_percentage():
     return (memory_info.rss / total_memory) * 100
 
 
+# Only reached from the /data/{uuid}/{key}/indexing_values investigation endpoint.
 def round_coordinate_list(coordinate_list: List[float]) -> List[ValueCount]:
     """
     Round a list of coordinates to according to the precision and return a list of ValueCount objects.
@@ -539,6 +498,7 @@ def round_coordinate_list(coordinate_list: List[float]) -> List[ValueCount]:
     return rounded_list
 
 
+# Only reached from the /data/{uuid}/{key}/indexing_values investigation endpoint.
 def round_dates(date_list: List[pandas.Timestamp]):
     """
     Round a list of dates to format YYYY-mm
@@ -564,6 +524,7 @@ def round_dates(date_list: List[pandas.Timestamp]):
     return rounded_dates
 
 
+# Only used by the /data/{uuid}/{key}/indexing_values investigation endpoint.
 def generate_feature_collection(
     dataset: xarray.Dataset,
     lat_key: str,

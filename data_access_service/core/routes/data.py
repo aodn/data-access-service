@@ -1,7 +1,6 @@
 import json
 import time
 import uuid as uuid_module
-from datetime import datetime, timezone
 from http import HTTPStatus
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -26,9 +25,8 @@ from data_access_service.sites.sites import (
 )
 from data_access_service.core.routes.auth import api_key_auth
 from data_access_service.utils.date_time_utils import (
-    DATE_FORMAT,
     MIN_DATE,
-    ensure_timezone,
+    to_utc_iso_z,
 )
 from data_access_service.core.routes.helpers import (
     async_response_json,
@@ -36,6 +34,7 @@ from data_access_service.core.routes.helpers import (
     generate_feature_collection,
     get_site_service,
     require_api_ready,
+    resolve_end_date_param,
     verify_datatime_param,
 )
 from data_access_service.utils.cancellation import Cancellation
@@ -67,13 +66,13 @@ async def has_data(
     request: Request,
     api_instance: API = Depends(require_api_ready),  # noqa: B008
     start_date: str | None = MIN_DATE,
-    end_date: str | None = datetime.now(timezone.utc).strftime(DATE_FORMAT),
+    end_date: str | None = None,
 ):
     logger.info(
         "Request details: %s", json.dumps(dict(request.query_params.multi_items()))
     )
     start_date = verify_datatime_param("start_date", start_date)
-    end_date = verify_datatime_param("end_date", end_date)
+    end_date = resolve_end_date_param(end_date)
     result = str(api_instance.has_data(uuid, key, start_date, end_date)).lower()
     return Response(result, media_type="application/json")
 
@@ -86,8 +85,8 @@ async def get_temporal_extent(
         start_date, end_date = api_instance.get_temporal_extent(uuid, key)
         result = [
             {
-                "start_date": ensure_timezone(start_date).strftime(DATE_FORMAT),
-                "end_date": ensure_timezone(end_date).strftime(DATE_FORMAT),
+                "start_date": to_utc_iso_z(start_date),
+                "end_date": to_utc_iso_z(end_date),
             }
         ]
         return Response(content=json.dumps(result), media_type="application/json")
@@ -224,9 +223,7 @@ async def get_data(
     key: str,
     api_instance: API = Depends(require_api_ready),  # noqa: B008
     start_date: str | None = Query(default=MIN_DATE),
-    end_date: str | None = Query(
-        default=datetime.now(timezone.utc).strftime(DATE_FORMAT)
-    ),
+    end_date: str | None = Query(default=None),
     columns: list[str] | None = Query(default=None),  # noqa: B008
     start_depth: float | None = Query(default=-1.0),
     end_depth: float | None = Query(default=-1.0),
@@ -254,7 +251,7 @@ async def get_data(
         end_depth,
     )
     start_date = verify_datatime_param("start_date", start_date)
-    end_date = verify_datatime_param("end_date", end_date)
+    end_date = resolve_end_date_param(end_date)
 
     sse = f.startswith("sse/")
     compress = "gzip" in request.headers.get("Accept-Encoding", "")

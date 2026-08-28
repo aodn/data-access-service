@@ -13,10 +13,7 @@ from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
 
 from data_access_service import API
 from data_access_service.core.api import BaseAPI
-from data_access_service.core.routes.helpers import (
-    _generate_partial_json_array,
-    _response_json,
-)
+from data_access_service.core.routes.helpers import _generate_partial_json_array
 
 
 class TestApi(unittest.TestCase):
@@ -205,7 +202,7 @@ class TestApi(unittest.TestCase):
 
         # Parse the JSON result but need to get it back to object so that compare
         # of null in json string is converted back to None in object
-        parsed_result = json.loads(_response_json(result, compress=False).body)
+        parsed_result = json.loads(json.dumps([x for x in result]))
 
         # Expected output
         expected = [

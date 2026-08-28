@@ -27,7 +27,6 @@ spec and Mapbox GL.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import timezone
 from typing import Any
 
 from data_access_service.sites.sites import (
@@ -38,6 +37,7 @@ from data_access_service.sites.sites import (
     SiteFeatureCollection,
     SitePoint,
 )
+from data_access_service.utils.date_time_utils import to_utc_iso_z
 
 
 def _native(value: Any) -> Any:
@@ -46,13 +46,24 @@ def _native(value: Any) -> Any:
 
 
 def _iso(value: Any) -> str:
-    """Render a timestamp as an ISO 8601 string with an explicit UTC marker."""
-    iso = getattr(value, "isoformat", None)
-    if not callable(iso):
+    """Render a timestamp as an ISO 8601 string with an explicit UTC marker.
+
+    A string is passed through untouched. Anything else that is not a timestamp falls back to str().
+
+    :param value: a timestamp (a naive one is read as UTC), or any other value
+    :return: string like "2024-01-15T00:00:00Z"; a non-timestamp is returned
+        as its own string form
+
+    Example:
+        _iso(pd.Timestamp("2024-01-15T10:00:00+10:00")) -> "2024-01-15T00:00:00Z"
+        _iso("2024-01-01") -> "2024-01-01"
+    """
+    if isinstance(value, str):
+        return value
+    try:
+        return to_utc_iso_z(value)
+    except (TypeError, ValueError):
         return str(value)
-    if getattr(value, "tzinfo", None) is not None:
-        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-    return f"{iso()}Z"
 
 
 def _point(longitude: Any, latitude: Any) -> SitePoint:

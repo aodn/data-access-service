@@ -14,17 +14,15 @@ from data_access_service.batch.subsetting.helpers.parquet_date_ranges import (
     trim_date_range,
 )
 from data_access_service.utils.date_time_utils import (
+    MIN_DATE,
+    _end_of_day_nano,
     parse_date,
-    get_final_day_of_month_,
-    next_month_first_day,
+    _get_final_day_of_month,
     get_monthly_utc_date_range_array_from_,
-    get_boundary_of_year_month,
-    transfer_date_range_into_yearmonth,
-    split_yearmonths_into_dict,
     ensure_timezone,
     split_date_range,
     split_date_range_binary,
-    supply_day_with_nano_precision,
+    to_utc_bounds,
     resolve_non_specified_dates,
     to_naive_utc,
 )
@@ -104,17 +102,8 @@ class TestDateTimeUtils(unittest.TestCase):
             nanosecond=999,
             tz=pytz.UTC,
         )
-        target_date = get_final_day_of_month_(date)
+        target_date = _get_final_day_of_month(date)
         self.assertEqual(target_date, expected_date)
-
-    def test_next_month_first_day(self):
-        date = pd.Timestamp(year=2023, month=1, day=31)
-        expected_date = pd.Timestamp(year=2023, month=2, day=1, tz=pytz.UTC)
-        self.assertEqual(next_month_first_day(date), expected_date)
-
-        date = pd.Timestamp(year=2023, month=1, day=31, tz="Asia/Tokyo")
-        expected_date = pd.Timestamp(year=2023, month=2, day=1, tz="Asia/Tokyo")
-        self.assertEqual(next_month_first_day(date), expected_date)
 
     def test_get_monthly_date_range_array_from_(self):
         """
@@ -996,96 +985,6 @@ class TestDateTimeUtils(unittest.TestCase):
             uuid="test-uuid", key="test-key"
         )
 
-    def test_get_boundary_of_year_month(self):
-        """Test the boundary of a year-month string."""
-        year_month_str = "2023-10"
-        expected_start = pd.Timestamp(
-            year=2023, month=10, day=1, hour=0, minute=0, second=0, tz=pytz.UTC
-        )
-        expected_end = pd.Timestamp(
-            year=2023,
-            month=10,
-            day=31,
-            hour=23,
-            minute=59,
-            second=59,
-            microsecond=999999,
-            nanosecond=999,
-            tz=pytz.UTC,
-        )
-
-        start_date, end_date = get_boundary_of_year_month(year_month_str)
-
-        self.assertEqual(start_date, expected_start)
-        self.assertEqual(end_date, expected_end)
-
-        year_month_str2 = "02-2023"
-        expected_start2 = pd.Timestamp(
-            year=2023, month=2, day=1, hour=0, minute=0, second=0, tz=pytz.UTC
-        )
-        expected_end2 = pd.Timestamp(
-            year=2023,
-            month=2,
-            day=28,
-            hour=23,
-            minute=59,
-            second=59,
-            microsecond=999999,
-            nanosecond=999,
-            tz=pytz.UTC,
-        )
-
-        start_date2, end_date2 = get_boundary_of_year_month(year_month_str2)
-        self.assertEqual(start_date2, expected_start2)
-        self.assertEqual(end_date2, expected_end2)
-
-    def test_transfer_date_range_into_yearmonth(self):
-        start_date = "09-2020"
-        end_date = "10-2021"
-
-        yearmonths = transfer_date_range_into_yearmonth(
-            start_date=start_date, end_date=end_date
-        )
-        expected_yearmonths = [
-            "09-2020",
-            "10-2020",
-            "11-2020",
-            "12-2020",
-            "01-2021",
-            "02-2021",
-            "03-2021",
-            "04-2021",
-            "05-2021",
-            "06-2021",
-            "07-2021",
-            "08-2021",
-            "09-2021",
-            "10-2021",
-        ]
-        self.assertEqual(yearmonths, expected_yearmonths)
-
-    def test_split_yearmonths_into_dict(self):
-        yearmonths = [
-            "2023-01",
-            "2023-02",
-            "2023-03",
-            "2023-04",
-            "2023-05",
-            "2023-06",
-            "2023-07",
-            "2023-08",
-            "2023-09",
-            "2023-10",
-        ]
-        expected_dict = {
-            0: ["2023-01", "2023-02", "2023-03"],
-            1: ["2023-04", "2023-05", "2023-06"],
-            2: ["2023-07", "2023-08", "2023-09"],
-            3: ["2023-10"],
-        }
-        result = split_yearmonths_into_dict(yearmonths, 3)
-        self.assertEqual(result, expected_dict)
-
     def test_datetime_without_timezone(self):
         # Test case: datetime without timezone should be assigned UTC
         dt = pd.Timestamp(year=2025, month=6, day=12, hour=8, minute=34)
@@ -1094,22 +993,25 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(result, datetime(2025, 6, 12, 8, 34, tzinfo=pytz.UTC))
 
     def test_datetime_with_timezone(self):
-        # Test case: datetime with timezone should remain unchanged
+        # Test case: an aware datetime is converted to UTC, same instant
         dt = pd.Timestamp(
             year=2025, month=6, day=12, hour=8, minute=34, tz="US/Pacific"
         )
         result = ensure_timezone(dt)
-        self.assertEqual(result.tzname(), "PDT")
+        self.assertEqual(result.tzname(), "UTC")
         self.assertEqual(result, dt)
+        self.assertEqual(result.hour, 15)
 
     def test_datetime_with_different_timezone(self):
-        # Test case: datetime with non-UTC timezone should remain unchanged
+        # Test case: same for a timezone ahead of UTC
         dt = pd.Timestamp(
             year=2025, month=6, day=12, hour=8, minute=34, tz="Asia/Tokyo"
         )
         result = ensure_timezone(dt)
-        self.assertEqual(result.tzname(), "JST")
+        self.assertEqual(result.tzname(), "UTC")
         self.assertEqual(result, dt)
+        # 08:34 JST is the previous day in UTC
+        self.assertEqual((result.day, result.hour), (11, 23))
 
     def test_datetime_preservation(self):
         # Test case: ensure original datetime components are preserved
@@ -1375,7 +1277,7 @@ class TestDateTimeUtils(unittest.TestCase):
             tz=pytz.UTC,
         )
         expected_tuple = (expected_start1, expected_end1)
-        result_tuple = supply_day_with_nano_precision(start_date1, end_date1)
+        result_tuple = to_utc_bounds(start_date1, end_date1)
         self.assertEqual(result_tuple, expected_tuple)
 
         # test supply day to full string
@@ -1404,7 +1306,7 @@ class TestDateTimeUtils(unittest.TestCase):
             tz=pytz.UTC,
         )
         expected_tuple2 = (expected_start2, expected_end2)
-        result_tuple2 = supply_day_with_nano_precision(start_date2, end_date2)
+        result_tuple2 = to_utc_bounds(start_date2, end_date2)
         self.assert_same_datetime(result_tuple2[0], expected_tuple2[0])
         self.assert_same_datetime(result_tuple2[1], expected_tuple2[1])
 
@@ -1420,10 +1322,12 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(dt1.tzinfo, dt2.tzinfo)
 
     def test_resolve_non_specified_dates_both_open(self):
-        # Both bounds open -> 1970-01-01 / today, matching batch init().
+        # Both bounds open -> epoch / end of today (UTC), matching batch init().
         start, end = resolve_non_specified_dates(NON_SPECIFIED, NON_SPECIFIED)
-        self.assertEqual(start, "1970-01-01")
-        self.assertEqual(end, pd.Timestamp.today().strftime("%Y-%m-%d"))
+        self.assertEqual(start, MIN_DATE)
+        # now(tz="UTC"), not today(): today() reads the host clock and names the
+        # wrong calendar day on any runner not pinned to UTC.
+        self.assertEqual(parse_date(end), _end_of_day_nano(pd.Timestamp.now(tz="UTC")))
 
     def test_resolve_non_specified_dates_passthrough(self):
         # Concrete values are returned unchanged.
@@ -1435,7 +1339,7 @@ class TestDateTimeUtils(unittest.TestCase):
         # Only the open bound is replaced; the concrete one is left alone.
         start, end = resolve_non_specified_dates("2008-08-05", NON_SPECIFIED)
         self.assertEqual(start, "2008-08-05")
-        self.assertEqual(end, pd.Timestamp.today().strftime("%Y-%m-%d"))
+        self.assertEqual(parse_date(end), _end_of_day_nano(pd.Timestamp.now(tz="UTC")))
 
     def test_to_naive_utc_none_passes_through(self):
         self.assertIsNone(to_naive_utc(None))
