@@ -7,6 +7,7 @@ calls - it does not parse input, format output, or stop a value being frozen at
 import time. These are the parts it cannot reach.
 """
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -15,10 +16,10 @@ from unittest.mock import MagicMock
 from data_access_service.core.constants import UNIX_EPOCH_UTC
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.date_time_utils import (
-    end_of_day_nano,
+    _end_of_day_nano,
     ensure_timezone,
     parse_date,
-    has_explicit_time,
+    _has_explicit_time,
     resolve_non_specified_dates,
     to_utc_bounds,
     to_naive_utc_string,
@@ -103,7 +104,7 @@ class TestEndBoundCoversTheUnitItWasGivenTo:
         ],
     )
     def test_has_explicit_time(self, value, expected):
-        assert has_explicit_time(value) is expected
+        assert _has_explicit_time(value) is expected
 
 
 class TestCustomFormatKeepsNanoseconds:
@@ -157,6 +158,19 @@ class TestApiOutputFormat:
             "2024-01-15T00:00:00Z"
         )
 
+    def test_sub_second_digits_are_kept(self):
+        """Truncating an end bound would drop the tail of the last second, the
+        same data loss _end_of_specified_precision exists to prevent."""
+        assert to_utc_iso_z(pd.Timestamp("2024-01-15T00:00:00.123456Z")) == (
+            "2024-01-15T00:00:00.123456Z"
+        )
+
+    def test_numpy_datetime64_is_accepted(self):
+        """The zarr time coordinate hands out datetime64, not pd.Timestamp."""
+        assert to_utc_iso_z(np.datetime64("2024-01-15T00:00:00")) == (
+            "2024-01-15T00:00:00Z"
+        )
+
 
 class TestParquetFilterKeepsTheWholeRange:
     """The row-count filter used to format the range as "%Y-%m-%d". The library
@@ -192,10 +206,10 @@ class TestOpenEndDate:
     def test_open_end_date_uses_the_utc_date(self):
         start, end = resolve_non_specified_dates("non-specified", "non-specified")
         assert parse_date(start) == UNIX_EPOCH_UTC
-        assert parse_date(end) == end_of_day_nano(pd.Timestamp.now(tz="UTC"))
+        assert parse_date(end) == _end_of_day_nano(pd.Timestamp.now(tz="UTC"))
 
     def test_open_end_date_is_already_the_end_of_the_day(self):
-        """The default must not rely on end_of_specified_precision running
+        """The default must not rely on _end_of_specified_precision running
         downstream to become the end of the day - it says so itself."""
         _, end = resolve_non_specified_dates("non-specified", "non-specified")
         assert parse_date(end).strftime("%H:%M:%S") == "23:59:59"

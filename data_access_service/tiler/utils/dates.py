@@ -1,12 +1,13 @@
-"""Pure date utility functions shared across routers and services.
-"""
+"""Pure date utility functions shared across routers and services."""
 
 import pandas as pd
+
+from data_access_service.utils.date_time_utils import to_utc_iso_z
 
 
 def ts_to_utc_iso(ts) -> str:
     """Format a raw (naive UTC) store timestamp as a canonical UTC ISO-8601 string."""
-    return pd.Timestamp(ts).tz_localize("UTC").isoformat().replace("+00:00", "Z")
+    return to_utc_iso_z(ts)
 
 
 def str_to_utc_timestamp(date: str, *, require_tz: bool = False) -> pd.Timestamp:

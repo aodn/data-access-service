@@ -82,14 +82,14 @@ def parse_date(
     return _to_timezone(ts, time_zone)
 
 
-def end_of_day_nano(ts: pd.Timestamp) -> pd.Timestamp:
+def _end_of_day_nano(ts: pd.Timestamp) -> pd.Timestamp:
     """Move a timestamp to the last nanosecond of its day.
 
     :param ts: any timestamp
     :return: the same day at 23:59:59.999999999
 
     Example:
-        end_of_day_nano("2024-01-15 10:00") -> "2024-01-15 23:59:59.999999999"
+        _end_of_day_nano("2024-01-15 10:00") -> "2024-01-15 23:59:59.999999999"
     """
     # a coarser-resolution timestamp (e.g. "us") silently drops the
     # nanosecond=999 in replace(), so force nanosecond resolution first
@@ -101,39 +101,6 @@ def end_of_day_nano(ts: pd.Timestamp) -> pd.Timestamp:
         # pyrefly: ignore [unexpected-keyword]
         nanosecond=999,
     )
-
-
-def get_final_day_of_month_(date: pd.Timestamp) -> pd.Timestamp:
-    """Move a timestamp to the last nanosecond of its month.
-
-    :param date: any timestamp; a naive one is read as UTC
-    :return: last day of that month at 23:59:59.999999999, UTC-aware
-
-    Example:
-        get_final_day_of_month_("2024-02-05") -> "2024-02-29 23:59:59.999999999+00:00"
-    """
-    if date.tz is None:
-        date = date.tz_localize(pytz.UTC)
-    return end_of_day_nano(date + pd.offsets.MonthEnd(0))
-
-
-def get_first_day_of_month(date: pd.Timestamp) -> pd.Timestamp:
-    """Roll a timestamp forward to a month's first day at midnight.
-
-    Despite the name, only a date already on the 1st stays in its own month;
-    any later day rolls forward to the NEXT month, because pandas' MonthBegin(0)
-    rolls forward. The one caller always passes the 1st, so this is safe today -
-    but do not reuse it on an arbitrary date without checking.
-
-    :param date: any timestamp; its timezone is kept as-is
-    :return: a month's first day at 00:00:00
-
-    Example:
-        get_first_day_of_month("2024-02-01 18:30") -> "2024-02-01 00:00:00"
-        get_first_day_of_month("2024-02-15 18:30") -> "2024-03-01 00:00:00"  (!)
-    """
-    first_day = date + pd.offsets.MonthBegin(0)
-    return first_day.normalize()
 
 
 def ensure_timezone(dt: pd.Timestamp | NaTType) -> pd.Timestamp | NaTType:
@@ -163,15 +130,18 @@ def to_utc_iso_z(ts: pd.Timestamp) -> str:
 
     strftime("%z") would write "+0000" with no colon, which is not one of the
     two forms the ECMAScript date-time format defines, so JS would parse it on
-    browser goodwill rather than by spec.
+    browser goodwill rather than by spec. isoformat() keeps whatever precision
+    the value carries, so an end bound is never silently truncated - the tiler
+    also relies on that to look a slice up by its exact instant.
 
     :param ts: any timestamp; a naive one is read as UTC
-    :return: string like "2024-01-15T00:00:00Z" (seconds precision)
+    :return: string like "2024-01-15T00:00:00Z", sub-second digits kept
 
     Example:
         to_utc_iso_z("2024-01-15T10:00:00+10:00") -> "2024-01-15T00:00:00Z"
+        to_utc_iso_z("2024-01-15 00:00:00.123456") -> "2024-01-15T00:00:00.123456Z"
     """
-    return ensure_timezone(pd.Timestamp(ts)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return ensure_timezone(pd.Timestamp(ts)).isoformat().replace("+00:00", "Z")
 
 
 def to_naive_utc(ts: pd.Timestamp | None) -> pd.Timestamp | None:
@@ -377,7 +347,7 @@ def resolve_non_specified_dates(start_date: str, end_date: str) -> Tuple[str, st
     """Replace the "non-specified" markers with the default open bounds.
 
     The end default carries full nanosecond precision. A day-only end would
-    become the end of that day only if end_of_specified_precision happened to
+    become the end of that day only if _end_of_specified_precision happened to
     run downstream; spelling it out here means the value is already the instant
     it claims to be.
 
@@ -398,82 +368,8 @@ def resolve_non_specified_dates(start_date: str, end_date: str) -> Tuple[str, st
     if end_date == NON_SPECIFIED:
         # now(tz="UTC") rather than today(), which reads the host clock and so
         # returns the wrong calendar day on any machine not pinned to UTC.
-        end_date = end_of_day_nano(pd.Timestamp.now(tz="UTC")).isoformat()
+        end_date = _end_of_day_nano(pd.Timestamp.now(tz="UTC")).isoformat()
     return start_date, end_date
-
-
-def has_explicit_time(date_string: str) -> bool:
-    """Tell whether a date string carries a clock time, not just a calendar date.
-
-    :param date_string: the raw string to inspect
-    :return: True when an "HH:MM" part is present
-
-    Example:
-        has_explicit_time("2024-01-15") -> False
-        has_explicit_time("2024-01-15T10:00:00Z") -> True
-    """
-    return bool(re.search(r"[T ]\d{2}:\d{2}", date_string))
-
-
-def end_of_specified_precision(date_string: str, ts: pd.Timestamp) -> pd.Timestamp:
-    """Widen an inclusive end bound to the last nanosecond of the precision given.
-
-    A bare date means that whole day, a whole second means that second. Only
-    those two precisions are recognised: a minute-only bound like
-    "2024-01-15T10:00" is read as second 00 and widens to 10:00:00.999999999,
-    not to the end of the minute. The portal always sends seconds.
-
-    The portal builds its end as 23:59:59.999 but formats it with
-    "YYYY-MM-DDTHH:mm:ss[Z]", dropping the milliseconds; taking that at face
-    value would leave the last second of every day outside both this range and
-    the next, so nothing could ever download it.
-
-    :param date_string: the raw string the bound was given as
-    :param ts: that same string, already parsed
-    :return: `ts` moved to the end of the unit `date_string` specified
-
-    Example:
-        end_of_specified_precision("2024-01-15", ts)
-        -> "2024-01-15 23:59:59.999999999+00:00"   (a date means the whole day)
-        end_of_specified_precision("2024-01-15T10:00:00Z", ts)
-        -> "2024-01-15 10:00:00.999999999+00:00"   (a second means that second)
-    """
-    if not has_explicit_time(date_string):
-        return end_of_day_nano(ts)
-
-    fraction = re.search(r"[T ]\d{2}:\d{2}:\d{2}\.(\d+)", date_string)
-    digits = len(fraction.group(1)) if fraction else 0
-    if digits >= 9:
-        return ts
-    # fill the digits the caller left unspecified with 9s
-    return ts + pd.Timedelta(nanoseconds=10 ** (9 - digits) - 1)
-
-
-# The legacy bound format the portal used to send, e.g. "02-2024".
-MONTH_ONLY_PATTERN = re.compile(r"^(0[1-9]|1[0-2])-\d{4}$")
-
-
-def _month_to_iso(date_string: str, *, is_end: bool) -> str:
-    """Rewrite a legacy "MM-YYYY" bound as the ISO date it means.
-
-    The portal sends ISO now. Converting here keeps the one place that still
-    understands the old format at the entry, so nothing downstream has to.
-
-    :param date_string: raw bound; anything not "MM-YYYY" is returned untouched
-    :param is_end: True picks the last day of the month, False the first
-    :return: a "YYYY-MM-DD" string
-
-    Example:
-        _month_to_iso("02-2024", is_end=False) -> "2024-02-01"
-        _month_to_iso("02-2024", is_end=True) -> "2024-02-29"
-        _month_to_iso("2024-02-15", is_end=True) -> "2024-02-15"  (not MM-YYYY)
-    """
-    if not MONTH_ONLY_PATTERN.match(date_string):
-        return date_string
-
-    month = parse_date(date_string, format_to_convert="%m-%Y")
-    day = get_final_day_of_month_(month) if is_end else get_first_day_of_month(month)
-    return day.strftime(YEAR_MONTH_DAY)
 
 
 def to_utc_bounds(
@@ -499,8 +395,115 @@ def to_utc_bounds(
 
     return (
         parse_date(start_date_str),
-        end_of_specified_precision(end_date_str, parse_date(end_date_str)),
+        _end_of_specified_precision(end_date_str, parse_date(end_date_str)),
     )
+
+
+# The legacy bound format the portal used to send, e.g. "02-2024".
+_MONTH_ONLY_PATTERN = re.compile(r"^(0[1-9]|1[0-2])-\d{4}$")
+
+
+def _month_to_iso(date_string: str, *, is_end: bool) -> str:
+    """Rewrite a legacy "MM-YYYY" bound as the ISO date it means.
+
+    The portal sends ISO now. Converting here keeps the one place that still
+    understands the old format at the entry, so nothing downstream has to.
+
+    :param date_string: raw bound; anything not "MM-YYYY" is returned untouched
+    :param is_end: True picks the last day of the month, False the first
+    :return: a "YYYY-MM-DD" string
+
+    Example:
+        _month_to_iso("02-2024", is_end=False) -> "2024-02-01"
+        _month_to_iso("02-2024", is_end=True) -> "2024-02-29"
+        _month_to_iso("2024-02-15", is_end=True) -> "2024-02-15"  (not MM-YYYY)
+    """
+    if not _MONTH_ONLY_PATTERN.match(date_string):
+        return date_string
+
+    month = parse_date(date_string, format_to_convert="%m-%Y")
+    day = _get_final_day_of_month(month) if is_end else _get_first_day_of_month(month)
+    return day.strftime(YEAR_MONTH_DAY)
+
+
+def _get_final_day_of_month(date: pd.Timestamp) -> pd.Timestamp:
+    """Move a timestamp to the last nanosecond of its month.
+
+    :param date: any timestamp; a naive one is read as UTC
+    :return: last day of that month at 23:59:59.999999999, UTC-aware
+
+    Example:
+        _get_final_day_of_month("2024-02-05") -> "2024-02-29 23:59:59.999999999+00:00"
+    """
+    if date.tz is None:
+        date = date.tz_localize(pytz.UTC)
+    return _end_of_day_nano(date + pd.offsets.MonthEnd(0))
+
+
+def _get_first_day_of_month(date: pd.Timestamp) -> pd.Timestamp:
+    """Roll a timestamp forward to a month's first day at midnight.
+
+    Despite the name, only a date already on the 1st stays in its own month;
+    any later day rolls forward to the NEXT month, because pandas' MonthBegin(0)
+    rolls forward. The one caller always passes the 1st, so this is safe today -
+    but do not reuse it on an arbitrary date without checking.
+
+    :param date: any timestamp; its timezone is kept as-is
+    :return: a month's first day at 00:00:00
+
+    Example:
+        _get_first_day_of_month("2024-02-01 18:30") -> "2024-02-01 00:00:00"
+        _get_first_day_of_month("2024-02-15 18:30") -> "2024-03-01 00:00:00"  (!)
+    """
+    first_day = date + pd.offsets.MonthBegin(0)
+    return first_day.normalize()
+
+
+def _end_of_specified_precision(date_string: str, ts: pd.Timestamp) -> pd.Timestamp:
+    """Widen an inclusive end bound to the last nanosecond of the precision given.
+
+    A bare date means that whole day, a whole second means that second. Only
+    those two precisions are recognised: a minute-only bound like
+    "2024-01-15T10:00" is read as second 00 and widens to 10:00:00.999999999,
+    not to the end of the minute. The portal always sends seconds.
+
+    The portal builds its end as 23:59:59.999 but formats it with
+    "YYYY-MM-DDTHH:mm:ss[Z]", dropping the milliseconds; taking that at face
+    value would leave the last second of every day outside both this range and
+    the next, so nothing could ever download it.
+
+    :param date_string: the raw string the bound was given as
+    :param ts: that same string, already parsed
+    :return: `ts` moved to the end of the unit `date_string` specified
+
+    Example:
+        _end_of_specified_precision("2024-01-15", ts)
+        -> "2024-01-15 23:59:59.999999999+00:00"   (a date means the whole day)
+        _end_of_specified_precision("2024-01-15T10:00:00Z", ts)
+        -> "2024-01-15 10:00:00.999999999+00:00"   (a second means that second)
+    """
+    if not _has_explicit_time(date_string):
+        return _end_of_day_nano(ts)
+
+    fraction = re.search(r"[T ]\d{2}:\d{2}:\d{2}\.(\d+)", date_string)
+    digits = len(fraction.group(1)) if fraction else 0
+    if digits >= 9:
+        return ts
+    # fill the digits the caller left unspecified with 9s
+    return ts + pd.Timedelta(nanoseconds=10 ** (9 - digits) - 1)
+
+
+def _has_explicit_time(date_string: str) -> bool:
+    """Tell whether a date string carries a clock time, not just a calendar date.
+
+    :param date_string: the raw string to inspect
+    :return: True when an "HH:MM" part is present
+
+    Example:
+        _has_explicit_time("2024-01-15") -> False
+        _has_explicit_time("2024-01-15T10:00:00Z") -> True
+    """
+    return bool(re.search(r"[T ]\d{2}:\d{2}", date_string))
 
 
 def split_date_range(

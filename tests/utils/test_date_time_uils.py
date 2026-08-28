@@ -15,9 +15,9 @@ from data_access_service.batch.subsetting.helpers.parquet_date_ranges import (
 )
 from data_access_service.utils.date_time_utils import (
     MIN_DATE,
-    end_of_day_nano,
+    _end_of_day_nano,
     parse_date,
-    get_final_day_of_month_,
+    _get_final_day_of_month,
     get_monthly_utc_date_range_array_from_,
     ensure_timezone,
     split_date_range,
@@ -102,7 +102,7 @@ class TestDateTimeUtils(unittest.TestCase):
             nanosecond=999,
             tz=pytz.UTC,
         )
-        target_date = get_final_day_of_month_(date)
+        target_date = _get_final_day_of_month(date)
         self.assertEqual(target_date, expected_date)
 
     def test_get_monthly_date_range_array_from_(self):
@@ -1327,7 +1327,7 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(start, MIN_DATE)
         # now(tz="UTC"), not today(): today() reads the host clock and names the
         # wrong calendar day on any runner not pinned to UTC.
-        self.assertEqual(parse_date(end), end_of_day_nano(pd.Timestamp.now(tz="UTC")))
+        self.assertEqual(parse_date(end), _end_of_day_nano(pd.Timestamp.now(tz="UTC")))
 
     def test_resolve_non_specified_dates_passthrough(self):
         # Concrete values are returned unchanged.
@@ -1339,7 +1339,7 @@ class TestDateTimeUtils(unittest.TestCase):
         # Only the open bound is replaced; the concrete one is left alone.
         start, end = resolve_non_specified_dates("2008-08-05", NON_SPECIFIED)
         self.assertEqual(start, "2008-08-05")
-        self.assertEqual(parse_date(end), end_of_day_nano(pd.Timestamp.now(tz="UTC")))
+        self.assertEqual(parse_date(end), _end_of_day_nano(pd.Timestamp.now(tz="UTC")))
 
     def test_to_naive_utc_none_passes_through(self):
         self.assertIsNone(to_naive_utc(None))
