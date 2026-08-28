@@ -10,6 +10,7 @@ from __future__ import annotations
 from abc import ABC
 from collections.abc import Sequence
 from typing import ClassVar
+import re
 
 import pandas as pd
 
@@ -56,7 +57,8 @@ class ParquetRepository(ABC):
     value_columns: ClassVar[Sequence[str]]
     group_column: ClassVar[str | None] = None
     value_columns_quality_control_columns: ClassVar[Sequence[str]] = ()
-    incremental_lookback_days: ClassVar[int] = 3
+    incremental_lookback_days: ClassVar[int] = 10
+    partition_column: ClassVar[str | None] = "timestamp"
 
     def __init_subclass__(cls, **kwargs) -> None:
         """Require every subclass to define the no-default class attributes.
@@ -135,17 +137,12 @@ class ParquetRepository(ABC):
         self.session.create_s3_secret(self.backup_bucket)
 
     def load(self) -> ParquetRepository:
-        """Materialize the PRIMARY dataset into this dataset's ``table``.
-
-        Reads the Hive-partitioned ``dataset`` directory and replaces the table.
-        Raises if the read fails; because ``CREATE OR REPLACE TABLE`` is atomic,
-        a failed read rolls back and leaves any existing table intact. Returns
-        ``self`` so callers can chain ``Repo(session).load()``.
+        """Full load: read the entire ``dataset`` and replace ``table``.
 
         Temporarily raises the shared connection's thread count to
-        ``full_load_threads`` for this heavier, infrequent read, then restores
-        it — this is a GLOBAL DuckDB setting, so it also applies to any
-        concurrent live API read for the duration.
+        ``full_load_threads`` for this heavier, infrequent read, then
+        restores it. Atomic via ``CREATE OR REPLACE TABLE``: a failed read
+        rolls back and leaves the existing table intact.
         """
         cols = ", ".join(quote_ident(c) for c in self.load_columns)
         self.session.set_threads(self.session.full_load_threads)
@@ -176,15 +173,37 @@ class ParquetRepository(ABC):
         now = pd.Timestamp.now(tz="UTC").tz_localize(None)
         return now - pd.Timedelta(days=lookback_days)
 
-    def load_incremental(self, lookback_days: int | None = None) -> ParquetRepository:
-        """Reload only the last ``lookback_days`` of data instead of the whole dataset.
+    def _qualifying_partition_globs(self, cutoff_epoch: int) -> list[str]:
+        """Glob patterns for the partition containing ``cutoff_epoch`` and any after it.
 
-        Deletes and re-reads rows at or after the cutoff, filtered on
-        ``time_column`` directly. Assumes older data is immutable; run
-        :meth:`load` (a full reload) on a slower cadence to catch retroactive
-        corrections. Unlike :meth:`load`'s atomic ``CREATE OR REPLACE TABLE``,
-        the ``DELETE`` and re-``INSERT`` here are separate statements, so a
-        failed re-insert leaves the cutoff window empty until the next run.
+        Lists the dataset's files to find real ``partition_column`` values —
+        the latest one at-or-before the cutoff must contain it, since
+        partitions are contiguous. Each pattern is the matched path's prefix
+        up to that partition segment plus one trailing ``**/*.parquet``
+        (DuckDB rejects more than one ``**`` per path). Empty if no files
+        exist yet.
+        """
+        pattern = re.compile(rf"{re.escape(self.partition_column)}=(-?\d+)")
+        rows = self.session.execute(
+            "SELECT file FROM glob(?)", [f"{self.dataset}/**/*.parquet"]
+        ).fetchall()
+        parsed = [
+            (int(m.group(1)), path[: m.end()])
+            for (path,) in rows
+            if (m := pattern.search(path))
+        ]
+        if not parsed:
+            return []
+        values = {v for v, _ in parsed}
+        eligible_before = [v for v in values if v <= cutoff_epoch]
+        threshold = max(eligible_before) if eligible_before else min(values)
+        prefixes = sorted({prefix for v, prefix in parsed if v >= threshold})
+        return [f"{prefix}/**/*.parquet" for prefix in prefixes]
+
+    def load_incremental(self, lookback_days: int | None = None) -> ParquetRepository:
+        """Incremental load: read only the files from
+        :meth:`_qualifying_partition_globs` (the last ``lookback_days``),
+        never the whole ``dataset``.
         """
         n = self.incremental_lookback_days if lookback_days is None else lookback_days
         cutoff = self._incremental_cutoff(n)
@@ -192,6 +211,13 @@ class ParquetRepository(ABC):
 
         cols = ", ".join(quote_ident(c) for c in self.load_columns)
         time = quote_ident(self.time_column)
+
+        source: object = f"{self.dataset}/**/*.parquet"
+        if self.partition_column is not None:
+            cutoff_epoch = int(cutoff.tz_localize("UTC").timestamp())
+            globs = self._qualifying_partition_globs(cutoff_epoch)
+            if globs:
+                source = globs
 
         self.session.execute(
             f"DELETE FROM {quote_ident(self.table)} WHERE {time} >= ?",
@@ -202,12 +228,12 @@ class ParquetRepository(ABC):
             INSERT INTO {quote_ident(self.table)}
             SELECT {cols}
             FROM read_parquet(
-                '{self.dataset}/**/*.parquet',
+                ?,
                 hive_partitioning=true,
                 union_by_name=true
             )
             WHERE {time} >= ?""",
-            [cutoff_iso],
+            [source, cutoff_iso],
         )
         return self
 

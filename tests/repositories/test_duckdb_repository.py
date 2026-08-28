@@ -326,7 +326,9 @@ def test_site_details_nulls_bad_quality_values_only(session, qc_rows):
 class _IncrementalRepo(ParquetRepository):
     """For load_incremental() tests. ``dataset`` is set per-test to a local
     tmp dir standing in for the S3 prefix — read_parquet globs local paths the
-    same way it globs s3:// ones."""
+    same way it globs s3:// ones. No Hive partitioning here (flat files) —
+    this exercises the fallback path for a dataset with no partition_column;
+    see _HivePartitionedIncrementalRepo below for the coarse-pruning path."""
 
     table = "test_incremental"
     bucket = "test-bucket"
@@ -339,6 +341,15 @@ class _IncrementalRepo(ParquetRepository):
     longitude_column = "LONGITUDE"
     value_columns = ("TEMP",)
     incremental_lookback_days = 5
+    partition_column = None
+
+
+class _HivePartitionedIncrementalRepo(_IncrementalRepo):
+    """Same as _IncrementalRepo, but with the real repos' default
+    partition_column="timestamp" — files live under timestamp=<epoch>/."""
+
+    table = "test_incremental_hive"
+    partition_column = "timestamp"
 
 
 def _write_file(con, root: str, name: str, rows: pd.DataFrame) -> None:
@@ -381,14 +392,16 @@ def test_load_incremental_only_touches_recent_rows(incremental_repo):
     old_time = now - pd.Timedelta(days=30)  # outside default lookback=5 days
     recent_time = now - pd.Timedelta(days=1)  # inside lookback
 
-    _write_file(con, incremental_repo.dataset, "old.parquet", _rows("A", old_time, 10.0))
+    _write_file(
+        con, incremental_repo.dataset, "old.parquet", _rows("A", old_time, 10.0)
+    )
     _write_file(
         con, incremental_repo.dataset, "recent.parquet", _rows("B", recent_time, 20.0)
     )
 
     incremental_repo.load()
     loaded = con.execute(
-        f'SELECT * FROM {quote_ident(incremental_repo.table)} ORDER BY site_code'
+        f"SELECT * FROM {quote_ident(incremental_repo.table)} ORDER BY site_code"
     ).df()
     assert list(loaded["site_code"]) == ["A", "B"]
 
@@ -400,7 +413,7 @@ def test_load_incremental_only_touches_recent_rows(incremental_repo):
 
     incremental_repo.load_incremental()  # default lookback_days=5
     refreshed = con.execute(
-        f'SELECT * FROM {quote_ident(incremental_repo.table)} ORDER BY site_code'
+        f"SELECT * FROM {quote_ident(incremental_repo.table)} ORDER BY site_code"
     ).df()
 
     assert list(refreshed["site_code"]) == ["A", "B"]
@@ -408,6 +421,168 @@ def test_load_incremental_only_touches_recent_rows(incremental_repo):
     assert refreshed.loc[refreshed["site_code"] == "A", "TEMP"].item() == 10.0
     # Recent row: replaced with the new value.
     assert refreshed.loc[refreshed["site_code"] == "B", "TEMP"].item() == 999.0
+
+
+def _write_hive_partition(
+    con, root: str, partition_start: pd.Timestamp, rows: pd.DataFrame
+) -> None:
+    """Write one timestamp=<epoch>/ Hive partition folder, matching how the
+    real mooring/wave-buoy datasets are laid out (see MooringRepository)."""
+    epoch = int(partition_start.tz_localize("UTC").timestamp())
+    part_dir = os.path.join(root, f"timestamp={epoch}")
+    os.makedirs(part_dir, exist_ok=True)
+    _write_file(con, part_dir, "data.parquet", rows)
+
+
+@pytest.fixture
+def hive_incremental_repo(session, tmp_path):
+    repo = _HivePartitionedIncrementalRepo(session)
+    repo.dataset = str(tmp_path)
+    return repo
+
+
+def test_load_incremental_with_partition_column_still_correct(hive_incremental_repo):
+    """Same correctness contract as the flat-file case, just laid out under
+    timestamp=<epoch>/ so the coarse partition_column pre-filter applies."""
+    con = hive_incremental_repo.session.get_instance()
+    now = pd.Timestamp.now(tz="UTC").tz_localize(None)
+    old_start = now - pd.Timedelta(days=30)  # outside default lookback=5 days
+    recent_start = now - pd.Timedelta(days=1)  # inside lookback
+
+    _write_hive_partition(
+        con, hive_incremental_repo.dataset, old_start, _rows("A", old_start, 10.0)
+    )
+    _write_hive_partition(
+        con, hive_incremental_repo.dataset, recent_start, _rows("B", recent_start, 20.0)
+    )
+
+    hive_incremental_repo.load()
+
+    # Overwrite the recent partition as if new/corrected data arrived
+    # upstream; leave the old (out-of-lookback) partition untouched.
+    _write_hive_partition(
+        con,
+        hive_incremental_repo.dataset,
+        recent_start,
+        _rows("B", recent_start, 999.0),
+    )
+
+    hive_incremental_repo.load_incremental()  # default lookback_days=5
+    refreshed = con.execute(
+        f"SELECT * FROM {quote_ident(hive_incremental_repo.table)} ORDER BY site_code"
+    ).df()
+
+    assert list(refreshed["site_code"]) == ["A", "B"]
+    assert refreshed.loc[refreshed["site_code"] == "A", "TEMP"].item() == 10.0
+    assert refreshed.loc[refreshed["site_code"] == "B", "TEMP"].item() == 999.0
+
+
+def test_qualifying_partition_globs_picks_exact_boundary(hive_incremental_repo):
+    con = hive_incremental_repo.session.get_instance()
+    now = pd.Timestamp.now(tz="UTC").tz_localize(None)
+    very_old_start = now - pd.Timedelta(days=1000)
+    recent_start = now - pd.Timedelta(days=1)
+
+    _write_hive_partition(
+        con,
+        hive_incremental_repo.dataset,
+        very_old_start,
+        _rows("A", very_old_start, 10.0),
+    )
+    _write_hive_partition(
+        con, hive_incremental_repo.dataset, recent_start, _rows("B", recent_start, 20.0)
+    )
+
+    recent_epoch = int(recent_start.tz_localize("UTC").timestamp())
+    very_old_epoch = int(very_old_start.tz_localize("UTC").timestamp())
+
+    # cutoff == now: only the recent partition is at-or-before it, and
+    # nothing exists after it, so only its glob is returned.
+    cutoff_epoch = int(now.tz_localize("UTC").timestamp())
+    globs = hive_incremental_repo._qualifying_partition_globs(cutoff_epoch)
+    assert len(globs) == 1
+    assert f"timestamp={recent_epoch}" in globs[0]
+    assert globs[0].endswith("/**/*.parquet")
+    assert globs[0].count("**") == 1
+
+    # Cutoff before every existing partition: falls back to the earliest one
+    # (nothing to safely exclude) instead of finding no match — so BOTH
+    # partitions qualify (earliest onward).
+    globs = hive_incremental_repo._qualifying_partition_globs(very_old_epoch - 1)
+    assert len(globs) == 2
+    assert any(f"timestamp={very_old_epoch}" in g for g in globs)
+    assert any(f"timestamp={recent_epoch}" in g for g in globs)
+
+
+def test_qualifying_partition_globs_empty_when_dataset_empty(hive_incremental_repo):
+    assert hive_incremental_repo._qualifying_partition_globs(0) == []
+
+
+def test_load_incremental_prunes_old_partitions_at_file_level(hive_incremental_repo):
+    """Regression guard for the exact bug this was built to fix: globbing the
+    whole dataset and filtering on partition_column in the WHERE clause
+    measured no faster than an unfiltered scan on the real (large, deeply
+    nested) wave-buoy dataset — resolving the full recursive glob dominates
+    before any WHERE filter gets a chance to skip anything. Confirms that
+    the glob patterns load_incremental() actually uses (built from
+    _qualifying_partition_globs, not a WHERE clause) exclude an old
+    partition at the file level.
+
+    Three partitions, default lookback_days=5 (cutoff = 5 days ago):
+      far_past (1000d ago)  -- older than the cutoff-containing partition:
+                                must be excluded
+      boundary (10d ago)    -- latest partition at-or-before the cutoff:
+                                becomes the threshold, included in full
+      recent (1d ago)       -- after the cutoff: included
+    """
+    con = hive_incremental_repo.session.get_instance()
+    now = pd.Timestamp.now(tz="UTC").tz_localize(None)
+    far_past_start = now - pd.Timedelta(days=1000)
+    boundary_start = now - pd.Timedelta(days=10)
+    recent_start = now - pd.Timedelta(days=1)
+
+    _write_hive_partition(
+        con,
+        hive_incremental_repo.dataset,
+        far_past_start,
+        _rows("A", far_past_start, 10.0),
+    )
+    _write_hive_partition(
+        con,
+        hive_incremental_repo.dataset,
+        boundary_start,
+        _rows("B", boundary_start, 20.0),
+    )
+    _write_hive_partition(
+        con, hive_incremental_repo.dataset, recent_start, _rows("C", recent_start, 30.0)
+    )
+
+    hive_incremental_repo.load()
+
+    cutoff = hive_incremental_repo._incremental_cutoff(
+        hive_incremental_repo.incremental_lookback_days
+    )
+    cutoff_epoch = int(cutoff.tz_localize("UTC").timestamp())
+    globs = hive_incremental_repo._qualifying_partition_globs(cutoff_epoch)
+
+    boundary_epoch = int(boundary_start.tz_localize("UTC").timestamp())
+    recent_epoch = int(recent_start.tz_localize("UTC").timestamp())
+    far_past_epoch = int(far_past_start.tz_localize("UTC").timestamp())
+    assert len(globs) == 2
+    assert any(f"timestamp={boundary_epoch}" in g for g in globs)
+    assert any(f"timestamp={recent_epoch}" in g for g in globs)
+    assert not any(f"timestamp={far_past_epoch}" in g for g in globs)
+
+    plan = con.execute(
+        f"""
+        EXPLAIN ANALYZE
+        SELECT "TIME" FROM read_parquet({globs!r}, hive_partitioning=true, union_by_name=true)
+        """
+    ).fetchall()
+    text = "\n".join(row[1] if len(row) > 1 else str(row) for row in plan)
+    # 2 of 3 files: boundary + recent, far_past excluded — because it was
+    # never part of the glob at all, not because of a WHERE filter.
+    assert "Total Files Read: 2" in text, text
 
 
 def test_load_uses_full_load_threads_then_restores_default(tmp_path, monkeypatch):

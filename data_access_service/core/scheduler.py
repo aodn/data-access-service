@@ -162,7 +162,9 @@ class TaskScheduler:
         """
         self.scheduler.add_job(
             self._refresh_task,
-            trigger=CronTrigger(day_of_week="sun", hour="3", minute="0"),  # Weekly, Sunday 03:00 UTC
+            trigger=CronTrigger(
+                day_of_week="sun", hour="3", minute="0"
+            ),  # Weekly, Sunday 03:00 UTC
             id="refresh_task",
             name="Repository data full refresh task",
             replace_existing=True,
