@@ -12,6 +12,9 @@ column_name_mapping:
     # Prefer a real datetime over the hive partition named "timestamp",
     # which some satellite-relay metadata datasets store as unix seconds.
     - release_date
+    - date
+    - d_date
+    - de_date
     - timestamp
   depth:
   latitude:
