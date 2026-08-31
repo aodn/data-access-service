@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 import yaml
 import boto3
 import os
@@ -16,6 +16,8 @@ from data_access_service.models.pmtiles_types import (
     HexLayerSpec,
     TimeGroupBy,
 )
+from data_access_service.models.duckdb_types import DuckDBTuningConfig
+from data_access_service.models.estimation_types import EstimationIndexConfig
 from data_access_service.models.sites_types import ParquetsGenerationConfig
 from data_access_service.models.tiler_types import TilerConfig
 
@@ -259,6 +261,83 @@ class Config:
             show_progress=pmconfig.get("show_progress", True),
             time_group_by=time_group_by,
             use_fork_process=bool(pmconfig.get("use_fork_process", True)),
+        )
+
+    def get_estimation_config(self) -> EstimationIndexConfig:
+        """Settings for the pre-built parquet estimation index.
+
+        The index is uploaded beside the pmtiles output, so the bucket is
+        resolved exactly the way :meth:`get_pmtiles_config` resolves it and
+        each environment writes to its own portal-data bucket.
+        """
+        econfig = self.config.get("estimation", {}).get("config", {})
+        # Source bucket only: the estimation job reads the same cloud-optimised
+        # data pmtiles reads, so it reuses that name and nothing else.
+        co_bucket = self.config.get("pmtiles", {}).get("config", {}).get("co_bucket")
+
+        bucket_name_env = os.getenv("AWS_S3_BUCKET_NAME_PORTAL_DATA")
+        if bucket_name_env:
+            bucket_name = bucket_name_env
+        else:
+            bucket_name = self.config["aws"]["s3"]["bucket_name"]["portal_data"]
+
+        bin_size = float(econfig.get("bin_size", 0.1))
+        # Whole numbers only: the size guard coarsens by merging whole cells of
+        # the base grid, which is only exact for an integer factor. 1 (the base
+        # grid itself) is always the first rung.
+        factors = sorted(
+            {
+                int(factor)
+                for factor in econfig.get("bin_merge_factors", [1, 2, 5, 10])
+                if int(factor) >= 1
+            }
+        )
+        if not factors or factors[0] != 1:
+            factors = [1] + factors
+
+        return EstimationIndexConfig(
+            bucket_name=bucket_name,
+            s3_prefix=econfig.get("s3_prefix", "portal/estimation"),
+            output_dir=econfig.get("output_dir", "portal/estimation/output"),
+            bin_size=bin_size,
+            bin_merge_factors=tuple(factors),
+            max_index_rows=int(econfig.get("max_index_rows", 5_000_000)),
+            sample_files=int(econfig.get("sample_files", 8)),
+            sample_rows=int(econfig.get("sample_rows", 50_000)),
+            row_group_size=int(econfig.get("row_group_size", 100_000)),
+            build_with_pmtiles=bool(econfig.get("build_with_pmtiles", True)),
+            use_index_for_estimate=bool(econfig.get("use_index_for_estimate", True)),
+            duckdb=self._duckdb_tuning(econfig.get("duckdb", {}), co_bucket=co_bucket),
+            use_fork_process=bool(econfig.get("use_fork_process", True)),
+        )
+
+    def get_pmtiles_duckdb_tuning(self) -> DuckDBTuningConfig:
+        """The pmtiles job's DuckDB settings, as the client wants them."""
+        pmconfig = self.get_pmtiles_config()
+        return DuckDBTuningConfig(
+            co_bucket=pmconfig.co_bucket,
+            duckdb_temp_dir=pmconfig.duckdb_temp_dir,
+            duckdb_database=pmconfig.duckdb_database,
+            memory_limit=pmconfig.memory_limit,
+            threads=pmconfig.threads,
+            show_progress=pmconfig.show_progress,
+        )
+
+    @staticmethod
+    def _duckdb_tuning(section: dict, co_bucket: Optional[str]) -> DuckDBTuningConfig:
+        """Read one job's ``duckdb:`` block.
+
+        Defaults are literals rather than the pmtiles values on purpose: a job
+        that leaves the block out must not start following pmtiles when someone
+        retunes pmtiles.
+        """
+        return DuckDBTuningConfig(
+            co_bucket=section.get("co_bucket") or co_bucket or "aodn-cloud-optimised",
+            duckdb_temp_dir=section.get("duckdb_temp_dir", "duckdb_tmp"),
+            duckdb_database=section.get("duckdb_database", "disk_db.duckdb"),
+            memory_limit=section.get("memory_limit", "3G"),
+            threads=int(section.get("threads", 3)),
+            show_progress=bool(section.get("show_progress", True)),
         )
 
     def get_parquets_config(self) -> ParquetsGenerationConfig:

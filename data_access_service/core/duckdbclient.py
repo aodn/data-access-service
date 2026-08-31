@@ -8,14 +8,14 @@ from collections.abc import Sequence
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 from threading import Lock
-from typing import Any, Iterator
+from typing import Any, Iterator, Optional
 
 import boto3
 import duckdb
 import logging
 
 from data_access_service.config.config import IntTestConfig
-from data_access_service.models.pmtiles_types import PmtilesGenerationConfig
+from data_access_service.models.duckdb_types import DuckDBTuningConfig
 from data_access_service.models.sites_types import ParquetsGenerationConfig
 from data_access_service import Config
 from tenacity import (
@@ -94,6 +94,9 @@ class PmTileDuckDBClient(DuckDBClient):
     # Process-global singletons
     _global_db_connection = None
     _temp_dir_object = None
+    # Tuning the live global connection was opened with, so a client asking for
+    # different settings rebuilds instead of silently getting the old ones.
+    _global_tuning = None
     _lock = Lock()
 
     MAX_READ_ATTEMPTS = 3
@@ -113,8 +116,15 @@ class PmTileDuckDBClient(DuckDBClient):
             f"Waiting {next_wait_minutes} minute(s) before attempt #{attempt_num + 1}..."
         )
 
-    def __init__(self):
-        self._config: PmtilesGenerationConfig = Config.get_config().get_pmtiles_config()
+    def __init__(self, tuning: Optional[DuckDBTuningConfig] = None):
+        """Open a session with ``tuning``, defaulting to the pmtiles job's settings.
+
+        Batch jobs pass their own object so one job's memory limit cannot move
+        another's; see :class:`DuckDBTuningConfig`.
+        """
+        self._config: DuckDBTuningConfig = (
+            tuning or Config.get_config().get_pmtiles_duckdb_tuning()
+        )
         self._logger = logging.getLogger(__name__)
         self._duckdb_client = None
         self._con = self.get_instance()
@@ -122,6 +132,21 @@ class PmTileDuckDBClient(DuckDBClient):
 
     def get_instance(self):
         """Initializes the single global DB instance if it does not exist."""
+        # The connection is process-global but the settings are per job, so a
+        # job that follows another one in the same process (estimation after
+        # pmtiles) must not inherit the previous job's limits.
+        if (
+            PmTileDuckDBClient._global_db_connection is not None
+            and PmTileDuckDBClient._global_tuning != self._config
+        ):
+            self._logger.info(
+                "DuckDB connection was opened with different tuning (%s); "
+                "rebuilding it for %s",
+                PmTileDuckDBClient._global_tuning,
+                self._config,
+            )
+            PmTileDuckDBClient.shutdown()
+
         if PmTileDuckDBClient._global_db_connection is None:
             with PmTileDuckDBClient._lock:
                 if PmTileDuckDBClient._global_db_connection is None:
@@ -167,6 +192,7 @@ class PmTileDuckDBClient(DuckDBClient):
                     db.execute("SET GLOBAL TimeZone = 'UTC';")
 
                     PmTileDuckDBClient._global_db_connection = db
+                    PmTileDuckDBClient._global_tuning = self._config
 
         # CRITICAL: Return a thread-safe, independent cursor from the global connection.
         # Progress-bar settings are LOCAL scope, so they must be set on this cursor
@@ -242,6 +268,7 @@ class PmTileDuckDBClient(DuckDBClient):
             # Drop the references first so a failure below can never leave
             # later datasets reusing a half-closed connection.
             cls._global_db_connection = None
+            cls._global_tuning = None
             cls._temp_dir_object = None
 
         # Close outside the class lock so a slow/native close cannot stall

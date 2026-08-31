@@ -53,6 +53,10 @@ from data_access_service.core.constants import (
     GEOTIFF_CURVILINEAR_INFLATION,
     MAX_FRAGMENT_FOOTER_READS,
 )
+from data_access_service.core.estimation_index import (
+    read_index_estimate,
+    sidecar_extent_provider,
+)
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.utils.cancellation import Cancellation, raise_if_client_gone
 from data_access_service.utils.format_utils import (
@@ -109,13 +113,16 @@ def estimate_single_key_size(
     # get_datasource above and the date trim below are both slow, so check between them.
     raise_if_client_gone(cancellation)
 
-    # Re-trim to THIS key's own extent
+    # Re-trim to THIS key's own extent. The estimate may take the extent from
+    # the pre-built index sidecar; the download never does (see
+    # estimation_index.sidecar_extent_provider).
     date_start, date_end = trim_date_range_for_keys(
         api,
         uuid,
         [key],
         resolved_subset_request.start_date,
         resolved_subset_request.end_date,
+        extent_provider=sidecar_extent_provider(api),
     )
     if date_start is None or date_end is None:
         return _empty_estimate(uuid, key, output_format)
@@ -135,6 +142,21 @@ def estimate_single_key_size(
             cancellation,
         )
     elif isinstance(ds, ParquetDataSource):
+        # The pre-built index answers in milliseconds when it exists and is
+        # still valid for this key; None means fall back to the live scan.
+        indexed = read_index_estimate(
+            api,
+            uuid,
+            key,
+            date_start,
+            date_end,
+            resolved_subset_request.bboxes,
+            output_format,
+            columns=resolved_subset_request.columns,
+            requested_end_date=resolved_subset_request.requested_end_date,
+        )
+        if indexed is not None:
+            return indexed
         return _estimate_parquet_size(
             api,
             ds,

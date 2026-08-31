@@ -3,6 +3,9 @@ import tempfile
 import threading
 
 from data_access_service import Config, init_log
+from data_access_service.batch.estimation.generator import (
+    build_and_upload_estimation_index,
+)
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.api import BaseAPI
 from data_access_service.utils.memory_utils import log_memory_usage
@@ -222,6 +225,13 @@ def _generate_pmtiles_for_parquets(api: BaseAPI, uuid: str, dname: str) -> bool:
                 logger.info(
                     f"Metadata file of dataset {dname}, uuid {uuid} uploaded to S3."
                 )
+
+            # Build the estimate index for the same dataset while we are here:
+            # this child already has the api, the DuckDB session and the
+            # dataset name, and it is killed afterwards so the memory goes
+            # back either way. Never fails the pmtiles run.
+            if config.get_estimation_config().build_with_pmtiles:
+                build_and_upload_estimation_index(api, uuid, dname)
     except Exception as e:
         logger.error(f"Pmtiles error processing dataset {uuid}, parquet {dname}: {e}")
         return False

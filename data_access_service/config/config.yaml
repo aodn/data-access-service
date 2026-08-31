@@ -46,6 +46,43 @@ parquet:
     extensions:
       - httpfs
       - json
+estimation:
+  config:
+    # Pre-built estimate index for parquet keys: a small summary file per
+    # dataset that estimate_size reads instead of scanning S3.
+    # Sibling of the pmtiles output folder, in the same portal_data bucket.
+    s3_prefix: "portal/estimation"
+    output_dir: "portal/estimation/output"
+    # Cell size in degrees of the single pass over the source data
+    # (0.1 deg is ~11 km).
+    bin_size: 0.1
+    # Whole-number factors tried in order when the index has more rows than
+    # max_index_rows: 5 means 0.5 deg cells. A coarser grid is re-aggregated
+    # from the file already written, so a retry never re-reads S3. Must be
+    # integers - that is what makes merging cells exact.
+    bin_merge_factors: [1, 2, 5, 10]
+    max_index_rows: 5000000
+    # Bytes-per-row and zip ratio are measured from this many source files
+    # (spread across the dataset) and this many rows in total.
+    sample_files: 8
+    sample_rows: 50000
+    row_group_size: 100000
+    # Build the index inside the weekly pmtiles job, per dataset.
+    build_with_pmtiles: True
+    # Request side switch. False makes estimate_size always do the live scan.
+    use_index_for_estimate: True
+    # True: the batch run forks one child per dataset so DuckDB memory goes
+    # back to the OS on exit. False: run in the main process (local debug).
+    use_fork_process: True
+    # DuckDB settings for the index build. Deliberately separate from the
+    # pmtiles block: this job has no tippecanoe subprocess to leave room for,
+    # so its limits should be tuned on their own.
+    duckdb:
+      duckdb_temp_dir: "estimation_duckdb_tmp"
+      duckdb_database: "estimation_db.duckdb"
+      memory_limit: "3G"
+      threads: 3
+      show_progress: True
 pmtiles:
   config:
     co_bucket: "aodn-cloud-optimised"
