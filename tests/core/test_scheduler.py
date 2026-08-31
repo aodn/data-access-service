@@ -79,9 +79,7 @@ class TestReloadTask:
 
 class TestStartWithInitialRun:
     @pytest.mark.asyncio
-    async def test_waits_for_api_then_reloads_then_starts_scheduler(
-        self, monkeypatch
-    ):
+    async def test_waits_for_api_then_reloads_then_starts_scheduler(self, monkeypatch):
         monkeypatch.setattr(Config, "is_profile_in", lambda *a, **k: True)
         api = MagicMock()
         api.wait_until_ready = AsyncMock()
