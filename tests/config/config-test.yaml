@@ -7,8 +7,8 @@ aws:
     bucket_name:
       subsetting: test-bucket
       portal_data: apps-test-data
-      wave_buoy_backup: test-wave-buoy-backup-bucket
-      mooring_backup: test-mooring-backup-bucket
+      wave_buoy_snapshot: test-wave-buoy-snapshot-bucket
+      mooring_snapshot: test-mooring-snapshot-bucket
   ses:
     sender_email: no.reply@aodn.org.au
   batch:
