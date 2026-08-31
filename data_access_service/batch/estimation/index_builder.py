@@ -245,7 +245,7 @@ class EstimationIndexBuilder(DatasetScanBase):
                     CAST(floor(CAST({quoted_lat} AS DOUBLE) / {bin_size}) AS INTEGER) AS lat_bin,
                     CAST(floor(CAST({quoted_lon} AS DOUBLE) / {bin_size}) AS INTEGER) AS lon_bin,
                     COUNT(*)::UBIGINT AS c
-                FROM read_parquet('{self.get_s3_uri()}', hive_partitioning=true, union_by_name=true)
+                FROM {self.get_source_sql()}
                 GROUP BY 1, 2, 3
                 ORDER BY d, lat_bin, lon_bin
             ) TO '{index_path}' (

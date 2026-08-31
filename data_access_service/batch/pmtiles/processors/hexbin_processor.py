@@ -133,7 +133,7 @@ class HexbinProcessor(AbstractProcessor):
                             {int(self.__get_max_res())}
                         ) AS h_cell,
                         {time_key_sql} AS {time_col}
-                    FROM read_parquet('{self.get_s3_uri()}', hive_partitioning=true, union_by_name=true)
+                    FROM {self.get_source_sql()}
                     WHERE {quoted_lon} IS NOT NULL
                       AND {quoted_lat} IS NOT NULL
                       {time_null_filter}

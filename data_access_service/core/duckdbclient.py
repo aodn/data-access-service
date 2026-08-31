@@ -129,6 +129,8 @@ class PmTileDuckDBClient(DuckDBClient):
         self._duckdb_client = None
         self._con = self.get_instance()
         self._lock = Lock()
+        # dataset root -> _common_metadata table expression (None when it has none)
+        self._common_metadata_sql_cache: dict[str, Optional[str]] = {}
 
     def get_instance(self):
         """Initializes the single global DB instance if it does not exist."""
@@ -362,6 +364,13 @@ class PmTileDuckDBClient(DuckDBClient):
                 sql_preview,
             )
 
+    # Sibling file a cloud-optimised dataset publishes next to its partitions:
+    # the whole dataset schema in one object.
+    _COMMON_METADATA = "_common_metadata"
+
+    # Rows read to tell epoch seconds from milliseconds.
+    _EPOCH_SAMPLE_ROWS = 1000
+
     # Epoch values above this absolute magnitude are treated as milliseconds.
     # Modern epoch-seconds are ~1e9; epoch-milliseconds are ~1e12. 1e11 is well
     # above any realistic second-based timestamp (year ~5138) and below any
@@ -415,31 +424,33 @@ class PmTileDuckDBClient(DuckDBClient):
         1970-01-21 date keys.
         """
         col_quoted = PmTileDuckDBClient.quote_identifier(time_col)
-        source_sql = self._parquet_source_sql(input_path)
+        source_sql = self.parquet_source_sql(input_path)
 
-        try:
-            rows = self._con.execute(
-                f"DESCRIBE SELECT {col_quoted} FROM {source_sql} LIMIT 0"
-            ).fetchall()
-        except Exception:
-            self._logger.warning(
-                "detect_time_type: failed to DESCRIBE %s in %s; defaulting to timestamp",
-                time_col,
-                input_path,
-                exc_info=True,
-            )
-            return "timestamp"
-
+        # The type of one column is all this needs, so ask the dataset's
+        # _common_metadata first: one request, instead of one per file.
         col_type = None
-        for row in rows:
-            if row[0].lower() == time_col.lower():
-                col_type = row[1].upper()
-                break
+        metadata_sql = self._common_metadata_sql(input_path)
+        if metadata_sql is not None:
+            col_type = self._describe_column_type(metadata_sql, time_col, col_quoted)
+            if col_type is None:
+                self._logger.info(
+                    "detect_time_type: %s is not in %s (Hive key only?); reading "
+                    "the schema from the dataset itself",
+                    time_col,
+                    self._COMMON_METADATA,
+                )
 
         if col_type is None:
-            raise ValueError(
-                f"Column '{time_col}' not found in schema of '{input_path}'."
+            col_type = self._describe_column_type(source_sql, time_col, col_quoted)
+
+        if col_type is None:
+            self._logger.warning(
+                "detect_time_type: could not read the type of %s in %s; "
+                "defaulting to timestamp",
+                time_col,
+                input_path,
             )
+            return "timestamp"
 
         base_type = col_type.split("(", 1)[0].strip()
 
@@ -468,25 +479,87 @@ class PmTileDuckDBClient(DuckDBClient):
         )
         return "timestamp"
 
-    def _parquet_source_sql(self, input_path: str) -> str:
+    def parquet_source_sql(self, input_path: str) -> str:
         """SQL table expression that exposes both file columns and Hive keys."""
         # Prefer the full dataset glob with hive_partitioning so partition
         # columns (e.g. timestamp=1764547200/) are part of the schema. A single
         # file path without hive_partitioning would hide those keys.
         if input_path.endswith("_metadata") or input_path.endswith("_common_metadata"):
             return f"read_parquet('{input_path}')"
+
+        # union_by_name has to open EVERY file's footer before the query can be
+        # bound, and keeps that metadata resident: argo (301,875 files, ~109 KB
+        # of footer each) needs ~31 GB for the binding alone. A dataset that
+        # publishes _common_metadata has one canonical schema, so DuckDB can
+        # bind from the first file and read the rest while it scans.
+        union_by_name = "false" if self._common_metadata_sql(input_path) else "true"
         return (
-            f"read_parquet('{input_path}', hive_partitioning=true, union_by_name=true)"
+            f"read_parquet('{input_path}', hive_partitioning=true, "
+            f"union_by_name={union_by_name})"
         )
+
+    def _dataset_root(self, input_path: str) -> Optional[str]:
+        """Root of a dataset glob (``s3://b/x.parquet/**/*.parquet``), else None."""
+        head, glob_marker, _ = input_path.partition("/**")
+        return head if glob_marker else None
+
+    def _common_metadata_sql(self, input_path: str) -> Optional[str]:
+        """Table expression for the dataset's ``_common_metadata``, or None.
+
+        Cached per dataset: the probe is one request, but the answer is needed
+        every time SQL is built for that dataset.
+        """
+        root = self._dataset_root(input_path)
+        if root is None:
+            return None
+
+        if root not in self._common_metadata_sql_cache:
+            sql = f"read_parquet('{root}/{self._COMMON_METADATA}')"
+            try:
+                self._con.execute(f"DESCRIBE SELECT * FROM {sql} LIMIT 0").fetchall()
+            except Exception:
+                self._logger.info(
+                    "No readable %s under %s; queries keep union_by_name=true",
+                    self._COMMON_METADATA,
+                    root,
+                )
+                sql = None
+            self._common_metadata_sql_cache[root] = sql
+        return self._common_metadata_sql_cache[root]
+
+    def _describe_column_type(
+        self, source_sql: str, time_col: str, col_quoted: str
+    ) -> Optional[str]:
+        """SQL type of ``time_col`` in ``source_sql``, or None when unreadable."""
+        try:
+            rows = self._con.execute(
+                f"DESCRIBE SELECT {col_quoted} FROM {source_sql} LIMIT 0"
+            ).fetchall()
+        except Exception:
+            self._logger.debug(
+                "DESCRIBE %s in %s failed", time_col, source_sql, exc_info=True
+            )
+            return None
+        for row in rows:
+            if row[0].lower() == time_col.lower():
+                return row[1].upper()
+        return None
 
     def _detect_epoch_unit(self, source_sql: str, col_quoted: str) -> str:
         """Classify numeric epoch values as seconds or milliseconds by magnitude."""
+        # A sample, not the whole dataset: seconds and milliseconds are 1000x
+        # apart, so any real row settles it, while MAX() over the source would
+        # scan every file.
         try:
             max_abs = self._con.execute(
                 f"""
                 SELECT MAX(ABS(CAST({col_quoted} AS DOUBLE)))
-                FROM {source_sql}
-                WHERE {col_quoted} IS NOT NULL
+                FROM (
+                    SELECT {col_quoted}
+                    FROM {source_sql}
+                    WHERE {col_quoted} IS NOT NULL
+                    LIMIT {self._EPOCH_SAMPLE_ROWS}
+                )
                 """
             ).fetchone()[0]
         except Exception:

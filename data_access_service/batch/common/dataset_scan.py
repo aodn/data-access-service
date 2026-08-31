@@ -45,6 +45,14 @@ class DatasetScanBase:
     def get_s3_uri(self):
         return f"s3://{BUCKET_OPTIMISED_DEFAULT}/{self.dataset_name}/**/*.parquet"
 
+    def get_source_sql(self) -> str:
+        """The source dataset as a table expression, for use in a FROM clause.
+
+        Built by the client so every job reads the dataset the same way (Hive
+        keys exposed, union_by_name only when the dataset needs it).
+        """
+        return self.pm_client.parquet_source_sql(self.get_s3_uri())
+
     def get_lat_col_name(self) -> str:
         lat_mapped = self.api.map_column_names(
             uuid=self.uuid, key=self.dataset_name, columns=[STR_LATITUDE_UPPER_CASE]
