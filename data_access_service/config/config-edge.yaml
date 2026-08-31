@@ -7,8 +7,8 @@ aws:
     bucket_name:
       subsetting: aodn-cloud-optimized-subset-edge
       portal_data: aodnportal-edge-data
-      wave_buoy_backup: datavis-apps-edge-data
-      mooring_backup: datavis-apps-edge-data
+      wave_buoy_snapshot: datavis-apps-edge-data
+      mooring_snapshot: datavis-apps-edge-data
   ses:
     sender_email: no.reply@aodn.org.au
   batch:

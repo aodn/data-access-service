@@ -7,6 +7,9 @@ from data_access_service.batch import subsetting
 from data_access_service.batch.pmtiles.generator import (
     generate_pmtiles_for_all_parquets,
 )
+from data_access_service.batch.sites_parquet.refresher import (
+    refresh_sites_parquet_snapshots,
+)
 from data_access_service.config.config import DevConfig
 
 logger = init_log(Config.get_config())
@@ -44,9 +47,12 @@ else:
     call_type = os.getenv("AWS_BATCH_CALL_TYPE")
     parameters = {}
 
-# A global app
-api = API()
-api.initialize_metadata()
+# A global app. Sites-parquet refresh doesn't touch the metadata catalog, so
+# skip the memory-intensive metadata init for it — every other job type needs it.
+api = None
+if call_type != "refresh-sites-parquet":
+    api = API()
+    api.initialize_metadata()
 
 match call_type:
     case "sub-setting":
@@ -66,5 +72,7 @@ match call_type:
         if target_uuid:
             logger.info("PMTiles generation restricted to uuid=%s", target_uuid)
         generate_pmtiles_for_all_parquets(api=api, uuid=target_uuid or None)
+    case "refresh-sites-parquet":
+        refresh_sites_parquet_snapshots()
     case _:
         logger.error("Unknow call type", call_type)
