@@ -4,7 +4,9 @@ Two passes over the source dataset, both in the same DuckDB session:
 
 * **Pass A** reads only latitude / longitude / time and groups them into
   ``(day, lat cell, lon cell) -> row count``. Three columns, so parquet
-  projection pushdown keeps the S3 traffic small.
+  projection pushdown keeps the S3 traffic small. A dataset with many source
+  files is scanned a chunk of files at a time, each chunk in its own process
+  (see :meth:`EstimationIndexBuilder._scan_counts`).
 * **Pass B** takes a sample of REAL rows, writes them to a CSV and zips it, so
   bytes-per-row and the zip ratio are measured rather than guessed.
 
@@ -16,6 +18,7 @@ outside -180..180 are kept raw (the download slices raw longitudes too).
 import json
 import math
 import os
+import shutil
 import zipfile
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
@@ -59,6 +62,9 @@ class EstimationIndexBuilder(DatasetScanBase):
         # How many base cells wide the cells in the file are; the size guard
         # raises it when the index comes out too big.
         self._bin_merge_factor: int = 1
+        # Source file listing, kept because both the chunked scan and the
+        # sampling pass need it and it costs one S3 listing of every file.
+        self._source_files_cache: Optional[List[str]] = None
 
     def get_index_path(self) -> str:
         return os.path.join(
@@ -117,9 +123,7 @@ class EstimationIndexBuilder(DatasetScanBase):
             self.estimation_config.bin_size,
             self._has_time,
         )
-        self.pm_client.execute(
-            self._counts_sql(date_key_sql, self.estimation_config.bin_size, base_path)
-        )
+        self._scan_counts(date_key_sql, base_path)
         log_memory_usage(self.logger, "after estimation index scan")
 
         factors = self.estimation_config.bin_merge_factors
@@ -169,6 +173,214 @@ class EstimationIndexBuilder(DatasetScanBase):
 
         # Unreachable: the loop always returns on its last rung.
         raise RuntimeError("no bin merge factor configured")
+
+    def _scan_counts(self, date_key_sql: str, base_path: str) -> None:
+        """Run pass A into ``base_path``, a chunk of source files at a time.
+
+        DuckDB keeps per-file state (parquet metadata, reader and httpfs
+        handles) for as long as the connection lives, not the statement, so one
+        scan over a dataset with hundreds of thousands of files needs far more
+        memory than the container has - argo needs ~15 GB on an 8 GB host.
+        Scanning ``chunk_files`` files per child process makes the peak depend
+        on the chunk size instead of the dataset size, and makes a transient S3
+        error cost one chunk rather than the whole scan.
+
+        Small datasets take the single-statement path and behave as before.
+        """
+        chunk_files = int(self.estimation_config.chunk_files)
+        files = self._source_files() if chunk_files > 0 else []
+
+        if chunk_files <= 0 or len(files) <= chunk_files:
+            self.pm_client.execute(
+                self._counts_sql(
+                    date_key_sql,
+                    self.estimation_config.bin_size,
+                    base_path,
+                    self.get_source_sql(),
+                )
+            )
+            return
+
+        chunks = [
+            files[start : start + chunk_files]
+            for start in range(0, len(files), chunk_files)
+        ]
+        self.logger.info(
+            "Scanning %s in %s chunk(s) of up to %s file(s) (%s file(s) total)",
+            self.dataset_name,
+            len(chunks),
+            f"{chunk_files:,}",
+            f"{len(files):,}",
+        )
+
+        parts_dir = base_path + ".parts"
+        os.makedirs(parts_dir, exist_ok=True)
+        # Asked once here, not per chunk: the answer is a property of the
+        # dataset, and the probe needs a connection the children do not have yet.
+        union_by_name = self.pm_client.needs_union_by_name(self.get_s3_uri())
+
+        for number, chunk in enumerate(chunks):
+            part_path = os.path.join(parts_dir, f"part_{number:05d}.parquet")
+            if os.path.exists(part_path):
+                self.logger.info(
+                    "Chunk %s/%s of %s already built; skipping",
+                    number + 1,
+                    len(chunks),
+                    self.dataset_name,
+                )
+                continue
+            self._scan_chunk(
+                date_key_sql, chunk, part_path, union_by_name, number, len(chunks)
+            )
+            log_memory_usage(
+                self.logger, f"after estimation chunk {number + 1}/{len(chunks)}"
+            )
+
+        self._merge_parts(parts_dir, base_path)
+        shutil.rmtree(parts_dir, ignore_errors=True)
+
+    def _scan_chunk(
+        self,
+        date_key_sql: str,
+        files: List[str],
+        part_path: str,
+        union_by_name: bool,
+        number: int,
+        total: int,
+    ) -> None:
+        """Scan one chunk of files into ``part_path``.
+
+        What makes the chunking work is that every chunk gets a connection that
+        starts empty. Forking a child gives that and hands the memory back to
+        the OS on exit, which closing a connection here cannot: glibc keeps
+        freed memory in its own arenas. ``use_fork_process`` false (local
+        debugging) runs the chunk in this process and rebuilds the connection
+        afterwards instead - DuckDB releases the per-file state, even though
+        the process may not shrink.
+        """
+        self.logger.info(
+            "Estimation index chunk %s/%s of %s: %s file(s)",
+            number + 1,
+            total,
+            self.dataset_name,
+            f"{len(files):,}",
+        )
+
+        if not self.estimation_config.use_fork_process:
+            self._write_chunk_counts(
+                self.pm_client, date_key_sql, files, part_path, union_by_name
+            )
+            self._recycle_duckdb(f"between chunks ({number + 1}/{total})")
+            return
+
+        pid = os.fork()
+        if pid == 0:
+            # Child: never return into the parent loop.
+            try:
+                PmTileDuckDBClient.reset_after_fork()
+                client = PmTileDuckDBClient(tuning=self.estimation_config.duckdb)
+                self._write_chunk_counts(
+                    client, date_key_sql, files, part_path, union_by_name
+                )
+                log_memory_usage(self.logger, f"chunk worker exit ({number + 1})")
+                # os._exit runs no finalizer, so the temp directory has to go
+                # explicitly. The connection is deliberately left open: the
+                # native teardown path has SIGSEGV'd forked workers before.
+                PmTileDuckDBClient.discard_temp_directory()
+                os._exit(0)
+            except BaseException:
+                self.logger.exception(
+                    "Estimation index chunk %s/%s of %s crashed",
+                    number + 1,
+                    total,
+                    self.dataset_name,
+                )
+                os._exit(1)
+
+        _, status = os.waitpid(pid, 0)
+        if os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0:
+            return
+
+        raise RuntimeError(
+            f"Estimation index chunk {number + 1}/{total} of {self.dataset_name} "
+            f"failed (wait status {status}); no {part_path} written"
+        )
+
+    def _write_chunk_counts(
+        self,
+        client: PmTileDuckDBClient,
+        date_key_sql: str,
+        files: List[str],
+        part_path: str,
+        union_by_name: bool,
+    ) -> None:
+        """Aggregate one chunk of files, then publish it under ``part_path``.
+
+        Written to a temp name first so a chunk that dies half way cannot be
+        mistaken for a finished one on a re-run. Not sorted: the merge below
+        sorts the whole index once.
+        """
+        tmp_path = part_path + ".tmp"
+        client.execute(
+            self._counts_sql(
+                date_key_sql,
+                self.estimation_config.bin_size,
+                tmp_path,
+                client.parquet_file_list_sql(files, union_by_name=union_by_name),
+                ordered=False,
+            )
+        )
+        os.replace(tmp_path, part_path)
+
+    def _recycle_duckdb(self, checkpoint: str) -> None:
+        """Close the session and open a fresh one for the next chunk.
+
+        Only for the in-process chunk path: the per-file state a scan builds up
+        lives as long as the connection, so the next chunk has to start on a
+        new one.
+        """
+        self._release_duckdb(checkpoint)
+        self.pm_client = PmTileDuckDBClient(tuning=self.estimation_config.duckdb)
+
+    def _merge_parts(self, parts_dir: str, base_path: str) -> None:
+        """Add the chunk counts together into one base-grid file, locally.
+
+        Every chunk used the same grid, so this is a plain SUM per cell - no
+        cell arithmetic (that is :meth:`_merge_cells`) and no S3.
+        """
+        self.pm_client.execute(
+            f"""
+            COPY (
+                SELECT d, lat_bin, lon_bin, SUM(c)::UBIGINT AS c
+                FROM read_parquet('{parts_dir}/part_*.parquet')
+                GROUP BY 1, 2, 3
+                ORDER BY d, lat_bin, lon_bin
+            ) TO '{base_path}' (
+                FORMAT PARQUET,
+                COMPRESSION ZSTD,
+                ROW_GROUP_SIZE {int(self.estimation_config.row_group_size)}
+            )
+            """
+        )
+
+    def _source_files(self) -> List[str]:
+        """Every source parquet path, listed once and reused.
+
+        Both the chunked scan and the Pass B sample need the listing, and for a
+        dataset like argo it is 300k paths over S3 - too expensive, and too big
+        in memory, to build twice.
+        """
+        if self._source_files_cache is None:
+            rows = self.pm_client.execute(
+                f"SELECT file FROM glob('{self.get_s3_uri()}') ORDER BY file"
+            ).fetchall()
+            self._source_files_cache = [row[0] for row in rows]
+            self.logger.info(
+                "Source dataset %s has %s parquet file(s)",
+                self.dataset_name,
+                f"{len(self._source_files_cache):,}",
+            )
+        return self._source_files_cache
 
     def _row_count(self, path: str) -> int:
         return int(
@@ -231,9 +443,23 @@ class EstimationIndexBuilder(DatasetScanBase):
             time_col=time_col_name, time_type=time_type
         )
 
-    def _counts_sql(self, date_key_sql: str, bin_size: float, index_path: str) -> str:
+    def _counts_sql(
+        self,
+        date_key_sql: str,
+        bin_size: float,
+        index_path: str,
+        source_sql: str,
+        ordered: bool = True,
+    ) -> str:
+        """The pass A aggregation over ``source_sql``, written to ``index_path``.
+
+        ``source_sql`` is the whole dataset for a single scan, or one chunk's
+        file list. ``ordered`` is False for a chunk: only the merged index has
+        to come out sorted.
+        """
         quoted_lat = PmTileDuckDBClient.quote_identifier(self.get_lat_col_name())
         quoted_lon = PmTileDuckDBClient.quote_identifier(self.get_lon_col_name())
+        order_by = "ORDER BY d, lat_bin, lon_bin" if ordered else ""
 
         # INTEGER, not SMALLINT: a dataset stored on the 0-360 longitude
         # convention reaches 3600 at bin 0.1 and would overflow a finer grid.
@@ -245,9 +471,9 @@ class EstimationIndexBuilder(DatasetScanBase):
                     CAST(floor(CAST({quoted_lat} AS DOUBLE) / {bin_size}) AS INTEGER) AS lat_bin,
                     CAST(floor(CAST({quoted_lon} AS DOUBLE) / {bin_size}) AS INTEGER) AS lon_bin,
                     COUNT(*)::UBIGINT AS c
-                FROM {self.get_source_sql()}
+                FROM {source_sql}
                 GROUP BY 1, 2, 3
-                ORDER BY d, lat_bin, lon_bin
+                {order_by}
             ) TO '{index_path}' (
                 FORMAT PARQUET,
                 COMPRESSION ZSTD,
@@ -400,10 +626,7 @@ class EstimationIndexBuilder(DatasetScanBase):
         Evenly spread rather than the first N: the oldest files of a dataset
         often have different string columns from the newest ones.
         """
-        rows = self.pm_client.execute(
-            f"SELECT file FROM glob('{self.get_s3_uri()}') ORDER BY file"
-        ).fetchall()
-        paths = [row[0] for row in rows]
+        paths = self._source_files()
         wanted = max(1, int(self.estimation_config.sample_files))
         if len(paths) <= wanted:
             return paths

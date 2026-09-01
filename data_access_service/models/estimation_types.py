@@ -61,6 +61,10 @@ class EstimationIndexConfig:
     # True: the batch run forks one child per dataset so DuckDB memory goes
     # back to the OS on exit. False: run in the main process (local debug).
     use_fork_process: bool
+    # Source files scanned per chunk in pass A. DuckDB holds per-file state for
+    # the life of the connection, so one scan over a 300k-file dataset needs
+    # far more memory than the container has. 0 scans the whole dataset at once.
+    chunk_files: int
 
 
 @dataclass(frozen=True)

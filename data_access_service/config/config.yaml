@@ -48,9 +48,6 @@ parquet:
       - json
 estimation:
   config:
-    # Pre-built estimate index for parquet keys: a small summary file per
-    # dataset that estimate_size reads instead of scanning S3.
-    # Sibling of the pmtiles output folder, in the same portal_data bucket.
     s3_prefix: "portal/estimation"
     output_dir: "portal/estimation/output"
     # Cell size in degrees of the single pass over the source data
@@ -74,15 +71,20 @@ estimation:
     # True: the batch run forks one child per dataset so DuckDB memory goes
     # back to the OS on exit. False: run in the main process (local debug).
     use_fork_process: True
-    # DuckDB settings for the index build. Deliberately separate from the
-    # pmtiles block: this job has no tippecanoe subprocess to leave room for,
-    # so its limits should be tuned on their own.
+    # Files per chunk in the scan over the source parquet which counts rows per # day, lat cell, lon cell.
+    # DuckDB frees its per-file state (parquet metadata, reader and httpfs
+    # handles) only when the connection closes, not when the query ends.
+    # 0 = no chunking: one scan of everything.
+    chunk_files: 150000
     duckdb:
       duckdb_temp_dir: "estimation_duckdb_tmp"
       duckdb_database: "estimation_db.duckdb"
       memory_limit: "3G"
       threads: 3
       show_progress: True
+      # This scan reads every file once, so the block cache can never hit.
+      # Off, it drops the per-file cost from ~48 KB to ~11 KB for ~2% runtime.
+      enable_external_file_cache: False
 pmtiles:
   config:
     co_bucket: "aodn-cloud-optimised"

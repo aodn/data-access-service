@@ -13,9 +13,7 @@ from dataclasses import dataclass
 class DuckDBTuningConfig:
     """What PmTileDuckDBClient needs to open a connection."""
 
-    # Source bucket the s3 secret is created for. The same cloud-optimised
-    # bucket for every batch job, but kept here so the client needs no other
-    # config object.
+    # Source bucket the s3 secret is created for.
     co_bucket: str
     # Prefix of the TemporaryDirectory holding the database and any spill.
     duckdb_temp_dir: str
@@ -24,3 +22,4 @@ class DuckDBTuningConfig:
     memory_limit: str
     threads: int
     show_progress: bool
+    enable_external_file_cache: bool = True

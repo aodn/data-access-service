@@ -309,6 +309,7 @@ class Config:
             use_index_for_estimate=bool(econfig.get("use_index_for_estimate", True)),
             duckdb=self._duckdb_tuning(econfig.get("duckdb", {}), co_bucket=co_bucket),
             use_fork_process=bool(econfig.get("use_fork_process", True)),
+            chunk_files=max(0, int(econfig.get("chunk_files", 15_000))),
         )
 
     def get_pmtiles_duckdb_tuning(self) -> DuckDBTuningConfig:
@@ -338,6 +339,9 @@ class Config:
             memory_limit=section.get("memory_limit", "3G"),
             threads=int(section.get("threads", 3)),
             show_progress=bool(section.get("show_progress", True)),
+            enable_external_file_cache=bool(
+                section.get("enable_external_file_cache", True)
+            ),
         )
 
     def get_parquets_config(self) -> ParquetsGenerationConfig:

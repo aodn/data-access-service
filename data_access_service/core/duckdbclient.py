@@ -98,6 +98,10 @@ class PmTileDuckDBClient(DuckDBClient):
     # different settings rebuilds instead of silently getting the old ones.
     _global_tuning = None
     _lock = Lock()
+    # Temp-dir objects a forked child inherited from its parent. Kept referenced
+    # so their finalizer cannot run in the child and delete a directory the
+    # parent is still using.
+    _inherited_temp_dirs: list = []
 
     MAX_READ_ATTEMPTS = 3
     MIN_WAIT_SECONDS = 120  # 2 minutes
@@ -174,6 +178,11 @@ class PmTileDuckDBClient(DuckDBClient):
                         "s3_url_style": "path",
                         "enable_http_metadata_cache": "true",
                         "http_keep_alive": "true",
+                        "enable_external_file_cache": (
+                            "true"
+                            if self._config.enable_external_file_cache
+                            else "false"
+                        ),
                     }
 
                     # Establish the primary process-global connection
@@ -243,6 +252,44 @@ class PmTileDuckDBClient(DuckDBClient):
                 connection.execute(sql)
             except Exception:
                 log.debug("Pre-close DuckDB setting failed: %s", sql, exc_info=True)
+
+    @classmethod
+    def reset_after_fork(cls) -> None:
+        """Forget the inherited connection so a forked child opens its own.
+
+        Call this first thing in the child. The parent's handle is never closed
+        here: the copy shares native state with the parent's (and none of its
+        background threads survived the fork), so touching it can break the
+        parent's session. The child just leaves it behind.
+        """
+        if cls._temp_dir_object is not None:
+            # Never drop the last reference: TemporaryDirectory deletes the
+            # directory when it is garbage collected, and that directory
+            # belongs to the parent.
+            cls._inherited_temp_dirs.append(cls._temp_dir_object)
+        cls._global_db_connection = None
+        cls._global_tuning = None
+        cls._temp_dir_object = None
+        # A lock copied mid-fork can be held by a thread that does not exist
+        # in this process, which would deadlock the first get_instance.
+        cls._lock = Lock()
+
+    @classmethod
+    def discard_temp_directory(cls) -> None:
+        """Delete the temp directory without closing the connection.
+
+        For a forked child that ends in ``os._exit``: no finalizer runs there,
+        so the directory would be left behind. Unlinking files DuckDB still has
+        open is safe on Linux; the space returns when the process exits.
+        """
+        temp_dir = cls._temp_dir_object
+        cls._temp_dir_object = None
+        if temp_dir is None:
+            return
+        try:
+            temp_dir.cleanup()
+        except Exception:
+            log.debug("Discarding DuckDB temp directory failed", exc_info=True)
 
     @classmethod
     def shutdown(cls) -> None:
@@ -489,15 +536,37 @@ class PmTileDuckDBClient(DuckDBClient):
         if input_path.endswith("_metadata") or input_path.endswith("_common_metadata"):
             return f"read_parquet('{input_path}')"
 
-        # union_by_name has to open EVERY file's footer before the query can be
-        # bound, and keeps that metadata resident: argo (301,875 files, ~109 KB
-        # of footer each) needs ~31 GB for the binding alone. A dataset that
-        # publishes _common_metadata has one canonical schema, so DuckDB can
-        # bind from the first file and read the rest while it scans.
-        union_by_name = "false" if self._common_metadata_sql(input_path) else "true"
+        union_by_name = self.needs_union_by_name(input_path)
         return (
             f"read_parquet('{input_path}', hive_partitioning=true, "
-            f"union_by_name={union_by_name})"
+            f"union_by_name={str(union_by_name).lower()})"
+        )
+
+    def needs_union_by_name(self, input_path: str) -> bool:
+        """True when the dataset has no ``_common_metadata`` to bind from.
+
+        union_by_name has to open EVERY file's footer before the query can be
+        bound, and keeps that metadata resident: argo (301,875 files, ~109 KB of
+        footer each) needs ~31 GB for the binding alone. A dataset that
+        publishes ``_common_metadata`` has one canonical schema, so DuckDB can
+        bind from the first file and read the rest while it scans.
+        """
+        return self._common_metadata_sql(input_path) is None
+
+    @staticmethod
+    def parquet_file_list_sql(paths: Sequence[str], union_by_name: bool) -> str:
+        """The same table expression as :meth:`parquet_source_sql`, for a list of files.
+
+        An explicit path list still carries the Hive keys, so the date-key
+        expression built for the whole dataset works unchanged on a subset.
+        Takes ``union_by_name`` as an argument rather than probing for
+        ``_common_metadata``: the caller already knows, and the probe needs a
+        connection the caller may not want to open.
+        """
+        quoted = ", ".join("'" + path.replace("'", "''") + "'" for path in paths)
+        return (
+            f"read_parquet([{quoted}], hive_partitioning=true, "
+            f"union_by_name={str(union_by_name).lower()})"
         )
 
     def _dataset_root(self, input_path: str) -> Optional[str]:
