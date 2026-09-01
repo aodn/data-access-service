@@ -49,9 +49,6 @@ class EstimationIndexConfig:
 
     row_group_size: int
 
-    # Build the index inside the weekly pmtiles job, right after the pmtiles
-    # of the same dataset are uploaded.
-    build_with_pmtiles: bool
     # Master switch for the request side. False = always use the live scan.
     use_index_for_estimate: bool
 

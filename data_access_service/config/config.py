@@ -261,15 +261,11 @@ class Config:
             show_progress=pmconfig.get("show_progress", True),
             time_group_by=time_group_by,
             use_fork_process=bool(pmconfig.get("use_fork_process", True)),
+            build_estimation_index=bool(pmconfig.get("build_estimation_index", True)),
         )
 
     def get_estimation_config(self) -> EstimationIndexConfig:
-        """Settings for the pre-built parquet estimation index.
 
-        The index is uploaded beside the pmtiles output, so the bucket is
-        resolved exactly the way :meth:`get_pmtiles_config` resolves it and
-        each environment writes to its own portal-data bucket.
-        """
         econfig = self.config.get("estimation", {}).get("config", {})
         # Source bucket only: the estimation job reads the same cloud-optimised
         # data pmtiles reads, so it reuses that name and nothing else.
@@ -305,7 +301,6 @@ class Config:
             sample_files=int(econfig.get("sample_files", 8)),
             sample_rows=int(econfig.get("sample_rows", 50_000)),
             row_group_size=int(econfig.get("row_group_size", 100_000)),
-            build_with_pmtiles=bool(econfig.get("build_with_pmtiles", True)),
             use_index_for_estimate=bool(econfig.get("use_index_for_estimate", True)),
             duckdb=self._duckdb_tuning(econfig.get("duckdb", {}), co_bucket=co_bucket),
             use_fork_process=bool(econfig.get("use_fork_process", True)),

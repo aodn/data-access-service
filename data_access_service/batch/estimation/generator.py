@@ -145,8 +145,9 @@ def generate_estimation_index_for_parquets(api: BaseAPI, uuid: str, dname: str) 
 def build_and_upload_estimation_index(api: BaseAPI, uuid: str, dname: str) -> bool:
     """Build both files in a temp dir and upload them to the portal-data bucket.
 
-    Also called from the pmtiles job (right after that dataset's pmtiles are
-    uploaded), so it never raises: a failed index must not fail the pmtiles run.
+    Also reached from the pmtiles job (its Phase 2 calls
+    :func:`generate_estimation_index_for_all_parquets` once all pmtiles are
+    done), so it never raises: a failed index must not fail the pmtiles run.
     """
     try:
         logger.info(

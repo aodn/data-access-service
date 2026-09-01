@@ -64,8 +64,6 @@ estimation:
     sample_files: 8
     sample_rows: 50000
     row_group_size: 100000
-    # Build the index inside the weekly pmtiles job, per dataset.
-    build_with_pmtiles: True
     # Request side switch. False makes estimate_size always do the live scan.
     use_index_for_estimate: True
     # True: the batch run forks one child per dataset so DuckDB memory goes
@@ -104,6 +102,9 @@ pmtiles:
     # dataset (reclaims DuckDB/tippecanoe memory on exit). False: run each
     # dataset in the main app process.
     use_fork_process: True
+    # True: after all pmtiles are generated, the same job builds the estimation
+    # index for the same datasets (one uuid only, when the run is filtered).
+    build_estimation_index: True
   layers:
     hex_z0:
       h3_resolution: 2
