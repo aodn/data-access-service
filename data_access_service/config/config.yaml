@@ -46,6 +46,43 @@ parquet:
     extensions:
       - httpfs
       - json
+estimation:
+  config:
+    s3_prefix: "portal/estimation"
+    output_dir: "portal/estimation/output"
+    # Cell size in degrees of the single pass over the source data
+    # (0.1 deg is ~11 km).
+    bin_size: 0.1
+    # Whole-number factors tried in order when the index has more rows than
+    # max_index_rows: 5 means 0.5 deg cells. A coarser grid is re-aggregated
+    # from the file already written, so a retry never re-reads S3. Must be
+    # integers - that is what makes merging cells exact.
+    bin_merge_factors: [1, 2, 5, 10]
+    max_index_rows: 5000000
+    # Bytes-per-row and zip ratio are measured from this many source files
+    # (spread across the dataset) and this many rows in total.
+    sample_files: 8
+    sample_rows: 50000
+    row_group_size: 100000
+    # Request side switch. False makes estimate_size always do the live scan.
+    use_index_for_estimate: True
+    # True: the batch run forks one child per dataset so DuckDB memory goes
+    # back to the OS on exit. False: run in the main process (local debug).
+    use_fork_process: True
+    # Files per chunk in the scan over the source parquet which counts rows per # day, lat cell, lon cell.
+    # DuckDB frees its per-file state (parquet metadata, reader and httpfs
+    # handles) only when the connection closes, not when the query ends.
+    # 0 = no chunking: one scan of everything.
+    chunk_files: 150000
+    duckdb:
+      duckdb_temp_dir: "estimation_duckdb_tmp"
+      duckdb_database: "estimation_db.duckdb"
+      memory_limit: "3G"
+      threads: 3
+      show_progress: True
+      # This scan reads every file once, so the block cache can never hit.
+      # Off, it drops the per-file cost from ~48 KB to ~11 KB for ~2% runtime.
+      enable_external_file_cache: False
 pmtiles:
   config:
     co_bucket: "aodn-cloud-optimised"
@@ -65,6 +102,9 @@ pmtiles:
     # dataset (reclaims DuckDB/tippecanoe memory on exit). False: run each
     # dataset in the main app process.
     use_fork_process: True
+    # True: after all pmtiles are generated, the same job builds the estimation
+    # index for the same datasets (one uuid only, when the run is filtered).
+    build_estimation_index: True
   layers:
     hex_z0:
       h3_resolution: 2

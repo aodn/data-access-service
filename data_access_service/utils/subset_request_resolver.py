@@ -7,7 +7,7 @@ interpretation, so the consumers cannot drift apart.
 
 import logging
 from dataclasses import dataclass, replace
-from typing import List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import pandas as pd
 from shapely.geometry.base import BaseGeometry
@@ -23,6 +23,13 @@ from data_access_service.utils.date_time_utils import (
 from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
 
 logger = logging.getLogger(__name__)
+
+# (uuid, key) -> (start, end). Swapped in by the estimation path so the dates
+# can come from the pre-built index sidecar instead of a live scan; every other
+# caller leaves it None and keeps api.get_temporal_extent.
+ExtentProvider = Callable[
+    [str, str], Tuple[Optional[pd.Timestamp], Optional[pd.Timestamp]]
+]
 
 
 @dataclass(frozen=True)
@@ -43,6 +50,12 @@ class ResolvedSubsetRequest:
     # zarr path crops by bbox then blanks the cells outside this
     # (subset_zarr_helper.area_to_keep). None means no area was given.
     geometry: Optional[BaseGeometry] = None
+    # The dates as asked for, BEFORE the trim to the keys' temporal extent.
+    # The estimate needs them to notice a request that runs past what a
+    # (weekly, so possibly stale) index covers, instead of quietly dropping
+    # those days - see core/estimation_index._extrapolate_tail.
+    requested_start_date: Optional[pd.Timestamp] = None
+    requested_end_date: Optional[pd.Timestamp] = None
 
     @property
     def has_data(self) -> bool:
@@ -60,6 +73,7 @@ def resolve_subset_request(
     multi_polygon: Union[str, dict, None],
     bboxes: Optional[List[BoundingBox]] = None,
     columns: Optional[List[str]] = None,
+    extent_provider: Optional[ExtentProvider] = None,
 ) -> ResolvedSubsetRequest:
     """Interpret a raw subset request into a ResolvedSubsetRequest.
 
@@ -75,11 +89,22 @@ def resolve_subset_request(
     4. resolve geometry: the merged drawn shape the bboxes came from, always
        from the MultiPolygon (both paths carry it), so the zarr subset can blank the cells its bbox crop had to include.
 
+    :param extent_provider: where the keys' temporal extent comes from during
+        the trim. None (the default) means api.get_temporal_extent, i.e. the
+        live scan every download path must keep using.
     :raises ValueError/TypeError: on unparseable dates or a bad multi_polygon
     """
     resolved_keys = resolve_keys(api, uuid, keys)
+    requested_start_date, requested_end_date = to_utc_bounds(
+        *resolve_non_specified_dates(start_date_str, end_date_str)
+    )
     start_date, end_date = resolve_date_range(
-        start_date_str, end_date_str, api=api, uuid=uuid, keys=resolved_keys
+        start_date_str,
+        end_date_str,
+        api=api,
+        uuid=uuid,
+        keys=resolved_keys,
+        extent_provider=extent_provider,
     )
     resolved_bboxes = bboxes if bboxes is not None else resolve_bboxes(multi_polygon)
     resolved_geometry = resolve_geometry(multi_polygon)
@@ -92,6 +117,8 @@ def resolve_subset_request(
         bboxes=resolved_bboxes,
         columns=columns,
         geometry=resolved_geometry,
+        requested_start_date=requested_start_date,
+        requested_end_date=requested_end_date,
     )
 
 
@@ -136,6 +163,7 @@ def resolve_date_range(
     api=None,
     uuid: Optional[str] = None,
     keys: Optional[List[str]] = None,
+    extent_provider: Optional[ExtentProvider] = None,
 ) -> Tuple[pd.Timestamp, pd.Timestamp] | Tuple[None, None]:
     """Resolve the requested dates into the range the subset will actually use.
 
@@ -158,6 +186,7 @@ def resolve_date_range(
             keys=keys,
             requested_start_date=start_date,
             requested_end_date=end_date,
+            extent_provider=extent_provider,
         )
     return start_date, end_date
 
@@ -183,9 +212,16 @@ def trim_date_range_for_keys(
     keys: List[str],
     requested_start_date: pd.Timestamp,
     requested_end_date: pd.Timestamp,
+    extent_provider: Optional[ExtentProvider] = None,
 ) -> Tuple[pd.Timestamp, pd.Timestamp] | Tuple[None, None]:
     """Trim the requested date range to the union temporal extent of the given
-    keys. Returns (None, None) when the request is entirely outside it."""
+    keys. Returns (None, None) when the request is entirely outside it.
+
+    :param extent_provider: where each key's extent comes from. None (the
+        default) means api.get_temporal_extent - the live scan, which the
+        download and the temporal_extent route must keep.
+    """
+    get_extent = extent_provider or api.get_temporal_extent
     # convert into utc:
     requested_start_date = ensure_timezone(requested_start_date)
     requested_end_date = ensure_timezone(requested_end_date)
@@ -206,7 +242,7 @@ def trim_date_range_for_keys(
     got_any_extent = False
     for key in keys:
         try:
-            start_date, end_date = api.get_temporal_extent(uuid, key)
+            start_date, end_date = get_extent(uuid, key)
         except KeyError:
             # key does not exist in this dataset; callers report/skip unknown
             # keys downstream, they must not break the trim

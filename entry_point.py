@@ -4,6 +4,9 @@ import boto3
 
 from data_access_service import init_log, Config, API
 from data_access_service.batch import subsetting
+from data_access_service.batch.estimation.generator import (
+    generate_estimation_index_for_all_parquets,
+)
 from data_access_service.batch.pmtiles.generator import (
     generate_pmtiles_for_all_parquets,
 )
@@ -66,5 +69,12 @@ match call_type:
         if target_uuid:
             logger.info("PMTiles generation restricted to uuid=%s", target_uuid)
         generate_pmtiles_for_all_parquets(api=api, uuid=target_uuid or None)
+    case "generate-estimation-index-for-parquet":
+        target_uuid = parameters.get("uuid") or os.getenv("ESTIMATION_TARGET_UUID")
+        if target_uuid:
+            logger.info(
+                "Estimation index generation restricted to uuid=%s", target_uuid
+            )
+        generate_estimation_index_for_all_parquets(api=api, uuid=target_uuid or None)
     case _:
         logger.error("Unknow call type", call_type)

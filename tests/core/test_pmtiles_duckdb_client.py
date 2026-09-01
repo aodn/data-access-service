@@ -355,3 +355,79 @@ def test_date_key_stays_utc_on_a_non_utc_host(monkeypatch):
         # monkeypatch restores TZ itself, but only tzset() makes libc notice.
         os.environ["TZ"] = "UTC"
         time.tzset()
+
+
+def _write_hive_dataset(root: Path, client) -> str:
+    """Two Hive partitions with a TIMESTAMP column; returns the dataset glob."""
+    for day, key in ((1, 1764547200), (2, 1764633600)):
+        part_dir = root / f"timestamp={key}"
+        part_dir.mkdir(parents=True)
+        client.execute(
+            f"""
+            COPY (
+                SELECT TIMESTAMP '2025-12-0{day} 00:00:00' AS JULD,
+                       -49.35::DOUBLE AS LATITUDE
+            ) TO '{part_dir / "part-0.parquet"}' (FORMAT PARQUET)
+            """
+        )
+    return str(root / "**" / "*.parquet")
+
+
+def _write_common_metadata(root: Path, client) -> None:
+    """Schema-only sibling file, like the one a cloud-optimised dataset ships."""
+    client.execute(
+        f"""
+        COPY (
+            SELECT NULL::TIMESTAMP AS JULD, NULL::DOUBLE AS LATITUDE LIMIT 0
+        ) TO '{root / "_common_metadata"}' (FORMAT PARQUET)
+        """
+    )
+
+
+def test_parquet_source_sql_drops_union_by_name_with_common_metadata():
+    """union_by_name has to open every file's footer before the query can bind.
+
+    Regression: argo.parquet (301,875 files, ~109 KB of footer metadata each)
+    needed ~31 GB just to bind, which OOM killed the worker. A dataset that
+    publishes _common_metadata has one canonical schema, so binding from the
+    first file is enough.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "dataset.parquet"
+        client = _make_local_pmtiles_client()
+        glob_path = _write_hive_dataset(root, client)
+        _write_common_metadata(root, client)
+
+        assert "union_by_name=false" in client.parquet_source_sql(glob_path)
+
+
+def test_parquet_source_sql_keeps_union_by_name_without_common_metadata():
+    """No _common_metadata means no authority on the schema: keep unioning."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "dataset.parquet"
+        client = _make_local_pmtiles_client()
+        glob_path = _write_hive_dataset(root, client)
+
+        assert "union_by_name=true" in client.parquet_source_sql(glob_path)
+
+
+def test_detect_time_type_reads_schema_from_common_metadata():
+    """The column type comes from the one metadata file, not from every file."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "dataset.parquet"
+        client = _make_local_pmtiles_client()
+        glob_path = _write_hive_dataset(root, client)
+        _write_common_metadata(root, client)
+
+        assert client.detect_time_type(glob_path, "JULD") == "timestamp"
+
+
+def test_detect_time_type_falls_back_when_column_missing_from_metadata():
+    """A Hive key is not in _common_metadata, so the dataset itself answers."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "dataset.parquet"
+        client = _make_local_pmtiles_client()
+        glob_path = _write_hive_dataset(root, client)
+        _write_common_metadata(root, client)
+
+        assert client.detect_time_type(glob_path, "timestamp") == "epoch_s"

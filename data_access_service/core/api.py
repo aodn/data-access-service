@@ -36,6 +36,7 @@ from data_access_service.core.constants import (
 from data_access_service.models.subset_request import NON_SPECIFIED
 from data_access_service.utils.cancellation import Cancellation, raise_if_client_gone
 from data_access_service.utils.format_utils import SUPPORTED_OUTPUT_FORMATS
+from data_access_service.core.estimation_index import sidecar_extent_provider
 from data_access_service.core.size_estimation import estimate_single_key_size
 from data_access_service.utils.subset_request_resolver import resolve_subset_request
 from data_access_service.core.descriptor import Depth, Descriptor, Coordinate
@@ -1014,6 +1015,10 @@ class API(BaseAPI):
             end_date_str=end_date,
             multi_polygon=multi_polygon,
             columns=columns,
+            # Estimation only: the dates may come from the pre-built index
+            # sidecar. Every download caller of resolve_subset_request passes
+            # no provider and keeps the live scan.
+            extent_provider=sidecar_extent_provider(self),
         )
 
         per_key: list[dict] = []
