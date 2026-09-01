@@ -299,7 +299,9 @@ class PmTileDuckDBClient(DuckDBClient):
         stop=stop_after_attempt(MAX_READ_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=MIN_WAIT_SECONDS, max=MAX_WAIT_SECONDS),
         retry=retry_if_exception_type(duckdb.IOException),
-        before_sleep=lambda retry_state: retry_state.fn.__self__.log_retry_attempt(
+        # args[0] is self: tenacity stores the undecorated function in
+        # retry_state.fn, so it has no __self__ to read the instance from.
+        before_sleep=lambda retry_state: retry_state.args[0].log_retry_attempt(
             retry_state
         ),
         reraise=True,
