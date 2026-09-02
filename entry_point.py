@@ -14,9 +14,6 @@ from data_access_service.config.config import DevConfig
 
 logger = init_log(Config.get_config())
 
-# Initialize a boto3 client for AWS Batch
-client = boto3.client("batch")
-
 # Get the job ID from the environment variable
 job_id = os.getenv("AWS_BATCH_JOB_ID")
 logger.info(f"Job ID:{job_id}")
@@ -26,6 +23,10 @@ if not isinstance(Config.get_config(), DevConfig):
     job_index = os.getenv("AWS_BATCH_JOB_ARRAY_INDEX")
     if job_index is not None:
         logger.info(f"Job Index: { job_index }")
+
+    # Only needed to describe the real Batch job; a local DevConfig run never
+    # calls the Batch API, so skip requiring AWS region/credentials for it.
+    client = boto3.client("batch")
 
     # Retrieve the job details
     response = client.describe_jobs(jobs=[job_id])

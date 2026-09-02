@@ -8,13 +8,38 @@ dataset-specific reads.
 
 from __future__ import annotations
 
+import logging
 from abc import ABC
 from collections.abc import Sequence
 from typing import ClassVar
 
+import duckdb
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+
 from data_access_service.config.config import Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.duckdbclient import SitesDuckDBClient
+
+logger = logging.getLogger(__name__)
+
+
+_LOAD_RETRY_ATTEMPTS = 3
+_LOAD_RETRY_MIN_WAIT_SECONDS = 10
+_LOAD_RETRY_MAX_WAIT_SECONDS = 60
+
+
+def _log_load_retry(retry_state) -> None:
+    logger.warning(
+        "load() attempt #%d failed (%s); retrying in %.0fs...",
+        retry_state.attempt_number,
+        retry_state.outcome.exception(),
+        retry_state.next_action.sleep,
+    )
 
 
 def quote_ident(name: str) -> str:
@@ -136,13 +161,27 @@ class ParquetRepository(ABC):
         """Create the S3 secret DuckDB uses to read the snapshot dataset."""
         self.session.create_s3_secret(self.snapshot_bucket)
 
+    @retry(
+        stop=stop_after_attempt(_LOAD_RETRY_ATTEMPTS),
+        wait=wait_exponential(
+            multiplier=1,
+            min=_LOAD_RETRY_MIN_WAIT_SECONDS,
+            max=_LOAD_RETRY_MAX_WAIT_SECONDS,
+        ),
+        retry=retry_if_exception_type((duckdb.IOException, UnicodeDecodeError)),
+        before_sleep=_log_load_retry,
+        reraise=True,
+    )
     def load(self) -> ParquetRepository:
         """Materialize the PRIMARY dataset into this dataset's ``table``.
 
         Reads the Hive-partitioned ``dataset`` directory and replaces the table.
-        Raises if the read fails; because ``CREATE OR REPLACE TABLE`` is atomic,
-        a failed read rolls back and leaves any existing table intact. Returns
-        ``self`` so callers can chain ``Repo(session).load()``.
+        Retries a few times (see ``_LOAD_RETRY_*``) on ``duckdb.IOException`` or
+        ``UnicodeDecodeError`` — both can happen when this read races an
+        in-progress rewrite of the primary dataset by its external producer.
+        Raises if every attempt fails; because ``CREATE OR REPLACE TABLE`` is
+        atomic, a failed read rolls back and leaves any existing table intact.
+        Returns ``self`` so callers can chain ``Repo(session).load()``.
         """
         cols = ", ".join(quote_ident(c) for c in self.load_columns)
         self.session.execute(

@@ -62,9 +62,6 @@ class TaskScheduler:
             else:
                 logger.info("Repository '%s' snapshot unchanged; skipped", name)
         except Exception as e:
-            # Not logger.exception(): _format_exception recovers non-UTF-8 DuckDB
-            # error bytes that would otherwise mask the real error, and passing
-            # the exception object to .exception() would repeat that same decode.
             logger.error(
                 f"Error reloading repository '{name}': {_format_exception(e)}",
                 exc_info=True,
@@ -106,7 +103,6 @@ class TaskScheduler:
 
     async def start_with_initial_run(self):
         """Start the scheduler and run the reload task immediately."""
-        # API init is memory intensive, so do not reload until the init is done
         await self.api.wait_until_ready()
 
         loop = asyncio.get_running_loop()
