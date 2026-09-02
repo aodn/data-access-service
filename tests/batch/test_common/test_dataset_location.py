@@ -151,3 +151,52 @@ class TestDatasetScanBaseUsesTheLocation:
         )
 
         assert scan.get_s3_uri().startswith("s3://resolved-bucket/")
+
+
+class TestCredentialsFollowEveryConnection:
+    """A secret lives on one connection, so each new one needs it again."""
+
+    EXTERNAL = DatasetLocation(
+        bucket="dapprd-mnf",
+        prefix="000072626v001/data/",
+        endpoint="s3.data.csiro.au",
+        access_key="csiro-key",
+        secret_access_key="csiro-secret",
+    )
+
+    def _scan(self, location, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "data_access_service.batch.common.dataset_scan.PmTileDuckDBClient",
+            lambda tuning=None: MagicMock(),
+        )
+        return DatasetScanBase(
+            uuid="a-uuid",
+            dataset_name=CSIRO_DATASET,
+            work_dir=str(tmp_path),
+            api=MagicMock(),
+            location=location,
+        )
+
+    def test_a_rebuilt_client_gets_the_keys_again(self, tmp_path, monkeypatch):
+        scan = self._scan(self.EXTERNAL, tmp_path, monkeypatch)
+        later_client = MagicMock()
+
+        scan.apply_location_credentials(later_client)
+
+        later_client.create_s3_secret_with_keys.assert_called_once_with(
+            bucket="dapprd-mnf",
+            access_key="csiro-key",
+            secret_access_key="csiro-secret",
+            endpoint="s3.data.csiro.au",
+            use_ssl=True,
+        )
+
+    def test_aodn_dataset_adds_nothing(self, tmp_path, monkeypatch):
+        scan = self._scan(
+            DatasetLocation(bucket="aodn-cloud-optimised"), tmp_path, monkeypatch
+        )
+        later_client = MagicMock()
+
+        scan.apply_location_credentials(later_client)
+
+        later_client.create_s3_secret_with_keys.assert_not_called()
