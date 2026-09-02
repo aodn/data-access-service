@@ -37,7 +37,7 @@ class TaskScheduler:
     scheduler only ever does the cheap side: on a recurring schedule, a single
     S3 HEAD per repository to check its snapshot's ETag, and — only if it
     changed — a lightweight reload. The repositories share the single
-    ``ParquetDuckDBClient`` built in :mod:`data_access_service.server`, so
+    ``SitesDuckDBClient`` built in :mod:`data_access_service.server`, so
     every read endpoint sees the reloaded tables.
     """
 

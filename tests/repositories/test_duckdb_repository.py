@@ -1,7 +1,7 @@
 """Unit tests for ParquetRepository.
 
 The read methods (sites_in_date_range / latest_time / site_details) build SQL
-and run it against the bound ParquetDuckDBClient. We exercise them against an
+and run it against the bound SitesDuckDBClient. We exercise them against an
 in-memory DuckDB seeded from a DataFrame, so no S3 / load() is needed. The
 session's S3-secret creation is patched out (no AWS credentials in tests).
 """
@@ -13,7 +13,7 @@ from data_access_service.sites.sites_repository import (
     ParquetRepository,
     quote_ident,
 )
-from data_access_service.core.duckdbclient import ParquetDuckDBClient, DuckDBClient
+from data_access_service.core.duckdbclient import SitesDuckDBClient, DuckDBClient
 
 
 class _GroupedRepo(ParquetRepository):
@@ -72,7 +72,7 @@ def session(monkeypatch):
     # No AWS in tests, and these repos never call load(), so stub the S3 secret.
     monkeypatch.setattr(DuckDBClient, "create_s3_secret", lambda self, bucket: None)
     # The autouse memory_parquets_config fixture keeps this in-memory + offline.
-    s = ParquetDuckDBClient()
+    s = SitesDuckDBClient()
     yield s
     s.close()
 

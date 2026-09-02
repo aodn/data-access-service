@@ -29,7 +29,7 @@ class TestRefreshSitesParquetSnapshots:
     def test_refreshes_every_repository_and_closes_session(self, monkeypatch):
         session = MagicMock()
         monkeypatch.setattr(
-            refresher, "ParquetDuckDBClient", MagicMock(return_value=session)
+            refresher, "SitesDuckDBClient", MagicMock(return_value=session)
         )
 
         mooring_repo = MagicMock()
@@ -51,7 +51,7 @@ class TestRefreshSitesParquetSnapshots:
     def test_one_repository_failure_does_not_block_others_or_raise(self, monkeypatch):
         session = MagicMock()
         monkeypatch.setattr(
-            refresher, "ParquetDuckDBClient", MagicMock(return_value=session)
+            refresher, "SitesDuckDBClient", MagicMock(return_value=session)
         )
 
         broken_repo = MagicMock()

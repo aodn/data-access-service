@@ -8,7 +8,7 @@ S3 as the snapshot the API process reloads. See
 """
 
 from data_access_service import Config, init_log
-from data_access_service.core.duckdbclient import ParquetDuckDBClient
+from data_access_service.core.duckdbclient import SitesDuckDBClient
 from data_access_service.sites.sites_repository import (
     ParquetRepository,
     build_repositories,
@@ -23,12 +23,12 @@ def refresh_sites_parquet_snapshots() -> None:
 
     Always reloads from the primary dataset — the primary source updates
     often enough that a freshness pre-check rarely skips anything, so it's not
-    worth the complexity. Builds its own :class:`ParquetDuckDBClient` (this
+    worth the complexity. Builds its own :class:`SitesDuckDBClient` (this
     runs in its own disposable process, so unlike the old in-process scheduler
     there is no long-lived connection or S3 credentials to keep refreshed
     across runs).
     """
-    session = ParquetDuckDBClient()
+    session = SitesDuckDBClient()
     try:
         for name, repo in build_repositories(session).items():
             try:

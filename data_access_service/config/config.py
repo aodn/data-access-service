@@ -16,7 +16,7 @@ from data_access_service.models.pmtiles_types import (
     HexLayerSpec,
     TimeGroupBy,
 )
-from data_access_service.models.sites_types import ParquetsGenerationConfig
+from data_access_service.models.sites_types import SitesConfig
 from data_access_service.models.tiler_types import TilerConfig
 
 
@@ -261,8 +261,8 @@ class Config:
             use_fork_process=bool(pmconfig.get("use_fork_process", True)),
         )
 
-    def get_parquets_config(self) -> ParquetsGenerationConfig:
-        """DuckDB tuning for the API's on-disk Parquet read client.
+    def get_sites_config(self) -> SitesConfig:
+        """DuckDB tuning for the sites API's on-disk Parquet read client.
 
         On disk (not ``:memory:``) with a memory limit and a temp dir so large
         dataset loads spill to disk instead of OOM-killing the container. More
@@ -271,17 +271,23 @@ class Config:
         file lives inside a freshly generated temp directory each call (same
         trick as :meth:`get_pmtiles_config`'s ``duckdb_temp_dir``) to avoid
         DuckDB file-lock conflicts between them.
+
+        ``threads`` can be overridden per-process via ``SITES_DUCKDB_THREADS``
+        (e.g. set higher for the disposable sites-parquet Batch job than for the
+        always-on API service, without splitting the shared yaml config).
         """
-        pqconfig = self.config.get("parquet", {}).get("config", {})
-        temp_dir = tempfile.mkdtemp(prefix=pqconfig["duckdb_temp_dir"])
-        return ParquetsGenerationConfig(
-            duckdb_database=os.path.join(temp_dir, pqconfig["duckdb_database"]),
-            co_bucket=pqconfig.get("co_bucket", "aodn-cloud-optimised"),
-            memory_limit=pqconfig["memory_limit"],
-            threads=pqconfig["threads"],
+        sconfig = self.config.get("sites", {}).get("config", {})
+        temp_dir = tempfile.mkdtemp(prefix=sconfig["duckdb_temp_dir"])
+        threads_env = os.getenv("SITES_DUCKDB_THREADS")
+        threads = int(threads_env) if threads_env else sconfig["threads"]
+        return SitesConfig(
+            duckdb_database=os.path.join(temp_dir, sconfig["duckdb_database"]),
+            co_bucket=sconfig.get("co_bucket", "aodn-cloud-optimised"),
+            memory_limit=sconfig["memory_limit"],
+            threads=threads,
             duckdb_temp_dir=str(temp_dir),
-            region=pqconfig["region"],
-            extensions=tuple(pqconfig["extensions"]),
+            region=sconfig["region"],
+            extensions=tuple(sconfig["extensions"]),
         )
 
     def get_tiler_config(self) -> TilerConfig:

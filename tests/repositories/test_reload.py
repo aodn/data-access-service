@@ -12,14 +12,14 @@ import pandas as pd
 import pytest
 from botocore.exceptions import ClientError
 
-from data_access_service.core.duckdbclient import DuckDBClient, ParquetDuckDBClient
+from data_access_service.core.duckdbclient import DuckDBClient, SitesDuckDBClient
 from data_access_service.sites.sites_repository import ParquetRepository
 
 
 @pytest.fixture
 def session(monkeypatch):
     monkeypatch.setattr(DuckDBClient, "create_s3_secret", lambda self, bucket: None)
-    s = ParquetDuckDBClient()
+    s = SitesDuckDBClient()
     yield s
     s.close()
 

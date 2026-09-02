@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse
 from data_access_service import Config
 from data_access_service.config.config import IntTestConfig
 from data_access_service.core.api import API
-from data_access_service.core.duckdbclient import ParquetDuckDBClient
+from data_access_service.core.duckdbclient import SitesDuckDBClient
 from data_access_service.core.middleware import configure_gzip_middleware
 from data_access_service.core.routes import router as api_router
 from data_access_service.core.scheduler import TaskScheduler
@@ -81,7 +81,7 @@ async def lifespan(application: FastAPI):
         if isinstance(Config.get_config(), IntTestConfig):
             yield
         else:
-            session = ParquetDuckDBClient()
+            session = SitesDuckDBClient()
             application.state.duckdb_session = session
             application.state.repositories = build_repositories(session)
             scheduler = TaskScheduler(api, application.state.repositories)

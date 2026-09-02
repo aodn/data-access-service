@@ -1,6 +1,6 @@
 """A base Parquet repository over a DuckDB client.
 
-``ParquetRepository`` binds one :class:`ParquetDuckDBClient` to one Parquet
+``ParquetRepository`` binds one :class:`SitesDuckDBClient` to one Parquet
 dataset — each dataset gets its own subclass below (:class:`MooringRepository`,
 :class:`WaveBuoyRepository`) that declares where it lives and adds
 dataset-specific reads.
@@ -14,7 +14,7 @@ from typing import ClassVar
 
 from data_access_service.config.config import Config
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.core.duckdbclient import ParquetDuckDBClient
+from data_access_service.core.duckdbclient import SitesDuckDBClient
 
 
 def quote_ident(name: str) -> str:
@@ -86,7 +86,7 @@ class ParquetRepository(ABC):
                 "empty or the same length as value_columns"
             )
 
-    def __init__(self, session: ParquetDuckDBClient) -> None:
+    def __init__(self, session: SitesDuckDBClient) -> None:
         if type(self) is ParquetRepository:
             raise TypeError(
                 "ParquetRepository is abstract; instantiate a dataset subclass"
@@ -341,7 +341,7 @@ class MooringRepository(ParquetRepository):
     config: Config = Config.get_config()
 
     table: ClassVar[str] = "mooring_timeseries_realtime_qc"
-    bucket: ClassVar[str] = config.get_parquets_config().co_bucket
+    bucket: ClassVar[str] = config.get_sites_config().co_bucket
     snapshot_bucket: ClassVar[str] = config.get_mooring_snapshot_bucket_name()
     dataset: ClassVar[str] = f"s3://{bucket}/{table}.parquet"
     snapshot_dataset: ClassVar[str] = (
@@ -366,7 +366,7 @@ class WaveBuoyRepository(ParquetRepository):
     config: Config = Config.get_config()
 
     table: ClassVar[str] = "wave_buoy_realtime_nonqc"
-    bucket: ClassVar[str] = config.get_parquets_config().co_bucket
+    bucket: ClassVar[str] = config.get_sites_config().co_bucket
     snapshot_bucket: ClassVar[str] = config.get_wave_buoy_snapshot_bucket_name()
     dataset: ClassVar[str] = f"s3://{bucket}/{table}.parquet"
     snapshot_dataset: ClassVar[str] = (
@@ -386,6 +386,6 @@ REPOSITORY_CLASSES: dict[str, type[ParquetRepository]] = {
 }
 
 
-def build_repositories(session: ParquetDuckDBClient) -> dict[str, ParquetRepository]:
-    """Instantiate one repository per product, all sharing one ``ParquetDuckDBClient``."""
+def build_repositories(session: SitesDuckDBClient) -> dict[str, ParquetRepository]:
+    """Instantiate one repository per product, all sharing one ``SitesDuckDBClient``."""
     return {name: cls(session) for name, cls in REPOSITORY_CLASSES.items()}
