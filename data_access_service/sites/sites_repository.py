@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 _LOAD_RETRY_ATTEMPTS = 3
-_LOAD_RETRY_MIN_WAIT_SECONDS = 10
+_LOAD_RETRY_MIN_WAIT_SECONDS = 30
 _LOAD_RETRY_MAX_WAIT_SECONDS = 60
 
 
@@ -164,7 +164,7 @@ class ParquetRepository(ABC):
     @retry(
         stop=stop_after_attempt(_LOAD_RETRY_ATTEMPTS),
         wait=wait_exponential(
-            multiplier=1,
+            multiplier=_LOAD_RETRY_MIN_WAIT_SECONDS,
             min=_LOAD_RETRY_MIN_WAIT_SECONDS,
             max=_LOAD_RETRY_MAX_WAIT_SECONDS,
         ),
@@ -172,6 +172,7 @@ class ParquetRepository(ABC):
         before_sleep=_log_load_retry,
         reraise=True,
     )
+    # wait = multiplier * exp_base**(attempt_number - 1), clamped to [min, max].
     def load(self) -> ParquetRepository:
         """Materialize the PRIMARY dataset into this dataset's ``table``.
 

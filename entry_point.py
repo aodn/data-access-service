@@ -84,6 +84,6 @@ match call_type:
             )
         generate_estimation_index_for_all_parquets(api=api, uuid=target_uuid or None)
     case "refresh-sites-parquet":
-            refresh_sites_parquet_snapshots()
+        refresh_sites_parquet_snapshots()
     case _:
         logger.error("Unknow call type", call_type)

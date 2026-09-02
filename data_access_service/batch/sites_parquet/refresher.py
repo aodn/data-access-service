@@ -13,6 +13,7 @@ from data_access_service.sites.sites_repository import (
     ParquetRepository,
     build_repositories,
 )
+from data_access_service.utils.memory_utils import log_memory_usage
 
 config = Config.get_config()
 logger = init_log(config)
@@ -28,6 +29,7 @@ def refresh_sites_parquet_snapshots() -> None:
     there is no long-lived connection or S3 credentials to keep refreshed
     across runs).
     """
+    log_memory_usage(logger, "job start")
     session = SitesDuckDBClient()
     try:
         for name, repo in build_repositories(session).items():
@@ -37,6 +39,7 @@ def refresh_sites_parquet_snapshots() -> None:
                 logger.exception("Error refreshing repository '%s'", name)
     finally:
         session.close()
+    log_memory_usage(logger, "job end")
 
 
 def _refresh_one(name: str, repo: ParquetRepository) -> None:
@@ -46,6 +49,9 @@ def _refresh_one(name: str, repo: ParquetRepository) -> None:
     one dataset's failure doesn't block the others.
     """
     logger.info("Refreshing repository '%s'...", name)
+    log_memory_usage(logger, f"before load '{name}'")
     repo.load()
+    log_memory_usage(logger, f"after load '{name}'")
     repo.write_snapshot()
+    log_memory_usage(logger, f"after write_snapshot '{name}'")
     logger.info("Repository '%s' snapshot refreshed", name)
