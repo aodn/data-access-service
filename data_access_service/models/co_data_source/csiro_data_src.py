@@ -1,11 +1,13 @@
 import logging
-import requests
 from aodn_cloud_optimised.lib.DataQuery import Metadata, DataSource, GetAodn
 
 from data_access_service.config.config import Config
 from data_access_service.models.co_data_source.abstract_data_src import (
     AbstractDataSrc,
     CSIRO,
+)
+from data_access_service.models.co_data_source.csiro_access import (
+    request_csiro_s3_access,
 )
 
 log = logging.getLogger(__name__)
@@ -66,44 +68,14 @@ class CsiroDataSrc(AbstractDataSrc):
         return catalog
 
     def __init_data_src(self, dataset_name: str, key_request_url: str) -> GetAodn:
-        log.info(
-            "Requesting temporary access keys for CSIRO dataset '%s'...", dataset_name
+        access = request_csiro_s3_access(dataset_name, key_request_url)
+        csiro = GetAodn(
+            bucket_name=access.bucket,
+            prefix=access.prefix,
+            s3_fs_opts=access.to_s3_fs_opts(),
         )
-        response = requests.get(key_request_url, timeout=30)
         log.info(
-            "Received response for CSIRO dataset '%s', status code: %s",
+            "Successfully initialized CSIRO data source for dataset '%s'",
             dataset_name,
-            response.status_code,
         )
-        if response.status_code == 200:
-            res = response.json()
-            access_key = res["accessKey"]
-            secret_access_key = res["secretAccessKey"]
-            endpoint_url = res["endPointUrl"]
-            bucket_name = res["bucket"]
-            remote_directory = res["remoteDirectory"]
-            if remote_directory.startswith(bucket_name + "/"):
-                prefix = remote_directory[len(bucket_name) + 1 :] + "data/"
-            else:
-                raise Exception(
-                    f"Unexpected remote directory format: {remote_directory}"
-                )
-
-            csiro = GetAodn(
-                bucket_name=bucket_name,
-                prefix=prefix,
-                s3_fs_opts={
-                    "key": access_key,
-                    "secret": secret_access_key,
-                    "client_kwargs": {"endpoint_url": endpoint_url},
-                },
-            )
-            log.info(
-                "Successfully initialized CSIRO data source for dataset '%s'",
-                dataset_name,
-            )
-            return csiro
-        else:
-            raise Exception(
-                f"Failed to get keys from CSIRO for dataset '{dataset_name}', status code: {response.status_code}"
-            )
+        return csiro

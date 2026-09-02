@@ -1,11 +1,12 @@
-"""Shared plumbing for batch jobs that scan one cloud-optimised parquet dataset.
-"""
+"""Shared plumbing for batch jobs that scan one cloud-optimised parquet dataset."""
 
 from typing import Optional
 
-from aodn_cloud_optimised.lib.DataQuery import BUCKET_OPTIMISED_DEFAULT
-
 from data_access_service import Config, init_log
+from data_access_service.batch.common.dataset_location import (
+    DatasetLocation,
+    resolve_dataset_location,
+)
 from data_access_service.core.api import BaseAPI
 from data_access_service.core.constants import (
     STR_LATITUDE_UPPER_CASE,
@@ -27,11 +28,16 @@ class DatasetScanBase:
         work_dir: str,
         api: BaseAPI,
         duckdb_tuning: Optional[DuckDBTuningConfig] = None,
+        location: Optional[DatasetLocation] = None,
     ):
         """``duckdb_tuning`` defaults to the pmtiles job's DuckDB settings.
 
         Subclasses whose memory profile differs (the estimation index has no
         tippecanoe to leave room for) pass their own.
+
+        ``location`` defaults to looking the dataset up: not every dataset is
+        in the AODN bucket, and one hosted elsewhere needs its own credentials
+        before DuckDB can read a single file.
         """
         self.work_dir = work_dir
         self.uuid = uuid
@@ -39,11 +45,27 @@ class DatasetScanBase:
         self.api = api
         self.config = Config.get_config()
         self.logger = init_log(self.config)
+        self.location = (
+            location if location is not None else resolve_dataset_location(dataset_name)
+        )
         self.pm_client = PmTileDuckDBClient(tuning=duckdb_tuning)
+        if self.location.is_external:
+            self.logger.info(
+                "Dataset %s is hosted outside AODN; adding an S3 secret for %s",
+                self.dataset_name,
+                self.location.bucket,
+            )
+            self.pm_client.create_s3_secret_with_keys(
+                bucket=self.location.bucket,
+                access_key=self.location.access_key,
+                secret_access_key=self.location.secret_access_key,
+                endpoint=self.location.endpoint,
+                use_ssl=self.location.use_ssl,
+            )
 
     # The s3 uri of the source parquet. It is not http URL of s3 objects.
     def get_s3_uri(self):
-        return f"s3://{BUCKET_OPTIMISED_DEFAULT}/{self.dataset_name}/**/*.parquet"
+        return self.location.parquet_glob(self.dataset_name)
 
     def get_source_sql(self) -> str:
         """The source dataset as a table expression, for use in a FROM clause.
