@@ -110,6 +110,9 @@ class PmtilesGenerationConfig:
     # When False, each dataset runs in the main process (useful for local
     # debug or agents that do not tolerate os.fork, e.g. some APM agents).
     use_fork_process: bool = True
+    # When True (default), the pmtiles batch also run the second phase: builds the
+    # estimation index for all after every dataset's pmtiles are done. When False, the pmtiles batch only builds the pmtiles and skips the estimation index.
+    build_estimation_index: bool = True
 
 
 @dataclass

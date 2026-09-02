@@ -17,3 +17,7 @@ aws:
 pmtiles:
   config:
     show_progress: False
+estimation:
+  config:
+    duckdb:
+      show_progress: False

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -8,22 +9,21 @@ from collections.abc import Sequence
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 from threading import Lock
-from typing import Any, Iterator
+from typing import Any, Iterator, Optional
 
 import boto3
 import duckdb
-import logging
-
-from data_access_service.config.config import IntTestConfig
-from data_access_service.models.pmtiles_types import PmtilesGenerationConfig
-from data_access_service.models.sites_types import SitesConfig
-from data_access_service import Config
 from tenacity import (
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
 )
+
+from data_access_service import Config
+from data_access_service.config.config import IntTestConfig
+from data_access_service.models.duckdb_types import DuckDBTuningConfig
+from data_access_service.models.sites_types import SitesConfig
 
 # How often to emit a progress log line while a long query is running.
 _PROGRESS_LOG_INTERVAL_SECONDS = 60
@@ -94,7 +94,14 @@ class PmTileDuckDBClient(DuckDBClient):
     # Process-global singletons
     _global_db_connection = None
     _temp_dir_object = None
+    # Tuning the live global connection was opened with, so a client asking for
+    # different settings rebuilds instead of silently getting the old ones.
+    _global_tuning = None
     _lock = Lock()
+    # Temp-dir objects a forked child inherited from its parent. Kept referenced
+    # so their finalizer cannot run in the child and delete a directory the
+    # parent is still using.
+    _inherited_temp_dirs: list = []
 
     MAX_READ_ATTEMPTS = 3
     MIN_WAIT_SECONDS = 120  # 2 minutes
@@ -113,15 +120,39 @@ class PmTileDuckDBClient(DuckDBClient):
             f"Waiting {next_wait_minutes} minute(s) before attempt #{attempt_num + 1}..."
         )
 
-    def __init__(self):
-        self._config: PmtilesGenerationConfig = Config.get_config().get_pmtiles_config()
+    def __init__(self, tuning: Optional[DuckDBTuningConfig] = None):
+        """Open a session with ``tuning``, defaulting to the pmtiles job's settings.
+
+        Batch jobs pass their own object so one job's memory limit cannot move
+        another's; see :class:`DuckDBTuningConfig`.
+        """
+        self._config: DuckDBTuningConfig = (
+            tuning or Config.get_config().get_pmtiles_duckdb_tuning()
+        )
         self._logger = logging.getLogger(__name__)
         self._duckdb_client = None
         self._con = self.get_instance()
         self._lock = Lock()
+        # dataset root -> _common_metadata table expression (None when it has none)
+        self._common_metadata_sql_cache: dict[str, Optional[str]] = {}
 
     def get_instance(self):
         """Initializes the single global DB instance if it does not exist."""
+        # The connection is process-global but the settings are per job, so a
+        # job that follows another one in the same process (estimation after
+        # pmtiles) must not inherit the previous job's limits.
+        if (
+            PmTileDuckDBClient._global_db_connection is not None
+            and PmTileDuckDBClient._global_tuning != self._config
+        ):
+            self._logger.info(
+                "DuckDB connection was opened with different tuning (%s); "
+                "rebuilding it for %s",
+                PmTileDuckDBClient._global_tuning,
+                self._config,
+            )
+            PmTileDuckDBClient.shutdown()
+
         if PmTileDuckDBClient._global_db_connection is None:
             with PmTileDuckDBClient._lock:
                 if PmTileDuckDBClient._global_db_connection is None:
@@ -147,6 +178,11 @@ class PmTileDuckDBClient(DuckDBClient):
                         "s3_url_style": "path",
                         "enable_http_metadata_cache": "true",
                         "http_keep_alive": "true",
+                        "enable_external_file_cache": (
+                            "true"
+                            if self._config.enable_external_file_cache
+                            else "false"
+                        ),
                     }
 
                     # Establish the primary process-global connection
@@ -167,6 +203,7 @@ class PmTileDuckDBClient(DuckDBClient):
                     db.execute("SET GLOBAL TimeZone = 'UTC';")
 
                     PmTileDuckDBClient._global_db_connection = db
+                    PmTileDuckDBClient._global_tuning = self._config
 
         # CRITICAL: Return a thread-safe, independent cursor from the global connection.
         # Progress-bar settings are LOCAL scope, so they must be set on this cursor
@@ -217,6 +254,44 @@ class PmTileDuckDBClient(DuckDBClient):
                 log.debug("Pre-close DuckDB setting failed: %s", sql, exc_info=True)
 
     @classmethod
+    def reset_after_fork(cls) -> None:
+        """Forget the inherited connection so a forked child opens its own.
+
+        Call this first thing in the child. The parent's handle is never closed
+        here: the copy shares native state with the parent's (and none of its
+        background threads survived the fork), so touching it can break the
+        parent's session. The child just leaves it behind.
+        """
+        if cls._temp_dir_object is not None:
+            # Never drop the last reference: TemporaryDirectory deletes the
+            # directory when it is garbage collected, and that directory
+            # belongs to the parent.
+            cls._inherited_temp_dirs.append(cls._temp_dir_object)
+        cls._global_db_connection = None
+        cls._global_tuning = None
+        cls._temp_dir_object = None
+        # A lock copied mid-fork can be held by a thread that does not exist
+        # in this process, which would deadlock the first get_instance.
+        cls._lock = Lock()
+
+    @classmethod
+    def discard_temp_directory(cls) -> None:
+        """Delete the temp directory without closing the connection.
+
+        For a forked child that ends in ``os._exit``: no finalizer runs there,
+        so the directory would be left behind. Unlinking files DuckDB still has
+        open is safe on Linux; the space returns when the process exits.
+        """
+        temp_dir = cls._temp_dir_object
+        cls._temp_dir_object = None
+        if temp_dir is None:
+            return
+        try:
+            temp_dir.cleanup()
+        except Exception:
+            log.debug("Discarding DuckDB temp directory failed", exc_info=True)
+
+    @classmethod
     def shutdown(cls) -> None:
         """Close the process-global connection and remove its temp directory.
 
@@ -242,6 +317,7 @@ class PmTileDuckDBClient(DuckDBClient):
             # Drop the references first so a failure below can never leave
             # later datasets reusing a half-closed connection.
             cls._global_db_connection = None
+            cls._global_tuning = None
             cls._temp_dir_object = None
 
         # Close outside the class lock so a slow/native close cannot stall
@@ -270,7 +346,9 @@ class PmTileDuckDBClient(DuckDBClient):
         stop=stop_after_attempt(MAX_READ_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=MIN_WAIT_SECONDS, max=MAX_WAIT_SECONDS),
         retry=retry_if_exception_type(duckdb.IOException),
-        before_sleep=lambda retry_state: retry_state.fn.__self__.log_retry_attempt(
+        # args[0] is self: tenacity stores the undecorated function in
+        # retry_state.fn, so it has no __self__ to read the instance from.
+        before_sleep=lambda retry_state: retry_state.args[0].log_retry_attempt(
             retry_state
         ),
         reraise=True,
@@ -335,6 +413,13 @@ class PmTileDuckDBClient(DuckDBClient):
                 sql_preview,
             )
 
+    # Sibling file a cloud-optimised dataset publishes next to its partitions:
+    # the whole dataset schema in one object.
+    _COMMON_METADATA = "_common_metadata"
+
+    # Rows read to tell epoch seconds from milliseconds.
+    _EPOCH_SAMPLE_ROWS = 1000
+
     # Epoch values above this absolute magnitude are treated as milliseconds.
     # Modern epoch-seconds are ~1e9; epoch-milliseconds are ~1e12. 1e11 is well
     # above any realistic second-based timestamp (year ~5138) and below any
@@ -388,31 +473,33 @@ class PmTileDuckDBClient(DuckDBClient):
         1970-01-21 date keys.
         """
         col_quoted = PmTileDuckDBClient.quote_identifier(time_col)
-        source_sql = self._parquet_source_sql(input_path)
+        source_sql = self.parquet_source_sql(input_path)
 
-        try:
-            rows = self._con.execute(
-                f"DESCRIBE SELECT {col_quoted} FROM {source_sql} LIMIT 0"
-            ).fetchall()
-        except Exception:
-            self._logger.warning(
-                "detect_time_type: failed to DESCRIBE %s in %s; defaulting to timestamp",
-                time_col,
-                input_path,
-                exc_info=True,
-            )
-            return "timestamp"
-
+        # The type of one column is all this needs, so ask the dataset's
+        # _common_metadata first: one request, instead of one per file.
         col_type = None
-        for row in rows:
-            if row[0].lower() == time_col.lower():
-                col_type = row[1].upper()
-                break
+        metadata_sql = self._common_metadata_sql(input_path)
+        if metadata_sql is not None:
+            col_type = self._describe_column_type(metadata_sql, time_col, col_quoted)
+            if col_type is None:
+                self._logger.info(
+                    "detect_time_type: %s is not in %s (Hive key only?); reading "
+                    "the schema from the dataset itself",
+                    time_col,
+                    self._COMMON_METADATA,
+                )
 
         if col_type is None:
-            raise ValueError(
-                f"Column '{time_col}' not found in schema of '{input_path}'."
+            col_type = self._describe_column_type(source_sql, time_col, col_quoted)
+
+        if col_type is None:
+            self._logger.warning(
+                "detect_time_type: could not read the type of %s in %s; "
+                "defaulting to timestamp",
+                time_col,
+                input_path,
             )
+            return "timestamp"
 
         base_type = col_type.split("(", 1)[0].strip()
 
@@ -441,25 +528,109 @@ class PmTileDuckDBClient(DuckDBClient):
         )
         return "timestamp"
 
-    def _parquet_source_sql(self, input_path: str) -> str:
+    def parquet_source_sql(self, input_path: str) -> str:
         """SQL table expression that exposes both file columns and Hive keys."""
         # Prefer the full dataset glob with hive_partitioning so partition
         # columns (e.g. timestamp=1764547200/) are part of the schema. A single
         # file path without hive_partitioning would hide those keys.
         if input_path.endswith("_metadata") or input_path.endswith("_common_metadata"):
             return f"read_parquet('{input_path}')"
+
+        union_by_name = self.needs_union_by_name(input_path)
         return (
-            f"read_parquet('{input_path}', hive_partitioning=true, union_by_name=true)"
+            f"read_parquet('{input_path}', hive_partitioning=true, "
+            f"union_by_name={str(union_by_name).lower()})"
         )
+
+    def needs_union_by_name(self, input_path: str) -> bool:
+        """True when the dataset has no ``_common_metadata`` to bind from.
+
+        union_by_name has to open EVERY file's footer before the query can be
+        bound, and keeps that metadata resident: argo (301,875 files, ~109 KB of
+        footer each) needs ~31 GB for the binding alone. A dataset that
+        publishes ``_common_metadata`` has one canonical schema, so DuckDB can
+        bind from the first file and read the rest while it scans.
+        """
+        return self._common_metadata_sql(input_path) is None
+
+    @staticmethod
+    def parquet_file_list_sql(paths: Sequence[str], union_by_name: bool) -> str:
+        """The same table expression as :meth:`parquet_source_sql`, for a list of files.
+
+        An explicit path list still carries the Hive keys, so the date-key
+        expression built for the whole dataset works unchanged on a subset.
+        Takes ``union_by_name`` as an argument rather than probing for
+        ``_common_metadata``: the caller already knows, and the probe needs a
+        connection the caller may not want to open.
+        """
+        quoted = ", ".join("'" + path.replace("'", "''") + "'" for path in paths)
+        return (
+            f"read_parquet([{quoted}], hive_partitioning=true, "
+            f"union_by_name={str(union_by_name).lower()})"
+        )
+
+    def _dataset_root(self, input_path: str) -> Optional[str]:
+        """Root of a dataset glob (``s3://b/x.parquet/**/*.parquet``), else None."""
+        head, glob_marker, _ = input_path.partition("/**")
+        return head if glob_marker else None
+
+    def _common_metadata_sql(self, input_path: str) -> Optional[str]:
+        """Table expression for the dataset's ``_common_metadata``, or None.
+
+        Cached per dataset: the probe is one request, but the answer is needed
+        every time SQL is built for that dataset.
+        """
+        root = self._dataset_root(input_path)
+        if root is None:
+            return None
+
+        if root not in self._common_metadata_sql_cache:
+            sql = f"read_parquet('{root}/{self._COMMON_METADATA}')"
+            try:
+                self._con.execute(f"DESCRIBE SELECT * FROM {sql} LIMIT 0").fetchall()
+            except Exception:
+                self._logger.info(
+                    "No readable %s under %s; queries keep union_by_name=true",
+                    self._COMMON_METADATA,
+                    root,
+                )
+                sql = None
+            self._common_metadata_sql_cache[root] = sql
+        return self._common_metadata_sql_cache[root]
+
+    def _describe_column_type(
+        self, source_sql: str, time_col: str, col_quoted: str
+    ) -> Optional[str]:
+        """SQL type of ``time_col`` in ``source_sql``, or None when unreadable."""
+        try:
+            rows = self._con.execute(
+                f"DESCRIBE SELECT {col_quoted} FROM {source_sql} LIMIT 0"
+            ).fetchall()
+        except Exception:
+            self._logger.debug(
+                "DESCRIBE %s in %s failed", time_col, source_sql, exc_info=True
+            )
+            return None
+        for row in rows:
+            if row[0].lower() == time_col.lower():
+                return row[1].upper()
+        return None
 
     def _detect_epoch_unit(self, source_sql: str, col_quoted: str) -> str:
         """Classify numeric epoch values as seconds or milliseconds by magnitude."""
+        # A sample, not the whole dataset: seconds and milliseconds are 1000x
+        # apart, so any real row settles it, while MAX() over the source would
+        # scan every file.
         try:
             max_abs = self._con.execute(
                 f"""
                 SELECT MAX(ABS(CAST({col_quoted} AS DOUBLE)))
-                FROM {source_sql}
-                WHERE {col_quoted} IS NOT NULL
+                FROM (
+                    SELECT {col_quoted}
+                    FROM {source_sql}
+                    WHERE {col_quoted} IS NOT NULL
+                    LIMIT {self._EPOCH_SAMPLE_ROWS}
+                )
                 """
             ).fetchone()[0]
         except Exception:

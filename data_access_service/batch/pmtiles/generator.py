@@ -3,6 +3,9 @@ import tempfile
 import threading
 
 from data_access_service import Config, init_log
+from data_access_service.batch.estimation.generator import (
+    generate_estimation_index_for_all_parquets,
+)
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.api import BaseAPI
 from data_access_service.utils.memory_utils import log_memory_usage
@@ -29,6 +32,14 @@ class PmtilesGenerationInProgressError(RuntimeError):
 def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
     """Generate PMTiles for every parquet dataset in the catalog.
 
+    Runs in two phases inside the one batch job:
+
+    * **Phase 1:** pmtiles, one dataset at a time.
+    * **Phase 2:** the estimation index for the same datasets, once *all*
+      pmtiles are done (``pmtiles.config.build_estimation_index``). It is a
+      separate phase, not part of each pmtiles child, so the index scan does
+      not start on top of the memory tippecanoe/DuckDB just used.
+
     Process isolation is controlled by ``pmtiles.config.use_fork_process``:
 
     * **True (default):** each dataset runs in a forked child so DuckDB /
@@ -36,7 +47,8 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
       Fork (not re-exec) reuses the already-initialized ``api`` via
       copy-on-write — no metadata reload per dataset. Invariant: the parent
       must not open ``PmTileDuckDBClient`` before forking; the child creates
-      its own process-global DuckDB connection.
+      its own process-global DuckDB connection. Phase 2 relies on the same
+      invariant — it forks from this still-clean parent.
     * **False:** each dataset runs in the main app process (no ``os.fork``).
       Useful for local debug or when an APM agent cannot tolerate forking.
 
@@ -102,6 +114,19 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
                 dataset_name,
             )
         log_memory_usage(logger, after_label)
+
+    # Phase 2: every pmtiles child has exited, so the parent is back to its
+    # startup baseline before the index scans start. Same job, same loaded
+    # metadata (inherited copy-on-write), but no tippecanoe/DuckDB memory left
+    # over from Phase 1. ``uuid`` carries through, so a single-dataset pmtiles
+    # run refreshes that uuid's index too. Never fails the pmtiles run.
+    if config.get_pmtiles_config().build_estimation_index:
+        logger.info("PMTiles done; starting estimation index phase")
+        try:
+            generate_estimation_index_for_all_parquets(api=api, uuid=uuid)
+        except Exception as e:
+            logger.error("Estimation index phase failed: %s", e)
+        log_memory_usage(logger, "after estimation index phase")
 
 
 def _generate_pmtiles_for_parquets_in_subprocess(

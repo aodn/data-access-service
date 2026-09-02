@@ -18,3 +18,8 @@ pmtiles:
   config:
     threads: 12
     use_fork_process: False
+estimation:
+  config:
+    use_fork_process: False
+    duckdb:
+      threads: 12

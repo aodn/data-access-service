@@ -13,12 +13,25 @@ from data_access_service.batch.pmtiles.generator import (
 from data_access_service.models.pmtiles_types import PmtilesVisualizationStyle
 
 
-def _enable_fork(monkeypatch, enabled: bool = True):
+def _enable_fork(
+    monkeypatch, enabled: bool = True, build_estimation_index: bool = True
+):
     monkeypatch.setattr(
         generator.config,
         "get_pmtiles_config",
-        lambda: MagicMock(use_fork_process=enabled),
+        lambda: MagicMock(
+            use_fork_process=enabled,
+            build_estimation_index=build_estimation_index,
+        ),
     )
+
+
+@pytest.fixture(autouse=True)
+def estimation_phase(monkeypatch):
+    """Phase 2 runs for real otherwise: it would fork index workers onto S3."""
+    stub = MagicMock()
+    monkeypatch.setattr(generator, "generate_estimation_index_for_all_parquets", stub)
+    return stub
 
 
 class TestBatchProcessIsolation:
@@ -206,6 +219,91 @@ class TestBatchProcessIsolation:
 
         generate_pmtiles_for_all_parquets(api)
         assert calls == ["a.parquet", "b.parquet"]
+
+
+class TestEstimationIndexPhase:
+    """Phase 2: the index build starts only after every pmtiles child is done."""
+
+    @staticmethod
+    def _api():
+        api = MagicMock()
+        api.get_mapped_meta_data.return_value = {
+            "uuid-a": {"a.parquet": {}, "notes.txt": {}},
+            "uuid-b": {"b.parquet": {}},
+        }
+        return api
+
+    def test_runs_once_after_all_pmtiles(self, monkeypatch, estimation_phase):
+        _enable_fork(monkeypatch, True)
+        api = self._api()
+        order = []
+
+        def fake_run(passed_api, uuid, dname):
+            order.append(dname)
+            return True
+
+        estimation_phase.side_effect = lambda **kwargs: order.append("estimation")
+        monkeypatch.setattr(
+            generator, "_generate_pmtiles_for_parquets_in_subprocess", fake_run
+        )
+        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+
+        generate_pmtiles_for_all_parquets(api)
+
+        assert order == ["a.parquet", "b.parquet", "estimation"]
+        estimation_phase.assert_called_once_with(api=api, uuid=None)
+
+    def test_passes_the_uuid_filter_through(self, monkeypatch, estimation_phase):
+        _enable_fork(monkeypatch, True)
+        api = self._api()
+        monkeypatch.setattr(
+            generator,
+            "_generate_pmtiles_for_parquets_in_subprocess",
+            lambda *a: True,
+        )
+        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+
+        generate_pmtiles_for_all_parquets(api, uuid="uuid-b")
+
+        estimation_phase.assert_called_once_with(api=api, uuid="uuid-b")
+
+    def test_skipped_when_flag_off(self, monkeypatch, estimation_phase):
+        _enable_fork(monkeypatch, True, build_estimation_index=False)
+        api = self._api()
+        monkeypatch.setattr(
+            generator,
+            "_generate_pmtiles_for_parquets_in_subprocess",
+            lambda *a: True,
+        )
+        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+
+        generate_pmtiles_for_all_parquets(api)
+
+        estimation_phase.assert_not_called()
+
+    def test_skipped_when_no_parquet_datasets(self, monkeypatch, estimation_phase):
+        _enable_fork(monkeypatch, True)
+        api = self._api()
+        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+
+        generate_pmtiles_for_all_parquets(api, uuid="missing-uuid")
+
+        estimation_phase.assert_not_called()
+
+    def test_failure_does_not_fail_the_pmtiles_run(self, monkeypatch, estimation_phase):
+        _enable_fork(monkeypatch, True)
+        api = self._api()
+        estimation_phase.side_effect = RuntimeError("index boom")
+        monkeypatch.setattr(
+            generator,
+            "_generate_pmtiles_for_parquets_in_subprocess",
+            lambda *a: True,
+        )
+        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+
+        generate_pmtiles_for_all_parquets(api)
+
+        estimation_phase.assert_called_once()
 
 
 class TestGenerationLock:

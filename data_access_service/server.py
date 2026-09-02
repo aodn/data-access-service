@@ -1,15 +1,8 @@
 import asyncio
 import logging
-from asyncio import AbstractEventLoop
-from contextlib import asynccontextmanager
-from pathlib import Path
 import os
+from asyncio import AbstractEventLoop
 from contextlib import asynccontextmanager, suppress
-
-import uvicorn
-
-from fastapi import FastAPI
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 import anyio
@@ -21,6 +14,7 @@ from data_access_service import Config
 from data_access_service.config.config import IntTestConfig
 from data_access_service.core.api import API
 from data_access_service.core.duckdbclient import SitesDuckDBClient
+from data_access_service.core.estimation_index import set_duckdb_client
 from data_access_service.core.middleware import configure_gzip_middleware
 from data_access_service.core.routes import router as api_router
 from data_access_service.core.scheduler import TaskScheduler
@@ -83,6 +77,9 @@ async def lifespan(application: FastAPI):
         else:
             session = SitesDuckDBClient()
             application.state.duckdb_session = session
+            # The estimate reads the pre-built index through the same client,
+            # rather than opening a second DuckDB connection of its own.
+            set_duckdb_client(session)
             application.state.repositories = build_repositories(session)
             scheduler = TaskScheduler(api, application.state.repositories)
             repository_cache_task = asyncio.create_task(
@@ -111,6 +108,7 @@ async def lifespan(application: FastAPI):
         if scheduler:
             scheduler.shutdown()
         if session:
+            set_duckdb_client(None)
             session.close()
         api.destroy()
 

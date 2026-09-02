@@ -17,6 +17,9 @@ aws:
 pmtiles:
   config:
     use_fork_process: True
+estimation:
+  config:
+    use_fork_process: True
 tiler:
   config:
     # Capacity gate for concurrent store opens during startup prewarm.
