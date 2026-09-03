@@ -95,7 +95,7 @@ class TestStartWithInitialRun:
 
 
 class TestStart:
-    def test_registers_hourly_cron_job(self):
+    def test_registers_every_2_hours_cron_job(self):
         scheduler = TaskScheduler(api=MagicMock(), repositories={})
         scheduler.scheduler = MagicMock()
 
@@ -105,7 +105,7 @@ class TestStart:
         kwargs = scheduler.scheduler.add_job.call_args.kwargs
         fields = {f.name: str(f) for f in kwargs["trigger"].fields}
         assert fields["minute"] == "0"  # on the hour
-        assert fields["hour"] == "*"  # every hour
+        assert fields["hour"] == "*/2"  # every 2 hours
         scheduler.scheduler.start.assert_called_once()
 
 

@@ -8,6 +8,7 @@ from apscheduler.triggers.cron import CronTrigger
 from data_access_service import API, Config
 from data_access_service.config.config import EnvType
 from data_access_service.sites.sites_repository import ParquetRepository
+from data_access_service.utils.memory_utils import log_memory_usage
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ class TaskScheduler:
         reload keeps it current.
         """
         repo._configure_snapshot_bucket_s3()
+        log_memory_usage(logger, f"before reload check '{name}'")
         try:
             if repo.reload_if_changed():
                 logger.info("Repository '%s' reloaded from snapshot", name)
@@ -66,6 +68,7 @@ class TaskScheduler:
                 f"Error reloading repository '{name}': {_format_exception(e)}",
                 exc_info=True,
             )
+        log_memory_usage(logger, f"after reload check '{name}'")
 
     def _reload_task(self):
         """Reload every registered repository whose snapshot changed (the scheduled job)."""
@@ -81,15 +84,17 @@ class TaskScheduler:
             )
             return
         logger.info("Reload task is running...")
+        log_memory_usage(logger, "reload task start")
         for name, repo in self.repositories.items():
             self._reload_repository(name, repo)
+        log_memory_usage(logger, "reload task end")
         logger.info("Reload task completed")
 
     def _start(self):
         """Start the scheduler and add the recurring reload job."""
         self.scheduler.add_job(
             self._reload_task,
-            trigger=CronTrigger(minute="0"),  # Every hour, on the hour
+            trigger=CronTrigger(hour="*/2", minute="0"),  # Every 2 hours, on the hour
             id="reload_task",
             name="Repository snapshot reload task",
             replace_existing=True,
