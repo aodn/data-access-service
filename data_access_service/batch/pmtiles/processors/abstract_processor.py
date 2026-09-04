@@ -3,9 +3,9 @@ import os
 
 from abc import ABC, abstractmethod
 from typing import List, Optional, Sequence, Tuple
-from data_access_service.batch.common.dataset_location import DatasetLocation
 from data_access_service.batch.common.dataset_scan import DatasetScanBase
 from data_access_service.core.api import BaseAPI
+from data_access_service.models.co_data_source.dataset_location import DatasetLocation
 from data_access_service.models.pmtiles_types import (
     PmtilesGenerationConfig,
     PmtilesLayerSpec,

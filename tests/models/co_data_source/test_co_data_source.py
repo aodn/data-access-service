@@ -73,6 +73,10 @@ class _ConcreteDataSrc(AbstractDataSrc):
     def get_data_src(self):
         return self._data_src
 
+    @classmethod
+    def locate_dataset(cls, dataset_name_with_ext: str):
+        return None
+
 
 class TestAbstractDataSrc:
     def test_get_dataset_raises_when_not_in_catalog(self):
@@ -190,7 +194,7 @@ def _patch_csiro(api_response=None, metadata=None):
     mock_aodn.get_dataset.return_value = mock_dataset
 
     requests_patch = patch(
-        "data_access_service.models.co_data_source.csiro_access.requests.get",
+        "data_access_service.models.co_data_source.csiro_data_src.requests.get",
         return_value=mock_response,
     )
     get_aodn_patch = patch(
@@ -231,7 +235,7 @@ class TestCsiroDataSrc:
         mock_response.status_code = 403
 
         with patch(
-            "data_access_service.models.co_data_source.csiro_access.requests.get",
+            "data_access_service.models.co_data_source.csiro_data_src.requests.get",
             return_value=mock_response,
         ):
             with pytest.raises(Exception, match="Failed to get keys from CSIRO"):
@@ -283,7 +287,7 @@ class TestCsiroDataSrc:
         mock_aodn.get_dataset.return_value = mock_dataset
 
         with patch(
-            "data_access_service.models.co_data_source.csiro_access.requests.get",
+            "data_access_service.models.co_data_source.csiro_data_src.requests.get",
             return_value=mock_response,
         ), patch(
             "data_access_service.models.co_data_source.csiro_data_src.GetAodn",

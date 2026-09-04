@@ -3,10 +3,6 @@
 from typing import Optional
 
 from data_access_service import Config, init_log
-from data_access_service.batch.common.dataset_location import (
-    DatasetLocation,
-    resolve_dataset_location,
-)
 from data_access_service.core.api import BaseAPI
 from data_access_service.core.constants import (
     STR_LATITUDE_UPPER_CASE,
@@ -14,6 +10,10 @@ from data_access_service.core.constants import (
     STR_TIME_UPPER_CASE,
 )
 from data_access_service.core.duckdbclient import PmTileDuckDBClient
+from data_access_service.models.co_data_source.co_data_registory import (
+    resolve_dataset_location,
+)
+from data_access_service.models.co_data_source.dataset_location import DatasetLocation
 from data_access_service.models.duckdb_types import DuckDBTuningConfig
 from data_access_service.utils.memory_utils import log_memory_usage
 
