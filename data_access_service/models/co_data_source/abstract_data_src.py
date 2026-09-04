@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
+from typing import Optional
 
 from aodn_cloud_optimised.lib.DataQuery import DataSource, Metadata, GetAodn
 
 from data_access_service.exceptions.dataset_not_found_error import DatasetNotFoundError
+from data_access_service.models.co_data_source.dataset_location import DatasetLocation
 
 AODN = "aodn"
 CSIRO = "csiro"
@@ -41,4 +43,9 @@ class AbstractDataSrc(ABC):
 
     @abstractmethod
     def get_data_src(self) -> GetAodn:
+        pass
+
+    @classmethod
+    @abstractmethod
+    def locate_dataset(cls, dataset_name_with_ext: str) -> Optional[DatasetLocation]:
         pass

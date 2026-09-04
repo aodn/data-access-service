@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Sequence, Tuple
 from data_access_service.batch.common.dataset_scan import DatasetScanBase
 from data_access_service.core.api import BaseAPI
+from data_access_service.models.co_data_source.dataset_location import DatasetLocation
 from data_access_service.models.pmtiles_types import (
     PmtilesGenerationConfig,
     PmtilesLayerSpec,
@@ -15,9 +16,20 @@ from data_access_service.utils.memory_utils import log_memory_usage
 
 class AbstractProcessor(DatasetScanBase, ABC):
 
-    def __init__(self, uuid: str, dataset_name: str, work_dir: str, api: BaseAPI):
+    def __init__(
+        self,
+        uuid: str,
+        dataset_name: str,
+        work_dir: str,
+        api: BaseAPI,
+        location: Optional[DatasetLocation] = None,
+    ):
         super().__init__(
-            uuid=uuid, dataset_name=dataset_name, work_dir=work_dir, api=api
+            uuid=uuid,
+            dataset_name=dataset_name,
+            work_dir=work_dir,
+            api=api,
+            location=location,
         )
 
         # These dirs are relative dir names. If they start with "/", they will be absolute dir names and will cause further problems.

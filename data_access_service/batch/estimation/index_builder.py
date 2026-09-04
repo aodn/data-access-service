@@ -279,6 +279,9 @@ class EstimationIndexBuilder(DatasetScanBase):
             try:
                 PmTileDuckDBClient.reset_after_fork()
                 client = PmTileDuckDBClient(tuning=self.estimation_config.duckdb)
+                # The child's connection is new, so it needs the external
+                # keys again; the location itself came across the fork.
+                self.apply_location_credentials(client)
                 self._write_chunk_counts(
                     client, date_key_sql, files, part_path, union_by_name
                 )
@@ -341,6 +344,7 @@ class EstimationIndexBuilder(DatasetScanBase):
         """
         self._release_duckdb(checkpoint)
         self.pm_client = PmTileDuckDBClient(tuning=self.estimation_config.duckdb)
+        self.apply_location_credentials(self.pm_client)
 
     def _merge_parts(self, parts_dir: str, base_path: str) -> None:
         """Add the chunk counts together into one base-grid file, locally.

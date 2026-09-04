@@ -31,6 +31,18 @@ _PROGRESS_LOG_INTERVAL_SECONDS = 60
 log = logging.getLogger(__name__)
 
 
+def _sql_preview(sql: str) -> str:
+    """Short one-line form of ``sql`` for the query logs.
+
+    CREATE SECRET carries live access keys in its text, so it is named rather
+    than quoted — the logs go to CloudWatch and New Relic.
+    """
+    flat = " ".join(sql.split())
+    if flat.upper().startswith(("CREATE SECRET", "CREATE OR REPLACE SECRET")):
+        return "<CREATE SECRET, redacted>"
+    return flat[:120]
+
+
 class DuckDBClient(ABC):
     """Common interface over a DuckDB connection.
 
@@ -68,26 +80,80 @@ class DuckDBClient(ABC):
             and not isinstance(Config.get_config(), IntTestConfig)
         ):
             creds = boto_session.get_credentials().get_frozen_credentials()
-            region = boto_session.region_name or "ap-southeast-2"
-
-            def lit(value: str) -> str:
-                return "'" + value.replace("'", "''") + "'"
-
-            def ident(name: str) -> str:
-                return '"' + name.replace('"', '""') + '"'
-
-            self.execute(
-                f"""
-                CREATE OR REPLACE SECRET {ident(f"{bucket}_s3")} (
-                    TYPE S3,
-                    KEY_ID {lit(creds.access_key)},
-                    SECRET {lit(creds.secret_key)},
-                    SESSION_TOKEN {lit(creds.token or "")},
-                    REGION {lit(region)},
-                    SCOPE 's3://{bucket}'
-                )
-                """
+            self._create_s3_secret(
+                bucket=bucket,
+                key_id=creds.access_key,
+                secret=creds.secret_key,
+                session_token=creds.token or "",
+                region=boto_session.region_name or "ap-southeast-2",
             )
+
+    def create_s3_secret_with_keys(
+        self,
+        bucket: str,
+        access_key: str,
+        secret_access_key: str,
+        endpoint: Optional[str] = None,
+        use_ssl: bool = True,
+        region: str = "us-east-1",
+    ) -> None:
+        """Create a secret for a bucket the job's own role cannot read.
+
+        For data hosted outside AODN: the keys come from the other
+        organisation, and ``endpoint`` points DuckDB at their S3 service
+        instead of AWS. Secrets are scoped per bucket, so this one sits
+        alongside the AODN secret rather than replacing it.
+        """
+        self._create_s3_secret(
+            bucket=bucket,
+            key_id=access_key,
+            secret=secret_access_key,
+            # These keys are long-lived enough not to be STS session keys.
+            session_token="",
+            region=region,
+            endpoint=endpoint,
+            use_ssl=use_ssl,
+        )
+
+    def _create_s3_secret(
+        self,
+        bucket: str,
+        key_id: str,
+        secret: str,
+        session_token: str,
+        region: str,
+        endpoint: Optional[str] = None,
+        use_ssl: bool = True,
+    ) -> None:
+        """The CREATE SECRET statement shared by both credential sources."""
+
+        def lit(value: str) -> str:
+            return "'" + value.replace("'", "''") + "'"
+
+        def ident(name: str) -> str:
+            return '"' + name.replace('"', '""') + '"'
+
+        clauses = [
+            "TYPE S3",
+            f"KEY_ID {lit(key_id)}",
+            f"SECRET {lit(secret)}",
+            f"SESSION_TOKEN {lit(session_token)}",
+            f"REGION {lit(region)}",
+        ]
+        if endpoint is not None:
+            clauses += [
+                f"ENDPOINT {lit(endpoint)}",
+                # Path style: an S3-compatible service usually cannot serve
+                # the bucket as a subdomain of its own host.
+                "URL_STYLE 'path'",
+                f"USE_SSL {str(use_ssl).lower()}",
+            ]
+        clauses.append(f"SCOPE {lit(f's3://{bucket}')}")
+
+        self.execute(
+            f"CREATE OR REPLACE SECRET {ident(f'{bucket}_s3')} "
+            f"({', '.join(clauses)})"
+        )
 
 
 class PmTileDuckDBClient(DuckDBClient):
@@ -375,7 +441,7 @@ class PmTileDuckDBClient(DuckDBClient):
         """
         stop = threading.Event()
         started = time.monotonic()
-        sql_preview = " ".join(sql.split())[:120]
+        sql_preview = _sql_preview(sql)
         connection = self._duckdb_client
 
         def _poll() -> None:

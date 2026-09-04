@@ -1,6 +1,10 @@
 import logging
 
-from aodn_cloud_optimised.lib.DataQuery import Metadata, DataSource
+from aodn_cloud_optimised.lib.DataQuery import (
+    BUCKET_OPTIMISED_DEFAULT,
+    Metadata,
+    DataSource,
+)
 
 from data_access_service.exceptions.dataset_not_found_error import DatasetNotFoundError
 from data_access_service.models.co_data_source.abstract_data_src import (
@@ -9,9 +13,34 @@ from data_access_service.models.co_data_source.abstract_data_src import (
 )
 from data_access_service.models.co_data_source.aodn_data_src import AodnDataSrc
 from data_access_service.models.co_data_source.csiro_data_src import CsiroDataSrc
+from data_access_service.models.co_data_source.dataset_location import DatasetLocation
 from data_access_service.utils.common_utils import compare_dict_keys
 
 log = logging.getLogger(__name__)
+
+# Every cloud optimised data source, in the order they are asked where a
+# dataset lives. Adding a provider means adding it here *and* to the list
+# CODataRegistry builds below.
+#
+# The classes land in this list at import time, so the autouse mock in
+# tests/conftest.py (which patches the CsiroDataSrc name in this module) does
+# not reach them: a test that resolves a CSIRO dataset must patch
+# csiro_data_src.requests.get, or this list, itself.
+_DATA_SOURCES: list[type[AbstractDataSrc]] = [AodnDataSrc, CsiroDataSrc]
+
+
+def resolve_dataset_location(dataset_name: str) -> DatasetLocation:
+    """Where ``dataset_name`` lives, falling back to the AODN bucket.
+
+    Asks the classes, not a :class:`CODataRegistry`, because the batch jobs
+    call this from forked children: building a registry there would reload the
+    whole catalog and request keys for every dataset, to answer about one.
+    """
+    for source in _DATA_SOURCES:
+        location = source.locate_dataset(dataset_name)
+        if location is not None:
+            return location
+    return DatasetLocation(bucket=BUCKET_OPTIMISED_DEFAULT)
 
 
 class CODataRegistry:
