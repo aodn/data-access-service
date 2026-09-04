@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -12,18 +13,17 @@ from typing import Any, Iterator, Optional
 
 import boto3
 import duckdb
-import logging
-
-from data_access_service.config.config import IntTestConfig
-from data_access_service.models.duckdb_types import DuckDBTuningConfig
-from data_access_service.models.sites_types import ParquetsGenerationConfig
-from data_access_service import Config
 from tenacity import (
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
 )
+
+from data_access_service import Config
+from data_access_service.config.config import IntTestConfig
+from data_access_service.models.duckdb_types import DuckDBTuningConfig
+from data_access_service.models.sites_types import SitesConfig
 
 # How often to emit a progress log line while a long query is running.
 _PROGRESS_LOG_INTERVAL_SECONDS = 60
@@ -39,7 +39,7 @@ class DuckDBClient(ABC):
     handle, :meth:`execute` to run SQL, and :meth:`close` to release resources.
     Subclasses decide the connection's lifetime and concurrency model — e.g.
     :class:`PmTileDuckDBClient` shares one process-global connection, while
-    :class:`ParquetDuckDBClient` owns one connection and runs each call on its
+    :class:`SitesDuckDBClient` owns one connection and runs each call on its
     own cursor.
     """
 
@@ -681,7 +681,7 @@ class PmTileDuckDBClient(DuckDBClient):
         return f"CAST(strftime({ts}, '%Y') AS INTEGER)"
 
 
-class ParquetDuckDBClient(DuckDBClient):
+class SitesDuckDBClient(DuckDBClient):
     """Owns a DuckDB connection and its extension/region configuration.
 
     A concrete :class:`DuckDBClient`. Like :class:`PmTileDuckDBClient` it builds
@@ -702,10 +702,8 @@ class ParquetDuckDBClient(DuckDBClient):
 
     def __init__(self) -> None:
         # All settings come from the config (tests override
-        # ``Config.get_parquets_config`` to point at an in-memory DB).
-        self._config: ParquetsGenerationConfig = (
-            Config.get_config().get_parquets_config()
-        )
+        # ``Config.get_sites_config`` to point at an in-memory DB).
+        self._config: SitesConfig = Config.get_config().get_sites_config()
         self._database = self._config.duckdb_database
         self._region = self._config.region
         self._extensions = tuple(self._config.extensions)
@@ -722,7 +720,7 @@ class ParquetDuckDBClient(DuckDBClient):
         Mirrors :meth:`PmTileDuckDBClient.get_instance` — lazy, double-checked
         creation under a lock — but the connection is owned per-instance rather
         than shared process-global. Applies the memory limit and thread count
-        from :meth:`Config.get_parquets_config`, loads the requested extensions,
+        from :meth:`Config.get_sites_config`, loads the requested extensions,
         and sets the S3 region on first build. The spill (temp) directory is
         only set for on-disk databases — an in-memory test DB never spills.
         """
@@ -783,7 +781,7 @@ class ParquetDuckDBClient(DuckDBClient):
                 self._duckdb_client.close()
         self._duckdb_client = None
 
-    def __enter__(self) -> ParquetDuckDBClient:
+    def __enter__(self) -> SitesDuckDBClient:
         return self
 
     def __exit__(self, *_: object) -> None:

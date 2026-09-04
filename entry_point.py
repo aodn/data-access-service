@@ -2,7 +2,7 @@ import os
 
 import boto3
 
-from data_access_service import init_log, Config, API
+from data_access_service import API, Config, init_log
 from data_access_service.batch import subsetting
 from data_access_service.batch.estimation.generator import (
     generate_estimation_index_for_all_parquets,
@@ -10,12 +10,12 @@ from data_access_service.batch.estimation.generator import (
 from data_access_service.batch.pmtiles.generator import (
     generate_pmtiles_for_all_parquets,
 )
+from data_access_service.batch.sites_parquet.refresher import (
+    refresh_sites_parquet_snapshots,
+)
 from data_access_service.config.config import DevConfig
 
 logger = init_log(Config.get_config())
-
-# Initialize a boto3 client for AWS Batch
-client = boto3.client("batch")
 
 # Get the job ID from the environment variable
 job_id = os.getenv("AWS_BATCH_JOB_ID")
@@ -26,6 +26,10 @@ if not isinstance(Config.get_config(), DevConfig):
     job_index = os.getenv("AWS_BATCH_JOB_ARRAY_INDEX")
     if job_index is not None:
         logger.info(f"Job Index: { job_index }")
+
+    # Only needed to describe the real Batch job; a local DevConfig run never
+    # calls the Batch API, so skip requiring AWS region/credentials for it.
+    client = boto3.client("batch")
 
     # Retrieve the job details
     response = client.describe_jobs(jobs=[job_id])
@@ -47,9 +51,12 @@ else:
     call_type = os.getenv("AWS_BATCH_CALL_TYPE")
     parameters = {}
 
-# A global app
-api = API()
-api.initialize_metadata()
+# A global app. Sites-parquet refresh doesn't touch the metadata catalog, so
+# skip the memory-intensive metadata init for it — every other job type needs it.
+api = None
+if call_type != "refresh-sites-parquet":
+    api = API()
+    api.initialize_metadata()
 
 match call_type:
     case "sub-setting":
@@ -76,5 +83,7 @@ match call_type:
                 "Estimation index generation restricted to uuid=%s", target_uuid
             )
         generate_estimation_index_for_all_parquets(api=api, uuid=target_uuid or None)
+    case "refresh-sites-parquet":
+        refresh_sites_parquet_snapshots()
     case _:
         logger.error("Unknow call type", call_type)

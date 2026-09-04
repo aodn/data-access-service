@@ -5,10 +5,10 @@ from concurrent.futures import ThreadPoolExecutor
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from data_access_service import API
-from data_access_service import Config
+from data_access_service import API, Config
 from data_access_service.config.config import EnvType
 from data_access_service.sites.sites_repository import ParquetRepository
+from data_access_service.utils.memory_utils import log_memory_usage
 
 logger = logging.getLogger(__name__)
 
@@ -29,13 +29,17 @@ def _format_exception(exc: BaseException) -> str:
 
 
 class TaskScheduler:
-    """Refreshes every registered :class:`ParquetRepository` on a schedule.
+    """Keeps every registered :class:`ParquetRepository`'s table in sync with its S3 snapshot.
 
-    Each repository owns its own dataset locations and the SQL to (re)load it
-    (see :mod:`data_access_service.sites.duckdb_repository`); this scheduler just
-    drives the loads. The repositories share the single ``ParquetDuckDBClient`` built in
-    :mod:`data_access_service.server`, so every read endpoint sees the refreshed
-    tables.
+    The heavy read of each dataset's primary source runs in a separate AWS
+    Batch job (see ``data_access_service/batch/sites_parquet/refresher.py``),
+    which writes the result to S3 as a flat snapshot file — see
+    ``data_access_service/sites/technical.md`` for the full design. This
+    scheduler only ever does the cheap side: on a recurring schedule, a single
+    S3 HEAD per repository to check its snapshot's ETag, and — only if it
+    changed — a lightweight reload. The repositories share the single
+    ``SitesDuckDBClient`` built in :mod:`data_access_service.server`, so
+    every read endpoint sees the reloaded tables.
     """
 
     def __init__(self, api: API, repositories: dict[str, ParquetRepository]):
@@ -43,40 +47,31 @@ class TaskScheduler:
         self.repositories = repositories
         self.scheduler = AsyncIOScheduler()
 
-    def _refresh_repository(self, name: str, repo: ParquetRepository):
-        """Reload one repository from its primary dataset, then refresh its backup.
+    def _reload_repository(self, name: str, repo: ParquetRepository):
+        """Reload one repository's table from its S3 snapshot if it changed.
 
-        ``CREATE OR REPLACE TABLE`` (inside ``repo.load``) is atomic, so readers
-        keep seeing the previous table until the new one is committed; a failed
-        read rolls back and leaves the existing table intact. The backup write is
-        best-effort — a failure there does not affect the freshly loaded table.
+        Only the snapshot-bucket S3 secret needs refreshing here — this process
+        never reads the primary dataset, so it never needs the primary
+        bucket's secret. ECS task role credentials are valid for ~6 hours and
+        boto3 always returns fresh ones, so re-creating the secret every
+        reload keeps it current.
         """
-        # Refresh the S3 secrets before each run so they never expire. ECS task
-        # role credentials are valid for ~6 hours and boto3 always returns fresh
-        # ones, so re-creating the secrets every refresh keeps them current.
-        repo._configure_s3()
-        repo._configure_backup_s3()
+        repo._configure_snapshot_bucket_s3()
+        log_memory_usage(logger, f"before reload check '{name}'")
         try:
-            logger.info(f"Refreshing repository '{name}' from primary dataset...")
-            repo.load()
-            logger.info(f"Repository '{name}' refreshed successfully")
+            if repo.reload_if_changed():
+                logger.info("Repository '%s' reloaded from snapshot", name)
+            else:
+                logger.info("Repository '%s' snapshot unchanged; skipped", name)
         except Exception as e:
             logger.error(
-                f"Error refreshing repository '{name}': {_format_exception(e)}",
+                f"Error reloading repository '{name}': {_format_exception(e)}",
                 exc_info=True,
             )
-            return
+        log_memory_usage(logger, f"after reload check '{name}'")
 
-        try:
-            repo.write_backup()
-            logger.info(f"Backup written for repository '{name}'")
-        except Exception as e:
-            logger.warning(
-                f"Failed to write backup for repository '{name}': {_format_exception(e)}"
-            )
-
-    def _refresh_task(self):
-        """Refresh every registered repository (the scheduled job)."""
+    def _reload_task(self):
+        """Reload every registered repository whose snapshot changed (the scheduled job)."""
         if not Config.is_profile_in(
             EnvType.EDGE,
             EnvType.STAGING,
@@ -85,37 +80,23 @@ class TaskScheduler:
             EnvType.TESTING,
         ):
             logger.info(
-                "Skipping refresh task on '%s' profile", Config.resolve_profile()
+                "Skipping reload task on '%s' profile", Config.resolve_profile()
             )
             return
-        logger.info("Refresh task is running...")
+        logger.info("Reload task is running...")
+        log_memory_usage(logger, "reload task start")
         for name, repo in self.repositories.items():
-            self._refresh_repository(name, repo)
-        logger.info("Refresh task completed")
-
-    def _preload_from_backup(self):
-        """Seed every repository from its S3 backup so endpoints work during the refresh.
-
-        Best-effort: on a first-ever run no backup exists yet, which is logged and
-        ignored — the subsequent primary refresh will populate the table.
-        """
-        for name, repo in self.repositories.items():
-            try:
-                repo.load_backup()
-                logger.info(f"Pre-loaded repository '{name}' from S3 backup")
-            except Exception as e:
-                logger.warning(
-                    f"No S3 backup to pre-load for repository '{name}', "
-                    f"will rely on initial S3 refresh: {_format_exception(e)}"
-                )
+            self._reload_repository(name, repo)
+        log_memory_usage(logger, "reload task end")
+        logger.info("Reload task completed")
 
     def _start(self):
-        """Start the scheduler and add the recurring refresh job."""
+        """Start the scheduler and add the recurring reload job."""
         self.scheduler.add_job(
-            self._refresh_task,
-            trigger=CronTrigger(hour="*/2", minute="0"),  # Every 2 hours at :00
-            id="refresh_task",
-            name="Repository data refresh task",
+            self._reload_task,
+            trigger=CronTrigger(hour="*/2", minute="0"),  # Every 2 hours, on the hour
+            id="reload_task",
+            name="Repository snapshot reload task",
             replace_existing=True,
             coalesce=True,
             misfire_grace_time=None,
@@ -126,18 +107,15 @@ class TaskScheduler:
         logger.info("Task scheduler started successfully")
 
     async def start_with_initial_run(self):
-        # API init is memory intensive, so do not refresh until the init is done
+        """Start the scheduler and run the reload task immediately."""
         await self.api.wait_until_ready()
 
-        """Start the scheduler and run the refresh task immediately."""
         loop = asyncio.get_running_loop()
         with ThreadPoolExecutor() as executor:
-            # Pre-load from backup so the endpoints are available while the full S3
-            # refresh runs. Both are blocking S3 reads — run in an executor to
-            # avoid blocking the event loop.
-            logger.info("Running refresh task on startup...")
-            await loop.run_in_executor(executor, self._preload_from_backup)
-            await loop.run_in_executor(executor, self._refresh_task)
+            # Reload is cheap (one HEAD + a small-file read per repository) but
+            # still blocking S3 I/O, so keep it off the event loop at startup.
+            logger.info("Running reload task on startup...")
+            await loop.run_in_executor(executor, self._reload_task)
         self._start()
 
     def shutdown(self):

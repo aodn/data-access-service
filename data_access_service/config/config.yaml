@@ -35,13 +35,13 @@ column_name_mapping:
     - release_longitude
     - ssm_lon
     - receiver_deployment_longitude
-parquet:
+sites:
   config:
     duckdb_database: "parquet_disk_db.duckdb"
     duckdb_temp_dir: "parquet_duckdb_tmp"
     co_bucket: "aodn-cloud-optimised"
     memory_limit: "800M"
-    threads: 8
+    threads: 4
     region: "ap-southeast-2"
     extensions:
       - httpfs

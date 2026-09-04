@@ -7,8 +7,8 @@ aws:
     bucket_name:
       subsetting: aodn-cloud-optimized-subset-dev
       portal_data: aodnportal-dev-data
-      wave_buoy_backup: aodn-cloud-optimized-wave-buoy-backup-testing
-      mooring_backup: aodn-cloud-optimized-wave-buoy-backup-testing
+      wave_buoy_snapshot: aodn-cloud-optimized-wave-buoy-backup-testing
+      mooring_snapshot: aodn-cloud-optimized-wave-buoy-backup-testing
   ses:
     sender_email: no.reply@aodn.org.au
   batch:
