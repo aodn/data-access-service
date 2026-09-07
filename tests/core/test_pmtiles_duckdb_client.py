@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 import duckdb
 import pytest
 
-from data_access_service.core.duckdbclient import PmTileDuckDBClient
+from data_access_service.core.duckdbclient import PmTileDuckDBClient, _sql_preview
 
 
 @pytest.fixture(autouse=True)
@@ -431,3 +431,25 @@ def test_detect_time_type_falls_back_when_column_missing_from_metadata():
         _write_common_metadata(root, client)
 
         assert client.detect_time_type(glob_path, "timestamp") == "epoch_s"
+
+
+def test_secret_sql_is_not_written_to_the_query_log():
+    """CREATE SECRET carries live keys; the logs must not repeat them."""
+    sql = """
+        CREATE OR REPLACE SECRET "dapprd-mnf_s3" (
+            TYPE S3,
+            KEY_ID 'a-key-id',
+            SECRET 'a-secret'
+        )
+        """
+
+    preview = _sql_preview(sql)
+
+    assert "a-key-id" not in preview
+    assert "a-secret" not in preview
+
+
+def test_ordinary_sql_still_shows_in_the_query_log():
+    preview = _sql_preview("SELECT count(*)\n  FROM read_parquet('s3://b/x/*.parquet')")
+
+    assert preview == "SELECT count(*) FROM read_parquet('s3://b/x/*.parquet')"
