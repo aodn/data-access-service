@@ -253,10 +253,27 @@ class ParquetRepository(ABC):
 
         Called after a successful primary :meth:`load` so the snapshot always
         mirrors the latest good data.
+
+        Rows are written sorted by (``site_column`` [, ``group_column``],
+        ``time_column``) rather than in their incoming order. The API service
+        reads this file through a VIEW (see :meth:`load_snapshot`), so every
+        :meth:`site_details` call rescans it directly — sorting clusters each
+        site's rows into a small, contiguous set of row groups, so Parquet's
+        per-row-group min/max stats let DuckDB skip row groups outside the
+        requested ``site_code`` (and, secondarily, time range) instead of
+        scanning the whole file. ``sites_in_date_range``/:meth:`latest_time`
+        touch every site regardless, so this ordering doesn't help or hurt
+        them.
         """
+        order_columns = [self.site_column]
+        if self.group_column is not None:
+            order_columns.append(self.group_column)
+        order_columns.append(self.time_column)
+        order_by = ", ".join(quote_ident(c) for c in order_columns)
+
         self.session.execute(
             f"""
-            COPY (SELECT * FROM {quote_ident(self.table)})
+            COPY (SELECT * FROM {quote_ident(self.table)} ORDER BY {order_by})
             TO '{self.snapshot_dataset}' (FORMAT PARQUET)
             """
         )
