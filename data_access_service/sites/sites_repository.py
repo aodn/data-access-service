@@ -198,16 +198,22 @@ class ParquetRepository(ABC):
         return self
 
     def load_snapshot(self) -> ParquetRepository:
-        """Load the table from ``snapshot_dataset`` (a single flat Parquet file).
+        """Point the table name at ``snapshot_dataset`` (a single flat Parquet file) as a VIEW.
 
         The Batch job writes ``snapshot_dataset`` via :meth:`write_snapshot`;
         this reads it directly (it's one flat file, not a partitioned
         directory). Called by :meth:`reload_if_changed`, which only calls this
         once it has confirmed the snapshot exists.
+
+        A VIEW rather than a materialized TABLE: this runs in the always-on
+        API service, so a reload should not copy the whole snapshot into the
+        service's memory — it's just a catalog-level pointer swap onto the new
+        file, and DuckDB pushes filter/projection pushdown through the view
+        into the underlying ``read_parquet`` scan for the read methods below.
         """
         self.session.execute(
             f"""
-            CREATE OR REPLACE TABLE {quote_ident(self.table)} AS
+            CREATE OR REPLACE VIEW {quote_ident(self.table)} AS
             SELECT * FROM read_parquet('{self.snapshot_dataset}')
             """
         )
