@@ -1,9 +1,12 @@
+from typing import Optional
+
 from aodn_cloud_optimised.lib.DataQuery import Metadata, DataSource, GetAodn
 
 from data_access_service.models.co_data_source.abstract_data_src import (
     AbstractDataSrc,
     AODN,
 )
+from data_access_service.models.co_data_source.dataset_location import DatasetLocation
 
 
 class AodnDataSrc(AbstractDataSrc):
@@ -32,3 +35,8 @@ class AodnDataSrc(AbstractDataSrc):
 
     def get_data_src(self) -> GetAodn:
         return self.__data_src
+
+    @classmethod
+    def locate_dataset(cls, dataset_name_with_ext: str) -> Optional[DatasetLocation]:
+        """Always None: AODN data is already in the default bucket."""
+        return None

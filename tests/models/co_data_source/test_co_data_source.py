@@ -73,6 +73,10 @@ class _ConcreteDataSrc(AbstractDataSrc):
     def get_data_src(self):
         return self._data_src
 
+    @classmethod
+    def locate_dataset(cls, dataset_name_with_ext: str):
+        return None
+
 
 class TestAbstractDataSrc:
     def test_get_dataset_raises_when_not_in_catalog(self):

@@ -1,6 +1,11 @@
 import h3
-from typing import List, Dict
-from shapely.geometry import Polygon, MultiPolygon, mapping
+from typing import Dict, List
+
+from shapely import make_valid
+from shapely.affinity import translate
+from shapely.errors import GEOSException
+from shapely.geometry import MultiPolygon, Polygon, mapping
+from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 _WORLD_BOUNDS = Polygon([(-180, -90), (180, -90), (180, 90), (-180, 90), (-180, -90)])
@@ -65,28 +70,48 @@ def _unwrap_ring(ring: List[List[float]]) -> List[List[float]]:
     return unwrapped
 
 
+def _polygons_with_area(geometry: BaseGeometry | None) -> List[Polygon]:
+    """Flatten overlay results to polygons that have area (drop lines/points)."""
+    if geometry is None or geometry.is_empty:
+        return []
+    if isinstance(geometry, Polygon):
+        return [geometry] if geometry.area > 0 else []
+    if hasattr(geometry, "geoms"):
+        parts: List[Polygon] = []
+        for geom in geometry.geoms:
+            parts.extend(_polygons_with_area(geom))
+        return parts
+    return []
+
+
+def _split_unwrapped_at_dateline(ring: List[List[float]]) -> List[Polygon]:
+    """Clip an antimeridian-unwrapped hex into pieces inside [-180, 180].
+
+    Polar H3 cells can unwrap to a self-intersecting ring (GEOS reports
+    ``side location conflict``). ``make_valid`` repairs that before clip.
+    """
+    valid = make_valid(Polygon(ring))
+    pieces: List[Polygon] = []
+    for shift in (0, -360, 360):
+        clipped = translate(valid, xoff=shift).intersection(_WORLD_BOUNDS)
+        pieces.extend(_polygons_with_area(clipped))
+    return _polygons_with_area(unary_union(pieces)) if pieces else []
+
+
 def build_hex_geometry(cell: str) -> Dict:
     ring = h3_boundary_lnglat(cell)
 
     if not _crosses_antimeridian(ring):
         return {"type": "Polygon", "coordinates": [ring]}
 
-    unwrapped = _unwrap_ring(ring)
-    poly = Polygon(unwrapped)
+    try:
+        parts = _split_unwrapped_at_dateline(_unwrap_ring(ring))
+    except GEOSException:
+        parts = []
 
-    pieces = []
-    for shift in (0, -360, 360):
-        shifted = Polygon([(x + shift, y) for x, y in poly.exterior.coords])
-        clipped = shifted.intersection(_WORLD_BOUNDS)
-        if not clipped.is_empty and clipped.area > 0:
-            pieces.append(clipped)
-
-    if not pieces:
+    if not parts:
         return {"type": "Polygon", "coordinates": [ring]}
 
-    merged = unary_union(pieces)
-    if isinstance(merged, Polygon):
-        merged = MultiPolygon([merged])
-
+    merged = parts[0] if len(parts) == 1 else MultiPolygon(parts)
     geo = mapping(merged)
     return {"type": geo["type"], "coordinates": _round_coordinates(geo["coordinates"])}
