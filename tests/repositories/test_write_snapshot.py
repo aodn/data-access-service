@@ -99,5 +99,3 @@ def test_write_snapshot_sorts_by_site_then_group_then_time(session, tmp_path):
 
     written = pq.read_table(repo.snapshot_dataset).to_pandas()
     assert list(written["NOMINAL_DEPTH"]) == [5, 5, 10]
-
-
