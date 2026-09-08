@@ -1,8 +1,9 @@
 """Unit tests for SitesDuckDBClient (connection ownership, params, lifecycle).
 
 The autouse ``memory_parquets_config`` fixture (see ``conftest.py``) points the
-client at an in-memory DB with no extensions, so nothing tries to download
-httpfs over the network — the behaviours under test don't need S3.
+client at an in-memory DB — the behaviours under test don't need S3. httpfs
+and json are still loaded (hardcoded in SitesDuckDBClient.get_instance()),
+but that's a no-op once cached locally.
 """
 
 import pytest

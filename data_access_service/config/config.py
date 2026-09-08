@@ -359,7 +359,6 @@ class Config:
             threads=threads,
             duckdb_temp_dir=str(temp_dir),
             region=sconfig["region"],
-            extensions=tuple(sconfig["extensions"]),
         )
 
     def get_tiler_config(self) -> TilerConfig:

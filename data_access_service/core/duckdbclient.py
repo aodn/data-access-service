@@ -757,7 +757,7 @@ class SitesDuckDBClient(DuckDBClient):
     and every :meth:`execute` runs on its own cursor so the threadpool serving
     sync API endpoints can read in parallel.
 
-    Loads the requested extensions and sets the S3 region. The client does not
+    Loads httpfs/json and sets the S3 region. The client does not
     decide *which* buckets get credentials — each
     :class:`~data_access_service.sites.duckdb_repository.ParquetRepository`
     calls :meth:`create_s3_secret` for its own buckets on construction (see
@@ -772,7 +772,6 @@ class SitesDuckDBClient(DuckDBClient):
         self._config: SitesConfig = Config.get_config().get_sites_config()
         self._database = self._config.duckdb_database
         self._region = self._config.region
-        self._extensions = tuple(self._config.extensions)
         self._duckdb_client = None
         # Track active cursors so they can be interrupted on close.
         self._active_cursors: set[Any] = set()
@@ -785,10 +784,13 @@ class SitesDuckDBClient(DuckDBClient):
 
         Mirrors :meth:`PmTileDuckDBClient.get_instance` — lazy, double-checked
         creation under a lock — but the connection is owned per-instance rather
-        than shared process-global. Applies the memory limit and thread count
-        from :meth:`Config.get_sites_config`, loads the requested extensions,
-        and sets the S3 region on first build. The spill (temp) directory is
-        only set for on-disk databases — an in-memory test DB never spills.
+        than shared process-global. httpfs and json are loaded unconditionally,
+        same as :meth:`PmTileDuckDBClient.get_instance` does for httpfs/h3:
+        every dataset here is read from S3 (primary and snapshot alike), and
+        sites metadata is read from JSON. Applies the memory limit and thread
+        count from :meth:`Config.get_sites_config` and sets the S3 region on
+        first build. The spill (temp) directory is only set for on-disk
+        databases — an in-memory test DB never spills.
         """
         if self._duckdb_client is None:
             with self._lock:
@@ -801,8 +803,8 @@ class SitesDuckDBClient(DuckDBClient):
                         os.makedirs(self._config.duckdb_temp_dir, exist_ok=True)
                         db_config["temp_directory"] = self._config.duckdb_temp_dir
                     db = duckdb.connect(database=self._database, config=db_config)
-                    for ext in self._extensions:
-                        db.execute(f"INSTALL {ext}; LOAD {ext};")
+                    db.execute("INSTALL httpfs; LOAD httpfs;")
+                    db.execute("INSTALL json; LOAD json;")
                     db.execute(f"SET GLOBAL s3_region = '{self._region}';")
                     db.execute("SET GLOBAL TimeZone = 'UTC';")
                     self._duckdb_client = db
