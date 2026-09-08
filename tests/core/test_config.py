@@ -11,9 +11,7 @@ def test_config_trim():
     config = Config.get_config(EnvType.TESTING)
     # Ensure they are loaded and trimmed correctly
     assert config.get_subsetting_bucket_name() == "test-bucket"
-    assert (
-        config.get_wave_buoy_snapshot_bucket_name() == "test-wave-buoy-snapshot-bucket"
-    )
+    assert config.get_datavis_data_bucket_name() == "test-site-snapshot-bucket"
 
 
 def test_pmtiles_use_fork_process_default():

@@ -382,7 +382,7 @@ class MooringRepository(ParquetRepository):
 
     table: ClassVar[str] = "mooring_timeseries_realtime_qc"
     bucket: ClassVar[str] = config.get_sites_config().co_bucket
-    snapshot_bucket: ClassVar[str] = config.get_mooring_snapshot_bucket_name()
+    snapshot_bucket: ClassVar[str] = config.get_datavis_data_bucket_name()
     dataset: ClassVar[str] = f"s3://{bucket}/{table}.parquet"
     snapshot_dataset: ClassVar[str] = (
         f"s3://{snapshot_bucket}/imoslive/MOORING/{table}.parquet"
@@ -407,7 +407,7 @@ class WaveBuoyRepository(ParquetRepository):
 
     table: ClassVar[str] = "wave_buoy_realtime_nonqc"
     bucket: ClassVar[str] = config.get_sites_config().co_bucket
-    snapshot_bucket: ClassVar[str] = config.get_wave_buoy_snapshot_bucket_name()
+    snapshot_bucket: ClassVar[str] = config.get_datavis_data_bucket_name()
     dataset: ClassVar[str] = f"s3://{bucket}/{table}.parquet"
     snapshot_dataset: ClassVar[str] = (
         f"s3://{snapshot_bucket}/imoslive/BUOY/{table}.parquet"
