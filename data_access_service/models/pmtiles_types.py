@@ -92,6 +92,8 @@ class PmtilesSidecarMetadata:
 @dataclass(frozen=True)
 class PmtilesGenerationConfig:
     co_bucket: str
+    # S3 folder where pmtiles are uploaded and the portal reads them from
+    s3_prefix: str
     output_pmtiles_dir: str
     staged_parquet_dir: str
     geojsonseq_dir: str
@@ -113,6 +115,10 @@ class PmtilesGenerationConfig:
     # When True (default), the pmtiles batch also run the second phase: builds the
     # estimation index for all after every dataset's pmtiles are done. When False, the pmtiles batch only builds the pmtiles and skips the estimation index.
     build_estimation_index: bool = True
+    # Cleanup: delete pmtiles in S3 of datasets removed from the catalog (full runs only)
+    cleanup_stale_pmtiles: bool = True
+    # Dry run: cleanup only logs what it would delete
+    cleanup_dry_run: bool = False
 
 
 @dataclass

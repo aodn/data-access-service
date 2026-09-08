@@ -180,6 +180,29 @@ class TestAWSHelper(TestWithS3):
                 namelist = zf.namelist()
                 assert "test_part_000000000.csv" in namelist
 
+    def test_list_and_delete_s3_objects_round_trip(
+        self, setup, aws_clients, localstack
+    ):
+        """Real S3 (localstack): list a prefix, delete some keys, list again."""
+        s3_client, _, _ = aws_clients
+        bucket = "list-delete-test"
+        s3_client.create_bucket(Bucket=bucket)
+        for key in ["p/a", "p/b", "other/c"]:
+            s3_client.put_object(Bucket=bucket, Key=key, Body=b"x")
+        helper = AWSHelper()
+        helper.s3 = s3_client
+
+        listed = helper.list_s3_objects(bucket, "p/")
+
+        assert sorted(listed) == ["p/a", "p/b"]  # "other/c" is outside the prefix
+        assert all(dt.tzinfo is not None for dt in listed.values())
+
+        # Deleting a key that does not exist is not an error in S3
+        failed = helper.delete_s3_objects(bucket, ["p/a", "missing"])
+
+        assert failed == []
+        assert helper.list_all_s3_objects(bucket, "") == ["other/c", "p/b"]
+
     def test_write_csv_to_s3(self, setup, aws_clients, localstack, mock_boto3_client):
         helper = AWSHelper()
         helper.s3 = MagicMock()
@@ -340,3 +363,23 @@ class TestAWSHelper(TestWithS3):
 
 def has_invalid_unicode(s: str) -> bool:
     return any(0xD800 <= ord(ch) <= 0xDFFF for ch in s)
+
+
+class TestDeleteS3ObjectsBatching:
+    """S3 accepts at most 1000 keys per delete_objects call."""
+
+    def test_1001_keys_take_two_calls_and_failed_keys_are_returned(self):
+        helper = AWSHelper()
+        helper.s3 = MagicMock()
+        helper.s3.delete_objects.side_effect = [
+            {},  # first call: all 1000 keys deleted
+            {"Errors": [{"Key": "k1000", "Message": "denied"}]},  # second call
+        ]
+        keys = [f"k{i}" for i in range(1001)]
+
+        failed = helper.delete_s3_objects("bucket", keys)
+
+        assert failed == ["k1000"]
+        first_call, second_call = helper.s3.delete_objects.call_args_list
+        assert len(first_call.kwargs["Delete"]["Objects"]) == 1000
+        assert second_call.kwargs["Delete"]["Objects"] == [{"Key": "k1000"}]

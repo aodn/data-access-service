@@ -1,6 +1,7 @@
 import os
 import tempfile
 import threading
+from datetime import datetime, timezone
 
 from data_access_service import Config, init_log
 from data_access_service.batch.estimation.generator import (
@@ -10,6 +11,7 @@ from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.api import BaseAPI
 from data_access_service.utils.memory_utils import log_memory_usage
 
+from .cleanup import pmtiles_s3_keys, remove_stale_pmtiles
 from .processors.hexbin_processor import HexbinProcessor
 from ...models.pmtiles_types import (
     PmtilesVisualizationStyle,
@@ -60,6 +62,8 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
         uuid: Optional catalog UUID. When set, only parquet datasets for that
             UUID are processed (useful for local/debug runs of a single product).
     """
+    # Remember when this run started; cleanup never deletes files newer than this
+    started_at = datetime.now(timezone.utc)
     metadata_list = api.get_mapped_meta_data(uuid=None)
 
     # Materialise the work list before trimming so we do not depend on the
@@ -114,6 +118,13 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
                 dataset_name,
             )
         log_memory_usage(logger, after_label)
+
+    # Cleanup: delete pmtiles of datasets removed from the catalog (full runs only)
+    if uuid is None and config.get_pmtiles_config().cleanup_stale_pmtiles:
+        try:
+            remove_stale_pmtiles(work, started_at)
+        except Exception as e:
+            logger.error("Stale pmtiles cleanup failed: %s", e, exc_info=True)
 
     # Phase 2: every pmtiles child has exited, so the parent is back to its
     # startup baseline before the index scans start. Same job, same loaded
@@ -229,21 +240,16 @@ def _generate_pmtiles_for_parquets(api: BaseAPI, uuid: str, dname: str) -> bool:
                 # TODO: please use functions like is_local_pmtiles_valid() in pmtiles_util to verify the new generated pmtiles file
                 #  is valid or not before uploading to S3. We don't want to upload an invalid pmtiles file to S3 and cause errors
                 # [Raymond] Is the function is_local_pmtiles_valid() in pmtiles_util.py reliable? Seems not
-                bucket = config.get_pmtiles_config().bucket_name
-                s3_dir = f"portal/visualization/{uuid}"
-                aws.upload_file_to_s3(
-                    pmtiles_path,
-                    bucket,
-                    f"{s3_dir}/{dname}.pmtiles",
+                pm_config = config.get_pmtiles_config()
+                bucket = pm_config.bucket_name
+                pmtiles_key, metadata_key = pmtiles_s3_keys(
+                    pm_config.s3_prefix, uuid, dname
                 )
+                aws.upload_file_to_s3(pmtiles_path, bucket, pmtiles_key)
                 logger.info(
                     f"Pmtiles file of dataset {dname}, uuid {uuid} uploaded to S3."
                 )
-                aws.upload_file_to_s3(
-                    metadata_path,
-                    bucket,
-                    f"{s3_dir}/{dname}.metadata",
-                )
+                aws.upload_file_to_s3(metadata_path, bucket, metadata_key)
                 logger.info(
                     f"Metadata file of dataset {dname}, uuid {uuid} uploaded to S3."
                 )

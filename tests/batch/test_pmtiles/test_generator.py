@@ -14,7 +14,10 @@ from data_access_service.models.pmtiles_types import PmtilesVisualizationStyle
 
 
 def _enable_fork(
-    monkeypatch, enabled: bool = True, build_estimation_index: bool = True
+    monkeypatch,
+    enabled: bool = True,
+    build_estimation_index: bool = True,
+    cleanup_stale_pmtiles: bool = False,
 ):
     monkeypatch.setattr(
         generator.config,
@@ -22,6 +25,7 @@ def _enable_fork(
         lambda: MagicMock(
             use_fork_process=enabled,
             build_estimation_index=build_estimation_index,
+            cleanup_stale_pmtiles=cleanup_stale_pmtiles,
         ),
     )
 
@@ -368,7 +372,7 @@ class TestUploadMetadata:
         monkeypatch.setattr(
             generator.config,
             "get_pmtiles_config",
-            lambda: MagicMock(bucket_name=bucket),
+            lambda: MagicMock(bucket_name=bucket, s3_prefix="portal/visualization"),
         )
 
         assert _generate_pmtiles_for_parquets(api=None, uuid=uuid, dname=dname) is True
@@ -376,3 +380,65 @@ class TestUploadMetadata:
             (pmtiles_path, bucket, f"portal/visualization/{uuid}/{dname}.pmtiles"),
             (metadata_path, bucket, f"portal/visualization/{uuid}/{dname}.metadata"),
         ]
+
+
+class TestCleanupInBatch:
+    """The batch calls remove_stale_pmtiles once, after Phase 1, on full runs only."""
+
+    def _run_batch(self, monkeypatch, uuid=None, cleanup_enabled=True):
+        _enable_fork(monkeypatch, True, cleanup_stale_pmtiles=cleanup_enabled)
+        api = MagicMock()
+        api.get_mapped_meta_data.return_value = {
+            "uuid-a": {"a.parquet": {}},
+            "uuid-b": {"b.parquet": {}},
+        }
+
+        def generate(api, uuid, dname):
+            return dname != "b.parquet"  # b.parquet fails to generate
+
+        monkeypatch.setattr(
+            generator, "_generate_pmtiles_for_parquets_in_subprocess", generate
+        )
+        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+        cleanup = MagicMock(return_value=[])
+        monkeypatch.setattr(generator, "remove_stale_pmtiles", cleanup)
+
+        generate_pmtiles_for_all_parquets(api, uuid=uuid)
+        return cleanup
+
+    def test_full_run_cleans_up_and_keeps_failed_datasets(self, monkeypatch):
+        cleanup = self._run_batch(monkeypatch)
+
+        cleanup.assert_called_once()
+        work, started_at = cleanup.call_args.args
+        # b.parquet failed but is still in the catalog, so its old files must stay
+        assert work == [("uuid-a", "a.parquet"), ("uuid-b", "b.parquet")]
+        assert started_at.tzinfo is not None  # comparable with S3 LastModified
+
+    def test_single_uuid_run_does_not_clean_up(self, monkeypatch):
+        cleanup = self._run_batch(monkeypatch, uuid="uuid-a")
+
+        cleanup.assert_not_called()
+
+    def test_config_flag_disables_cleanup(self, monkeypatch):
+        cleanup = self._run_batch(monkeypatch, cleanup_enabled=False)
+
+        cleanup.assert_not_called()
+
+    def test_cleanup_error_does_not_stop_the_batch(self, monkeypatch, estimation_phase):
+        _enable_fork(monkeypatch, True, cleanup_stale_pmtiles=True)
+        api = MagicMock()
+        api.get_mapped_meta_data.return_value = {"uuid-a": {"a.parquet": {}}}
+        monkeypatch.setattr(
+            generator, "_generate_pmtiles_for_parquets_in_subprocess", lambda *a: True
+        )
+        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+        monkeypatch.setattr(
+            generator,
+            "remove_stale_pmtiles",
+            MagicMock(side_effect=RuntimeError("s3 down")),
+        )
+
+        generate_pmtiles_for_all_parquets(api)
+
+        estimation_phase.assert_called_once()  # Phase 2 still ran

@@ -8,6 +8,7 @@ import zipfile
 import dask.dataframe
 import dask.dataframe as dd
 import xarray
+from datetime import datetime
 from pathlib import Path
 from data_access_service import init_log
 from data_access_service.config.config import Config, IntTestConfig
@@ -409,13 +410,37 @@ class AWSHelper:
         Returns:
             A list of object keys in the specified bucket and prefix.
         """
-        objects = []
+        return list(self.list_s3_objects(bucket_name, prefix))
+
+    def list_s3_objects(
+        self, bucket_name: str, prefix: str = ""
+    ) -> dict[str, datetime]:
+        """List files under prefix. Returns {key: upload time}."""
+        objects = {}
         paginator = self.s3.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
-            if "Contents" in page:
-                for obj in page["Contents"]:
-                    objects.append(obj["Key"])
+            for obj in page.get("Contents", []):
+                objects[obj["Key"]] = obj["LastModified"]
         return objects
+
+    def delete_s3_objects(self, bucket_name: str, keys: list[str]) -> list[str]:
+        """Delete files in batches of 1000 (S3 limit). Returns keys that failed."""
+        failed = []
+        for start in range(0, len(keys), 1000):
+            chunk = keys[start : start + 1000]
+            response = self.s3.delete_objects(
+                Bucket=bucket_name,
+                Delete={"Objects": [{"Key": key} for key in chunk], "Quiet": True},
+            )
+            for error in response.get("Errors", []):
+                self.log.error(
+                    "Failed to delete s3://%s/%s: %s",
+                    bucket_name,
+                    error.get("Key"),
+                    error.get("Message"),
+                )
+                failed.append(error.get("Key"))
+        return failed
 
     def extract_zip_from_s3(
         self, bucket_name: str, zip_key: str, output_path: str
