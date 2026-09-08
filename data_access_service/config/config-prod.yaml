@@ -7,8 +7,7 @@ aws:
     bucket_name:
       subsetting: aodn-cloud-optimized-subset-prod
       portal_data: aodnportal-production-data
-      wave_buoy_backup: datavis-apps-prod-data
-      mooring_backup: datavis-apps-prod-data
+      datavis_data: datavis-apps-prod-data
   ses:
     sender_email: no.reply@aodn.org.au
   batch:
