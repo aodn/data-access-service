@@ -12,7 +12,10 @@ from botocore.client import BaseClient
 from dotenv import load_dotenv
 
 from data_access_service.models.duckdb_types import DuckDBTuningConfig
-from data_access_service.models.estimation_types import EstimationIndexConfig
+from data_access_service.models.estimation_types import (
+    EstimationIndexConfig,
+    EstimationReadDuckDBConfig,
+)
 from data_access_service.models.pmtiles_types import (
     HexLayerSpec,
     PmtilesGenerationConfig,
@@ -297,6 +300,7 @@ class Config:
             row_group_size=int(econfig.get("row_group_size", 100_000)),
             use_index_for_estimate=bool(econfig.get("use_index_for_estimate", True)),
             duckdb=self._duckdb_tuning(econfig.get("duckdb", {}), co_bucket=co_bucket),
+            read_duckdb=self._estimation_read_duckdb(econfig.get("read_duckdb", {})),
             use_fork_process=bool(econfig.get("use_fork_process", True)),
             chunk_files=max(0, int(econfig.get("chunk_files", 15_000))),
         )
@@ -311,6 +315,19 @@ class Config:
             memory_limit=pmconfig.memory_limit,
             threads=pmconfig.threads,
             show_progress=pmconfig.show_progress,
+        )
+
+    @staticmethod
+    def _estimation_read_duckdb(section: dict) -> EstimationReadDuckDBConfig:
+        """Read the ``estimation.config.read_duckdb:`` block.
+
+        Literal defaults, not the build block's or the sites client's: the read
+        side must not start following either of them when someone retunes them.
+        """
+        return EstimationReadDuckDBConfig(
+            memory_limit=section.get("memory_limit", "128MB"),
+            threads=int(section.get("threads", 2)),
+            region=section.get("region", "ap-southeast-2"),
         )
 
     @staticmethod

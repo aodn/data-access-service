@@ -26,6 +26,23 @@ INDEX_COUNT_COLUMN = "c"
 
 
 @dataclass(frozen=True)
+class EstimationReadDuckDBConfig:
+    """DuckDB settings for reading the estimation index inside the API service.
+
+    Its own object, separate from the ``duckdb`` build settings above and from
+    the sites client's :class:`~data_access_service.models.sites_types.SitesConfig`,
+    so retuning either of those cannot move the read side. The read query is a
+    streaming ``SUM`` over one small parquet on S3 - no join, sort or group by -
+    so there is nothing to spill and no catalog to keep: the database is always
+    ``:memory:`` and the limit below is a guard rail, not a working budget.
+    """
+
+    memory_limit: str
+    threads: int
+    region: str
+
+
+@dataclass(frozen=True)
 class EstimationIndexConfig:
     """Settings for building and reading the estimation index."""
 
@@ -55,6 +72,10 @@ class EstimationIndexConfig:
     # DuckDB session settings for the build. Its own object, not the pmtiles
     # one, so the two jobs' memory limits move independently.
     duckdb: DuckDBTuningConfig
+    # DuckDB session settings for the read side (the API service). Separate
+    # from ``duckdb`` above: the build wants gigabytes, one request wants a
+    # guard rail.
+    read_duckdb: EstimationReadDuckDBConfig
     # True: the batch run forks one child per dataset so DuckDB memory goes
     # back to the OS on exit. False: run in the main process (local debug).
     use_fork_process: bool

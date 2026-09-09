@@ -17,11 +17,12 @@ import logging
 import math
 import threading
 import time
-from typing import TYPE_CHECKING, Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import pandas as pd
 
 from data_access_service.config.config import Config
+from data_access_service.core.duckdbclient import EstimationDuckDBClient
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.models.estimation_types import (
     ESTIMATION_INDEX_VERSION,
@@ -30,9 +31,6 @@ from data_access_service.models.estimation_types import (
 )
 from data_access_service.utils.date_time_utils import ensure_timezone
 from data_access_service.utils.format_utils import OUTPUT_FORMAT_CSV
-
-if TYPE_CHECKING:  # pragma: no cover - import cycle: core.api imports this
-    from data_access_service.core.duckdbclient import ParquetDuckDBClient
 
 log = logging.getLogger(__name__)
 
@@ -49,14 +47,21 @@ _sidecar_cache: dict[
 ] = {}
 _sidecar_lock = threading.Lock()
 
-# DuckDB client used to read the index. The server hands over the app-level
-# client (which already has httpfs, the region and UTC set) in its lifespan;
-# batch jobs and tests get a lazily created one.
-_duckdb_client: Optional["ParquetDuckDBClient"] = None
-_owned_client: Optional["ParquetDuckDBClient"] = None
+# DuckDB client used to read the index. This module owns it: an
+# EstimationDuckDBClient on its own :memory: database, built on first use (or
+# eagerly by the server lifespan via init_client). set_duckdb_client stays for
+# tests that want to hand in a stub. It used to be the app-level sites client,
+# which coupled the estimate to the sites tuning and the sites class name.
+_duckdb_client: Optional[EstimationDuckDBClient] = None
+_owned_client: Optional[EstimationDuckDBClient] = None
 _client_lock = threading.Lock()
 # Buckets a given client already has S3 credentials for.
 _secret_done: set[tuple[int, str]] = set()
+
+# Failures that mean this module is wrong, not that the index is missing or S3
+# is unhappy. They are logged at ERROR rather than folded into the ordinary
+# fail-soft WARNING, so a refactor cannot quietly turn the index off.
+_BUG_ERRORS = (ImportError, AttributeError, NameError, TypeError)
 
 
 ExtentProvider = Callable[
@@ -64,8 +69,8 @@ ExtentProvider = Callable[
 ]
 
 
-def set_duckdb_client(client: Optional["ParquetDuckDBClient"]) -> None:
-    """Give this module the app-level DuckDB client (called from the lifespan)."""
+def set_duckdb_client(client: Optional[EstimationDuckDBClient]) -> None:
+    """Override the client this module uses (tests hand in a stub)."""
     global _duckdb_client
     with _client_lock:
         _duckdb_client = client
@@ -110,6 +115,21 @@ def read_index_estimate(
         extra_rows, tail_note = _extrapolate_tail(
             client, path, meta, date_start, bboxes, requested_end_date
         )
+    except _BUG_ERRORS as e:
+        # Not a data or S3 problem - this module is broken. Still fall back
+        # (an estimate must never fail because of this optimisation), but say
+        # so at ERROR: the fallback is 50x slower, so a silent WARNING here is
+        # how a rename went unnoticed in production once already.
+        log.error(
+            "estimation index is broken for %s/%s - falling back to the live "
+            "scan, which is far slower. This is a code fault, not a missing "
+            "index: %s",
+            uuid,
+            key,
+            e,
+            exc_info=True,
+        )
+        return None
     except Exception as e:
         log.warning(
             "estimation index query failed for %s/%s; falling back to the live "
@@ -304,7 +324,7 @@ def index_s3_path(uuid: str, key: str) -> str:
 
 
 def _count_rows(
-    client: "ParquetDuckDBClient",
+    client: EstimationDuckDBClient,
     path: str,
     meta: EstimationSidecarMetadata,
     date_start: Optional[pd.Timestamp],
@@ -358,7 +378,7 @@ def _where_clause(
 
 
 def _extrapolate_tail(
-    client: "ParquetDuckDBClient",
+    client: EstimationDuckDBClient,
     path: str,
     meta: EstimationSidecarMetadata,
     date_start: Optional[pd.Timestamp],
@@ -464,20 +484,41 @@ def _live_schema_fingerprint(api, uuid: str, key: str) -> str:
         return ""
 
 
-def _get_client() -> "ParquetDuckDBClient":
-    """The app-level client when the server injected one, else our own."""
-    from data_access_service.core.duckdbclient import ParquetDuckDBClient
-
+def _get_client() -> EstimationDuckDBClient:
+    """This module's own client, built on first use (or by :func:`init_client`)."""
     global _owned_client
     with _client_lock:
         if _duckdb_client is not None:
             return _duckdb_client
         if _owned_client is None:
-            _owned_client = ParquetDuckDBClient()
+            _owned_client = EstimationDuckDBClient(
+                Config.get_config().get_estimation_config().read_duckdb
+            )
         return _owned_client
 
 
-def _ensure_secret(client: "ParquetDuckDBClient") -> None:
+def init_client() -> None:
+    """Build the client now, so a broken read path fails at startup.
+
+    The server calls this from its lifespan. The point is not the few
+    milliseconds it saves on the first estimate - it is that a refactor which
+    breaks this module surfaces as a failed deploy rather than as an estimate
+    that silently falls back to the live scan and gets 50x slower.
+    """
+    _get_client()
+
+
+def close_client() -> None:
+    """Close the client this module owns (called from the lifespan shutdown)."""
+    global _owned_client
+    with _client_lock:
+        client = _owned_client
+        _owned_client = None
+    if client is not None:
+        client.close()
+
+
+def _ensure_secret(client: EstimationDuckDBClient) -> None:
     """Give the client S3 credentials for the portal-data bucket, once.
 
     The app-level client is only given secrets for the buckets the site
