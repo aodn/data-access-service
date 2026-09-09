@@ -33,8 +33,21 @@ if not isinstance(Config.get_config(), DevConfig):
 
     # Retrieve the job details
     response = client.describe_jobs(jobs=[job_id])
-    jobs = response.get("jobs", [])
-    if not jobs:
+
+    # LOCAL_JOB_PARAM is use for local debug run only, sample
+    # {
+    #   "type":"sub-setting-data-preparation",
+    #   "uuid":"<your-uuid>",
+    #   "start_date":"07-2010",
+    #   "end_date":"06-2011",
+    #   "recipient":"you@example.com",
+    #   "multi_polygon":"{\"type\":\"MultiPolygon\",\"coordinates\":[[[[38.22656250000031,55.578344672182],[60.02343749999969,55.578344672182],[60.02343749999969,61.77312286453116],[38.22656250000031,61.77312286453116],[38.22656250000031,55.578344672182]]]]}",
+    #   "date_ranges":"{\"13\": [\"2010-07-01 00:00:00.000000000\", \"2011-06-30 23:59:59.999999999\"]}",
+    #   "master_job_id":"local-debug",
+    #   "intermediate_output_folder":"/tmp/local-subset"
+    # }
+    jobs = response.get("jobs", os.getenv("LOCAL_JOBS_PARAM"))
+    if not jobs or len(jobs) == 0:
         raise ValueError(f"No job found with ID: {job_id}")
 
     job = jobs[0]
