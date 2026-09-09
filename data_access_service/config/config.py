@@ -361,14 +361,23 @@ class Config:
             region=sconfig["region"],
         )
 
+    def get_sites_reload_interval_hours(self) -> int:
+        """Hours between cron sweeps that reload a sites repository if its S3
+        snapshot changed (see ``core/scheduler.py``).
+
+        A plain read, unlike :meth:`get_sites_config` — no ``mkdtemp`` side
+        effect, so it's safe to call on every scheduler start.
+        """
+        sconfig = self.config.get("sites", {}).get("config", {})
+        return sconfig["reload_interval_hours"]
+
     def get_tiler_config(self) -> TilerConfig:
         redis_env = os.getenv("CACHE_HOST")
         tconfig = self.config.get("tiler", {}).get("config", {})
         return TilerConfig(
             co_bucket=f"s3://{tconfig.get('co_bucket', 'aodn-cloud-optimised')}",
-            store_ttl_seconds=tconfig["store_ttl_seconds"],
             store_prewarm_workers=tconfig["store_prewarm_workers"],
-            store_refresh_workers=tconfig["store_refresh_workers"],
+            store_refresh_interval_hours=tconfig["store_refresh_interval_hours"],
             thread_pool_size=tconfig["thread_pool_size"],
             animation_workers=tconfig["animation_workers"],
             cache_backend=tconfig["cache_backend"],

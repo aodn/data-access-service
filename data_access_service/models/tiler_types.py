@@ -8,9 +8,8 @@ class TilerConfig:
     """
 
     co_bucket: str
-    store_ttl_seconds: int
     store_prewarm_workers: int
-    store_refresh_workers: int
+    store_refresh_interval_hours: int
     thread_pool_size: int
     animation_workers: int
     cache_backend: str

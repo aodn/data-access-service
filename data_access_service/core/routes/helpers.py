@@ -443,8 +443,8 @@ def get_repo(product: str, request: Request) -> ParquetRepository:
     404 if the product is unknown; 503 if its table has not been loaded yet (the
     startup pre-load / refresh is still in progress).
     """
-    repositories = getattr(request.app.state, "repositories", {})
-    repo = repositories.get(product)
+    sites_repositories = getattr(request.app.state, "sites_repositories", {})
+    repo = sites_repositories.get(product)
     if repo is None:
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,

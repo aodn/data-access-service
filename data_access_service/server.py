@@ -35,7 +35,7 @@ def api_setup(application: FastAPI) -> API:
     """
     api = API()
     application.state.api_instance = api  # type: ignore
-    application.state.repositories = {}  # type: ignore
+    application.state.sites_repositories = {}  # type: ignore
 
     # Heavy load so try to use a task to complete it in the background
     try:
@@ -80,15 +80,15 @@ async def lifespan(application: FastAPI):
             # The estimate reads the pre-built index through the same client,
             # rather than opening a second DuckDB connection of its own.
             set_duckdb_client(session)
-            application.state.repositories = build_repositories(session)
-            scheduler = TaskScheduler(api, application.state.repositories)
-            repository_cache_task = asyncio.create_task(
-                scheduler.start_with_initial_run(), name="repository_cache"
+            application.state.sites_repositories = build_repositories(session)
+            scheduler = TaskScheduler(api, application.state.sites_repositories)
+            scheduler_startup_task = asyncio.create_task(
+                scheduler.start_with_initial_run(), name="task_scheduler_startup"
             )
             tiler_warmup_task = asyncio.create_task(
                 run_tiler_warmup(api), name="tiler_warmup"
             )
-            background_tasks = (repository_cache_task, tiler_warmup_task)
+            background_tasks = (scheduler_startup_task, tiler_warmup_task)
             # Set the thread pool size for tiler endpoints to the configured value, as only the tiler endpoints use anyio thread pool.
             limiter = anyio.to_thread.current_default_thread_limiter()
             limiter.total_tokens = (

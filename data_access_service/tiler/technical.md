@@ -89,7 +89,7 @@ flowchart TD
     vtRouter --> registry
     prodRouter --> registry
 
-    storeReg["Store registry<br/>open zarr handles · TTL store_ttl_seconds"]
+    storeReg["Store registry<br/>open zarr handles · refreshed by cron sweep"]
     registry --> storeReg
 
     sliceCache["L1 · Slice cache + dedup<br/>ns l1 · slice_memo / _slice_dedup<br/>key: store_url, date, variables"]
@@ -218,7 +218,7 @@ data_access_service/
         visual_tiles.py               ← render_tile / render_bbox / render_bbox_animation — Web Mercator (visual tiles)
         masks.py                      ← inpaint_nearest, land_mask_for_grid/land_mask_for_coords, apply_ocean_mask
       store/
-        registry.py                   ← StoreRegistry (stale-while-revalidate) + per-URL time index + get_available_dates
+        registry.py                   ← StoreRegistry (cron-refreshed) + per-URL time index + get_available_dates
         slice_loader.py                ← load_slice / load_slice_uncached — fetch a 2-D slice from the Zarr store
         spatial.py                     ← bbox_to_wgs84 + native_resolution_in_bbox + default_bbox_from_store
     utils/
@@ -781,12 +781,11 @@ Because caching is off by default, the **in-process `Deduper`** (below) is the o
 
 Caches the open Zarr store handle (lazy, metadata + coordinate arrays only). Shared across all products that point at the same store URL.
 
-Uses a **stale-while-revalidate** strategy to pick up newly appended time steps without ever blocking a request:
+Freshness is decoupled from the request path entirely — a request only ever serves the currently-published handle, so reads never block on freshness beyond the very first open per URL:
 
 - **Startup** — `prewarm_stores` opens every registered store concurrently on the shared anyio pool, gated by `_STORE_PREWARM_LIMITER` (`store_prewarm_workers`, default 6), so the cache is warm before most requests arrive.
-- **Within TTL** (`store_ttl_seconds`, default `600`) — the cached store is returned immediately.
-- **After TTL** — the stale store is returned immediately for the current request, and a single background daemon thread (`StoreRegistry._refresh_background`) re-opens it. A `_refreshing` set prevents duplicate refresh threads for the same URL.
 - **First-ever open** — the request blocks until `xr.open_zarr` completes; concurrent requests for the same URL wait on the same `concurrent.futures.Future` (keyed per-URL in `_in_flight`) rather than each opening independently. Opens of _different_ URLs proceed in parallel.
+- **Later opens** — once published, a store is served as-is regardless of age. Picking up newly appended time steps is entirely the job of a periodic cron sweep (`StoreRegistry.refresh_all`, driven by `core/scheduler.py`'s `TaskScheduler`, every `store_refresh_interval_hours`, default 4) that walks every URL already in `_stores` and re-opens it **one at a time** — sequential by design, so staleness is bounded by the sweep interval regardless of how often (or rarely) a store is requested, without ever opening more than one store's metadata concurrently.
 
 Re-opening is cheap — `xr.open_zarr` reads only metadata and coordinate arrays, no data chunks. In-flight `load_slice` calls hold a direct Python reference to the old dataset object and complete normally.
 
@@ -811,7 +810,7 @@ Each `Deduper` instance lives with its one consumer:
 - `_fill_dedup` (`services/rendering/visual_tiles.py`) — the coastal-fill step (`_get_filled_values`), no persistent cache behind it.
 - `_tile_dedup` / `_bbox_dedup` (`core/tiler_routes/visual_tiles.py`) — `Deduper`-only, no `CacheBackend` behind them (coalesce concurrent identical tile/bbox renders; there's no reusable artifact to cache beyond that, only concurrent duplicates to coalesce).
 
-Outside this pairing, `StoreRegistry._in_flight` deduplicates store opens with its own per-URL Future map, layering TTL + stale-while-revalidate on top, which `Deduper` deliberately does not model.
+Outside this pairing, `StoreRegistry._in_flight` deduplicates store opens with its own per-URL Future map, which `Deduper` deliberately does not model.
 
 `Deduper` only coordinates threads within one process — it does nothing across horizontally-scaled instances. With `cache_backend: none` and no distributed lock implemented, a burst of identical requests landing on _different_ instances each pays its own S3 fetch; only within a single instance is the burst collapsed to one fetch.
 
@@ -821,7 +820,7 @@ Outside this pairing, `StoreRegistry._in_flight` deduplicates store opens with i
 
 ### 11.1 Shared lifespan (`data_access_service/server.py`)
 
-The tiler shares a single FastAPI `lifespan` with the rest of `data-access-service`. On startup, the lifespan sets the anyio default thread-pool size from `tiler.thread_pool_size` (since tiler routes are the only sync `def` handlers using it) and schedules the tiler's own startup coroutine, `run_tiler_warmup` (`core/tiler_routes/startup.py`), as one of several background `asyncio.Task`s alongside the rest of the app's own startup work (e.g. `repository_cache_task` for the non-tiler API).
+The tiler shares a single FastAPI `lifespan` with the rest of `data-access-service`. On startup, the lifespan sets the anyio default thread-pool size from `tiler.thread_pool_size` (since tiler routes are the only sync `def` handlers using it) and schedules the tiler's own startup coroutine, `run_tiler_warmup` (`core/tiler_routes/startup.py`), as one of several background `asyncio.Task`s alongside the rest of the app's own startup work (e.g. `scheduler_startup_task` for the non-tiler API's `TaskScheduler`, which also drives the tiler's own store-refresh cron sweep — see [§10.1](#101-store-singleton-servicesstoreregistrypy-storeregistry)).
 
 ### 11.2 `run_tiler_warmup` (`core/tiler_routes/startup.py`)
 
@@ -893,7 +892,7 @@ Phase 1 deliberately checks _presence_ and _time-indexability_ only — not dime
 | Trigger                     | Action                                                                                       | Mechanism                                                                                                                                                                           |
 | --------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `prewarm_stores` at startup | Open each unique Zarr store URL (metadata only) and report a per-URL outcome                 | Fans out on the anyio pool, gated by `_STORE_PREWARM_LIMITER` (`store_prewarm_workers`, default 6); operational failures get 3 attempts with exponential backoff                    |
-| Store TTL expiry            | Re-open Zarr store in the background to pick up new timestamps; stale store served meanwhile | `StoreRegistry._refresh_background` on a bounded pool (`store_refresh_workers`, default 4), with per-store TTL jitter so stores opened together at startup don't all expire at once |
+| Cron sweep, every `store_refresh_interval_hours` | Re-open every currently-published Zarr store to pick up new timestamps; the currently-published handle keeps serving requests until its refresh completes | `StoreRegistry.refresh_all`, scheduled by `TaskScheduler` (`core/scheduler.py`, APScheduler `CronTrigger`); one store at a time, so refreshes never overlap regardless of how many stores are registered |
 
 ---
 
@@ -959,7 +958,7 @@ A store-prewarm burst saturating its budget does not reduce the tile-handler bud
 
 #### Non-pool worker threads
 
-- **Store TTL refresh daemon threads** — `StoreRegistry._refresh_background` spawns a bare `threading.Thread` per stale-store re-open, outside the anyio pool (triggered from inside `get()`, which may itself be running in a worker thread without an event-loop reference). Not a reusable pool.
+- **Store refresh cron job** — `StoreRegistry.refresh_all` runs on APScheduler's own executor thread (`core/scheduler.py`'s `TaskScheduler`), entirely outside the anyio pool, and re-opens stores strictly one at a time — never more than one Zarr store's metadata open concurrently regardless of how many stores are registered.
 - **C-extension threads** — Zarr decompression, NumPy via BLAS, and PIL all release the GIL and may use their own internal threads. Total OS thread count is always higher than the sum of the Python-managed threads above.
 - **The numba parallel-kernel lock** ([§7.4](#74-resample-and-normalize-numba-jit)) serialises entry into `prange` regions across whichever anyio worker threads happen to call into the resample/normalize kernels concurrently — it doesn't add threads, it bounds how many parallel regions can be open at once.
 
@@ -1103,8 +1102,8 @@ A wrong-layer choice has real costs: making `LOD.max_lods` a freely-edited opera
 
 | Key                       | Default            | Description                                                                                                                                                                  |
 | ------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `store_ttl_seconds`       | `600`              | Stale-while-revalidate window for the Zarr store singleton.                                                                                                                  |
 | `store_prewarm_workers`   | `6`                | Capacity-limiter cap for concurrent `xr.open_zarr` opens during startup store prewarm. Sized to the S3 connection pool.                                                      |
+| `store_refresh_interval_hours` | `4`           | Hours between cron sweeps that re-open every prewarmed Zarr store, one at a time, to pick up new timestamps. See [§10.1](#101-store-singleton-servicesstoreregistrypy-storeregistry) and [§11.5](#115-other-background-actions).                                    |
 | `thread_pool_size`        | `20`               | Anyio thread-pool size, shared with the rest of `data-access-service`. Each in-flight sync tiler request uses one slot. See [§12](#12-concurrency-event-loop-and-threading). |
 | `animation_workers`       | `10`               | Capacity-limiter cap for `/animation` per-frame S3 fan-out. Sized to the aiobotocore S3 connection pool.                                                                     |
 | `cache_backend`           | `"none"`           | Selects the L1 `CacheBackend` implementation. `"none"` is the only one implemented today — see [§10](#10-caching-strategy).                                                  |
