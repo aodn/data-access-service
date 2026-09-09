@@ -17,3 +17,7 @@ pmtiles:
   config:
     # Temporal bucket for hexbin counts: "month" (YYYYMM) or "date" (YYYYMMDD).
     time_group_by: month
+sites:
+  config:
+    duckdb_database: ":memory:"
+    threads: 8
