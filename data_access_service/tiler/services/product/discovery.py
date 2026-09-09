@@ -12,7 +12,10 @@ import logging
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
-from data_access_service.config.tiler.paths import GRIDDED_VARIABLES_CONFIG_PATH
+from data_access_service.config.tiler.paths import (
+    GRIDDED_VARIABLES_CONFIG_PATH,
+    STORE_BLACKLIST_CONFIG_PATH,
+)
 from data_access_service.core.api import API
 from data_access_service.tiler.schemas.products import (
     ProductOverride,
@@ -43,6 +46,35 @@ def _load_gridded_variable_specs(
             "gridded_variables.json must contain a non-empty JSON array of variable specs"
         )
     return raw
+
+
+def _load_store_blacklist(
+    path: str | Path = STORE_BLACKLIST_CONFIG_PATH,
+) -> frozenset[str]:
+    raw = json.loads(Path(path).read_text())
+    if not isinstance(raw, list):
+        raise ValueError(
+            "blacklist.json must contain a JSON array of store names"
+        )
+    return frozenset(raw)
+
+
+def _exclude_blacklisted_stores(
+    dataset_variables: ZarrDatasetVariables,
+    blacklist: frozenset[str],
+) -> ZarrDatasetVariables:
+    """Drop every (uuid, dataset_name, fields) triple whose store is
+    blacklisted, before candidates get fanned out. Matched against the same
+    suffix-stripped name product_id uses, so blacklist.json entries read the
+    same as the dataset_name half of a products.json id.
+    """
+    for uuid, dataset_name, fields in dataset_variables:
+        if dataset_name.removesuffix(".zarr") in blacklist:
+            logger.info(
+                "Skipping blacklisted store %r (uuid %s)", dataset_name, uuid
+            )
+            continue
+        yield uuid, dataset_name, fields
 
 
 def product_id(dataset_name: str, variables: list[str]) -> str:
@@ -196,15 +228,18 @@ def log_unmatched_overrides(
 
 
 def discover_products(api: API, base_url: str) -> dict[str, Product]:
-    """Single entry point: load gridded_variables.json + products.json, fan
-    out across the metadata catalogue, and layer overrides on top. Everything
-    startup needs from config — no fatal/non-fatal distinction is made here,
-    that's up to the caller (run_tiler_warmup treats the whole call as fatal).
+    """Single entry point: load gridded_variables.json + products.json +
+    blacklist.json, fan out across the metadata catalogue (minus blacklisted
+    stores), and layer overrides on top. Everything startup needs from config
+    — no fatal/non-fatal distinction is made here, that's up to the caller
+    (run_tiler_warmup treats the whole call as fatal).
     """
     specs = _load_gridded_variable_specs()
     overrides = load_product_overrides()
-    candidates = build_candidate_products(
-        api.iter_zarr_dataset_variables(), specs, base_url
+    blacklist = _load_store_blacklist()
+    dataset_variables = _exclude_blacklisted_stores(
+        api.iter_zarr_dataset_variables(), blacklist
     )
+    candidates = build_candidate_products(dataset_variables, specs, base_url)
     log_unmatched_overrides(candidates, overrides)
     return apply_product_overrides(candidates, overrides)

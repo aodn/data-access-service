@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-from asyncio import AbstractEventLoop
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 

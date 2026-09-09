@@ -338,6 +338,7 @@ def test_discover_products_loads_config_and_layers_overrides(monkeypatch):
         "load_product_overrides",
         lambda: parse_product_overrides([{"id": "a:gsla", "ocean_masked": True}]),
     )
+    monkeypatch.setattr(discovery, "_load_store_blacklist", lambda: frozenset())
 
     api = FakeAPI({"u1": {"a.zarr": frozenset({"GSLA"})}})
     products = discover_products(api, BASE_URL)
@@ -353,12 +354,66 @@ def test_discover_products_logs_a_stale_override(monkeypatch, caplog):
         "load_product_overrides",
         lambda: parse_product_overrides([{"id": "renamed:gsla", "ocean_masked": True}]),
     )
+    monkeypatch.setattr(discovery, "_load_store_blacklist", lambda: frozenset())
 
     api = FakeAPI({"u1": {"a.zarr": frozenset({"GSLA"})}})
     with caplog.at_level("ERROR"):
         discover_products(api, BASE_URL)
 
     assert "renamed:gsla" in caplog.text
+
+
+# --- store blacklist ----------------------------------------------------------
+
+
+def test_blacklisted_store_is_excluded_from_dataset_variables():
+    index = {
+        "u1": {
+            "keep.zarr": frozenset({"GSLA"}),
+            "drop.zarr": frozenset({"GSLA"}),
+        }
+    }
+    filtered = list(
+        discovery._exclude_blacklisted_stores(_flatten(index), frozenset({"drop"}))
+    )
+    assert [dname for _, dname, _ in filtered] == ["keep.zarr"]
+
+
+def test_blacklist_matches_suffix_stripped_dataset_name():
+    """blacklist.json entries read the same as products.json ids' dataset_name
+    prefix — no trailing .zarr — even though the raw index carries it."""
+    index = {"u1": {"model_sea_level_anomaly_gridded_realtime.zarr": frozenset({"GSLA"})}}
+    filtered = list(
+        discovery._exclude_blacklisted_stores(
+            _flatten(index),
+            frozenset({"model_sea_level_anomaly_gridded_realtime"}),
+        )
+    )
+    assert filtered == []
+
+
+def test_empty_blacklist_excludes_nothing():
+    index = {"u1": {"a.zarr": frozenset({"GSLA"})}}
+    filtered = list(discovery._exclude_blacklisted_stores(_flatten(index), frozenset()))
+    assert [dname for _, dname, _ in filtered] == ["a.zarr"]
+
+
+def test_discover_products_drops_blacklisted_store(monkeypatch):
+    monkeypatch.setattr(discovery, "_load_gridded_variable_specs", lambda: ["GSLA"])
+    monkeypatch.setattr(discovery, "load_product_overrides", lambda: {})
+    monkeypatch.setattr(discovery, "_load_store_blacklist", lambda: frozenset({"drop"}))
+
+    api = FakeAPI(
+        {
+            "u1": {
+                "keep.zarr": frozenset({"GSLA"}),
+                "drop.zarr": frozenset({"GSLA"}),
+            }
+        }
+    )
+    products = discover_products(api, BASE_URL)
+
+    assert set(products) == {"keep:gsla"}
 
 
 # --- the five product IDs that predate derivation ---------------------------
