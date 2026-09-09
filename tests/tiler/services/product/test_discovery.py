@@ -382,7 +382,9 @@ def test_blacklisted_store_is_excluded_from_dataset_variables():
 def test_blacklist_matches_suffix_stripped_dataset_name():
     """blacklist.json entries read the same as products.json ids' dataset_name
     prefix — no trailing .zarr — even though the raw index carries it."""
-    index = {"u1": {"model_sea_level_anomaly_gridded_realtime.zarr": frozenset({"GSLA"})}}
+    index = {
+        "u1": {"model_sea_level_anomaly_gridded_realtime.zarr": frozenset({"GSLA"})}
+    }
     filtered = list(
         discovery._exclude_blacklisted_stores(
             _flatten(index),

@@ -53,9 +53,7 @@ def _load_store_blacklist(
 ) -> frozenset[str]:
     raw = json.loads(Path(path).read_text())
     if not isinstance(raw, list):
-        raise ValueError(
-            "blacklist.json must contain a JSON array of store names"
-        )
+        raise ValueError("blacklist.json must contain a JSON array of store names")
     return frozenset(raw)
 
 
@@ -70,9 +68,7 @@ def _exclude_blacklisted_stores(
     """
     for uuid, dataset_name, fields in dataset_variables:
         if dataset_name.removesuffix(".zarr") in blacklist:
-            logger.info(
-                "Skipping blacklisted store %r (uuid %s)", dataset_name, uuid
-            )
+            logger.info("Skipping blacklisted store %r (uuid %s)", dataset_name, uuid)
             continue
         yield uuid, dataset_name, fields
 
