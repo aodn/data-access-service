@@ -90,13 +90,3 @@ jobs:
                 environment: '${{ inputs.environment }}'
               }
             })
-            github.rest.actions.createWorkflowDispatch({
-              owner: 'aodn',
-              repo: 'appdeploy',
-              workflow_id: 'deploy.yml',
-              ref: 'main',
-              inputs: {
-                app_name: 'data-access-service/batch-sites-parquet',
-                environment: '${{ inputs.environment }}'
-              }
-            })
