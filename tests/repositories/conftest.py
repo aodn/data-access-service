@@ -10,16 +10,23 @@ def memory_parquets_config(monkeypatch):
 
     SitesDuckDBClient now takes no constructor arguments and reads every
     setting from ``Config.get_sites_config()``. Overriding that here keeps
-    these unit tests off disk (no /tmp db file, no .duckdb_temp). httpfs and
-    json are still loaded — both are hardcoded in
-    SitesDuckDBClient.get_instance() — but that's a no-op once cached locally.
+    these unit tests off disk (no /tmp db file, no .duckdb_temp). The values
+    come from ``tests/config/config-test.yaml``'s ``sites:`` section (merged
+    over the base ``config.yaml``, same as every other test override) rather
+    than being hardcoded here. httpfs and json are still loaded — both are
+    hardcoded in SitesDuckDBClient.get_instance() — but that's a no-op once
+    cached locally.
     """
+    sconfig = Config.load_merged_config(
+        "data_access_service/config/config.yaml",
+        "tests/config/config-test.yaml",
+    )["sites"]["config"]
     cfg = SitesConfig(
-        duckdb_database=":memory:",
-        co_bucket="aodn-cloud-optimised",
-        memory_limit="800M",
-        threads=8,
-        duckdb_temp_dir="/tmp",
-        region="ap-southeast-2",
+        duckdb_database=sconfig["duckdb_database"],
+        co_bucket=sconfig["co_bucket"],
+        memory_limit=sconfig["memory_limit"],
+        threads=sconfig["threads"],
+        duckdb_temp_dir=sconfig["duckdb_temp_dir"],
+        region=sconfig["region"],
     )
     monkeypatch.setattr(Config, "get_sites_config", lambda self: cfg)
