@@ -78,9 +78,11 @@ class CODataRegistry:
         return metadata
 
     def get_dataset(self, dataset_name_with_ext: str) -> DataSource:
-        log.info(f"Getting dataset {dataset_name_with_ext} from all data sources...")
         for data_src in self.data_source_list:
             try:
+                log.info(
+                    f"Getting {dataset_name_with_ext} dataset from {data_src.get_name()}..."
+                )
                 return data_src.get_dataset(dataset_name_with_ext)
             except DatasetNotFoundError as e:
                 # log the exception and continue to try the next data source

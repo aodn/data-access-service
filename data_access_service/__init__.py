@@ -15,9 +15,19 @@ def set_process_timezone_utc() -> None:
         time.tzset()
 
 
+def set_matplotlib_backend_agg() -> None:
+    """Use a non-interactive matplotlib backend (no Tk / display).
+
+    Must run before matplotlib is imported. setdefault leaves an explicit
+    MPLBACKEND env var in place.
+    """
+    os.environ.setdefault("MPLBACKEND", "Agg")
+
+
 # Run on import so every entry point (server, AWS Batch entry_point, pytest)
-# gets it before any module reads the clock.
+# gets it before any module reads the clock or imports matplotlib.
 set_process_timezone_utc()
+set_matplotlib_backend_agg()
 
 from data_access_service.config.config import Config
 from data_access_service.core.api import API
