@@ -170,7 +170,7 @@ class BaseAPI:
 
         Subsetting cannot build a date filter without one. Raising here beats an
         IndexError further down, and beats silently falling back to the hive
-        partition key, which yields a 1970 extent (issue 9144).
+        partition key.
         """
         mapped = self.map_column_names(uuid, key, [STR_TIME_UPPER_CASE]) or []
         time_varname = mapped[0] if mapped else None

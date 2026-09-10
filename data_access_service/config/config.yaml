@@ -20,8 +20,7 @@ column_name_mapping:
     # are the interval bounds, so the extent is narrow by about one interval.
     - s_date
     - end_date
-    # String time column (fixed-width ISO-like); compared as a string, see
-    # helpers/time_column.py.
+    # String time column (fixed-width ISO-like); compared as a string.
     - date_hour_UTC
     - timestamp
   depth:
