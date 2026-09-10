@@ -40,6 +40,14 @@ def _ts_for_get_data(ts) -> str:
     return pd.Timestamp(ts).isoformat()
 
 
+def _warm_coord_indexes(ds: xr.Dataset) -> xr.Dataset:
+    """Force-build the lazy pandas index engine for lat/lon, once, here."""
+    for dim in ("lon", "lat"):
+        if dim in ds.indexes:
+            ds.indexes[dim].is_unique
+    return ds
+
+
 def _compute_slice_from_store(
     store_url: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
 ) -> xr.Dataset:
@@ -108,10 +116,12 @@ def load_slice(
     cache_key = (store_url, ts, tuple(sorted(variables)))
 
     def compute() -> xr.Dataset:
-        return slice_memo.get_or_compute(
+        result = slice_memo.get_or_compute(
             cache_key,
             lambda: _compute_slice_from_store(store_url, ts, variables, ocean_masked),
         )
+
+        return _warm_coord_indexes(result)
 
     return _slice_dedup.dedupe(cache_key, compute)
 
