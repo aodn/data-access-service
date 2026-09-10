@@ -14,7 +14,12 @@ from data_access_service import Config
 from data_access_service.config.config import IntTestConfig
 from data_access_service.core.api import API
 from data_access_service.core.duckdbclient import SitesDuckDBClient
-from data_access_service.core.estimation_index import set_duckdb_client
+from data_access_service.core.estimation_index import (
+    close_client as close_estimation_client,
+)
+from data_access_service.core.estimation_index import (
+    init_client as init_estimation_client,
+)
 from data_access_service.core.middleware import configure_gzip_middleware
 from data_access_service.core.routes import router as api_router
 from data_access_service.core.scheduler import TaskScheduler
@@ -77,9 +82,11 @@ async def lifespan(application: FastAPI):
         else:
             session = SitesDuckDBClient()
             application.state.duckdb_session = session
-            # The estimate reads the pre-built index through the same client,
-            # rather than opening a second DuckDB connection of its own.
-            set_duckdb_client(session)
+            # The estimate reads the index on its own :memory: connection, not
+            # this one - so retuning sites cannot move the estimate. Built here
+            # rather than on first use so a broken read path fails the deploy
+            # instead of silently degrading to the (50x slower) live scan.
+            init_estimation_client()
             application.state.repositories = build_repositories(session)
             scheduler = TaskScheduler(api, application.state.repositories)
             repository_cache_task = asyncio.create_task(
@@ -107,8 +114,8 @@ async def lifespan(application: FastAPI):
         # Cleanup
         if scheduler:
             scheduler.shutdown()
+        close_estimation_client()
         if session:
-            set_duckdb_client(None)
             session.close()
         api.destroy()
 

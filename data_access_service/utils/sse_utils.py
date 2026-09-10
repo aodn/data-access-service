@@ -147,7 +147,8 @@ def sse_it(
                     )
 
                     try:
-                        last_sent_sse = time.time()
+                        started_at = time.time()
+                        last_sent_sse = started_at
                         while not task.done():
                             if await _client_gone(request):
                                 # Return rather than break: there is no result to
@@ -166,6 +167,16 @@ def sse_it(
                                     "processing",
                                 )
                                 last_sent_sse = time.time()
+                                # Logged so the gap between heartbeats is
+                                # visible in CloudWatch. A stream that dies
+                                # upstream at ~30s is either "we stopped
+                                # sending" or "the bytes were dropped", and
+                                # without this line the two look identical.
+                                logger.debug(
+                                    "[%s] SSE heartbeat sent, %.1fs elapsed.",
+                                    fn.__name__,
+                                    last_sent_sse - started_at,
+                                )
                             await asyncio.sleep(_DISCONNECT_POLL_INTERVAL)
 
                         result = task.result()
