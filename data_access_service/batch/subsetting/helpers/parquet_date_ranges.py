@@ -20,14 +20,15 @@ from aodn_cloud_optimised.lib.DataQuery import (
     ParquetDataSource,
 )
 
+from data_access_service.batch.subsetting.helpers.time_column import (
+    TimeColumn,
+    resolve_time_column,
+)
 from data_access_service.core.api import BaseAPI
 from data_access_service.core.constants import (
     MAX_PARQUET_SPLIT,
     PARQUET_INDEX_SUBSET_ROW_NUMBER,
     PARQUET_SUBSET_ROW_NUMBER,
-    STR_LATITUDE_UPPER_CASE,
-    STR_LONGITUDE_UPPER_CASE,
-    STR_TIME_UPPER_CASE,
 )
 from data_access_service.core.estimation_index import (
     count_index_rows,
@@ -373,9 +374,10 @@ def check_rows_with_date_range(
     checked_date_ranges = []
     q = []
 
-    time_dim = api.map_column_names(uuid=uuid, key=key, columns=[STR_TIME_UPPER_CASE])[
-        0
-    ]
+    time_dim = api.require_time_column(uuid=uuid, key=key)
+    # Resolve once: a string column needs a one-off format check, and the library's
+    # create_time_filter only builds a valid literal for a timestamp column.
+    time_column = resolve_time_column(dataset, time_dim)
 
     bbox = _bbox_from_polygon(polygon)
     lat_dim = lon_dim = None
@@ -438,6 +440,73 @@ def check_rows_with_date_range(
             checked_date_ranges.append({"start_date": start, "end_date": end})
             continue
 
+        # Full timestamps, not "%Y-%m-%d": create_time_filter compares against
+        # pd.to_datetime(end_str), so a day-only end becomes midnight and the
+        # count covers one instant instead of the range. Counting 0 makes the
+        # loop below drop the range, and that data is never downloaded.
+        start_str = to_naive_utc_string(start)
+        end_str = to_naive_utc_string(end)
+
+        if time_column.is_string:
+            # create_time_filter would compare this string column against a
+            # pd.Timestamp, which has no pyarrow kernel (issue 9144), so build
+            # the filter here instead.
+            try:
+                time_filter = create_customised_time_filter(
+                    dataset=dataset,
+                    start=start,
+                    end=end,
+                    time_varname=time_dim,
+                    time_column=time_column,
+                )
+            except ValueError as e:
+                # Fully non-overlapping after clamp (e.g. query after dataset end).
+                log.info(
+                    "Skipping date range %s to %s: no overlap with dataset extent (%s)",
+                    start,
+                    end,
+                    e,
+                )
+                continue
+        else:
+            try:
+                time_filter = create_time_filter(
+                    dataset=dataset,
+                    date_start=start_str,
+                    date_end=end_str,
+                    time_varname=time_dim,
+                )
+            except DateOutOfRangeError as e:
+                # create_time_filter validates against partition/temporal bounds and can
+                # raise false positives; fall back to a filter clamped to real extent.
+                # Import note: catch DataQuery.DateOutOfRangeError (what create_time_filter
+                # raises) — lib.exceptions.DateOutOfRangeError is a separate class.
+                log.info(
+                    "create_time_filter out of range for %s to %s (%s); "
+                    "trying customised time filter",
+                    start_str,
+                    end_str,
+                    e,
+                )
+                try:
+                    time_filter = create_customised_time_filter(
+                        dataset=dataset,
+                        start=start,
+                        end=end,
+                        time_varname=time_dim,
+                        time_column=time_column,
+                    )
+                except ValueError as e2:
+                    # Fully non-overlapping after clamp (e.g. query after dataset end).
+                    log.info(
+                        "Skipping date range %s to %s: no overlap with dataset extent (%s)",
+                        start,
+                        end,
+                        e2,
+                    )
+                    continue
+
+        num_rows = _count_rows_with_retry(dataset, time_filter)
         if index_meta is not None and not force_live:
             if _handle_with_index(
                 q,
@@ -479,6 +548,7 @@ def create_customised_time_filter(
     start: pd.Timestamp,
     end: pd.Timestamp,
     time_varname: str | None = None,
+    time_column: TimeColumn | None = None,
 ) -> ds.Expression:
     """
     Creates a time filter using actual dataset temporal extent instead of partition boundaries.
@@ -530,11 +600,11 @@ def create_customised_time_filter(
     expr1 = pc.field("timestamp") >= np.int64(partition_start)
     expr2 = pc.field("timestamp") <= np.int64(partition_end)
 
-    start_naive = start.tz_localize(None) if start.tz is not None else start
-    end_naive = end.tz_localize(None) if end.tz is not None else end
+    if time_column is None:
+        time_column = resolve_time_column(dataset, time_varname)
 
-    expr3 = pc.field(time_varname) >= start_naive
-    expr4 = pc.field(time_varname) <= end_naive
+    expr3 = pc.field(time_varname) >= time_column.to_literal(start)
+    expr4 = pc.field(time_varname) <= time_column.to_literal(end)
 
     expression = expr1 & expr2 & expr3 & expr4
     return expression

@@ -31,6 +31,20 @@ MESSAGE = "message"
 DATA = "data"
 PARTITION_KEY = sys.intern("PARTITION_KEY")
 
+# aodn_cloud_optimised adds the hive partition columns to a dataset's schema
+# alongside the real columns, so name alone cannot tell them apart. The only
+# marker surviving into the catalog is long_name; the declared type is not
+# usable (_common_metadata says int64, pyarrow infers int32 from the directory).
+PARTITION_KEY_LONG_NAMES = frozenset(
+    {"Partition timestamp", "Spatial partition polygon"}
+)
+
+# Names the cloud-optimised pipeline always uses for its hive partitions. Older
+# datasets predate the long_name marker above, so the name is the only clue left.
+# Matched by name ONLY when the declared type is not temporal, so a dataset that
+# genuinely has a "timestamp" column of type timestamp[ns] is still usable.
+PARTITION_KEY_NAMES = frozenset({"timestamp", "polygon"})
+
 PARQUET_SUBSET_ROW_NUMBER: int = 200000
 # Index counts are day-granular and up to a week stale. Split at half the
 # live cap so an under-count still lands under PARQUET_SUBSET_ROW_NUMBER.

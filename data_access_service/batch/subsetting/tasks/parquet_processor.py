@@ -15,7 +15,7 @@ from data_access_service.core.constants import STR_LONGITUDE_UPPER_CASE
 from data_access_service.core.constants import STR_LATITUDE_UPPER_CASE
 from data_access_service import API, init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.core.constants import PARTITION_KEY, STR_TIME_UPPER_CASE
+from data_access_service.core.constants import PARTITION_KEY
 from data_access_service.core.descriptor import Descriptor
 from data_access_service.models.subset_request import NON_SPECIFIED, SubsetRequest
 from data_access_service.batch.subsetting.helpers.data_file_upload import (
@@ -105,7 +105,11 @@ def process_parquet_files(
             # is not something we can support
             raise MemoryError(f"Data file {datum} too big to convert subset : {e}")
         except Exception as e:
+            # Never swallow: on an unexpected failure this datum writes no output,
+            # the collector finds nothing and emails "No data available" as if the
+            # dataset were empty (issue 9144). Fail loudly so the error is visible.
             log.error(f"Error: {e}")
+            raise
     return None
 
 
@@ -204,9 +208,7 @@ def _generate_partition_output(
                     output_path = f"{root_folder_path}/{key}/part-{job_index}/"
 
                     # Derive partition key without time
-                    time_key = api.map_column_names(
-                        uuid=uuid, key=key, columns=[STR_TIME_UPPER_CASE]
-                    )[0]
+                    time_key = api.require_time_column(uuid=uuid, key=key)
 
                     # 'M' stands for Datetime in NumPy/Pandas dtypes, some dataset return
                     # time field of different type
