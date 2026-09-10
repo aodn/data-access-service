@@ -44,6 +44,7 @@ from data_access_service.utils.date_time_utils import (
     split_date_range_binary,
     to_naive_utc_string,
 )
+from data_access_service.utils.multi_polygon_helper import bbox_of
 
 log = logging.getLogger(__name__)
 
@@ -80,32 +81,6 @@ def _count_rows_with_retry(dataset, time_filter) -> int:
 
 def _as_utc_timestamp(value) -> pd.Timestamp:
     return ensure_timezone(pd.Timestamp(value))
-
-
-def _bbox_from_polygon(polygon) -> BoundingBox | None:
-    """Axis-aligned box of ``polygon.bounds``, or None when it cannot be used.
-
-    Matches query_data: the download loads the bbox, then clips to the exact
-    polygon. Splitting on the bbox count is the right memory guard. A
-    degenerate or antimeridian-swapped box is skipped (over-count) rather
-    than failing the job.
-    """
-    if polygon is None:
-        return None
-    bounds = getattr(polygon, "bounds", None)
-    if bounds is None or len(bounds) != 4:
-        return None
-    min_lon, min_lat, max_lon, max_lat = bounds
-    try:
-        return BoundingBox(
-            min_lon=float(min_lon),
-            min_lat=float(min_lat),
-            max_lon=float(max_lon),
-            max_lat=float(max_lat),
-        )
-    except (TypeError, ValueError) as e:
-        log.warning("Ignoring polygon bounds %s for row-count split: %s", bounds, e)
-        return None
 
 
 def _spatial_bbox_filter(
@@ -407,7 +382,7 @@ def check_rows_with_date_range(
     # create_time_filter only builds a valid literal for a timestamp column.
     time_column = resolve_time_column(dataset, time_dim)
 
-    bbox = _bbox_from_polygon(polygon)
+    bbox = bbox_of(polygon) if polygon is not None else None
     lat_dim = lon_dim = None
     if bbox is not None:
         mapped = api.map_column_names(

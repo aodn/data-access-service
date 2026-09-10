@@ -10,7 +10,6 @@ import pytz
 
 from data_access_service.core.api import BaseAPI
 from data_access_service.batch.subsetting.helpers.parquet_date_ranges import (
-    _bbox_from_polygon,
     _split_on_utc_day_boundary,
     check_rows_with_date_range,
     trim_date_range,
@@ -1287,21 +1286,6 @@ class TestDateTimeUtils(unittest.TestCase):
         if len(columns) == 2:
             return ["LATITUDE", "LONGITUDE"]
         return ["TIME"]
-
-    def test_bbox_from_polygon_reads_bounds(self):
-        polygon = Mock()
-        polygon.bounds = (140.0, -40.0, 150.0, -30.0)
-        bbox = _bbox_from_polygon(polygon)
-        self.assertEqual(bbox.min_lon, 140.0)
-        self.assertEqual(bbox.min_lat, -40.0)
-        self.assertEqual(bbox.max_lon, 150.0)
-        self.assertEqual(bbox.max_lat, -30.0)
-
-    def test_bbox_from_polygon_none_and_degenerate(self):
-        self.assertIsNone(_bbox_from_polygon(None))
-        polygon = Mock()
-        polygon.bounds = (150.0, -40.0, 150.0, -30.0)
-        self.assertIsNone(_bbox_from_polygon(polygon))
 
     @patch(
         "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_INDEX_SUBSET_ROW_NUMBER",
