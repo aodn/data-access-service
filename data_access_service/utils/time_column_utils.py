@@ -17,6 +17,11 @@ from typing import Any
 import pandas as pd
 import pyarrow as pa
 import pyarrow.dataset as ds
+from pyarrow import compute as pc
+
+from aodn_cloud_optimised.lib.DataQuery import get_timestamps_boundary_values
+
+from data_access_service.utils.date_time_utils import to_naive_utc_string
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +37,11 @@ class TimeColumn:
 
     name: str
     arrow_type: pa.DataType
+
+    @property
+    def is_timestamp(self) -> bool:
+        """True when the library's own filter builder can handle this column."""
+        return pa.types.is_timestamp(self.arrow_type)
 
     @property
     def is_string(self) -> bool:
@@ -111,3 +121,52 @@ def _first_value(dataset: ds.Dataset, name: str) -> str | None:
             if value is not None:
                 return value
     return None
+
+
+def partition_timestamp_scalar(dataset: ds.Dataset, value) -> pa.Scalar:
+    """Cast a `timestamp` partition boundary to that field's own type.
+
+    Hive partition types are inferred from directory names, so the same value is
+    int32 in one dataset and a string in another, and a mismatched literal
+    raises the same ArrowNotImplementedError this module exists to avoid.
+    """
+    try:
+        ts_type = dataset.schema.field("timestamp").type
+    except KeyError:
+        ts_type = pa.int64()
+
+    if pa.types.is_string(ts_type) or pa.types.is_large_string(ts_type):
+        return pa.scalar(str(int(value)), type=ts_type)
+    return pa.scalar(int(value), type=ts_type)
+
+
+def build_time_filter(
+    dataset: ds.Dataset,
+    time_column: TimeColumn,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> pc.Expression:
+    """Filter for `start`..`end` (both inclusive) on `time_column`.
+
+    Same shape as the library's ``create_time_filter``: prune the `timestamp`
+    partitions first, then compare the real time column row by row. The
+    difference is the literal, which comes from :meth:`TimeColumn.to_literal`
+    and so matches the stored type.
+    """
+    expression = pc.field(time_column.name) >= time_column.to_literal(start)
+    expression = expression & (
+        pc.field(time_column.name) <= time_column.to_literal(end)
+    )
+
+    if "timestamp" not in dataset.schema.names:
+        # Not partitioned by time, so the row-level comparison is all there is.
+        return expression
+
+    partition_start, partition_end = get_timestamps_boundary_values(
+        dataset, to_naive_utc_string(start), to_naive_utc_string(end)
+    )
+    return (
+        (pc.field("timestamp") >= partition_timestamp_scalar(dataset, partition_start))
+        & (pc.field("timestamp") <= partition_timestamp_scalar(dataset, partition_end))
+        & expression
+    )
