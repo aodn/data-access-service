@@ -29,6 +29,8 @@ from bokeh.server.tornado import psutil
 from xarray.core.utils import Frozen
 
 from data_access_service.core.constants import (
+    PARTITION_KEY_LONG_NAMES,
+    PARTITION_KEY_NAMES,
     STR_LATITUDE_UPPER_CASE,
     STR_LONGITUDE_UPPER_CASE,
     STR_TIME_UPPER_CASE,
@@ -162,6 +164,23 @@ class BaseAPI:
             _one(STR_LONGITUDE_UPPER_CASE),
             _one(STR_TIME_UPPER_CASE),
         )
+
+    def require_time_column(self, uuid: str, key: str) -> str:
+        """Mapped time column for `key`, or raise if the dataset has none.
+
+        Subsetting cannot build a date filter without one. Raising here beats an
+        IndexError further down, and beats silently falling back to the hive
+        partition key, which yields a 1970 extent (issue 9144).
+        """
+        mapped = self.map_column_names(uuid, key, [STR_TIME_UPPER_CASE]) or []
+        time_varname = mapped[0] if mapped else None
+        if time_varname is None:
+            raise ValueError(
+                f"No usable time column for uuid={uuid} key={key}. Add the "
+                f"dataset's real time column to column_name_mapping.time in "
+                f"config.yaml (hive partition keys are rejected on purpose)."
+            )
+        return time_varname
 
     def release_memory_for_pmtiles_batch(self) -> None:
         """Optional hook: free memory the PMTiles batch job no longer needs.
@@ -455,6 +474,13 @@ class API(BaseAPI):
         # Top-level schema field names per dataset — enough for map_column_names
         # without retaining full compressed schemas in memory.
         self._schema_keys: Dict[str, Dict[str, frozenset[str]]] = dict()
+        # Names in _schema_keys that are hive partition keys, not real columns.
+        # Kept separate so _schema_keys stays a slim name-only set: holding the
+        # full type per column nearly doubles it, this adds ~11%.
+        self._partition_keys: Dict[str, Dict[str, frozenset[str]]] = dict()
+        # Only three distinct partition-key sets exist across the whole
+        # catalog, so share one frozenset object between datasets.
+        self._partition_key_pool: Dict[frozenset[str], frozenset[str]] = dict()
 
         # UUID to metadata mapper
         # self._instance = DataQuery.GetAodn()
@@ -557,6 +583,7 @@ class API(BaseAPI):
         """
         parquet_cached: Dict[str, Dict[str, Descriptor]] = {}
         parquet_schema: Dict[str, Dict[str, frozenset[str]]] = {}
+        parquet_partitions: Dict[str, Dict[str, frozenset[str]]] = {}
 
         for uuid, datasets in self._cached_metadata.items():
             kept = {
@@ -571,9 +598,16 @@ class API(BaseAPI):
             parquet_schema[uuid] = {
                 name: src_keys[name] for name in kept if name in src_keys
             }
+            # Must survive the trim: map_column_names needs it to keep rejecting
+            # partition keys in the fork children.
+            src_partitions = self._partition_keys.get(uuid, {})
+            parquet_partitions[uuid] = {
+                name: src_partitions[name] for name in kept if name in src_partitions
+            }
 
         self._cached_metadata = parquet_cached
         self._schema_keys = parquet_schema
+        self._partition_keys = parquet_partitions
         self._raw.clear()
         # Data loading for PMTiles goes through DuckDB/S3, not GetAodn.
         self._instance = None
@@ -630,6 +664,12 @@ class API(BaseAPI):
                     if uuid not in self._schema_keys:
                         self._schema_keys[uuid] = dict()
                     self._schema_keys[uuid][key] = frozenset(data.keys())
+
+                    if uuid not in self._partition_keys:
+                        self._partition_keys[uuid] = dict()
+                    self._partition_keys[uuid][key] = self._intern_partition_keys(
+                        API._extract_partition_keys(data)
+                    )
 
                     if uuid not in self._cached_metadata:
                         self._cached_metadata[uuid] = dict()
@@ -781,6 +821,35 @@ class API(BaseAPI):
         else:
             return None, None
 
+    @staticmethod
+    def _extract_partition_keys(data: dict) -> frozenset[str]:
+        """Names in a dataset's schema that are hive partition keys.
+
+        Identified by long_name, the only partition marker the cloud-optimised
+        catalog keeps (the ``@partitioning:`` source tag is stripped upstream).
+        """
+
+        def _is_partition(name: str, field: dict) -> bool:
+            if field.get("long_name") in PARTITION_KEY_LONG_NAMES:
+                return True
+            # Older metadata has no long_name. Fall back to the reserved name,
+            # but only when the declared type is not temporal.
+            return name in PARTITION_KEY_NAMES and not str(
+                field.get("type", "")
+            ).startswith("timestamp")
+
+        return frozenset(
+            name
+            for name, field in data.items()
+            if isinstance(field, dict) and _is_partition(name, field)
+        )
+
+    def _intern_partition_keys(self, keys: frozenset[str]) -> frozenset[str]:
+        return self._partition_key_pool.setdefault(keys, keys)
+
+    def get_partition_keys(self, uuid: str, key: str) -> frozenset[str]:
+        return self._partition_keys.get(uuid, {}).get(key, frozenset())
+
     def map_column_names(
         self, uuid: str, key: str, columns: list[str] | None
     ) -> list[str] | None:
@@ -794,6 +863,11 @@ class API(BaseAPI):
         if field_names is None:
             field_names = self.get_raw_meta_data(uuid)[key]
 
+        # A hive partition key carries unix seconds, not real values, so it must
+        # never win a lookup even though it sits in the schema like a column
+        # (issue 9144: "timestamp" was matching TIME and giving a 1970 extent).
+        partition_keys = self.get_partition_keys(uuid, key)
+
         columns_map = Config.get_config().get_column_name_mapping()
         output = list()
         for column in columns:
@@ -802,7 +876,7 @@ class API(BaseAPI):
                 candidates = columns_map.get(column.casefold())
                 if candidates is not None:
                     for candidate in candidates:
-                        if candidate in field_names:
+                        if candidate in field_names and candidate not in partition_keys:
                             output.append(candidate)
                             break
                     else:
