@@ -80,3 +80,4 @@ cython_debug/
 node_modules/
 .vscode/
 .DS_Store
+uv.lock
