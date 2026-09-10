@@ -29,6 +29,8 @@ from data_access_service.core.constants import (
     MAX_PARQUET_SPLIT,
     PARQUET_INDEX_SUBSET_ROW_NUMBER,
     PARQUET_SUBSET_ROW_NUMBER,
+    STR_LATITUDE_UPPER_CASE,
+    STR_LONGITUDE_UPPER_CASE,
 )
 from data_access_service.core.estimation_index import (
     count_index_rows,
@@ -201,6 +203,7 @@ def _live_count_rows(
     start,
     end,
     time_dim,
+    time_column: TimeColumn,
     lat_dim: str | None = None,
     lon_dim: str | None = None,
     bbox: BoundingBox | None = None,
@@ -211,42 +214,67 @@ def _live_count_rows(
     pd.to_datetime(end_str), so a day-only end becomes midnight and the
     count covers one instant instead of the range. Counting 0 makes the
     caller drop the range, and that data is never downloaded.
+
+    String time columns cannot go through create_time_filter (no pyarrow
+    kernel for string vs timestamp; issue 9144).
     """
     start_str = to_naive_utc_string(start)
     end_str = to_naive_utc_string(end)
 
-    try:
-        time_filter = create_time_filter(
-            dataset=dataset,
-            date_start=start_str,
-            date_end=end_str,
-            time_varname=time_dim,
-        )
-    except DateOutOfRangeError as e:
-        # create_time_filter validates against partition/temporal bounds and can
-        # raise false positives; fall back to a filter clamped to real extent.
-        # Import note: catch DataQuery.DateOutOfRangeError (what create_time_filter
-        # raises) — lib.exceptions.DateOutOfRangeError is a separate class.
-        log.info(
-            "create_time_filter out of range for %s to %s (%s); "
-            "trying customised time filter",
-            start_str,
-            end_str,
-            e,
-        )
+    if time_column.is_string:
         try:
             time_filter = create_customised_time_filter(
-                dataset=dataset, start=start, end=end, time_varname=time_dim
+                dataset=dataset,
+                start=start,
+                end=end,
+                time_varname=time_dim,
+                time_column=time_column,
             )
-        except ValueError as e2:
-            # Fully non-overlapping after clamp (e.g. query after dataset end).
+        except ValueError as e:
             log.info(
                 "Skipping date range %s to %s: no overlap with dataset extent (%s)",
                 start,
                 end,
-                e2,
+                e,
             )
             return None
+    else:
+        try:
+            time_filter = create_time_filter(
+                dataset=dataset,
+                date_start=start_str,
+                date_end=end_str,
+                time_varname=time_dim,
+            )
+        except DateOutOfRangeError as e:
+            # create_time_filter validates against partition/temporal bounds and can
+            # raise false positives; fall back to a filter clamped to real extent.
+            # Import note: catch DataQuery.DateOutOfRangeError (what create_time_filter
+            # raises) — lib.exceptions.DateOutOfRangeError is a separate class.
+            log.info(
+                "create_time_filter out of range for %s to %s (%s); "
+                "trying customised time filter",
+                start_str,
+                end_str,
+                e,
+            )
+            try:
+                time_filter = create_customised_time_filter(
+                    dataset=dataset,
+                    start=start,
+                    end=end,
+                    time_varname=time_dim,
+                    time_column=time_column,
+                )
+            except ValueError as e2:
+                # Fully non-overlapping after clamp (e.g. query after dataset end).
+                log.info(
+                    "Skipping date range %s to %s: no overlap with dataset extent (%s)",
+                    start,
+                    end,
+                    e2,
+                )
+                return None
     if bbox is not None and lat_dim and lon_dim:
         time_filter = time_filter & _spatial_bbox_filter(lat_dim, lon_dim, bbox)
     return _count_rows_with_retry(dataset, time_filter)
@@ -440,73 +468,6 @@ def check_rows_with_date_range(
             checked_date_ranges.append({"start_date": start, "end_date": end})
             continue
 
-        # Full timestamps, not "%Y-%m-%d": create_time_filter compares against
-        # pd.to_datetime(end_str), so a day-only end becomes midnight and the
-        # count covers one instant instead of the range. Counting 0 makes the
-        # loop below drop the range, and that data is never downloaded.
-        start_str = to_naive_utc_string(start)
-        end_str = to_naive_utc_string(end)
-
-        if time_column.is_string:
-            # create_time_filter would compare this string column against a
-            # pd.Timestamp, which has no pyarrow kernel (issue 9144), so build
-            # the filter here instead.
-            try:
-                time_filter = create_customised_time_filter(
-                    dataset=dataset,
-                    start=start,
-                    end=end,
-                    time_varname=time_dim,
-                    time_column=time_column,
-                )
-            except ValueError as e:
-                # Fully non-overlapping after clamp (e.g. query after dataset end).
-                log.info(
-                    "Skipping date range %s to %s: no overlap with dataset extent (%s)",
-                    start,
-                    end,
-                    e,
-                )
-                continue
-        else:
-            try:
-                time_filter = create_time_filter(
-                    dataset=dataset,
-                    date_start=start_str,
-                    date_end=end_str,
-                    time_varname=time_dim,
-                )
-            except DateOutOfRangeError as e:
-                # create_time_filter validates against partition/temporal bounds and can
-                # raise false positives; fall back to a filter clamped to real extent.
-                # Import note: catch DataQuery.DateOutOfRangeError (what create_time_filter
-                # raises) — lib.exceptions.DateOutOfRangeError is a separate class.
-                log.info(
-                    "create_time_filter out of range for %s to %s (%s); "
-                    "trying customised time filter",
-                    start_str,
-                    end_str,
-                    e,
-                )
-                try:
-                    time_filter = create_customised_time_filter(
-                        dataset=dataset,
-                        start=start,
-                        end=end,
-                        time_varname=time_dim,
-                        time_column=time_column,
-                    )
-                except ValueError as e2:
-                    # Fully non-overlapping after clamp (e.g. query after dataset end).
-                    log.info(
-                        "Skipping date range %s to %s: no overlap with dataset extent (%s)",
-                        start,
-                        end,
-                        e2,
-                    )
-                    continue
-
-        num_rows = _count_rows_with_retry(dataset, time_filter)
         if index_meta is not None and not force_live:
             if _handle_with_index(
                 q,
@@ -522,7 +483,7 @@ def check_rows_with_date_range(
                 continue
 
         num_rows = _live_count_rows(
-            dataset, start, end, time_dim, lat_dim, lon_dim, bbox
+            dataset, start, end, time_dim, time_column, lat_dim, lon_dim, bbox
         )
         if num_rows is None or num_rows == 0:
             continue
