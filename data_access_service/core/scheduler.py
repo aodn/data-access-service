@@ -131,10 +131,12 @@ class TaskScheduler:
 
     def _start(self):
         """Start the scheduler and add the recurring jobs."""
-        reload_interval_hours = Config.get_config().get_sites_reload_interval_hours()
         self.scheduler.add_job(
             self._reload_task,
-            trigger=CronTrigger(hour=f"*/{reload_interval_hours}", minute="0"),
+            trigger=CronTrigger(
+                hour=f"*/{Config.get_config().get_sites_reload_interval_hours()}",
+                minute="0",
+            ),
             id="reload_task",
             name="Repository snapshot reload task",
             replace_existing=True,
@@ -142,12 +144,12 @@ class TaskScheduler:
             misfire_grace_time=None,
         )
 
-        store_refresh_interval_hours = (
-            Config.get_config().get_tiler_config().store_refresh_interval_hours
-        )
         self.scheduler.add_job(
             self._store_refresh_task,
-            trigger=CronTrigger(hour=f"*/{store_refresh_interval_hours}", minute="0"),
+            trigger=CronTrigger(
+                hour=f"*/{Config.get_config().get_tiler_config().store_refresh_interval_hours}",
+                minute="0",
+            ),
             id="store_refresh_task",
             name="Tiler store refresh task",
             replace_existing=True,
