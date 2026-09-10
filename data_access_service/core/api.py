@@ -13,7 +13,10 @@ from data_access_service import Config
 import dask.dataframe as ddf
 import pandas as pd
 import logging
+import pyarrow as pa
 import xarray
+
+from pyarrow import compute as pc
 
 from datetime import timedelta, timezone
 from io import BytesIO
@@ -23,6 +26,7 @@ from aodn_cloud_optimised.lib.DataQuery import (
     ParquetDataSource,
     ZarrDataSource,
     Metadata,
+    create_bbox_filter,
 )
 from aodn_cloud_optimised.lib.config import get_notebook_url
 from bokeh.server.tornado import psutil
@@ -42,6 +46,11 @@ from data_access_service.core.estimation_index import sidecar_extent_provider
 from data_access_service.core.size_estimation import estimate_single_key_size
 from data_access_service.utils.subset_request_resolver import resolve_subset_request
 from data_access_service.core.descriptor import Depth, Descriptor, Coordinate
+from data_access_service.utils.time_column_utils import (
+    TimeColumn,
+    build_time_filter,
+    resolve_time_column,
+)
 
 from data_access_service.models.co_data_source.co_data_registory import CODataRegistry
 from data_access_service.models.co_data_source.csiro_data_src import CsiroDataSrc
@@ -901,6 +910,65 @@ class API(BaseAPI):
         else:
             return None
 
+    def _read_parquet_with_typed_time(
+        self,
+        ds: ParquetDataSource,
+        time_column: TimeColumn,
+        date_start: pd.Timestamp,
+        date_end: pd.Timestamp,
+        lat_min,
+        lat_max,
+        lon_min,
+        lon_max,
+        lat_varname: Optional[str],
+        lon_varname: Optional[str],
+        scalar_filter: Optional[dict],
+        columns: Optional[list[str]],
+    ) -> pd.DataFrame:
+        """Same read as ParquetDataSource.get_data, but with a type-aware time filter.
+
+        Only the time filter differs: its literal follows the type the column is
+        stored as, so a string time column (e.g. date_hour_UTC) compares against
+        a string instead of raising ArrowNotImplementedError. The bbox filter and
+        the sort come from the library path so both paths return the same frame.
+        """
+        dataset = ds.dataset
+        data_filter = build_time_filter(dataset, time_column, date_start, date_end)
+
+        if None not in (lat_min, lat_max, lon_min, lon_max):
+            bbox_kwargs = dict()
+            if lat_varname is not None:
+                bbox_kwargs["lat_varname"] = lat_varname
+            if lon_varname is not None:
+                bbox_kwargs["lon_varname"] = lon_varname
+
+            data_filter = data_filter & create_bbox_filter(
+                dataset,
+                lat_min=lat_min,
+                lat_max=lat_max,
+                lon_min=lon_min,
+                lon_max=lon_max,
+                **bbox_kwargs,
+            )
+
+        if scalar_filter is not None:
+            for name, value in scalar_filter.items():
+                field_type = (
+                    dataset.schema.field(name).type
+                    if name in dataset.schema.names
+                    else pa.scalar(value).type
+                )
+                data_filter = data_filter & (
+                    pc.field(name) == pa.scalar(value, type=field_type)
+                )
+
+        df = dataset.to_table(filter=data_filter, columns=columns).to_pandas()
+
+        # Requested columns may leave the time column out, same guard as get_data.
+        if time_column.name in df.columns:
+            df = df.sort_values(by=time_column.name).reset_index(drop=True)
+        return df
+
     def get_dataset(
         self,
         uuid: str,
@@ -1003,20 +1071,46 @@ class API(BaseAPI):
                         )
                         query_time_varname = time_varname
 
-                    # Accuracy to nanoseconds
-                    result = ds.get_data(
-                        query_start,
-                        query_end,
-                        lat_min,
-                        lat_max,
-                        lon_min,
-                        lon_max,
-                        scalar_filter,
-                        self.map_column_names(uuid, key, columns),
-                        lat_varname=lat_varname,
-                        lon_varname=lon_varname,
-                        time_varname=query_time_varname,
+                    time_column = (
+                        resolve_time_column(ds.dataset, query_time_varname)
+                        if query_time_varname is not None
+                        else None
                     )
+
+                    if time_column is not None and not time_column.is_timestamp:
+                        # get_data compares the time column against a
+                        # pd.Timestamp, which pyarrow cannot do for a string
+                        # column. Read it here instead, with a literal that
+                        # matches the stored type.
+                        result = self._read_parquet_with_typed_time(
+                            ds,
+                            time_column,
+                            date_start,
+                            date_end,
+                            lat_min,
+                            lat_max,
+                            lon_min,
+                            lon_max,
+                            lat_varname,
+                            lon_varname,
+                            scalar_filter,
+                            self.map_column_names(uuid, key, columns),
+                        )
+                    else:
+                        # Accuracy to nanoseconds
+                        result = ds.get_data(
+                            query_start,
+                            query_end,
+                            lat_min,
+                            lat_max,
+                            lon_min,
+                            lon_max,
+                            scalar_filter,
+                            self.map_column_names(uuid, key, columns),
+                            lat_varname=lat_varname,
+                            lon_varname=lon_varname,
+                            time_varname=query_time_varname,
+                        )
 
                     return ddf.from_pandas(
                         result, npartitions=None, chunksize=None, sort=True

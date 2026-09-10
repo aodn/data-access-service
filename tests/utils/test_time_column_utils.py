@@ -1,13 +1,18 @@
+import tempfile
 import unittest
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.dataset as pds
+import pyarrow.parquet as pq
 import pytest
+from pyarrow import compute as pc
 
-from data_access_service.batch.subsetting.helpers.time_column import (
+from data_access_service.utils.time_column_utils import (
     STRING_TIME_FORMAT,
     TimeColumn,
+    build_time_filter,
+    partition_timestamp_scalar,
     resolve_time_column,
 )
 
@@ -15,6 +20,29 @@ from data_access_service.batch.subsetting.helpers.time_column import (
 def _dataset(column_name: str, values: list, arrow_type: pa.DataType) -> pds.Dataset:
     table = pa.table({column_name: pa.array(values, type=arrow_type)})
     return pds.dataset(table)
+
+
+def _string_time_dataset(partitioned: bool = True) -> pds.Dataset:
+    """A daily dataset shaped like animal_acoustic_tracking: the time column is a
+    fixed width string, and the partition key holds unix seconds as int32."""
+    days = pd.date_range("2010-08-01", "2010-10-01", freq="D")
+    table = pa.table(
+        {
+            "date_hour_UTC": pa.array(
+                [day.strftime(STRING_TIME_FORMAT) for day in days], type=pa.string()
+            ),
+            "timestamp": pa.array(
+                [int(pd.Timestamp(day.year, day.month, 1).timestamp()) for day in days],
+                type=pa.int32(),
+            ),
+        }
+    )
+    if not partitioned:
+        return pds.dataset(table.drop_columns(["timestamp"]))
+
+    path = tempfile.mkdtemp()
+    pq.write_to_dataset(table, path, partition_cols=["timestamp"])
+    return pds.dataset(path, partitioning="hive")
 
 
 class TestTimeColumnLiteral(unittest.TestCase):
@@ -109,3 +137,78 @@ class TestResolveTimeColumn(unittest.TestCase):
                 pd.Timestamp(rendered).tz_localize(None), pd.Timestamp(stamp)
             )
         self.assertTrue(STRING_TIME_FORMAT.endswith("Z"))
+
+
+class TestBuildTimeFilter(unittest.TestCase):
+    def _rows(self, dataset: pds.Dataset, start: str, end: str) -> list:
+        column = resolve_time_column(dataset, "date_hour_UTC")
+        time_filter = build_time_filter(
+            dataset, column, pd.Timestamp(start), pd.Timestamp(end)
+        )
+        return (
+            dataset.to_table(filter=time_filter).to_pandas()["date_hour_UTC"].tolist()
+        )
+
+    def test_string_column_keeps_the_requested_range(self):
+        rows = self._rows(
+            _string_time_dataset(), "2010-08-05", "2010-08-10 23:59:59.999999999"
+        )
+
+        self.assertEqual(len(rows), 6)
+        self.assertEqual(
+            rows[0], pd.Timestamp("2010-08-05").strftime(STRING_TIME_FORMAT)
+        )
+        self.assertEqual(
+            rows[-1], pd.Timestamp("2010-08-10").strftime(STRING_TIME_FORMAT)
+        )
+
+    def test_range_crossing_a_partition_boundary(self):
+        # The partition key only changes once a month, so a range spanning two
+        # months must keep both partitions.
+        rows = self._rows(
+            _string_time_dataset(), "2010-08-30", "2010-09-02 23:59:59.999999999"
+        )
+
+        self.assertEqual(len(rows), 4)
+
+    def test_dataset_without_a_timestamp_partition(self):
+        rows = self._rows(
+            _string_time_dataset(partitioned=False),
+            "2010-08-05",
+            "2010-08-10 23:59:59.999999999",
+        )
+
+        self.assertEqual(len(rows), 6)
+
+    def test_library_style_literal_is_what_fails(self):
+        # The bug this filter works around (issue 9144): comparing the same
+        # string column against a pd.Timestamp has no pyarrow kernel.
+        dataset = _string_time_dataset()
+
+        with pytest.raises(pa.lib.ArrowNotImplementedError):
+            dataset.to_table(
+                filter=pc.field("date_hour_UTC") >= pd.to_datetime("2010-08-05")
+            )
+
+
+class TestPartitionTimestampScalar(unittest.TestCase):
+    def test_follows_the_partition_field_type(self):
+        dataset = _string_time_dataset()
+
+        scalar = partition_timestamp_scalar(dataset, 1280620800)
+
+        self.assertEqual(scalar.type, pa.int32())
+
+    def test_string_partition_gets_a_string_literal(self):
+        dataset = _dataset("timestamp", ["1280620800"], pa.string())
+
+        self.assertEqual(
+            partition_timestamp_scalar(dataset, 1280620800).as_py(), "1280620800"
+        )
+
+    def test_missing_partition_field_falls_back_to_int64(self):
+        dataset = _dataset("when", ["2010-08-01 00:00:00.000000Z"], pa.string())
+
+        self.assertEqual(
+            partition_timestamp_scalar(dataset, 1280620800).type, pa.int64()
+        )
