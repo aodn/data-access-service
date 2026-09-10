@@ -79,10 +79,6 @@ def _count_rows_with_retry(dataset, time_filter) -> int:
     return dataset.count_rows(filter=time_filter)
 
 
-def _as_utc_timestamp(value) -> pd.Timestamp:
-    return ensure_timezone(pd.Timestamp(value))
-
-
 def _spatial_bbox_filter(
     lat_dim: str, lon_dim: str, bbox: BoundingBox
 ) -> ds.Expression:
@@ -113,8 +109,8 @@ def _split_on_utc_day_boundary(
     the loop then bisects down to nanoseconds. Cutting at the midpoint
     midnight separates the days in one step.
     """
-    start = _as_utc_timestamp(start)
-    end = _as_utc_timestamp(end)
+    start = ensure_timezone(pd.Timestamp(start))
+    end = ensure_timezone(pd.Timestamp(end))
     start_day = start.floor("D")
     end_day = end.floor("D")
     if start_day == end_day:
@@ -430,8 +426,8 @@ def check_rows_with_date_range(
 
     # Go through monthly interval
     for date_range in date_ranges:
-        month_start = _as_utc_timestamp(date_range["start_date"])
-        month_end = _as_utc_timestamp(date_range["end_date"])
+        month_start = ensure_timezone(pd.Timestamp(date_range["start_date"]))
+        month_end = ensure_timezone(pd.Timestamp(date_range["end_date"]))
         if month_end < month_start:
             continue
         heapq.heappush(q, (month_start, month_end, 0, False))
