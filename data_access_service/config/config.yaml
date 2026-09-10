@@ -8,6 +8,7 @@ column_name_mapping:
     - JULD
     - eventDate
     - detection_timestamp
+    - detection_datetime
     - _temporal_extent
     # Prefer a real datetime over the hive partition named "timestamp",
     # which some satellite-relay metadata datasets store as unix seconds.
@@ -15,6 +16,13 @@ column_name_mapping:
     - date
     - d_date
     - de_date
+    # Interval columns: these datasets have no single instant. s_date/end_date
+    # are the interval bounds, so the extent is narrow by about one interval.
+    - s_date
+    - end_date
+    # String time column (fixed-width ISO-like); compared as a string, see
+    # helpers/time_column.py.
+    - date_hour_UTC
     - timestamp
   depth:
   latitude:
