@@ -159,7 +159,7 @@ def _generate_partition_output(
                 log.info(f"Saved table schema to {schema_path}")
 
             checked_date_ranges = check_rows_with_date_range(
-                api, uuid, key, datasource, date_ranges
+                api, uuid, key, datasource, date_ranges, polygon=polygon
             )
 
             if polygon is not None:

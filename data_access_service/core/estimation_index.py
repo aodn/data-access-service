@@ -309,18 +309,22 @@ def count_index_rows(
     meta: EstimationSidecarMetadata,
     date_start: pd.Timestamp,
     date_end: pd.Timestamp,
+    bboxes: Optional[List[BoundingBox]] = None,
 ) -> Optional[int]:
-    """``SUM(c)`` over the day range, no bbox.
+    """``SUM(c)`` over the day range and optional bbox(es).
 
     Returns None when the query fails so the caller can live-count. Does not
     extrapolate days after ``max_date``: those rows are absent from the SUM
-    and must not be treated as a real zero.
+    and must not be treated as a real zero. A bbox is an upper bound (whole
+    cells that only partly overlap the box are counted).
     """
     try:
         client = _get_client()
         _ensure_secret(client)
         path = index_s3_path(uuid, key)
-        return _count_rows(client, path, meta, date_start, date_end, bboxes=[])
+        return _count_rows(
+            client, path, meta, date_start, date_end, bboxes=bboxes or []
+        )
     except _BUG_ERRORS as e:
         log.error(
             "estimation index is broken for %s/%s row count - falling back "

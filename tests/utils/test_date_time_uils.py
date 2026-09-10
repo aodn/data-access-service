@@ -10,6 +10,7 @@ import pytz
 
 from data_access_service.core.api import BaseAPI
 from data_access_service.batch.subsetting.helpers.parquet_date_ranges import (
+    _bbox_from_polygon,
     _split_on_utc_day_boundary,
     check_rows_with_date_range,
     trim_date_range,
@@ -1279,6 +1280,27 @@ class TestDateTimeUtils(unittest.TestCase):
         meta.max_date = max_date
         return meta
 
+    def _map_time_and_latlon(self, **kwargs):
+        columns = kwargs.get("columns") or []
+        if len(columns) == 2:
+            return ["LATITUDE", "LONGITUDE"]
+        return ["TIME"]
+
+    def test_bbox_from_polygon_reads_bounds(self):
+        polygon = Mock()
+        polygon.bounds = (140.0, -40.0, 150.0, -30.0)
+        bbox = _bbox_from_polygon(polygon)
+        self.assertEqual(bbox.min_lon, 140.0)
+        self.assertEqual(bbox.min_lat, -40.0)
+        self.assertEqual(bbox.max_lon, 150.0)
+        self.assertEqual(bbox.max_lat, -30.0)
+
+    def test_bbox_from_polygon_none_and_degenerate(self):
+        self.assertIsNone(_bbox_from_polygon(None))
+        polygon = Mock()
+        polygon.bounds = (150.0, -40.0, 150.0, -30.0)
+        self.assertIsNone(_bbox_from_polygon(polygon))
+
     @patch(
         "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_INDEX_SUBSET_ROW_NUMBER",
         1000,
@@ -1378,6 +1400,87 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertEqual(len(result), 2)
         self.assertEqual(mock_count_index.call_count, 3)
         mock_ds.dataset.count_rows.assert_not_called()
+
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_INDEX_SUBSET_ROW_NUMBER",
+        1000,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.count_index_rows"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.sidecar_for_row_counts"
+    )
+    def test_check_rows_index_passes_polygon_bbox(self, mock_sidecar, mock_count_index):
+        mock_ds, mock_api = self._parquet_ds_and_api()
+        mock_api.map_column_names.side_effect = self._map_time_and_latlon
+        mock_sidecar.return_value = self._index_meta()
+        mock_count_index.return_value = 400
+        polygon = Mock()
+        polygon.bounds = (140.0, -40.0, 150.0, -30.0)
+
+        result = check_rows_with_date_range(
+            api=mock_api,
+            uuid="mock_uuid",
+            key="mock_key.parquet",
+            ds=mock_ds,
+            date_ranges=[
+                {
+                    "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc),
+                    "end_date": datetime(2023, 1, 31, tzinfo=timezone.utc),
+                }
+            ],
+            polygon=polygon,
+        )
+
+        self.assertEqual(len(result), 1)
+        bboxes = mock_count_index.call_args.kwargs["bboxes"]
+        self.assertEqual(len(bboxes), 1)
+        self.assertEqual(bboxes[0].min_lon, 140.0)
+        self.assertEqual(bboxes[0].max_lat, -30.0)
+        mock_ds.dataset.count_rows.assert_not_called()
+
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
+        1000,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_time_filter"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.sidecar_for_row_counts",
+        return_value=None,
+    )
+    def test_check_rows_live_applies_bbox_filter(self, _sidecar, mock_create_filter):
+        from pyarrow import compute as pc
+
+        mock_ds, mock_api = self._parquet_ds_and_api()
+        mock_api.map_column_names.side_effect = self._map_time_and_latlon
+        mock_create_filter.return_value = pc.field("TIME") >= pd.Timestamp("2023-01-01")
+        mock_ds.dataset.count_rows.return_value = 50
+        polygon = Mock()
+        polygon.bounds = (140.0, -40.0, 150.0, -30.0)
+
+        result = check_rows_with_date_range(
+            api=mock_api,
+            uuid="mock_uuid",
+            key="mock_key.parquet",
+            ds=mock_ds,
+            date_ranges=[
+                {
+                    "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc),
+                    "end_date": datetime(2023, 1, 31, tzinfo=timezone.utc),
+                }
+            ],
+            polygon=polygon,
+        )
+
+        self.assertEqual(len(result), 1)
+        filt = mock_ds.dataset.count_rows.call_args.kwargs["filter"]
+        self.assertIsNotNone(filt)
+        filt_text = str(filt)
+        self.assertIn("LATITUDE", filt_text)
+        self.assertIn("LONGITUDE", filt_text)
 
     @patch(
         "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_INDEX_SUBSET_ROW_NUMBER",

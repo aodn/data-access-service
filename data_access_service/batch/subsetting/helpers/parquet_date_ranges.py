@@ -25,6 +25,8 @@ from data_access_service.core.constants import (
     MAX_PARQUET_SPLIT,
     PARQUET_INDEX_SUBSET_ROW_NUMBER,
     PARQUET_SUBSET_ROW_NUMBER,
+    STR_LATITUDE_UPPER_CASE,
+    STR_LONGITUDE_UPPER_CASE,
     STR_TIME_UPPER_CASE,
 )
 from data_access_service.core.estimation_index import (
@@ -32,6 +34,7 @@ from data_access_service.core.estimation_index import (
     index_coverage_end,
     sidecar_for_row_counts,
 )
+from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.models.estimation_types import EstimationSidecarMetadata
 from data_access_service.utils.date_time_utils import (
     ensure_timezone,
@@ -74,6 +77,43 @@ def _count_rows_with_retry(dataset, time_filter) -> int:
 
 def _as_utc_timestamp(value) -> pd.Timestamp:
     return ensure_timezone(pd.Timestamp(value))
+
+
+def _bbox_from_polygon(polygon) -> BoundingBox | None:
+    """Axis-aligned box of ``polygon.bounds``, or None when it cannot be used.
+
+    Matches query_data: the download loads the bbox, then clips to the exact
+    polygon. Splitting on the bbox count is the right memory guard. A
+    degenerate or antimeridian-swapped box is skipped (over-count) rather
+    than failing the job.
+    """
+    if polygon is None:
+        return None
+    bounds = getattr(polygon, "bounds", None)
+    if bounds is None or len(bounds) != 4:
+        return None
+    min_lon, min_lat, max_lon, max_lat = bounds
+    try:
+        return BoundingBox(
+            min_lon=float(min_lon),
+            min_lat=float(min_lat),
+            max_lon=float(max_lon),
+            max_lat=float(max_lat),
+        )
+    except (TypeError, ValueError) as e:
+        log.warning("Ignoring polygon bounds %s for row-count split: %s", bounds, e)
+        return None
+
+
+def _spatial_bbox_filter(
+    lat_dim: str, lon_dim: str, bbox: BoundingBox
+) -> ds.Expression:
+    return (
+        (pc.field(lat_dim) >= bbox.min_lat)
+        & (pc.field(lat_dim) <= bbox.max_lat)
+        & (pc.field(lon_dim) >= bbox.min_lon)
+        & (pc.field(lon_dim) <= bbox.max_lon)
+    )
 
 
 def _same_utc_day(start: pd.Timestamp, end: pd.Timestamp) -> bool:
@@ -155,7 +195,15 @@ def _enqueue_split(
         checked_date_ranges.append({"start_date": start, "end_date": end})
 
 
-def _live_count_rows(dataset, start, end, time_dim) -> int | None:
+def _live_count_rows(
+    dataset,
+    start,
+    end,
+    time_dim,
+    lat_dim: str | None = None,
+    lon_dim: str | None = None,
+    bbox: BoundingBox | None = None,
+) -> int | None:
     """Exact row count for [start, end], or None when the range has no overlap.
 
     Full timestamps, not "%Y-%m-%d": create_time_filter compares against
@@ -198,6 +246,8 @@ def _live_count_rows(dataset, start, end, time_dim) -> int | None:
                 e2,
             )
             return None
+    if bbox is not None and lat_dim and lon_dim:
+        time_filter = time_filter & _spatial_bbox_filter(lat_dim, lon_dim, bbox)
     return _count_rows_with_retry(dataset, time_filter)
 
 
@@ -210,6 +260,7 @@ def _handle_with_index(
     start: pd.Timestamp,
     end: pd.Timestamp,
     times_of_split: int,
+    bboxes: list[BoundingBox],
 ) -> bool:
     """Try to keep / skip / split using the weekly index.
 
@@ -245,7 +296,7 @@ def _handle_with_index(
         )
         return True
 
-    num_rows = count_index_rows(uuid, key, meta, start, end)
+    num_rows = count_index_rows(uuid, key, meta, start, end, bboxes=bboxes)
     if num_rows is None:
         return False
     if num_rows == 0:
@@ -280,10 +331,17 @@ def _handle_with_index(
 
 
 def check_rows_with_date_range(
-    api: BaseAPI, uuid: str, key: str, ds: ParquetDataSource, date_ranges: list[dict]
+    api: BaseAPI,
+    uuid: str,
+    key: str,
+    ds: ParquetDataSource,
+    date_ranges: list[dict],
+    polygon=None,
 ) -> list[dict]:
     """
-    Count number of rows with specific monthly range. ignore bbox.
+    Count number of rows with specific monthly range, optionally clipped to
+    the polygon's bounding box (same box query_data loads before the exact
+    polygon clip).
     If rows number exceeds PARQUET_SUBSET_ROW_NUMBER, split this date range with binary division, until rows number
     under the safe threshold.
     If rows number is 0, remove this date range from the list of date_ranges so that to skip further querying data.
@@ -301,6 +359,8 @@ def check_rows_with_date_range(
         ds: DataSource fetched from cloud optimised library
         date_ranges: List of monthly intervals as dictionaries with 'start_date' and 'end_date' as UTC timestamps in
                     'YYYY-MM-DD HH:MM:SS.fffffffff+00:00' format.
+        polygon: Optional shapely polygon; its bounds prune the row count so a
+                    regional request is not split as if it were global.
     Returns:
         List[dict]: List of dictionaries with 'start_date' and 'end_date' as UTC timestamps in
                     'YYYY-MM-DD HH:MM:SS.fffffffff+00:00' format with row number check.
@@ -317,6 +377,25 @@ def check_rows_with_date_range(
         0
     ]
 
+    bbox = _bbox_from_polygon(polygon)
+    lat_dim = lon_dim = None
+    if bbox is not None:
+        mapped = api.map_column_names(
+            uuid=uuid,
+            key=key,
+            columns=[STR_LATITUDE_UPPER_CASE, STR_LONGITUDE_UPPER_CASE],
+        )
+        if mapped and len(mapped) >= 2:
+            lat_dim, lon_dim = mapped[0], mapped[1]
+        else:
+            log.warning(
+                "Could not map lat/lon for %s/%s; row-count split ignores polygon",
+                uuid,
+                key,
+            )
+            bbox = None
+    bboxes = [bbox] if bbox is not None else []
+
     index_meta = sidecar_for_row_counts(api, uuid, key)
     if index_meta is not None and not index_meta.has_time:
         log.info(
@@ -326,11 +405,23 @@ def check_rows_with_date_range(
         )
         index_meta = None
     if index_meta is not None:
-        log.info(
-            "using estimation index for parquet row-count splits on %s/%s",
-            uuid,
-            key,
-        )
+        if bbox is not None:
+            log.info(
+                "using estimation index for parquet row-count splits on %s/%s "
+                "(bbox lon[%s, %s] lat[%s, %s])",
+                uuid,
+                key,
+                bbox.min_lon,
+                bbox.max_lon,
+                bbox.min_lat,
+                bbox.max_lat,
+            )
+        else:
+            log.info(
+                "using estimation index for parquet row-count splits on %s/%s",
+                uuid,
+                key,
+            )
 
     # Go through monthly interval
     for date_range in date_ranges:
@@ -357,10 +448,13 @@ def check_rows_with_date_range(
                 start,
                 end,
                 times_of_split,
+                bboxes,
             ):
                 continue
 
-        num_rows = _live_count_rows(dataset, start, end, time_dim)
+        num_rows = _live_count_rows(
+            dataset, start, end, time_dim, lat_dim, lon_dim, bbox
+        )
         if num_rows is None or num_rows == 0:
             continue
         if num_rows <= PARQUET_SUBSET_ROW_NUMBER:
