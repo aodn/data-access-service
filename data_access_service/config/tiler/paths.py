@@ -11,20 +11,6 @@ from pathlib import Path
 # change) — same static-asset rationale as the mask paths below, so it's
 # resolved relative to the package rather than the CWD.
 COLORMAPS_CONFIG_PATH = str(Path(__file__).resolve().parent / "colormaps.json")
-# Variable specifications fanned out across the metadata catalogue at startup
-# to derive the product set — see services/product/discovery.py.
-GRIDDED_VARIABLES_CONFIG_PATH = str(
-    Path(__file__).resolve().parent / "gridded_variables.json"
-)
-# Per-product tuning, keyed by the derived product id (see
-# services/product/discovery.py::product_id) and applied on top of the
-# candidates gridded_variables.json fans out — see schemas/products.py.
-PRODUCTS_CONFIG_PATH = str(Path(__file__).resolve().parent / "products.json")
-# Stores to drop entirely before candidates are fanned out, keyed by the same
-# suffix-stripped dataset name product_id uses (e.g.
-# "model_sea_level_anomaly_gridded_realtime", not "*.zarr") — see
-# services/product/discovery.py::discover_products.
-STORE_BLACKLIST_CONFIG_PATH = str(Path(__file__).resolve().parent / "blacklist.json")
 
 # Mask assets stay with the tiler package (not config) since they're binary
 # data, not something a dev edits — resolved relative to the repo's

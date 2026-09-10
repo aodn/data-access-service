@@ -168,6 +168,60 @@ tiler:
     s3_connect_timeout: 5
     s3_read_timeout: 30
     s3_max_attempts: 2
+  # Static product-catalogue config, deliberately not overridden by any
+  # config-{env}.yaml overlay — it doesn't vary by environment. Read directly
+  # off this base file via Config.load_tiler_catalog_config(), bypassing the
+  # per-environment merge (see services/product/discovery.py and
+  # schemas/products.py for the loaders that read each section below).
+  #
+  # Stores to drop entirely before candidates are fanned out, keyed by the
+  # suffix-stripped dataset name product_id uses (e.g.
+  # "model_sea_level_anomaly_gridded_realtime", not "*.zarr") — see
+  # services/product/discovery.py::discover_products.
+  blacklist:
+    - radar_Newcastle_velocity_hourly_averaged_delayed_qc
+    - radar_Newcastle_velocity_hourly_averaged_realtime_nonqc
+    - radar_TurquoiseCoast_velocity_hourly_averaged_realtime_nonqc
+    - radar_CoralCoast_velocity_hourly_averaged_realtime_nonqc
+    - radar_BonneyCoast_velocity_hourly_averaged_realtime_nonqc
+    - radar_BonneyCoast_velocity_hourly_averaged_delayed_qc
+    - radar_TurquoiseCoast_velocity_hourly_averaged_delayed_qc
+    - radar_CoralCoast_velocity_hourly_averaged_delayed_qc
+  # Variable specifications fanned out across the metadata catalogue at
+  # startup to derive the candidate product set — see
+  # services/product/discovery.py. A plain string matches a single variable;
+  # a list matches an ordered pair (e.g. current vectors), which is always
+  # data-only, never visual.
+  gridded_variables:
+    - GSLA
+    - [UCUR, VCUR]
+    - GSL
+    - sea_surface_temperature
+    - analysed_sst
+    - sea_ice_fraction
+    - sst
+    - sst_mosaic
+    - ssta
+    - ssta_mosaic
+    - sst_anom_mosaic
+    - dhd
+    - dhd_mosaic
+    - dhd_count_mosaic
+    - dhdc_mosaic
+    - mpsa_mosaic
+    - MCS_category
+    - MCS_category_mosaic
+    - MHW_category_mosaic
+  # Per-product tuning, keyed by the derived product id (see
+  # services/product/discovery.py::product_id) and applied on top of the
+  # candidates gridded_variables fans out — see schemas/products.py.
+  products_customisation:
+    - id: model_sea_level_anomaly_gridded_realtime:gsla
+      data_tile:
+        coastal_fill:
+          max_dist_px: 4
+    - id: model_sea_level_anomaly_gridded_realtime:ucur+vcur
+      ocean_masked: true
 csiro:
   datasets:
     - dataset_name: uwy_csiro.parquet

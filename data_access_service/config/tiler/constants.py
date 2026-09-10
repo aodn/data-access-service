@@ -15,8 +15,8 @@ COORD_NAMES = {
 @dataclass(frozen=True)
 class DataTileLodConfig:
     """Server-shader contract for the data-tile LOD pyramid. Global policy, not
-    a per-product default like DataTileDefaults — never overridable in
-    products.json (see test_load_rejects_unknown_field).
+    a per-product default like DataTileDefaults — never overridable in the
+    products_customisation config (see test_load_rejects_unknown_field).
 
     Bundled here (rather than passed at runtime or read from env) because these
     values are baked into the WebGL shader on the frontend — changing one without
@@ -44,8 +44,9 @@ class DataTileDefaults:
 
     ``chunk_px`` is the visible tile size; ``padding`` is the extra ring of edge
     pixels included on each side so the shader can sample a bilinear filter
-    without seams between tiles. Both are overridable per product in
-    products.json (see ``product.DataTileConfig``, which these default into).
+    without seams between tiles. Both are overridable per product in the
+    products_customisation config (see ``product.DataTileConfig``, which these
+    default into).
     """
 
     chunk_px: tuple[int, int] = (240, 192)

@@ -85,6 +85,36 @@ class Config:
         return Config._deep_merge(base, override)
 
     @staticmethod
+    def _load_tiler_catalog_section(section: str):
+        """Read one section of the tiler's static product-catalogue config —
+        straight off the base config.yaml, deliberately bypassing the
+        per-environment overlay merge since this data doesn't vary by
+        environment.
+        """
+        tiler = (
+            Config.load_config("data_access_service/config/config.yaml") or {}
+        ).get("tiler", {})
+        return tiler.get(section)
+
+    @staticmethod
+    def get_tiler_blacklist() -> List | None:
+        """Stores to drop entirely before candidates are fanned out — see
+        services/product/discovery.py::_load_store_blacklist."""
+        return Config._load_tiler_catalog_section("blacklist")
+
+    @staticmethod
+    def get_tiler_gridded_variables() -> List | None:
+        """Variable specifications fanned out across the metadata catalogue at
+        startup — see services/product/discovery.py::_load_gridded_variable_specs."""
+        return Config._load_tiler_catalog_section("gridded_variables")
+
+    @staticmethod
+    def get_tiler_products_customisation() -> List | None:
+        """Per-product tuning layered onto discovered candidates by id — see
+        tiler/schemas/products.py::load_product_overrides."""
+        return Config._load_tiler_catalog_section("products_customisation")
+
+    @staticmethod
     def resolve_profile(profile: EnvType = None) -> EnvType:
         """Resolve the active profile, falling back to env detection when not given."""
         if profile is None:

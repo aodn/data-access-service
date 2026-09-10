@@ -1,11 +1,11 @@
 """Candidate product derivation from the metadata schema index, and
-products.json override application on top of it.
+products_customisation override application on top of it.
 
 Runs against a hand-built fake index — no API instance, no S3, no registry.
 Mistakes here are invisible at runtime (a wrong grid, an ID that moved under a
 frontend cache), so coverage is deliberately dense. Discovery and override
-application are separate steps (build_candidate_products never sees
-products.json), so they're tested separately too. build_candidate_products no
+application are separate steps (build_candidate_products never sees the
+products_customisation config), so they're tested separately too. build_candidate_products no
 longer filters to zarr itself — that's API.iter_zarr_dataset_variables's job
 (see test_api.py) — so every index here is written as if already filtered.
 """
@@ -144,7 +144,7 @@ def test_source_path_built_from_the_configured_base_url():
 
 
 def test_candidates_take_plain_defaults_with_no_overrides_involved():
-    """build_candidate_products never sees products.json — every candidate is
+    """build_candidate_products never sees the products_customisation config — every candidate is
     at plain defaults until apply_product_overrides runs."""
     candidates = _build({"u1": {"a.zarr": frozenset({"GSLA"})}}, ["GSLA"])
     candidate = candidates["a:gsla"]
@@ -380,8 +380,9 @@ def test_blacklisted_store_is_excluded_from_dataset_variables():
 
 
 def test_blacklist_matches_suffix_stripped_dataset_name():
-    """blacklist.json entries read the same as products.json ids' dataset_name
-    prefix — no trailing .zarr — even though the raw index carries it."""
+    """blacklist entries read the same as products_customisation ids'
+    dataset_name prefix — no trailing .zarr — even though the raw index
+    carries it."""
     index = {
         "u1": {"model_sea_level_anomaly_gridded_realtime.zarr": frozenset({"GSLA"})}
     }

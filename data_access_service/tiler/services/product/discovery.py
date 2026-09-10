@@ -2,20 +2,16 @@
 
 Dataset names and UUIDs come from live metadata, not config, so a rename changes
 the derived id instead of leaving a stale one. Candidates carry plain defaults
-only — [[apply_product_overrides]] layers products.json on top by id, as a
-separate step, so identity-derivation and config-resolution never mix.
+only — [[apply_product_overrides]] layers the products_customisation section
+on top by id, as a separate step, so identity-derivation and config-resolution
+never mix.
 """
 
 import dataclasses
-import json
 import logging
 from collections.abc import Iterable, Mapping
-from pathlib import Path
 
-from data_access_service.config.tiler.paths import (
-    GRIDDED_VARIABLES_CONFIG_PATH,
-    STORE_BLACKLIST_CONFIG_PATH,
-)
+from data_access_service.config.config import Config
 from data_access_service.core.api import API
 from data_access_service.tiler.schemas.products import (
     ProductOverride,
@@ -37,23 +33,20 @@ ZarrDatasetVariables = Iterable[tuple[str, str, frozenset[str]]]
 GriddedVariableSpec = str | list[str]
 
 
-def _load_gridded_variable_specs(
-    path: str | Path = GRIDDED_VARIABLES_CONFIG_PATH,
-) -> list[GriddedVariableSpec]:
-    raw = json.loads(Path(path).read_text())
+def _load_gridded_variable_specs() -> list[GriddedVariableSpec]:
+    raw = Config.get_tiler_gridded_variables()
     if not isinstance(raw, list) or not raw:
         raise ValueError(
-            "gridded_variables.json must contain a non-empty JSON array of variable specs"
+            "config.yaml's tiler.gridded_variables must be a non-empty list of "
+            "variable specs"
         )
     return raw
 
 
-def _load_store_blacklist(
-    path: str | Path = STORE_BLACKLIST_CONFIG_PATH,
-) -> frozenset[str]:
-    raw = json.loads(Path(path).read_text())
+def _load_store_blacklist() -> frozenset[str]:
+    raw = Config.get_tiler_blacklist() or []
     if not isinstance(raw, list):
-        raise ValueError("blacklist.json must contain a JSON array of store names")
+        raise ValueError("config.yaml's tiler.blacklist must be a list of store names")
     return frozenset(raw)
 
 
@@ -63,8 +56,8 @@ def _exclude_blacklisted_stores(
 ) -> ZarrDatasetVariables:
     """Drop every (uuid, dataset_name, fields) triple whose store is
     blacklisted, before candidates get fanned out. Matched against the same
-    suffix-stripped name product_id uses, so blacklist.json entries read the
-    same as the dataset_name half of a products.json id.
+    suffix-stripped name product_id uses, so blacklist entries read the same
+    as the dataset_name half of a products_customisation id.
     """
     for uuid, dataset_name, fields in dataset_variables:
         if dataset_name.removesuffix(".zarr") in blacklist:
@@ -166,7 +159,7 @@ def _apply_override(product: Product, override: ProductOverride | None) -> Produ
     if override.visual is not None:
         if len(product.variables) == 2 and override.visual:
             raise ValueError(
-                f"products.json override {product.id!r} sets visual: true on "
+                f"products_customisation override {product.id!r} sets visual: true on "
                 "a variable pair — visual tiles are single-variable only."
             )
         visual = override.visual
@@ -194,9 +187,9 @@ def apply_product_overrides(
     candidates: Mapping[str, Product],
     overrides: Mapping[str, ProductOverride],
 ) -> dict[str, Product]:
-    """Layer products.json onto discovered candidates, matched by id
-    (see product_id). A candidate with no matching override is returned
-    unchanged, at its plain defaults.
+    """Layer the products_customisation config onto discovered candidates,
+    matched by id (see product_id). A candidate with no matching override is
+    returned unchanged, at its plain defaults.
     """
     return {
         pid: _apply_override(product, overrides.get(pid))
@@ -208,7 +201,7 @@ def log_unmatched_overrides(
     candidates: Mapping[str, Product],
     overrides: Mapping[str, ProductOverride],
 ) -> None:
-    """Report products.json overrides that matched no candidate.
+    """Report products_customisation overrides that matched no candidate.
 
     A stale id silently stops its setting applying, so this is loud — but not
     fatal, since one entry should not take the catalogue down.
@@ -216,7 +209,7 @@ def log_unmatched_overrides(
     unmatched = [pid for pid in overrides if pid not in candidates]
     if unmatched:
         logger.error(
-            "%d products.json override(s) matched no discovered product, so "
+            "%d products_customisation override(s) matched no discovered product, so "
             "their settings will not apply: %s",
             len(unmatched),
             "; ".join(unmatched),
@@ -224,11 +217,11 @@ def log_unmatched_overrides(
 
 
 def discover_products(api: API, base_url: str) -> dict[str, Product]:
-    """Single entry point: load gridded_variables.json + products.json +
-    blacklist.json, fan out across the metadata catalogue (minus blacklisted
-    stores), and layer overrides on top. Everything startup needs from config
-    — no fatal/non-fatal distinction is made here, that's up to the caller
-    (run_tiler_warmup treats the whole call as fatal).
+    """Single entry point: load the gridded_variables, products_customisation and blacklist
+    sections of config.yaml, fan out across the metadata catalogue (minus
+    blacklisted stores), and layer overrides on top. Everything startup needs
+    from config — no fatal/non-fatal distinction is made here, that's up to
+    the caller (run_tiler_warmup treats the whole call as fatal).
     """
     specs = _load_gridded_variable_specs()
     overrides = load_product_overrides()
