@@ -83,6 +83,15 @@ estimation:
       # This scan reads every file once, so the block cache can never hit.
       # Off, it drops the per-file cost from ~48 KB to ~11 KB for ~2% runtime.
       enable_external_file_cache: False
+    # The read side, in the always-on API service. Its own connection, on its
+    # own :memory: database - it does not share the sites client, so retuning
+    # sites cannot move the estimate. The query is a streaming SUM over one
+    # small parquet, so this limit is a guard rail rather than a working
+    # budget: measured RSS is ~3 MB for the connection whatever it is set to.
+    read_duckdb:
+      memory_limit: "128MB"
+      threads: 2
+      region: "ap-southeast-2"
 pmtiles:
   config:
     co_bucket: "aodn-cloud-optimised"

@@ -5,6 +5,7 @@ from http import HTTPStatus
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 from xarray import Dataset
 
 from data_access_service import init_log
@@ -52,7 +53,7 @@ _estimate_size_single_flight = SingleFlight()
 
 
 @router.get("/data/{uuid}/notebook_url", dependencies=[Depends(api_key_auth)])
-async def get_notebook_url(uuid: str, request: Request):
+def get_notebook_url(uuid: str, request: Request):
     i = API.get_notebook_from(uuid)
     if isinstance(i, ValueError):
         raise HTTPException(status_code=404, detail="Notebook URL not found")
@@ -60,7 +61,7 @@ async def get_notebook_url(uuid: str, request: Request):
 
 
 @router.get("/data/{uuid}/{key}/has_data", dependencies=[Depends(api_key_auth)])
-async def has_data(
+def has_data(
     uuid: str,
     key: str,
     request: Request,
@@ -78,7 +79,7 @@ async def has_data(
 
 
 @router.get("/data/{uuid}/{key}/temporal_extent", dependencies=[Depends(api_key_auth)])
-async def get_temporal_extent(
+def get_temporal_extent(
     uuid: str, key: str, api_instance: API = Depends(require_api_ready)  # noqa: B008
 ):
     try:
@@ -95,7 +96,7 @@ async def get_temporal_extent(
 
 
 @router.get("/data/{uuid}/{key}/indexing_values", dependencies=[Depends(api_key_auth)])
-async def get_indexing_values(
+def get_indexing_values(
     uuid: str,
     key: str,
     start_date: str,
@@ -274,7 +275,11 @@ async def get_data(
     else:
         # for debug purpose, we need the request id as well
         logger.debug("Not a SSE request, request_id=%s", request_id)
-        result = fetch_data(
+        # This handler must stay `async def` for the SSE branch above, so the
+        # blocking read is pushed to the threadpool by hand - on the event loop
+        # it would stall every other request, SSE heartbeats included.
+        result = await run_in_threadpool(
+            fetch_data,
             api_instance,
             uuid,
             key,

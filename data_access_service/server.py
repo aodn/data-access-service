@@ -13,7 +13,12 @@ from data_access_service import Config
 from data_access_service.config.config import IntTestConfig
 from data_access_service.core.api import API
 from data_access_service.core.duckdbclient import SitesDuckDBClient
-from data_access_service.core.estimation_index import set_duckdb_client
+from data_access_service.core.estimation_index import (
+    close_client as close_estimation_client,
+)
+from data_access_service.core.estimation_index import (
+    init_client as init_estimation_client,
+)
 from data_access_service.core.middleware import configure_gzip_middleware
 from data_access_service.core.routes import router as api_router
 from data_access_service.core.scheduler import TaskScheduler
@@ -67,19 +72,22 @@ async def lifespan(application: FastAPI):
     # Initialize API
     api = api_setup(application)
 
-    session = None
+    sites_duckdb_session = None
     scheduler = None
     background_tasks: tuple[asyncio.Task, ...] = ()
     try:
         if isinstance(Config.get_config(), IntTestConfig):
             yield
         else:
-            session = SitesDuckDBClient()
-            application.state.duckdb_session = session
-            # The estimate reads the pre-built index through the same client,
-            # rather than opening a second DuckDB connection of its own.
-            set_duckdb_client(session)
-            application.state.sites_repositories = build_repositories(session)
+            sites_duckdb_session = SitesDuckDBClient()
+            # The estimate reads the index on its own :memory: connection, not
+            # this one - so retuning sites cannot move the estimate. Built here
+            # rather than on first use so a broken read path fails the deploy
+            # instead of silently degrading to the (50x slower) live scan.
+            init_estimation_client()
+            application.state.sites_repositories = build_repositories(
+                sites_duckdb_session
+            )
             scheduler = TaskScheduler(api, application.state.sites_repositories)
             scheduler_startup_task = asyncio.create_task(
                 scheduler.start_with_initial_run(), name="task_scheduler_startup"
@@ -106,17 +114,15 @@ async def lifespan(application: FastAPI):
         # Cleanup
         if scheduler:
             scheduler.shutdown()
-        if session:
-            set_duckdb_client(None)
-            session.close()
+        close_estimation_client()
+        if sites_duckdb_session:
+            sites_duckdb_session.close()
         api.destroy()
 
 
 app = FastAPI(lifespan=lifespan, title="Data Access Service")
 configure_gzip_middleware(app)
-# Register routes once at import time. Including them from lifespan/api_setup would
-# re-mount the same routers on every TestClient (or api_setup) call and produce
-# FastAPI "Duplicate Operation ID" warnings when generating the OpenAPI schema.
+
 app.include_router(api_router)
 app.include_router(tiler_router)
 
