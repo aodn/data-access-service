@@ -374,17 +374,40 @@ def _to_scalar_parts(
     return _scalar_parts_dedup.dedupe(key, compute)
 
 
+_rescale_dedup = Deduper()
+
+
 def _rescale_range(
     parts: list[xr.DataArray],
     rescale: tuple[float, float] | None,
+    *,
+    source_path: str = "",
+    date: str = "",
+    variable: str = "",
+    coastal_fill: CoastalFill | None = None,
 ) -> tuple[float, float] | None:
     """Return (vmin, vmax) from rescale arg or data range; None if no valid data."""
     if rescale is not None:
         return rescale
-    all_valid = np.concatenate([p.values[~np.isnan(p.values)].ravel() for p in parts])
-    if not all_valid.size:
-        return None
-    return float(all_valid.min()), float(all_valid.max())
+
+    def compute() -> tuple[float, float] | None:
+        all_valid = np.concatenate(
+            [p.values[~np.isnan(p.values)].ravel() for p in parts]
+        )
+        if not all_valid.size:
+            return None
+        return float(all_valid.min()), float(all_valid.max())
+
+    if not date:
+        return compute()
+
+    key = (
+        source_path,
+        date,
+        variable,
+        coastal_fill.max_dist_px if coastal_fill is not None else None,
+    )
+    return _rescale_dedup.dedupe(key, compute)
 
 
 def render_tile(
@@ -420,7 +443,14 @@ def render_tile(
         )
         return encode_rgba(result, fmt) if result is not None else empty_tile(fmt)
 
-    vrange = _rescale_range(parts, rescale)
+    vrange = _rescale_range(
+        parts,
+        rescale,
+        source_path=source_path,
+        date=date,
+        variable=variable,
+        coastal_fill=coastal_fill,
+    )
     if vrange is None:
         return empty_tile(fmt)
     vmin, vmax = vrange
@@ -530,7 +560,14 @@ def render_bbox(
         )
         return encode_rgba(result, fmt) if result is not None else empty_tile(fmt)
 
-    vrange = _rescale_range(parts, rescale)
+    vrange = _rescale_range(
+        parts,
+        rescale,
+        source_path=source_path,
+        date=date,
+        variable=variable,
+        coastal_fill=coastal_fill,
+    )
     if vrange is None:
         return empty_tile(fmt)
     vmin, vmax = vrange
