@@ -224,7 +224,7 @@ data_access_service/
     utils/
       dates.py                        ← ts_to_utc_iso + str_to_utc_timestamp
       geo.py                           ← dataset_bounds + json_safe_float
-      colors.py                       ← hex parsing + ramp/categorical LUT builders
+      colors.py                       ← hex/color parsing + ramp interpolation + categorical direct-index LUT builder
       image.py                        ← encode_rgba(arr, fmt) + empty_tile(fmt) + media_type(fmt) — PNG/WebP encoders shared by both renderers
     assets/
       land_mask.npz                   ← committed Natural Earth land mask (coastal fill) — see §7.6
@@ -662,14 +662,16 @@ An unrecognised name raises `ValueError`, mapped by the router to `400` (query-p
 
 **Custom colormaps.** Defined in `config/tiler/colormaps.json`, committed with the code. Loaded once on startup by `load_colormaps()` in `services/colormap/registry.py` — adding, removing, or changing one means editing the file and redeploying. All colormap state lives in `colormap/registry.py`; runtime resolution (custom → rio-tiler → matplotlib fallback) is a separate module, `services/colormap/resolver.py`.
 
-All colormaps are stored internally as **256-entry RGBA LUTs** (one tuple per normalised byte value, where 0 = data minimum and 255 = data maximum after `rescale`). Entries in `colormaps.json` are already the expanded 256-entry form; `utils/colors.py` has helper functions (hex parsing, ramp/categorical LUT builders) for producing a new entry offline before committing it.
+All colormaps are stored **in memory** as **256-entry RGBA LUTs** (one tuple per byte value 0-255). What that index means differs by mode: for `ramp` it's a normalised byte position (0 = data minimum, 255 = data maximum, after `rescale`); for `categorical` it's the raw integer category code itself, since categorical rendering never rescales. The two modes' on-disk shape in `colormaps.json` differs to match: a `ramp` entry's `entries` array is already the expanded 256-tuple form, while a `categorical` entry instead stores `values` and `colors` as parallel arrays — one colour per real category code, so the file only ever lists as many colours as there are categories. `registry.py` expands a categorical entry into the same 256-slot shape at load time via `categorical_lut()` (`utils/colors.py`), which places each colour at the slot equal to its own value — no rescaling — so two distinct category codes can never collide onto the same slot. `utils/colors.py` also has `parse_color`/`hex_to_rgba` (colour parsing, used to validate every entry on load) and `interpolate_colormap` (building a new ramp's 256 stops offline before committing it).
+
+**Loading is fail-soft and atomic.** `load_colormaps()` validates the whole file before touching the live registry — `mode` must be `ramp`/`categorical`, required fields must be present, a categorical entry's `values` must be unique integers within 0-255 and the same length as `colors`, and every colour must parse as a valid `[r, g, b, a]`. `_reload()` builds the new state into local dicts and only swaps it into the module-level registry once the whole file has validated cleanly, so one bad entry can't leave the registry half-loaded. On failure (malformed JSON or a validation error), `load_colormaps()` logs the error and returns rather than raising — the tiler still starts up with no custom colormaps rather than refusing to start, since rio-tiler/matplotlib's built-in colormaps don't depend on this file.
 
 **Colormap modes.** The `mode` field in a `colormaps.json` entry:
 
 | Mode             | Behaviour                                                                                                                                                                                                                                                                                                                         |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ramp` (default) | A smooth 256-entry gradient                                                                                                                                                                                                                                                                                                       |
-| `categorical`    | Each of a set of integer values maps to one LUT slot; the rest are transparent. The sorted category values are stored alongside the LUT (`values` field) so they can be validated against a product's `flag_values` at request time — the LUT alone can't recover them (transparent categories look identical to unmapped slots). |
+| `categorical`    | Each of a set of integer values maps to its own LUT slot (index == value); the rest are transparent. The category values are also kept unexpanded (`values` field) so they can be validated against a product's `flag_values` at request time — the 256-entry LUT alone can't recover them (transparent categories look identical to unmapped slots). |
 
 Categorical colormaps ignore `rescale`. They render only through the discrete, value-indexed path (nearest-neighbour resampling, a LUT keyed by the raw integer code), reached only for categorical variables.
 
