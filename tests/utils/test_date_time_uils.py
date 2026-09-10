@@ -10,6 +10,7 @@ import pytz
 
 from data_access_service.core.api import BaseAPI
 from data_access_service.batch.subsetting.helpers.parquet_date_ranges import (
+    _split_on_utc_day_boundary,
     check_rows_with_date_range,
     trim_date_range,
 )
@@ -1093,6 +1094,10 @@ class TestDateTimeUtils(unittest.TestCase):
             split_date_range_binary(start, end)
 
     @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.sidecar_for_row_counts",
+        return_value=None,
+    )
+    @patch(
         "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
         1000,
     )
@@ -1107,7 +1112,9 @@ class TestDateTimeUtils(unittest.TestCase):
         "data_access_service.batch.subsetting.helpers.parquet_date_ranges.split_date_range_binary"
     )
     @patch("data_access_service.batch.subsetting.helpers.parquet_date_ranges.log")
-    def test_check_rows_with_date_range(self, mock_log, mock_split, mock_create_filter):
+    def test_check_rows_with_date_range(
+        self, mock_log, mock_split, mock_create_filter, _sidecar
+    ):
         mock_ds = Mock()
         mock_ds.dname = "test_data.parquet"
         mock_ds.dataset = Mock()
@@ -1157,6 +1164,10 @@ class TestDateTimeUtils(unittest.TestCase):
         self.assertIn("non-overlapping halves", log_msg)
 
     @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.sidecar_for_row_counts",
+        return_value=None,
+    )
+    @patch(
         "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
         1000,
     )
@@ -1167,7 +1178,7 @@ class TestDateTimeUtils(unittest.TestCase):
         "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_time_filter"
     )
     def test_check_rows_falls_back_on_date_out_of_range(
-        self, mock_create_filter, mock_custom_filter
+        self, mock_create_filter, mock_custom_filter, _sidecar
     ):
         """create_time_filter raises DataQuery.DateOutOfRangeError; must fall back."""
         from aodn_cloud_optimised.lib.DataQuery import DateOutOfRangeError
@@ -1205,6 +1216,10 @@ class TestDateTimeUtils(unittest.TestCase):
         mock_ds.dataset.count_rows.assert_called_once()
 
     @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.sidecar_for_row_counts",
+        return_value=None,
+    )
+    @patch(
         "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
         1000,
     )
@@ -1215,7 +1230,7 @@ class TestDateTimeUtils(unittest.TestCase):
         "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_time_filter"
     )
     def test_check_rows_skips_when_customised_filter_has_no_overlap(
-        self, mock_create_filter, mock_custom_filter
+        self, mock_create_filter, mock_custom_filter, _sidecar
     ):
         """When both filters fail (true non-overlap), skip the range instead of crashing."""
         from aodn_cloud_optimised.lib.DataQuery import DateOutOfRangeError
@@ -1249,6 +1264,394 @@ class TestDateTimeUtils(unittest.TestCase):
 
         self.assertEqual(result, [])
         mock_ds.dataset.count_rows.assert_not_called()
+
+    def _parquet_ds_and_api(self):
+        mock_ds = Mock()
+        mock_ds.dname = "test_data.parquet"
+        mock_ds.dataset = Mock()
+        mock_api = Mock()
+        mock_api.map_column_names.return_value = ["TIME"]
+        return mock_ds, mock_api
+
+    def _index_meta(self, max_date=20230131):
+        meta = Mock()
+        meta.has_time = True
+        meta.max_date = max_date
+        return meta
+
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_INDEX_SUBSET_ROW_NUMBER",
+        1000,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.count_index_rows"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.sidecar_for_row_counts"
+    )
+    def test_check_rows_index_skips_historical_empty(
+        self, mock_sidecar, mock_count_index
+    ):
+        mock_ds, mock_api = self._parquet_ds_and_api()
+        mock_sidecar.return_value = self._index_meta()
+        mock_count_index.return_value = 0
+
+        result = check_rows_with_date_range(
+            api=mock_api,
+            uuid="mock_uuid",
+            key="mock_key.parquet",
+            ds=mock_ds,
+            date_ranges=[
+                {
+                    "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc),
+                    "end_date": datetime(2023, 1, 31, tzinfo=timezone.utc),
+                }
+            ],
+        )
+
+        self.assertEqual(result, [])
+        mock_count_index.assert_called_once()
+        mock_ds.dataset.count_rows.assert_not_called()
+
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_INDEX_SUBSET_ROW_NUMBER",
+        1000,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.count_index_rows"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.sidecar_for_row_counts"
+    )
+    def test_check_rows_index_keeps_range_under_threshold(
+        self, mock_sidecar, mock_count_index
+    ):
+        mock_ds, mock_api = self._parquet_ds_and_api()
+        mock_sidecar.return_value = self._index_meta()
+        mock_count_index.return_value = 400
+
+        start = datetime(2023, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2023, 1, 31, tzinfo=timezone.utc)
+        result = check_rows_with_date_range(
+            api=mock_api,
+            uuid="mock_uuid",
+            key="mock_key.parquet",
+            ds=mock_ds,
+            date_ranges=[{"start_date": start, "end_date": end}],
+        )
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["start_date"], pd.Timestamp("2023-01-01", tz="UTC"))
+        mock_ds.dataset.count_rows.assert_not_called()
+
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_INDEX_SUBSET_ROW_NUMBER",
+        1000,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.count_index_rows"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.sidecar_for_row_counts"
+    )
+    def test_check_rows_index_splits_range_over_threshold(
+        self, mock_sidecar, mock_count_index
+    ):
+        mock_ds, mock_api = self._parquet_ds_and_api()
+        mock_sidecar.return_value = self._index_meta()
+        # Parent month too big, each half under the index cap.
+        mock_count_index.side_effect = [2000, 400, 400]
+
+        result = check_rows_with_date_range(
+            api=mock_api,
+            uuid="mock_uuid",
+            key="mock_key.parquet",
+            ds=mock_ds,
+            date_ranges=[
+                {
+                    "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc),
+                    "end_date": datetime(2023, 1, 31, tzinfo=timezone.utc),
+                }
+            ],
+        )
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(mock_count_index.call_count, 3)
+        mock_ds.dataset.count_rows.assert_not_called()
+
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_INDEX_SUBSET_ROW_NUMBER",
+        1000,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.count_index_rows"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.sidecar_for_row_counts"
+    )
+    def test_check_rows_index_midnight_straddle_splits_once_at_day_boundary(
+        self, mock_sidecar, mock_count_index
+    ):
+        """A 20s window across midnight must not binary-split to nanoseconds.
+
+        The index counts whole days, so a timestamp midpoint still covers the
+        same day keys and SUM(c) never falls. Cut at UTC midnight instead.
+        """
+        mock_ds, mock_api = self._parquet_ds_and_api()
+        mock_sidecar.return_value = self._index_meta(max_date=20101031)
+        mock_count_index.side_effect = [2000, 400, 400]
+
+        result = check_rows_with_date_range(
+            api=mock_api,
+            uuid="mock_uuid",
+            key="mock_key.parquet",
+            ds=mock_ds,
+            date_ranges=[
+                {
+                    "start_date": datetime(
+                        2010, 10, 24, 23, 59, 58, tzinfo=timezone.utc
+                    ),
+                    "end_date": datetime(2010, 10, 25, 0, 0, 18, tzinfo=timezone.utc),
+                }
+            ],
+        )
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(mock_count_index.call_count, 3)
+        mock_ds.dataset.count_rows.assert_not_called()
+        midnight = pd.Timestamp("2010-10-25", tz="UTC")
+        ends = sorted(r["end_date"] for r in result)
+        starts = sorted(r["start_date"] for r in result)
+        self.assertEqual(ends[0].value, (midnight - pd.Timedelta(nanoseconds=1)).value)
+        self.assertEqual(starts[1].value, midnight.value)
+
+    def test_split_on_utc_day_boundary_cuts_at_midnight(self):
+        start = pd.Timestamp("2010-10-24 23:59:58", tz="UTC")
+        end = pd.Timestamp("2010-10-25 00:00:18", tz="UTC")
+        left_start, left_end, right_start, right_end = _split_on_utc_day_boundary(
+            start, end
+        )
+        midnight = pd.Timestamp("2010-10-25", tz="UTC")
+        self.assertEqual(left_start, start)
+        self.assertEqual(left_end.value, (midnight - pd.Timedelta(nanoseconds=1)).value)
+        self.assertEqual(right_start, midnight)
+        self.assertEqual(right_end, end)
+
+    def test_split_on_utc_day_boundary_rejects_single_day(self):
+        start = pd.Timestamp("2010-10-25 05:15:00", tz="UTC")
+        end = pd.Timestamp("2010-10-25 16:52:30", tz="UTC")
+        with self.assertRaises(ValueError):
+            _split_on_utc_day_boundary(start, end)
+
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
+        1000,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_INDEX_SUBSET_ROW_NUMBER",
+        1000,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_time_filter"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.count_index_rows"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.sidecar_for_row_counts"
+    )
+    def test_check_rows_index_oversized_day_falls_back_to_live(
+        self, mock_sidecar, mock_count_index, mock_create_filter
+    ):
+        mock_ds, mock_api = self._parquet_ds_and_api()
+        mock_sidecar.return_value = self._index_meta()
+        mock_count_index.return_value = 5000
+        mock_create_filter.return_value = Mock()
+        mock_ds.dataset.count_rows.return_value = 50
+
+        result = check_rows_with_date_range(
+            api=mock_api,
+            uuid="mock_uuid",
+            key="mock_key.parquet",
+            ds=mock_ds,
+            date_ranges=[
+                {
+                    "start_date": datetime(2023, 1, 15, tzinfo=timezone.utc),
+                    "end_date": datetime(2023, 1, 15, 23, 59, 59, tzinfo=timezone.utc),
+                }
+            ],
+        )
+
+        self.assertEqual(len(result), 1)
+        mock_ds.dataset.count_rows.assert_called_once()
+
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
+        1000,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_time_filter"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.count_index_rows"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.sidecar_for_row_counts"
+    )
+    def test_check_rows_index_tail_uses_live_count(
+        self, mock_sidecar, mock_count_index, mock_create_filter
+    ):
+        mock_ds, mock_api = self._parquet_ds_and_api()
+        # Index only covers through 2022; Jan 2023 is the uncovered tail.
+        mock_sidecar.return_value = self._index_meta(max_date=20221231)
+        mock_create_filter.return_value = Mock()
+        mock_ds.dataset.count_rows.return_value = 50
+
+        result = check_rows_with_date_range(
+            api=mock_api,
+            uuid="mock_uuid",
+            key="mock_key.parquet",
+            ds=mock_ds,
+            date_ranges=[
+                {
+                    "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc),
+                    "end_date": datetime(2023, 1, 31, tzinfo=timezone.utc),
+                }
+            ],
+        )
+
+        self.assertEqual(len(result), 1)
+        mock_count_index.assert_not_called()
+        mock_ds.dataset.count_rows.assert_called_once()
+
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_INDEX_SUBSET_ROW_NUMBER",
+        1000,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
+        1000,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_time_filter"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.count_index_rows"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.sidecar_for_row_counts"
+    )
+    def test_check_rows_index_straddle_splits_at_max_date(
+        self, mock_sidecar, mock_count_index, mock_create_filter
+    ):
+        mock_ds, mock_api = self._parquet_ds_and_api()
+        mock_sidecar.return_value = self._index_meta(max_date=20230115)
+        mock_count_index.return_value = 400
+        mock_create_filter.return_value = Mock()
+        mock_ds.dataset.count_rows.return_value = 50
+
+        result = check_rows_with_date_range(
+            api=mock_api,
+            uuid="mock_uuid",
+            key="mock_key.parquet",
+            ds=mock_ds,
+            date_ranges=[
+                {
+                    "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc),
+                    "end_date": datetime(2023, 1, 31, tzinfo=timezone.utc),
+                }
+            ],
+        )
+
+        self.assertEqual(len(result), 2)
+        mock_count_index.assert_called_once()
+        mock_ds.dataset.count_rows.assert_called_once()
+        ends = sorted(r["end_date"] for r in result)
+        starts = sorted(r["start_date"] for r in result)
+        # Indexed prefix ends at the last ns of max_date; tail starts 1ns later.
+        last_covered = pd.Timestamp("2023-01-15 23:59:59.999999999", tz="UTC")
+        self.assertEqual(ends[0].value, last_covered.value)
+        self.assertEqual(
+            starts[1].value, (last_covered + pd.Timedelta(nanoseconds=1)).value
+        )
+
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
+        1000,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_time_filter"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.count_index_rows",
+        return_value=None,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.sidecar_for_row_counts"
+    )
+    def test_check_rows_index_query_failure_falls_back_to_live(
+        self, mock_sidecar, _count_index, mock_create_filter
+    ):
+        mock_ds, mock_api = self._parquet_ds_and_api()
+        mock_sidecar.return_value = self._index_meta()
+        mock_create_filter.return_value = Mock()
+        mock_ds.dataset.count_rows.return_value = 50
+
+        result = check_rows_with_date_range(
+            api=mock_api,
+            uuid="mock_uuid",
+            key="mock_key.parquet",
+            ds=mock_ds,
+            date_ranges=[
+                {
+                    "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc),
+                    "end_date": datetime(2023, 1, 31, tzinfo=timezone.utc),
+                }
+            ],
+        )
+
+        self.assertEqual(len(result), 1)
+        mock_ds.dataset.count_rows.assert_called_once()
+
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
+        1000,
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_time_filter"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.count_index_rows"
+    )
+    @patch(
+        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.sidecar_for_row_counts"
+    )
+    def test_check_rows_timeless_index_uses_live_count(
+        self, mock_sidecar, mock_count_index, mock_create_filter
+    ):
+        mock_ds, mock_api = self._parquet_ds_and_api()
+        meta = self._index_meta()
+        meta.has_time = False
+        mock_sidecar.return_value = meta
+        mock_create_filter.return_value = Mock()
+        mock_ds.dataset.count_rows.return_value = 50
+
+        result = check_rows_with_date_range(
+            api=mock_api,
+            uuid="mock_uuid",
+            key="mock_key.parquet",
+            ds=mock_ds,
+            date_ranges=[
+                {
+                    "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc),
+                    "end_date": datetime(2023, 1, 31, tzinfo=timezone.utc),
+                }
+            ],
+        )
+
+        self.assertEqual(len(result), 1)
+        mock_count_index.assert_not_called()
+        mock_ds.dataset.count_rows.assert_called_once()
 
     def test_supply_day(self):
         # test supply day to a year-month string

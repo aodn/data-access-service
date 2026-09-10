@@ -10,6 +10,11 @@ Everything here fails soft. When there is no index, when it is too old to
 trust, or when the query errors, the caller falls back to the live scan in
 ``size_estimation._estimate_parquet_size`` - an estimate must never fail
 because of this optimisation.
+
+The parquet download also uses the index for cheap time-window row counts
+when splitting jobs (``parquet_date_ranges.check_rows_with_date_range``).
+Days after ``max_date`` are not in the file; that tail must not be treated
+as empty.
 """
 
 import json
@@ -237,11 +242,22 @@ def usable_sidecar(
     missing sidecar, a version this build does not know, and a column set that
     changed since the build - which is what makes csv_bytes_per_row stale.
     """
-    estimation_config = Config.get_config().get_estimation_config()
-    if not estimation_config.use_index_for_estimate:
-        return None
     if output_format != OUTPUT_FORMAT_CSV:
         # The index only models the zipped-CSV download.
+        return None
+    return sidecar_for_row_counts(api, uuid, key)
+
+
+def sidecar_for_row_counts(
+    api, uuid: str, key: str
+) -> Optional[EstimationSidecarMetadata]:
+    """Sidecar if the index can answer a time-window row count.
+
+    Same validity checks as :func:`usable_sidecar` (switch, version, schema)
+    but ignores output format: the download path only needs ``SUM(c)``.
+    """
+    estimation_config = Config.get_config().get_estimation_config()
+    if not estimation_config.use_index_for_estimate:
         return None
     if not key.endswith(".parquet"):
         return None
@@ -274,6 +290,56 @@ def usable_sidecar(
             return None
 
     return meta
+
+
+def index_coverage_end(meta: EstimationSidecarMetadata) -> pd.Timestamp:
+    """Last nanosecond of the last day the index covers (not clamped to now)."""
+    # Day-resolution timestamps silently drop nanosecond=999 in replace();
+    # force ns first (same trap as date_time_utils._end_of_day_nano).
+    return (
+        _day_key_to_timestamp(meta.max_date)
+        .as_unit("ns")
+        .replace(hour=23, minute=59, second=59, microsecond=999999, nanosecond=999)
+    )
+
+
+def count_index_rows(
+    uuid: str,
+    key: str,
+    meta: EstimationSidecarMetadata,
+    date_start: pd.Timestamp,
+    date_end: pd.Timestamp,
+) -> Optional[int]:
+    """``SUM(c)`` over the day range, no bbox.
+
+    Returns None when the query fails so the caller can live-count. Does not
+    extrapolate days after ``max_date``: those rows are absent from the SUM
+    and must not be treated as a real zero.
+    """
+    try:
+        client = _get_client()
+        _ensure_secret(client)
+        path = index_s3_path(uuid, key)
+        return _count_rows(client, path, meta, date_start, date_end, bboxes=[])
+    except _BUG_ERRORS as e:
+        log.error(
+            "estimation index is broken for %s/%s row count - falling back "
+            "to the live scan: %s",
+            uuid,
+            key,
+            e,
+            exc_info=True,
+        )
+        return None
+    except Exception as e:
+        log.warning(
+            "estimation index row count failed for %s/%s; falling back to "
+            "the live scan: %s",
+            uuid,
+            key,
+            e,
+        )
+        return None
 
 
 def load_sidecar(uuid: str, key: str) -> Optional[EstimationSidecarMetadata]:
@@ -438,9 +504,7 @@ def _sidecar_extent(
     than the download.
     """
     start = _day_key_to_timestamp(meta.min_date)
-    end = _day_key_to_timestamp(meta.max_date).replace(
-        hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
-    )
+    end = index_coverage_end(meta)
     now = pd.Timestamp.now(tz="UTC")
     if end > now:
         end = now

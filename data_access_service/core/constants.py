@@ -32,6 +32,9 @@ DATA = "data"
 PARTITION_KEY = sys.intern("PARTITION_KEY")
 
 PARQUET_SUBSET_ROW_NUMBER: int = 200000
+# Index counts are day-granular and up to a week stale. Split at half the
+# live cap so an under-count still lands under PARQUET_SUBSET_ROW_NUMBER.
+PARQUET_INDEX_SUBSET_ROW_NUMBER: int = 100000
 MAX_PARQUET_SPLIT: int = 30
 MAX_CSV_ROW: int = 1048576
 

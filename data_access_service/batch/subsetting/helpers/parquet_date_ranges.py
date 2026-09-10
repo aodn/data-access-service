@@ -23,9 +23,16 @@ from aodn_cloud_optimised.lib.DataQuery import (
 from data_access_service.core.api import BaseAPI
 from data_access_service.core.constants import (
     MAX_PARQUET_SPLIT,
+    PARQUET_INDEX_SUBSET_ROW_NUMBER,
     PARQUET_SUBSET_ROW_NUMBER,
     STR_TIME_UPPER_CASE,
 )
+from data_access_service.core.estimation_index import (
+    count_index_rows,
+    index_coverage_end,
+    sidecar_for_row_counts,
+)
+from data_access_service.models.estimation_types import EstimationSidecarMetadata
 from data_access_service.utils.date_time_utils import (
     ensure_timezone,
     split_date_range_binary,
@@ -65,6 +72,213 @@ def _count_rows_with_retry(dataset, time_filter) -> int:
     return dataset.count_rows(filter=time_filter)
 
 
+def _as_utc_timestamp(value) -> pd.Timestamp:
+    return ensure_timezone(pd.Timestamp(value))
+
+
+def _same_utc_day(start: pd.Timestamp, end: pd.Timestamp) -> bool:
+    """True when both ends fall on the same UTC calendar day.
+
+    The estimation index is day-granular: splitting inside a day does not
+    change SUM(c), so the download falls back to a live count instead.
+    """
+    return start.floor("D") == end.floor("D")
+
+
+def _split_on_utc_day_boundary(
+    start: pd.Timestamp, end: pd.Timestamp
+) -> tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp, pd.Timestamp]:
+    """Split a multi-day range at a UTC midnight, not at the timestamp midpoint.
+
+    The estimation index keys rows by calendar day, so a binary time split
+    around midnight still covers the same day keys and SUM(c) never falls —
+    the loop then bisects down to nanoseconds. Cutting at the midpoint
+    midnight separates the days in one step.
+    """
+    start = _as_utc_timestamp(start)
+    end = _as_utc_timestamp(end)
+    start_day = start.floor("D")
+    end_day = end.floor("D")
+    if start_day == end_day:
+        raise ValueError(
+            f"Range is a single UTC day; cannot split on a day boundary: "
+            f"{start} to {end}"
+        )
+    days = (end_day - start_day).days
+    mid = start_day + pd.Timedelta(days=(days + 1) // 2)
+    left_end = mid - pd.Timedelta(nanoseconds=1)
+    if left_end < start or mid > end:
+        raise ValueError(
+            f"Range too short to split on a UTC day boundary: {start} to {end}"
+        )
+    return start, left_end, mid, end
+
+
+def _enqueue_split(
+    q: list,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    times_of_split: int,
+    num_rows: int,
+    row_limit: int,
+    force_live: bool,
+    checked_date_ranges: list[dict],
+    split_fn=None,
+) -> None:
+    """Replace a too-large range with two non-overlapping halves, or keep it."""
+    if split_fn is None:
+        split_fn = split_date_range_binary
+    try:
+        left_start, left_end, right_start, right_end = split_fn(start, end)
+        # Parent is discarded: only the two non-overlapping halves are
+        # re-queued. Log makes that replacement explicit so nested split
+        # lines are not read as re-processing the same parent range.
+        log.info(
+            "Range too large (%s rows > limit %s); discarding parent "
+            "[%s → %s] and enqueueing non-overlapping halves "
+            "[%s → %s] and [%s → %s] (split depth %s → %s)",
+            num_rows,
+            row_limit,
+            start,
+            end,
+            left_start,
+            left_end,
+            right_start,
+            right_end,
+            times_of_split,
+            times_of_split + 1,
+        )
+        heapq.heappush(q, (left_start, left_end, times_of_split + 1, force_live))
+        heapq.heappush(q, (right_start, right_end, times_of_split + 1, force_live))
+    except Exception as e:
+        log.warning(f"Could not split range {start} to {end}: {e}")
+        checked_date_ranges.append({"start_date": start, "end_date": end})
+
+
+def _live_count_rows(dataset, start, end, time_dim) -> int | None:
+    """Exact row count for [start, end], or None when the range has no overlap.
+
+    Full timestamps, not "%Y-%m-%d": create_time_filter compares against
+    pd.to_datetime(end_str), so a day-only end becomes midnight and the
+    count covers one instant instead of the range. Counting 0 makes the
+    caller drop the range, and that data is never downloaded.
+    """
+    start_str = to_naive_utc_string(start)
+    end_str = to_naive_utc_string(end)
+
+    try:
+        time_filter = create_time_filter(
+            dataset=dataset,
+            date_start=start_str,
+            date_end=end_str,
+            time_varname=time_dim,
+        )
+    except DateOutOfRangeError as e:
+        # create_time_filter validates against partition/temporal bounds and can
+        # raise false positives; fall back to a filter clamped to real extent.
+        # Import note: catch DataQuery.DateOutOfRangeError (what create_time_filter
+        # raises) — lib.exceptions.DateOutOfRangeError is a separate class.
+        log.info(
+            "create_time_filter out of range for %s to %s (%s); "
+            "trying customised time filter",
+            start_str,
+            end_str,
+            e,
+        )
+        try:
+            time_filter = create_customised_time_filter(
+                dataset=dataset, start=start, end=end, time_varname=time_dim
+            )
+        except ValueError as e2:
+            # Fully non-overlapping after clamp (e.g. query after dataset end).
+            log.info(
+                "Skipping date range %s to %s: no overlap with dataset extent (%s)",
+                start,
+                end,
+                e2,
+            )
+            return None
+    return _count_rows_with_retry(dataset, time_filter)
+
+
+def _handle_with_index(
+    q: list,
+    checked_date_ranges: list[dict],
+    uuid: str,
+    key: str,
+    meta: EstimationSidecarMetadata,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    times_of_split: int,
+) -> bool:
+    """Try to keep / skip / split using the weekly index.
+
+    Returns True when the range is fully handled. False means the caller
+    should live-count this window (tail after max_date, a single day still
+    over the index threshold, or an index query failure).
+    """
+    last_covered = index_coverage_end(meta)
+    if start > last_covered:
+        log.info(
+            "Date range [%s → %s] is after index max_date %s; "
+            "using live row count for the uncovered tail",
+            start,
+            end,
+            meta.max_date,
+        )
+        return False
+    if end > last_covered:
+        # Indexed prefix + live tail, same split depth (this is coverage,
+        # not a size split).
+        heapq.heappush(q, (start, last_covered, times_of_split, False))
+        tail_start = last_covered + pd.Timedelta(nanoseconds=1)
+        if tail_start <= end:
+            heapq.heappush(q, (tail_start, end, times_of_split, True))
+        log.info(
+            "Date range [%s → %s] straddles index max_date %s; "
+            "index-counting [%s → %s] and live-counting the tail",
+            start,
+            end,
+            meta.max_date,
+            start,
+            last_covered,
+        )
+        return True
+
+    num_rows = count_index_rows(uuid, key, meta, start, end)
+    if num_rows is None:
+        return False
+    if num_rows == 0:
+        # Historical empty month: the weekly index covers this window.
+        return True
+    if num_rows <= PARQUET_INDEX_SUBSET_ROW_NUMBER:
+        checked_date_ranges.append({"start_date": start, "end_date": end})
+        return True
+    if _same_utc_day(start, end):
+        log.info(
+            "Index count %s for single day [%s → %s] exceeds %s; "
+            "falling back to live row count",
+            num_rows,
+            start,
+            end,
+            PARQUET_INDEX_SUBSET_ROW_NUMBER,
+        )
+        return False
+
+    _enqueue_split(
+        q,
+        start,
+        end,
+        times_of_split,
+        num_rows,
+        PARQUET_INDEX_SUBSET_ROW_NUMBER,
+        False,
+        checked_date_ranges,
+        split_fn=_split_on_utc_day_boundary,
+    )
+    return True
+
+
 def check_rows_with_date_range(
     api: BaseAPI, uuid: str, key: str, ds: ParquetDataSource, date_ranges: list[dict]
 ) -> list[dict]:
@@ -73,6 +287,13 @@ def check_rows_with_date_range(
     If rows number exceeds PARQUET_SUBSET_ROW_NUMBER, split this date range with binary division, until rows number
     under the safe threshold.
     If rows number is 0, remove this date range from the list of date_ranges so that to skip further querying data.
+
+    When the weekly estimation index is available it answers the count with a
+    DuckDB SUM over the few-MB index instead of dataset.count_rows() on S3.
+    Index zeros are trusted only inside the covered date range; the tail after
+    max_date and any single day still over the (tighter) index threshold fall
+    back to a live count.
+
     Args:
         api: BaseAPI instance for column name mapping
         uuid: Dataset UUID for metadata lookup
@@ -96,105 +317,65 @@ def check_rows_with_date_range(
         0
     ]
 
+    index_meta = sidecar_for_row_counts(api, uuid, key)
+    if index_meta is not None and not index_meta.has_time:
+        log.info(
+            "estimation index for %s/%s is timeless; using live row counts",
+            uuid,
+            key,
+        )
+        index_meta = None
+    if index_meta is not None:
+        log.info(
+            "using estimation index for parquet row-count splits on %s/%s",
+            uuid,
+            key,
+        )
+
     # Go through monthly interval
     for date_range in date_ranges:
-        month_start, month_end = date_range["start_date"], date_range["end_date"]
+        month_start = _as_utc_timestamp(date_range["start_date"])
+        month_end = _as_utc_timestamp(date_range["end_date"])
         if month_end < month_start:
             continue
-        heapq.heappush(q, (month_start, month_end, 0))
+        heapq.heappush(q, (month_start, month_end, 0, False))
 
     # check row count
     while q:
-        start, end, times_of_split = heapq.heappop(q)
+        start, end, times_of_split, force_live = heapq.heappop(q)
         if times_of_split >= MAX_PARQUET_SPLIT:
             checked_date_ranges.append({"start_date": start, "end_date": end})
             continue
 
-        # Full timestamps, not "%Y-%m-%d": create_time_filter compares against
-        # pd.to_datetime(end_str), so a day-only end becomes midnight and the
-        # count covers one instant instead of the range. Counting 0 makes the
-        # loop below drop the range, and that data is never downloaded.
-        start_str = to_naive_utc_string(start)
-        end_str = to_naive_utc_string(end)
-
-        try:
-            time_filter = create_time_filter(
-                dataset=dataset,
-                date_start=start_str,
-                date_end=end_str,
-                time_varname=time_dim,
-            )
-        except DateOutOfRangeError as e:
-            # create_time_filter validates against partition/temporal bounds and can
-            # raise false positives; fall back to a filter clamped to real extent.
-            # Import note: catch DataQuery.DateOutOfRangeError (what create_time_filter
-            # raises) — lib.exceptions.DateOutOfRangeError is a separate class.
-            log.info(
-                "create_time_filter out of range for %s to %s (%s); "
-                "trying customised time filter",
-                start_str,
-                end_str,
-                e,
-            )
-            try:
-                time_filter = create_customised_time_filter(
-                    dataset=dataset, start=start, end=end, time_varname=time_dim
-                )
-            except ValueError as e2:
-                # Fully non-overlapping after clamp (e.g. query after dataset end).
-                log.info(
-                    "Skipping date range %s to %s: no overlap with dataset extent (%s)",
-                    start,
-                    end,
-                    e2,
-                )
+        if index_meta is not None and not force_live:
+            if _handle_with_index(
+                q,
+                checked_date_ranges,
+                uuid,
+                key,
+                index_meta,
+                start,
+                end,
+                times_of_split,
+            ):
                 continue
-        num_rows = _count_rows_with_retry(dataset, time_filter)
 
-        if num_rows == 0:
-            # skip the date range if no data in this range
+        num_rows = _live_count_rows(dataset, start, end, time_dim)
+        if num_rows is None or num_rows == 0:
             continue
-        elif num_rows <= PARQUET_SUBSET_ROW_NUMBER:
-            checked_date_ranges.append(
-                {
-                    "start_date": start,
-                    "end_date": end,
-                }
-            )
+        if num_rows <= PARQUET_SUBSET_ROW_NUMBER:
+            checked_date_ranges.append({"start_date": start, "end_date": end})
         else:
-            try:
-                left_start, left_end, right_start, right_end = split_date_range_binary(
-                    start, end
-                )
-                # Parent is discarded: only the two non-overlapping halves are
-                # re-queued. Log makes that replacement explicit so nested split
-                # lines are not read as re-processing the same parent range.
-                log.info(
-                    "Range too large (%s rows > limit %s); discarding parent "
-                    "[%s → %s] and enqueueing non-overlapping halves "
-                    "[%s → %s] and [%s → %s] (split depth %s → %s)",
-                    num_rows,
-                    PARQUET_SUBSET_ROW_NUMBER,
-                    start,
-                    end,
-                    left_start,
-                    left_end,
-                    right_start,
-                    right_end,
-                    times_of_split,
-                    times_of_split + 1,
-                )
-                heapq.heappush(q, (left_start, left_end, times_of_split + 1))
-                heapq.heappush(q, (right_start, right_end, times_of_split + 1))
-
-            except Exception as e:
-                log.warning(f"Could not split range {start} to {end}: {e}")
-                checked_date_ranges.append(
-                    {
-                        "start_date": start,
-                        "end_date": end,
-                    }
-                )
+            _enqueue_split(
+                q,
+                start,
+                end,
+                times_of_split,
+                num_rows,
+                PARQUET_SUBSET_ROW_NUMBER,
+                True,
+                checked_date_ranges,
+            )
 
     return checked_date_ranges
 
