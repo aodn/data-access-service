@@ -2,26 +2,24 @@
 
 import heapq
 import logging
-import numpy as np
 import pandas as pd
 import pytz
 
 from typing import Tuple
 import pyarrow.dataset as ds
 from pandas._libs import NaTType
-from pyarrow import compute as pc
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from aodn_cloud_optimised.lib.DataQuery import (
     DateOutOfRangeError,
     get_temporal_extent,
-    get_timestamps_boundary_values,
     create_time_filter,
     ParquetDataSource,
 )
 
-from data_access_service.batch.subsetting.helpers.time_column import (
+from data_access_service.utils.time_column_utils import (
     TimeColumn,
+    build_time_filter,
     resolve_time_column,
 )
 from data_access_service.core.api import BaseAPI
@@ -277,24 +275,10 @@ def create_customised_time_filter(
             f"Invalid time range after boundary adjustment: {start} >= {end}"
         )
 
-    start_str = to_naive_utc_string(start)
-    end_str = to_naive_utc_string(end)
-
-    partition_start, partition_end = get_timestamps_boundary_values(
-        dataset, start_str, end_str
-    )
-
-    expr1 = pc.field("timestamp") >= np.int64(partition_start)
-    expr2 = pc.field("timestamp") <= np.int64(partition_end)
-
     if time_column is None:
         time_column = resolve_time_column(dataset, time_varname)
 
-    expr3 = pc.field(time_varname) >= time_column.to_literal(start)
-    expr4 = pc.field(time_varname) <= time_column.to_literal(end)
-
-    expression = expr1 & expr2 & expr3 & expr4
-    return expression
+    return build_time_filter(dataset, time_column, start, end)
 
 
 def trim_date_range(
