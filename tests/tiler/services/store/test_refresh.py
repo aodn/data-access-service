@@ -1,17 +1,13 @@
-"""TTL-triggered refresh is bounded and jittered.
-
-A raw thread per expired store is a stampede at 60 stores, and because prewarm
-opens them together they share a deadline, making it periodic.
+"""Cron-triggered refresh: ``refresh_all`` re-opens every currently-valid
+store sequentially, is never triggered from the request path, and does not
+let one store's failure stop the sweep.
 """
 
 import threading
-import time
 
 import numpy as np
-import pytest
 import xarray as xr
 
-from data_access_service.tiler.services.store import registry
 from data_access_service.tiler.services.store.registry import StoreRegistry
 
 
@@ -37,10 +33,10 @@ class _FakeZarrSource:
 
 
 def _patch_resolve(monkeypatch, factory):
-    """``factory`` is a zero-arg callable returning a Dataset (or raises)."""
+    """``factory`` is a one-arg callable (store_url) returning a Dataset (or raises)."""
 
-    def resolve(_url: str):
-        return _FakeZarrSource(factory())
+    def resolve(url: str):
+        return _FakeZarrSource(factory(url))
 
     monkeypatch.setattr(
         "data_access_service.tiler.services.store.registry._resolve_zarr_source",
@@ -48,112 +44,110 @@ def _patch_resolve(monkeypatch, factory):
     )
 
 
-def test_refresh_uses_the_bounded_pool_not_a_raw_thread(monkeypatch):
-    _patch_resolve(monkeypatch, _make_ds)
-    monkeypatch.setattr(
-        threading,
-        "Thread",
-        lambda *a, **k: pytest.fail("refresh must go through the bounded executor"),
-    )
-    submitted: list[str] = []
-    monkeypatch.setattr(
-        registry._REFRESH_EXECUTOR,
-        "submit",
-        lambda fn, url: submitted.append(url),
-    )
+def test_request_path_never_refreshes_an_already_open_store(monkeypatch):
+    opens: list[str] = []
 
-    store = StoreRegistry(ttl=0.0)  # everything is immediately stale
+    def factory(url):
+        opens.append(url)
+        return _make_ds()
+
+    _patch_resolve(monkeypatch, factory)
+    store = StoreRegistry()
+
+    first = store.get_datasource("s3://b/a.zarr")
+    for _ in range(10):
+        assert store.get_datasource("s3://b/a.zarr") is first
+
+    assert opens == ["s3://b/a.zarr"]  # only the initial open, never a refresh
+
+
+def test_refresh_all_reopens_every_published_store(monkeypatch):
+    opens: list[str] = []
+
+    def factory(url):
+        opens.append(url)
+        return _make_ds()
+
+    _patch_resolve(monkeypatch, factory)
+    store = StoreRegistry()
+    urls = [f"s3://b/{i}.zarr" for i in range(5)]
+    for url in urls:
+        store.get(url)
+    opens.clear()
+
+    store.refresh_all()
+
+    assert opens == urls
+
+
+def test_refresh_all_publishes_a_new_source_object(monkeypatch):
+    _patch_resolve(monkeypatch, lambda url: _make_ds())
+    store = StoreRegistry()
     store.get("s3://b/a.zarr")
-    store.get("s3://b/a.zarr")
+    first = store.get_datasource("s3://b/a.zarr")
 
-    assert submitted == ["s3://b/a.zarr"]
+    store.refresh_all()
+
+    assert store.get_datasource("s3://b/a.zarr") is not first
 
 
-def test_refresh_concurrency_never_exceeds_the_configured_bound(monkeypatch):
+def test_refresh_all_is_sequential_not_concurrent(monkeypatch):
     peak = {"current": 0, "max": 0}
     lock = threading.Lock()
-    phase = {"refresh": False}
 
-    def factory():
-        if not phase["refresh"]:
-            return _make_ds()
+    def factory(url):
         with lock:
             peak["current"] += 1
             peak["max"] = max(peak["max"], peak["current"])
-        time.sleep(0.05)
         with lock:
             peak["current"] -= 1
         return _make_ds()
 
     _patch_resolve(monkeypatch, factory)
-    store = StoreRegistry(ttl=0.0)
+    store = StoreRegistry()
     urls = [f"s3://b/{i}.zarr" for i in range(20)]
     for url in urls:
         store.get(url)
 
-    phase["refresh"] = True
-    for url in urls:
-        store.get(url)  # each is stale, so each queues a refresh
+    store.refresh_all()
 
-    deadline = time.monotonic() + 10
-    while store._refreshing and time.monotonic() < deadline:
-        time.sleep(0.01)
-
-    bound = registry._REFRESH_EXECUTOR._max_workers
-    assert peak["max"] <= bound, f"{peak['max']} concurrent refreshes exceeds {bound}"
-    assert peak["max"] > 0, "no refresh actually ran"
+    assert peak["max"] == 1
 
 
-def test_one_store_queues_at_most_one_refresh(monkeypatch):
-    _patch_resolve(monkeypatch, _make_ds)
-    submitted: list[str] = []
-    monkeypatch.setattr(
-        registry._REFRESH_EXECUTOR, "submit", lambda fn, url: submitted.append(url)
-    )
+def test_one_store_failure_does_not_stop_the_sweep(monkeypatch):
+    refreshing = {"active": False}
 
-    store = StoreRegistry(ttl=0.0)
-    store.get("s3://b/a.zarr")
-    for _ in range(10):
-        store.get("s3://b/a.zarr")
+    def factory(url):
+        if refreshing["active"] and url == "s3://b/broken.zarr":
+            raise RuntimeError("s3 down")
+        return _make_ds()
 
-    assert submitted == ["s3://b/a.zarr"]
+    _patch_resolve(monkeypatch, factory)
+    store = StoreRegistry()
+    store.get("s3://b/broken.zarr")
+    store.get("s3://b/healthy.zarr")
+    healthy_first = store.get_datasource("s3://b/healthy.zarr")
 
+    refreshing["active"] = True
+    store.refresh_all()  # must not raise
 
-def test_stale_store_is_served_immediately_during_refresh(monkeypatch):
-    _patch_resolve(monkeypatch, _make_ds)
-    monkeypatch.setattr(registry._REFRESH_EXECUTOR, "submit", lambda fn, url: None)
-
-    store = StoreRegistry(ttl=0.0)
-    first = store.get_datasource("s3://b/a.zarr")
-    assert store.get_datasource("s3://b/a.zarr") is first
-
-
-def test_jitter_spreads_deadlines_across_stores(monkeypatch):
-    _patch_resolve(monkeypatch, _make_ds)
-
-    store = StoreRegistry(ttl=600.0)
-    for i in range(30):
-        store.get(f"s3://b/{i}.zarr")
-
-    jitters = set(store._ttl_jitter.values())
-    assert len(jitters) > 1, "every store drew the same jitter"
-    assert all(0.0 <= j <= 600.0 * registry._REFRESH_JITTER_FRACTION for j in jitters)
+    # The failed refresh keeps serving the last-known-good handle...
+    assert store.get_datasource("s3://b/broken.zarr") is not None
+    # ...while the other store's refresh still went through.
+    assert store.get_datasource("s3://b/healthy.zarr") is not healthy_first
 
 
-def test_jitter_is_bounded_so_freshness_policy_is_not_changed(monkeypatch):
-    _patch_resolve(monkeypatch, _make_ds)
-
-    store = StoreRegistry(ttl=600.0)
-    store.get("s3://b/a.zarr")
-
-    assert store._ttl_jitter["s3://b/a.zarr"] <= 60.0
+def test_refresh_all_skips_stores_never_opened():
+    store = StoreRegistry()
+    store.refresh_all()  # nothing published yet; must not raise
+    assert store._stores == {}
 
 
-def test_clear_drops_jitter_state(monkeypatch):
-    _patch_resolve(monkeypatch, _make_ds)
-    store = StoreRegistry(ttl=600.0)
+def test_clear_drops_published_stores(monkeypatch):
+    _patch_resolve(monkeypatch, lambda url: _make_ds())
+    store = StoreRegistry()
     store.get("s3://b/a.zarr")
 
     store.clear()
 
-    assert store._ttl_jitter == {}
+    assert store._stores == {}

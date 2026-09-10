@@ -59,7 +59,7 @@ def test_get_products_reflects_effective_state(client, monkeypatch):
     assert p["data_tile"]["padding"] == 1
     # ocean_masked here is the Product's own default (False). In production the
     # real currents product gets True from the dataset override in
-    # gridded_variables.json; this instance was constructed directly.
+    # the gridded_variables config; this instance was constructed directly.
     assert p["ocean_masked"] is False
 
 

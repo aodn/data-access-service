@@ -85,6 +85,36 @@ class Config:
         return Config._deep_merge(base, override)
 
     @staticmethod
+    def _load_tiler_catalog_section(section: str):
+        """Read one section of the tiler's static product-catalogue config —
+        straight off the base config.yaml, deliberately bypassing the
+        per-environment overlay merge since this data doesn't vary by
+        environment.
+        """
+        tiler = (
+            Config.load_config("data_access_service/config/config.yaml") or {}
+        ).get("tiler", {})
+        return tiler.get(section)
+
+    @staticmethod
+    def get_tiler_blacklist() -> List | None:
+        """Stores to drop entirely before candidates are fanned out — see
+        services/product/discovery.py::_load_store_blacklist."""
+        return Config._load_tiler_catalog_section("blacklist")
+
+    @staticmethod
+    def get_tiler_gridded_variables() -> List | None:
+        """Variable specifications fanned out across the metadata catalogue at
+        startup — see services/product/discovery.py::_load_gridded_variable_specs."""
+        return Config._load_tiler_catalog_section("gridded_variables")
+
+    @staticmethod
+    def get_tiler_products_customisation() -> List | None:
+        """Per-product tuning layered onto discovered candidates by id — see
+        tiler/schemas/products.py::load_product_overrides."""
+        return Config._load_tiler_catalog_section("products_customisation")
+
+    @staticmethod
     def resolve_profile(profile: EnvType = None) -> EnvType:
         """Resolve the active profile, falling back to env detection when not given."""
         if profile is None:
@@ -378,14 +408,23 @@ class Config:
             region=sconfig["region"],
         )
 
+    def get_sites_reload_interval_hours(self) -> int:
+        """Hours between cron sweeps that reload a sites repository if its S3
+        snapshot changed (see ``core/scheduler.py``).
+
+        A plain read, unlike :meth:`get_sites_config` — no ``mkdtemp`` side
+        effect, so it's safe to call on every scheduler start.
+        """
+        sconfig = self.config.get("sites", {}).get("config", {})
+        return sconfig["reload_interval_hours"]
+
     def get_tiler_config(self) -> TilerConfig:
         redis_env = os.getenv("CACHE_HOST")
         tconfig = self.config.get("tiler", {}).get("config", {})
         return TilerConfig(
             co_bucket=f"s3://{tconfig.get('co_bucket', 'aodn-cloud-optimised')}",
-            store_ttl_seconds=tconfig["store_ttl_seconds"],
             store_prewarm_workers=tconfig["store_prewarm_workers"],
-            store_refresh_workers=tconfig["store_refresh_workers"],
+            store_refresh_interval_hours=tconfig["store_refresh_interval_hours"],
             thread_pool_size=tconfig["thread_pool_size"],
             animation_workers=tconfig["animation_workers"],
             cache_backend=tconfig["cache_backend"],

@@ -1,9 +1,13 @@
 """Per-URL registry of long-lived Zarr handles via aodn_cloud_optimised.
 
 Not a cache in the strict sense: handles are not evicted (the URL set is small
-and bounded by registered products), and ``ttl`` triggers a background refresh
-rather than expiry. Stale entries keep serving until the refresh completes, so
-requests never block on freshness — only the very first open per URL blocks.
+and bounded by registered products) and are never refreshed from the request
+path — a request only ever serves the currently-published handle, so reads
+never block on freshness beyond the very first open per URL. Freshness is
+instead the job of a periodic cron sweep (``refresh_all``, driven by
+``core.scheduler``) that walks every URL already in ``_stores`` and re-opens
+it one at a time, bounding staleness to the sweep interval regardless of how
+often (or rarely) a given store is requested.
 
 A per-store ``{timestamp: (raw_timestamp, iso_string)}`` index is built
 alongside the source so ``load_slice`` can resolve a requested timestamp in
@@ -32,9 +36,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import logging
-import random
 import threading
-import time
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -54,21 +56,10 @@ logger = logging.getLogger(__name__)
 
 _tiler_config = Config.get_config().get_tiler_config()
 
-_STORE_TTL = float(_tiler_config.store_ttl_seconds)
-
 # Capacity gate for concurrent store opens during prewarm. Bounded to the S3
 # connection ceiling, not CPU. Runs on the shared anyio pool but a separate
 # budget so a many-product startup can't transiently consume tile-handler slots.
 _STORE_PREWARM_LIMITER = anyio.CapacityLimiter(_tiler_config.store_prewarm_workers)
-
-# Bounded: a raw thread per expired store is a stampede at 60 stores.
-_REFRESH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-    max_workers=_tiler_config.store_refresh_workers,
-    thread_name_prefix="store-refresh",
-)
-
-# So stores opened together at startup do not all expire at once.
-_REFRESH_JITTER_FRACTION = 0.1
 
 _PREWARM_MAX_ATTEMPTS = 3
 _PREWARM_BACKOFF_SECONDS = 1.0
@@ -170,32 +161,22 @@ class StoreRegistry:
     lock until this pattern was introduced).
     """
 
-    def __init__(self, ttl: float) -> None:
-        self._ttl = ttl
+    def __init__(self) -> None:
         self._stores: dict[str, ZarrDataSource] = {}
-        self._opened_at: dict[str, float] = {}
-        self._ttl_jitter: dict[str, float] = {}
-        self._refreshing: set[str] = set()
         self._in_flight: dict[str, concurrent.futures.Future] = {}
         self._time_index: dict[str, dict[pd.Timestamp, tuple[object, str]]] = {}
         self._failed_stores: dict[str, BaseException] = {}
         self._lock = threading.Lock()
 
     def _ensure_open(self, store_url: str) -> ZarrDataSource:
-        """Return the long-lived source for ``store_url``, opening on first request."""
+        """Return the long-lived source for ``store_url``, opening on first request.
+
+        Once published, a store is served as-is regardless of age — freshness
+        is the cron sweep's job (``refresh_all``), not this request path's.
+        """
         should_open = False
         with self._lock:
             if store_url in self._stores:
-                deadline = self._ttl + self._ttl_jitter.get(store_url, 0.0)
-                if time.monotonic() - self._opened_at[store_url] < deadline:
-                    return self._stores[store_url]
-                # Serve stale, refresh once in the background.
-                if store_url not in self._refreshing:
-                    self._refreshing.add(store_url)
-                    logger.info(
-                        f"Store TTL expired, refreshing in background: {store_url}"
-                    )
-                    _REFRESH_EXECUTOR.submit(self._refresh_background, store_url)
                 return self._stores[store_url]
             if store_url in self._in_flight:
                 future = self._in_flight[store_url]
@@ -349,9 +330,6 @@ class StoreRegistry:
         """Drop all cached state. Intended for tests."""
         with self._lock:
             self._stores.clear()
-            self._opened_at.clear()
-            self._ttl_jitter.clear()
-            self._refreshing.clear()
             self._in_flight.clear()
             self._time_index.clear()
             self._failed_stores.clear()
@@ -362,29 +340,34 @@ class StoreRegistry:
         source: ZarrDataSource,
         index: dict[pd.Timestamp, tuple[object, str]],
     ) -> None:
-        """Atomically replace source, opened-at timestamp, and time index for a URL."""
+        """Atomically replace source and time index for a URL."""
         with self._lock:
             self._stores[store_url] = source
-            self._opened_at[store_url] = time.monotonic()
-            self._ttl_jitter[store_url] = random.uniform(
-                0.0, self._ttl * _REFRESH_JITTER_FRACTION
-            )
             self._time_index[store_url] = index
 
-    def _refresh_background(self, store_url: str) -> None:
-        try:
-            source = _open_store(store_url)
-            index = _build_time_index(source.zarr_store)
-            self._publish(store_url, source, index)
-            logger.info(f"Store refreshed: {store_url}")
-        except Exception:
-            logger.exception(f"Background refresh failed: {store_url}")
-        finally:
-            with self._lock:
-                self._refreshing.discard(store_url)
+    def refresh_all(self) -> None:
+        """Re-open every currently-valid store, one at a time (the cron sweep).
+
+        Only stores that already passed prewarm (i.e. currently in
+        ``_stores``) are refreshed — a store prewarm marked failed stays
+        failed until prewarm itself reconsiders it. Sequential by design:
+        overlapping refreshes across many stores is exactly the peak-memory/
+        CPU stampede this replaces. One store's failure is logged and does
+        not stop the sweep.
+        """
+        with self._lock:
+            urls = list(self._stores.keys())
+        for store_url in urls:
+            try:
+                source = _open_store(store_url)
+                index = _build_time_index(source.zarr_store)
+                self._publish(store_url, source, index)
+                logger.info(f"Store refreshed: {store_url}")
+            except Exception:
+                logger.exception(f"Store refresh failed: {store_url}")
 
 
-store_registry = StoreRegistry(_STORE_TTL)
+store_registry = StoreRegistry()
 
 
 def get_store(store_url: str) -> xr.Dataset:
@@ -431,3 +414,8 @@ def unavailable_date_message(store_url: str, ts: pd.Timestamp) -> str:
 async def prewarm_stores(store_urls: list[str]) -> dict[str, BaseException | None]:
     """Prewarm every URL and return the per-URL outcome map."""
     return await store_registry.prewarm(store_urls)
+
+
+def refresh_stores() -> None:
+    """Re-open every currently-valid store (the periodic cron sweep)."""
+    store_registry.refresh_all()

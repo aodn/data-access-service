@@ -92,7 +92,7 @@ def test_load_slice_unknown_date_raises_file_not_found(monkeypatch):
 
 
 def test_load_slice_unknown_variable_names_the_variable_not_the_date(monkeypatch):
-    """A variable absent from the store (e.g. a stale/misconfigured products.json
+    """A variable absent from the store (e.g. a stale/misconfigured products config
     entry) must be reported as such, not misattributed to the date."""
     ds = _ds_with_time(["2024-01-15T13:00:00"])
     _patch_source(monkeypatch, ds)

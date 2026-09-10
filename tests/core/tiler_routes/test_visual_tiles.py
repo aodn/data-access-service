@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from data_access_service.tiler.utils.colors import build_categorical_lut
+from data_access_service.tiler.utils.colors import categorical_lut
 
 _PNG = b"\x89PNG\r\n\x1a\n"
 
@@ -20,10 +20,7 @@ def _avail(dates: list[str]) -> list[tuple[str, pd.Timestamp]]:
 def _registered_categorical(name: str, values: list[int]):
     """Patch a categorical colormap with the given category values into the registry."""
     cats = {v: [v, v, v, 0 if v == 0 else 255] for v in values}
-    lut = [
-        tuple(c)
-        for c in build_categorical_lut(cats, (float(min(values)), float(max(values))))
-    ]
+    lut = [tuple(c) for c in categorical_lut(cats)]
     with (
         patch(
             "data_access_service.tiler.services.colormap.registry._custom_colormaps",

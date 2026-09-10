@@ -371,4 +371,4 @@ async def test_failed_open_is_not_cached_so_a_later_request_retries(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_prewarm_of_an_empty_url_list_is_a_no_op():
-    assert await StoreRegistry(ttl=60).prewarm([]) == {}
+    assert await StoreRegistry().prewarm([]) == {}

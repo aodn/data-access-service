@@ -13,6 +13,7 @@ repos:
           - "--autofix"
           - "--indent=2"
           - "--no-sort-keys"
+        exclude: ^data_access_service/config/tiler/colormaps\.json$
       - id: end-of-file-fixer
       - id: check-yaml
   - repo: https://github.com/shellcheck-py/shellcheck-py
