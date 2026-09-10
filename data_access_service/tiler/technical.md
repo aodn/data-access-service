@@ -53,7 +53,7 @@ It exposes **two independent tile pipelines** from the same underlying data:
 
 The same Zarr slice is the source for both pipelines; they diverge at the renderer. See [§5](#5-tile-coordinate-systems-and-projection-pipeline) for the full distinction.
 
-Products are **derived at startup**, not written out one by one. `data_access_service/config/tiler/gridded_variables.json` lists _variable specifications_ (`"GSLA"`, `["UCUR", "VCUR"]`, …), and warmup fans each one out to every `.zarr` dataset in the DAS metadata catalogue that carries the variable(s), applies any per-product tuning from `data_access_service/config/tiler/products.json`, verifies the stores, and publishes the result. Dataset names and metadata UUIDs therefore always come from live metadata, so a dataset rename changes the derived product id rather than leaving a stale one pointing at nothing. Adding or removing a _variable_ means editing `gridded_variables.json` and redeploying; there is no runtime registration API, and a missing or empty config (either file) is treated as a broken deploy rather than a valid empty state. See [§13](#13-adding-a-new-product).
+Products are **derived at startup**, not written out one by one. The `tiler.gridded_variables` section of `data_access_service/config/config.yaml` lists _variable specifications_ (`"GSLA"`, `["UCUR", "VCUR"]`, …), and warmup fans each one out to every `.zarr` dataset in the DAS metadata catalogue that carries the variable(s), applies any per-product tuning from the `tiler.products_customisation` section of the same file, verifies the stores, and publishes the result. Dataset names and metadata UUIDs therefore always come from live metadata, so a dataset rename changes the derived product id rather than leaving a stale one pointing at nothing. Adding or removing a _variable_ means editing `config.yaml` and redeploying; there is no runtime registration API, and a missing or empty section is treated as a broken deploy rather than a valid empty state. See [§13](#13-adding-a-new-product).
 
 ---
 
@@ -89,7 +89,7 @@ flowchart TD
     vtRouter --> registry
     prodRouter --> registry
 
-    storeReg["Store registry<br/>open zarr handles · TTL store_ttl_seconds"]
+    storeReg["Store registry<br/>open zarr handles · refreshed by cron sweep"]
     registry --> storeReg
 
     sliceCache["L1 · Slice cache + dedup<br/>ns l1 · slice_memo / _slice_dedup<br/>key: store_url, date, variables"]
@@ -172,14 +172,12 @@ With the default `cache_backend: none`, "slice warm" describes what _would_ happ
 data_access_service/
   server.py                       ← FastAPI app; mounts api_router + tiler_router; shared lifespan
   config/
-    config.py                     ← Config / TilerConfig dataclasses, get_tiler_config()
-    config.yaml, config-*.yaml    ← per-environment settings, including the `tiler:` block — see §14
+    config.py                     ← Config / TilerConfig dataclasses, get_tiler_config(), get_tiler_blacklist()/get_tiler_gridded_variables()/get_tiler_products_customisation()
+    config.yaml, config-*.yaml    ← per-environment settings, including the `tiler:` block (operational config plus the static blacklist/gridded_variables/products catalogue — see §13) — see §14
     http_cache.py                 ← IMMUTABLE_CACHE_HEADERS / REVALIDATE_CACHE_HEADERS — shared by the tiler and the sites feature-collection endpoints — see §6
     tiler/
       constants.py                ← LOD (DataTileLodConfig: max_lods, min_coarsest) + TILE (chunk_px, padding defaults) + COORD_NAMES
-      paths.py                    ← GRIDDED_VARIABLES_CONFIG_PATH, PRODUCTS_CONFIG_PATH, COLORMAPS_CONFIG_PATH, LAND_MASK_PATH, OCEAN_MASK_PATH
-      gridded_variables.json       ← variable specifications fanned out across the catalogue at startup — see §13.1
-      products.json                 ← per-product tuning, keyed by derived product id — see §13.2
+      paths.py                    ← COLORMAPS_CONFIG_PATH, LAND_MASK_PATH, OCEAN_MASK_PATH
       colormaps.json               ← static custom-colormap config, committed with the code
   core/
     tiler_routes/
@@ -193,7 +191,7 @@ data_access_service/
       startup.py                   ← run_tiler_warmup() — the tiler's startup sequence, see §11
   tiler/
     schemas/
-      products.py                  ← ProductConfig (GET /products wire shape), ProductOverride (products.json), ManifestResponse, PointResponse
+      products.py                  ← ProductConfig (GET /products wire shape), ProductOverride (config.yaml products section), ManifestResponse, PointResponse
       data_tiles.py                ← DataTileManifestResponse (manifest.json shape)
       visual_tiles.py              ← ColormapListResponse
     services/
@@ -209,7 +207,7 @@ data_access_service/
       product/
         product.py                  ← Product dataclass (+ DataTileConfig/VisualTileConfig/CoastalFill) + LOD algorithm + get_lod_grids lazy-init
         registry.py                  ← PRODUCTS dict + publish_products + get_product / iter_products / iter_product_items facades
-        discovery.py                 ← discover_products — loads config, fans variable specs out across the metadata schema index, layers products.json on top
+        discovery.py                 ← discover_products — loads config, fans variable specs out across the metadata schema index, layers the products_customisation section on top
         verification.py              ← verify_candidate_products + the store-failure classification
         manifest.py                  ← render_manifest() — bounds + per-variable ranges + LOD meta for manifest.json
       rendering/
@@ -218,13 +216,13 @@ data_access_service/
         visual_tiles.py               ← render_tile / render_bbox / render_bbox_animation — Web Mercator (visual tiles)
         masks.py                      ← inpaint_nearest, land_mask_for_grid/land_mask_for_coords, apply_ocean_mask
       store/
-        registry.py                   ← StoreRegistry (stale-while-revalidate) + per-URL time index + get_available_dates
+        registry.py                   ← StoreRegistry (cron-refreshed) + per-URL time index + get_available_dates
         slice_loader.py                ← load_slice / load_slice_uncached — fetch a 2-D slice from the Zarr store
         spatial.py                     ← bbox_to_wgs84 + native_resolution_in_bbox + default_bbox_from_store
     utils/
       dates.py                        ← ts_to_utc_iso + str_to_utc_timestamp
       geo.py                           ← dataset_bounds + json_safe_float
-      colors.py                       ← hex parsing + ramp/categorical LUT builders
+      colors.py                       ← hex/color parsing + ramp interpolation + categorical direct-index LUT builder
       image.py                        ← encode_rgba(arr, fmt) + empty_tile(fmt) + media_type(fmt) — PNG/WebP encoders shared by both renderers
     assets/
       land_mask.npz                   ← committed Natural Earth land mask (coastal fill) — see §7.6
@@ -238,13 +236,13 @@ These paths are constants in `data_access_service/config/tiler/paths.py`, resolv
 
 | Constant                        | Default                               | Notes                                                                                                                                    |
 | ------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `GRIDDED_VARIABLES_CONFIG_PATH` | `config/tiler/gridded_variables.json` | Committed with the code; edit + redeploy to add/remove a _variable_ — products are derived from it, see [§13](#13-adding-a-new-product). |
-| `PRODUCTS_CONFIG_PATH`          | `config/tiler/products.json`          | Committed with the code; edit + redeploy to tune a discovered product by id — see [§13.2](#132-editing-configtilerproductsjson).         |
-| `COLORMAPS_CONFIG_PATH`         | `config/tiler/colormaps.json`         | Same as above, for custom colormaps.                                                                                                     |
+| `COLORMAPS_CONFIG_PATH`         | `config/tiler/colormaps.json`         | Committed with the code; edit + redeploy to add/tune a custom colormap.                                                                  |
 | `LAND_MASK_PATH`                | `tiler/assets/land_mask.npz`          | Committed coastline raster used by coastal fill; see [§7.6](#76-coastal-fill-sparse-products).                                           |
 | `OCEAN_MASK_PATH`               | `tiler/assets/ocean_mask.npz`         | Committed valid-domain raster used by the ocean-validity mask; see [§7.6](#76-coastal-fill-sparse-products).                             |
 
-**Configuration note.** There is no `.env` file. Operational knobs live under the `tiler:` block of `config/config.yaml` (and the per-environment `config-{dev,staging,edge,prod}.yaml` overlays), read once into a `TilerConfig` dataclass via `Config.get_config().get_tiler_config()`. To change a value, edit the YAML and restart the server. See [§14](#14-configuration).
+The static product-catalogue config (`tiler.blacklist`/`tiler.gridded_variables`/`tiler.products_customisation` — add/remove a _variable_ or tune a discovered product by id, see [§13](#13-adding-a-new-product) / [§13.2](#132-editing-the-tilerproducts-section)) lives in `data_access_service/config/config.yaml` instead, alongside the `tiler:` operational block below — read via `Config.get_tiler_blacklist()` / `Config.get_tiler_gridded_variables()` / `Config.get_tiler_products_customisation()`, which deliberately bypass the per-environment overlay merge since this data doesn't vary by environment.
+
+**Configuration note.** There is no `.env` file. Operational knobs live under the `tiler.config` block of `config/config.yaml` (and the per-environment `config-{dev,staging,edge,prod}.yaml` overlays), read once into a `TilerConfig` dataclass via `Config.get_config().get_tiler_config()`. To change a value, edit the YAML and restart the server. See [§14](#14-configuration).
 
 ---
 
@@ -594,7 +592,7 @@ Because the data-tile cut writes the existing valid-mask channel (alpha for scal
 
 **Land-mask asset.** The coastline is a committed, bit-packed global raster `tiler/assets/land_mask.npz` (Natural Earth 1:10m land, ~5.5 km resolution), built once by `scripts/build_land_mask.py`. At runtime `masks.py` needs only numpy + scipy. `load_land_mask` unpacks it lazily and caches the result module-level.
 
-**Ocean-validity mask.** A second committed mask, `tiler/assets/ocean_mask.npz`, built from the model's valid-domain grid. Unlike the land mask, this one is applied to the **raw slice at read time** via `apply_ocean_mask`, not on a render grid — it samples the mask at the source grid's own lon/lat and sets cells outside the valid domain to NaN. Cutting at the source — before bilinear resampling can bleed it into valid neighbours, and before point lookups read it — means every consumer (data tiles, visual tiles, point endpoint) inherits the cut for free. It's opt-in per product via the `ocean_masked` field, which defaults to `false` and is normally switched on through a per-id entry in `products.json` ([§13.2](#132-editing-configtilerproductsjson)) — the mask is built from one specific model grid, so it is a property of that product id rather than of the variable. The mask is applied every time a slice is read from the Zarr store, so a rebuilt mask asset takes effect immediately on restart.
+**Ocean-validity mask.** A second committed mask, `tiler/assets/ocean_mask.npz`, built from the model's valid-domain grid. Unlike the land mask, this one is applied to the **raw slice at read time** via `apply_ocean_mask`, not on a render grid — it samples the mask at the source grid's own lon/lat and sets cells outside the valid domain to NaN. Cutting at the source — before bilinear resampling can bleed it into valid neighbours, and before point lookups read it — means every consumer (data tiles, visual tiles, point endpoint) inherits the cut for free. It's opt-in per product via the `ocean_masked` field, which defaults to `false` and is normally switched on through a per-id entry in the `products_customisation` section ([§13.2](#132-editing-the-tilerproducts-section)) — the mask is built from one specific model grid, so it is a property of that product id rather than of the variable. The mask is applied every time a slice is read from the Zarr store, so a rebuilt mask asset takes effect immediately on restart.
 
 **Caveats.**
 
@@ -662,14 +660,16 @@ An unrecognised name raises `ValueError`, mapped by the router to `400` (query-p
 
 **Custom colormaps.** Defined in `config/tiler/colormaps.json`, committed with the code. Loaded once on startup by `load_colormaps()` in `services/colormap/registry.py` — adding, removing, or changing one means editing the file and redeploying. All colormap state lives in `colormap/registry.py`; runtime resolution (custom → rio-tiler → matplotlib fallback) is a separate module, `services/colormap/resolver.py`.
 
-All colormaps are stored internally as **256-entry RGBA LUTs** (one tuple per normalised byte value, where 0 = data minimum and 255 = data maximum after `rescale`). Entries in `colormaps.json` are already the expanded 256-entry form; `utils/colors.py` has helper functions (hex parsing, ramp/categorical LUT builders) for producing a new entry offline before committing it.
+All colormaps are stored **in memory** as **256-entry RGBA LUTs** (one tuple per byte value 0-255). What that index means differs by mode: for `ramp` it's a normalised byte position (0 = data minimum, 255 = data maximum, after `rescale`); for `categorical` it's the raw integer category code itself, since categorical rendering never rescales. The two modes' on-disk shape in `colormaps.json` differs to match: a `ramp` entry's `entries` array is already the expanded 256-tuple form, while a `categorical` entry instead stores `values` and `colors` as parallel arrays — one colour per real category code, so the file only ever lists as many colours as there are categories. `registry.py` expands a categorical entry into the same 256-slot shape at load time via `categorical_lut()` (`utils/colors.py`), which places each colour at the slot equal to its own value — no rescaling — so two distinct category codes can never collide onto the same slot. `utils/colors.py` also has `parse_color`/`hex_to_rgba` (colour parsing, used to validate every entry on load) and `interpolate_colormap` (building a new ramp's 256 stops offline before committing it).
+
+**Loading is fail-soft and atomic.** `load_colormaps()` validates the whole file before touching the live registry — `mode` must be `ramp`/`categorical`, required fields must be present, a categorical entry's `values` must be unique integers within 0-255 and the same length as `colors`, and every colour must parse as a valid `[r, g, b, a]`. `_reload()` builds the new state into local dicts and only swaps it into the module-level registry once the whole file has validated cleanly, so one bad entry can't leave the registry half-loaded. On failure (malformed JSON or a validation error), `load_colormaps()` logs the error and returns rather than raising — the tiler still starts up with no custom colormaps rather than refusing to start, since rio-tiler/matplotlib's built-in colormaps don't depend on this file.
 
 **Colormap modes.** The `mode` field in a `colormaps.json` entry:
 
 | Mode             | Behaviour                                                                                                                                                                                                                                                                                                                         |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ramp` (default) | A smooth 256-entry gradient                                                                                                                                                                                                                                                                                                       |
-| `categorical`    | Each of a set of integer values maps to one LUT slot; the rest are transparent. The sorted category values are stored alongside the LUT (`values` field) so they can be validated against a product's `flag_values` at request time — the LUT alone can't recover them (transparent categories look identical to unmapped slots). |
+| `categorical`    | Each of a set of integer values maps to its own LUT slot (index == value); the rest are transparent. The category values are also kept unexpanded (`values` field) so they can be validated against a product's `flag_values` at request time — the 256-entry LUT alone can't recover them (transparent categories look identical to unmapped slots). |
 
 Categorical colormaps ignore `rescale`. They render only through the discrete, value-indexed path (nearest-neighbour resampling, a LUT keyed by the raw integer code), reached only for categorical variables.
 
@@ -781,12 +781,11 @@ Because caching is off by default, the **in-process `Deduper`** (below) is the o
 
 Caches the open Zarr store handle (lazy, metadata + coordinate arrays only). Shared across all products that point at the same store URL.
 
-Uses a **stale-while-revalidate** strategy to pick up newly appended time steps without ever blocking a request:
+Freshness is decoupled from the request path entirely — a request only ever serves the currently-published handle, so reads never block on freshness beyond the very first open per URL:
 
 - **Startup** — `prewarm_stores` opens every registered store concurrently on the shared anyio pool, gated by `_STORE_PREWARM_LIMITER` (`store_prewarm_workers`, default 6), so the cache is warm before most requests arrive.
-- **Within TTL** (`store_ttl_seconds`, default `600`) — the cached store is returned immediately.
-- **After TTL** — the stale store is returned immediately for the current request, and a single background daemon thread (`StoreRegistry._refresh_background`) re-opens it. A `_refreshing` set prevents duplicate refresh threads for the same URL.
 - **First-ever open** — the request blocks until `xr.open_zarr` completes; concurrent requests for the same URL wait on the same `concurrent.futures.Future` (keyed per-URL in `_in_flight`) rather than each opening independently. Opens of _different_ URLs proceed in parallel.
+- **Later opens** — once published, a store is served as-is regardless of age. Picking up newly appended time steps is entirely the job of a periodic cron sweep (`StoreRegistry.refresh_all`, driven by `core/scheduler.py`'s `TaskScheduler`, every `store_refresh_interval_hours`, default 4) that walks every URL already in `_stores` and re-opens it **one at a time** — sequential by design, so staleness is bounded by the sweep interval regardless of how often (or rarely) a store is requested, without ever opening more than one store's metadata concurrently.
 
 Re-opening is cheap — `xr.open_zarr` reads only metadata and coordinate arrays, no data chunks. In-flight `load_slice` calls hold a direct Python reference to the old dataset object and complete normally.
 
@@ -811,7 +810,7 @@ Each `Deduper` instance lives with its one consumer:
 - `_fill_dedup` (`services/rendering/visual_tiles.py`) — the coastal-fill step (`_get_filled_values`), no persistent cache behind it.
 - `_tile_dedup` / `_bbox_dedup` (`core/tiler_routes/visual_tiles.py`) — `Deduper`-only, no `CacheBackend` behind them (coalesce concurrent identical tile/bbox renders; there's no reusable artifact to cache beyond that, only concurrent duplicates to coalesce).
 
-Outside this pairing, `StoreRegistry._in_flight` deduplicates store opens with its own per-URL Future map, layering TTL + stale-while-revalidate on top, which `Deduper` deliberately does not model.
+Outside this pairing, `StoreRegistry._in_flight` deduplicates store opens with its own per-URL Future map, which `Deduper` deliberately does not model.
 
 `Deduper` only coordinates threads within one process — it does nothing across horizontally-scaled instances. With `cache_backend: none` and no distributed lock implemented, a burst of identical requests landing on _different_ instances each pays its own S3 fetch; only within a single instance is the burst collapsed to one fetch.
 
@@ -821,7 +820,7 @@ Outside this pairing, `StoreRegistry._in_flight` deduplicates store opens with i
 
 ### 11.1 Shared lifespan (`data_access_service/server.py`)
 
-The tiler shares a single FastAPI `lifespan` with the rest of `data-access-service`. On startup, the lifespan sets the anyio default thread-pool size from `tiler.thread_pool_size` (since tiler routes are the only sync `def` handlers using it) and schedules the tiler's own startup coroutine, `run_tiler_warmup` (`core/tiler_routes/startup.py`), as one of several background `asyncio.Task`s alongside the rest of the app's own startup work (e.g. `repository_cache_task` for the non-tiler API).
+The tiler shares a single FastAPI `lifespan` with the rest of `data-access-service`. On startup, the lifespan sets the anyio default thread-pool size from `tiler.thread_pool_size` (since tiler routes are the only sync `def` handlers using it) and schedules the tiler's own startup coroutine, `run_tiler_warmup` (`core/tiler_routes/startup.py`), as one of several background `asyncio.Task`s alongside the rest of the app's own startup work (e.g. `scheduler_startup_task` for the non-tiler API's `TaskScheduler`, which also drives the tiler's own store-refresh cron sweep — see [§10.1](#101-store-singleton-servicesstoreregistrypy-storeregistry)).
 
 ### 11.2 `run_tiler_warmup` (`core/tiler_routes/startup.py`)
 
@@ -878,7 +877,7 @@ log, instead of leaving them registered in a state that would never resolve.
 
 No store is special: the outcome is decided by what the store said, never by which products happen to sit on it. Uniformly fatal would be right at 2 stores and wrong at 60 — one flaky S3 endpoint would take the whole tiler to a permanent 503. Keeping unresolved-store products registered is only safe because the availability manifest is fault-isolated per store (see [§6.1](#61-shared-endpoints-mounted-under-both-data_tiles-and-visual_tiles)); otherwise one bad store would fail `/manifest`, and ogcapi-java fetches that on every collection-products call.
 
-Phase 1 deliberately checks _presence_ and _time-indexability_ only — not dimensions, dtype, or pair-shape compatibility. The curated variable list in `gridded_variables.json` is the phase-1 authority on renderability; per-variable proof is a later step that slots in behind this same call site.
+Phase 1 deliberately checks _presence_ and _time-indexability_ only — not dimensions, dtype, or pair-shape compatibility. The curated variable list in the `gridded_variables` section is the phase-1 authority on renderability; per-variable proof is a later step that slots in behind this same call site.
 
 ### 11.3 Readiness gate
 
@@ -893,7 +892,7 @@ Phase 1 deliberately checks _presence_ and _time-indexability_ only — not dime
 | Trigger                     | Action                                                                                       | Mechanism                                                                                                                                                                           |
 | --------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `prewarm_stores` at startup | Open each unique Zarr store URL (metadata only) and report a per-URL outcome                 | Fans out on the anyio pool, gated by `_STORE_PREWARM_LIMITER` (`store_prewarm_workers`, default 6); operational failures get 3 attempts with exponential backoff                    |
-| Store TTL expiry            | Re-open Zarr store in the background to pick up new timestamps; stale store served meanwhile | `StoreRegistry._refresh_background` on a bounded pool (`store_refresh_workers`, default 4), with per-store TTL jitter so stores opened together at startup don't all expire at once |
+| Cron sweep, every `store_refresh_interval_hours` | Re-open every currently-published Zarr store to pick up new timestamps; the currently-published handle keeps serving requests until its refresh completes | `StoreRegistry.refresh_all`, scheduled by `TaskScheduler` (`core/scheduler.py`, APScheduler `CronTrigger`); one store at a time, so refreshes never overlap regardless of how many stores are registered |
 
 ---
 
@@ -959,7 +958,7 @@ A store-prewarm burst saturating its budget does not reduce the tile-handler bud
 
 #### Non-pool worker threads
 
-- **Store TTL refresh daemon threads** — `StoreRegistry._refresh_background` spawns a bare `threading.Thread` per stale-store re-open, outside the anyio pool (triggered from inside `get()`, which may itself be running in a worker thread without an event-loop reference). Not a reusable pool.
+- **Store refresh cron job** — `StoreRegistry.refresh_all` runs on APScheduler's own executor thread (`core/scheduler.py`'s `TaskScheduler`), entirely outside the anyio pool, and re-opens stores strictly one at a time — never more than one Zarr store's metadata open concurrently regardless of how many stores are registered.
 - **C-extension threads** — Zarr decompression, NumPy via BLAS, and PIL all release the GIL and may use their own internal threads. Total OS thread count is always higher than the sum of the Python-managed threads above.
 - **The numba parallel-kernel lock** ([§7.4](#74-resample-and-normalize-numba-jit)) serialises entry into `prange` regions across whichever anyio worker threads happen to call into the resample/normalize kernels concurrently — it doesn't add threads, it bounds how many parallel regions can be open at once.
 
@@ -992,38 +991,40 @@ Sustained throughput is bound by real resources — CPU cores and the S3 connect
 
 ## 13. Adding a new product
 
-Products are **derived**, not listed. `config/tiler/gridded_variables.json` is the single source of truth for which _variables_ the tiler serves; which _datasets_ those variables live on comes from the DAS metadata catalogue at startup. `config/tiler/products.json` then layers optional per-product tuning on top, matched by the id discovery derives. Adding a product means adding a variable specification and redeploying — and it may add several products at once, since one specification fans out to every matching `.zarr` dataset.
+Products are **derived**, not listed. The `tiler.gridded_variables` section of `data_access_service/config/config.yaml` is the single source of truth for which _variables_ the tiler serves; which _datasets_ those variables live on comes from the DAS metadata catalogue at startup. The `tiler.products_customisation` section of the same file then layers optional per-product tuning on top, matched by the id discovery derives. Adding a product means adding a variable specification and redeploying — and it may add several products at once, since one specification fans out to every matching `.zarr` dataset.
 
-That indirection is the point. A products.json that hard-codes a dataset name and metadata UUID per product lets an upstream rename leave a stale product id pointing at nothing, with nobody finding out until a tile 404's. Deriving identity (`id`/`source_path`/`metadata_uuid`) from live metadata makes a rename change the derived id instead — `products.json` here only ever _tunes_ an id that discovery already produced, it never establishes one.
+That indirection is the point. A `products_customisation` section that hard-codes a dataset name and metadata UUID per product lets an upstream rename leave a stale product id pointing at nothing, with nobody finding out until a tile 404's. Deriving identity (`id`/`source_path`/`metadata_uuid`) from live metadata makes a rename change the derived id instead — `products_customisation` here only ever _tunes_ an id that discovery already produced, it never establishes one.
 
-### 13.1 Editing `config/tiler/gridded_variables.json`
+### 13.1 Editing the `tiler.gridded_variables` section
 
 A pure flat list — each element is shorthand only, no objects and no tuning:
 
-```json
-["GSL", "GSLA", ["UCUR", "VCUR"]]
+```yaml
+tiler:
+  gridded_variables:
+    - GSL
+    - GSLA
+    - [UCUR, VCUR]
 ```
 
-Loaded as raw JSON by `discovery._load_gridded_variable_specs` — there is no schema/validation layer for this file, unlike `products.json` (see [§13.2](#132-editing-configtilerproductsjson)). It's a flat list, so there's nothing to normalise.
+Loaded by `discovery._load_gridded_variable_specs` — there is no schema/validation layer for this section, unlike `products_customisation` (see [§13.2](#132-editing-the-tilerproducts-section)). It's a flat list, so there's nothing to normalise.
 
 - Each element is a `str` for a scalar product, or an **ordered two-element list** for a vector pair. The pair's order is the R/G channel order the data-tile shader decodes and is **never sorted**.
-- A malformed entry (blank name, a three-element list, a duplicate name in a pair) isn't rejected at load. It's caught downstream instead: `build_candidate_products` requires every name in an entry to be present in a dataset's field set, so a bad entry almost always just matches nothing and gets logged as an unmatched specification — not a hard failure at startup. `test_gridded_variables_config.py` pins the shape of the committed file so a real mistake still shows up in CI.
+- A malformed entry (blank name, a three-element list, a duplicate name in a pair) isn't rejected at load. It's caught downstream instead: `build_candidate_products` requires every name in an entry to be present in a dataset's field set, so a bad entry almost always just matches nothing and gets logged as an unmatched specification — not a hard failure at startup. `test_gridded_variables_config.py` pins the shape of the committed section so a real mistake still shows up in CI.
 
-### 13.2 Editing `config/tiler/products.json`
+### 13.2 Editing the `tiler.products_customisation` section
 
 A flat list of overrides, each keyed by the derived product id (`{dataset.removesuffix('.zarr')}:{'+'.join(v.lower() for v in variables)}`, joined with `+` in configured pair order):
 
-```json
-[
-  {
-    "id": "model_sea_level_anomaly_gridded_realtime:gsla",
-    "data_tile": { "coastal_fill": { "max_dist_px": 4 } }
-  },
-  {
-    "id": "model_sea_level_anomaly_gridded_realtime:ucur+vcur",
-    "ocean_masked": true
-  }
-]
+```yaml
+tiler:
+  products_customisation:
+    - id: model_sea_level_anomaly_gridded_realtime:gsla
+      data_tile:
+        coastal_fill:
+          max_dist_px: 4
+    - id: model_sea_level_anomaly_gridded_realtime:ucur+vcur
+      ocean_masked: true
 ```
 
 Entries normalise into `ProductOverride` (`schemas/products.py`) at load time.
@@ -1032,7 +1033,7 @@ Entries normalise into `ProductOverride` (`schemas/products.py`) at load time.
 - **`visual`** — whether `/visual_tiles` can render this product. Defaults to `true` for a scalar and `false` for a pair; `true` on a pair is rejected, since visual tiles render one scalar band. Set it to `false` on a scalar whose variable the renderer has no sensible colouring for. ogcapi-java publishes `tile_types` from this field, so it is what stops a non-renderable product advertising visual tiles.
 - **`ocean_masked`**, **`data_tile`**, **`visual_tile`** — see [§13.6](#136-optional-overrides).
 - `extra="forbid"` applies at every level, so a typo fails at load rather than being ignored.
-- Duplicate `id`s in the file are rejected at load.
+- Duplicate `id`s in the section are rejected at load.
 
 The live example of why per-id tuning exists: `["UCUR", "VCUR"]` matches 19 datasets, 18 of which are HF-radar sites on entirely different grids. The committed ocean mask is built from the SLA grid, so only `model_sea_level_anomaly_gridded_realtime:ucur+vcur` may enable `ocean_masked` — every other dataset that specification matches keeps the plain default.
 
@@ -1040,10 +1041,10 @@ The live example of why per-id tuning exists: `["UCUR", "VCUR"]` matches 19 data
 
 `run_tiler_warmup` calls one function, `discovery.discover_products(api, base_url)`, which internally:
 
-1. Loads both config files — `discovery._load_gridded_variable_specs()`, `load_product_overrides()`.
-2. Matches each specification against `API.iter_zarr_dataset_variables()` — already filtered to zarr and with `"global_attributes"` stripped from each field set, so discovery never has to know the catalogue holds Parquet too. Matching is **case-sensitive**; a pair requires both names. Builds a `Product` per match at plain defaults: id `f"{dataset.removesuffix('.zarr')}:{'+'.join(v.lower() for v in variables)}"`, `source_path` as `f"{tiler.co_bucket}/{dataset}"` (no trailing slash, ever — that string keys the store registry, date index, and both cache layers), `metadata_uuid` from the index key. This step never looks at `products.json` — see `discovery.build_candidate_products`.
-3. Logs any `products.json` id that matched no candidate (`discovery.log_unmatched_overrides`) — loud, not fatal.
-4. Layers `products.json` on top by id (`discovery.apply_product_overrides`), via `dataclasses.replace` — a separate pass over the already-built candidates, kept apart from step 2 so identity-derivation and config-resolution never mix.
+1. Loads the config sections — `discovery._load_gridded_variable_specs()`, `load_product_overrides()`.
+2. Matches each specification against `API.iter_zarr_dataset_variables()` — already filtered to zarr and with `"global_attributes"` stripped from each field set, so discovery never has to know the catalogue holds Parquet too. Matching is **case-sensitive**; a pair requires both names. Builds a `Product` per match at plain defaults: id `f"{dataset.removesuffix('.zarr')}:{'+'.join(v.lower() for v in variables)}"`, `source_path` as `f"{tiler.co_bucket}/{dataset}"` (no trailing slash, ever — that string keys the store registry, date index, and both cache layers), `metadata_uuid` from the index key. This step never looks at the `products_customisation` section — see `discovery.build_candidate_products`.
+3. Logs any `products_customisation` id that matched no candidate (`discovery.log_unmatched_overrides`) — loud, not fatal.
+4. Layers the `products_customisation` section on top by id (`discovery.apply_product_overrides`), via `dataclasses.replace` — a separate pass over the already-built candidates, kept apart from step 2 so identity-derivation and config-resolution never mix.
 
 Warmup then prewarms every unique store, verifies every candidate, and publishes atomically. See [§11.2](#112-run_tiler_warmup-coretiler_routesstartuppy).
 
@@ -1068,7 +1069,7 @@ Remove the variable specification and redeploy — which removes it from _every_
 
 ### 13.6 Optional overrides
 
-All of the following live in `products.json`, keyed by product id (see [§13.2](#132-editing-configtilerproductsjson)):
+All of the following live in the `products_customisation` section, keyed by product id (see [§13.2](#132-editing-the-tilerproducts-section)):
 
 | Field                      | Default                     | When to override                                                                                                                                   |
 | -------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1093,9 +1094,9 @@ There is no `.env` file and no ad-hoc Python-constants module for the tiler. Eve
 | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | **`config/config.yaml` `tiler:` block** (this section) | Operational knobs — perf, resource limits, backend selection. Do **not** affect wire format or shader contract. | Edit the YAML directly; doesn't need coordinated frontend review.               |
 | **`config/tiler/constants.py`**                        | Wire / shader contracts — values that must stay in lockstep with the frontend or the data encoding.             | Change via PR so frontend and server stay in sync; the diff is the audit trail. |
-| **Per-product fields** (`products.json`)               | Data characteristics that legitimately vary across products.                                                    | Set per product id in the config file; restart.                                 |
+| **Per-product fields** (`products_customisation` section) | Data characteristics that legitimately vary across products.                                                    | Set per product id in the config file; restart.                                 |
 
-The rule when adding a new tunable: ask _who needs to be informed when the value changes?_ Only the operator → the YAML config. The frontend (or any wire-format consumer) needs a matching update → `constants.py`, via code review. Only some products are affected → a per-id field in `products.json`.
+The rule when adding a new tunable: ask _who needs to be informed when the value changes?_ Only the operator → the YAML config. The frontend (or any wire-format consumer) needs a matching update → `constants.py`, via code review. Only some products are affected → a per-id field in the `products_customisation` section.
 
 A wrong-layer choice has real costs: making `LOD.max_lods` a freely-edited operational setting would let someone raise it thinking "more LODs = better detail," silently overflowing the WebGL atlas's 4096×4096 (~64 MB VRAM) cap.
 
@@ -1103,8 +1104,8 @@ A wrong-layer choice has real costs: making `LOD.max_lods` a freely-edited opera
 
 | Key                       | Default            | Description                                                                                                                                                                  |
 | ------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `store_ttl_seconds`       | `600`              | Stale-while-revalidate window for the Zarr store singleton.                                                                                                                  |
 | `store_prewarm_workers`   | `6`                | Capacity-limiter cap for concurrent `xr.open_zarr` opens during startup store prewarm. Sized to the S3 connection pool.                                                      |
+| `store_refresh_interval_hours` | `4`           | Hours between cron sweeps that re-open every prewarmed Zarr store, one at a time, to pick up new timestamps. See [§10.1](#101-store-singleton-servicesstoreregistrypy-storeregistry) and [§11.5](#115-other-background-actions).                                    |
 | `thread_pool_size`        | `20`               | Anyio thread-pool size, shared with the rest of `data-access-service`. Each in-flight sync tiler request uses one slot. See [§12](#12-concurrency-event-loop-and-threading). |
 | `animation_workers`       | `10`               | Capacity-limiter cap for `/animation` per-frame S3 fan-out. Sized to the aiobotocore S3 connection pool.                                                                     |
 | `cache_backend`           | `"none"`           | Selects the L1 `CacheBackend` implementation. `"none"` is the only one implemented today — see [§10](#10-caching-strategy).                                                  |

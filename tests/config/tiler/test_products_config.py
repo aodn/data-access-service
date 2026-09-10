@@ -1,14 +1,12 @@
-"""The committed products.json is valid and still says what it means.
+"""The committed products_customisation section of config.yaml is valid and
+still says what it means.
 
 Same rationale as test_gridded_variables_config.py: load the real committed
 file through the real validator so a malformed or semantically-drifted seed
 fails in CI rather than leaving the tiler at 503 on deploy.
 """
 
-import json
-from pathlib import Path
-
-from data_access_service.config.tiler.paths import PRODUCTS_CONFIG_PATH
+from data_access_service.config.config import Config
 from data_access_service.tiler.schemas.products import load_product_overrides
 
 SLA_GSLA = "model_sea_level_anomaly_gridded_realtime:gsla"
@@ -42,6 +40,6 @@ def test_no_duplicate_override_ids():
     """Checks the raw committed list directly, rather than hardcoding the
     current override count, so this doesn't need updating every time a
     new override is legitimately added."""
-    raw = json.loads(Path(PRODUCTS_CONFIG_PATH).read_text())
+    raw = Config.get_tiler_products_customisation()
     ids = [entry["id"] for entry in raw]
     assert len(ids) == len(set(ids))

@@ -31,7 +31,7 @@ from data_access_service.tiler.services.colormap.registry import (
     get_colormap,
     is_categorical,
 )
-from data_access_service.tiler.utils.colors import categorical_slot, parse_color
+from data_access_service.tiler.utils.colors import parse_color
 
 RGBA = tuple[int, int, int, int]
 
@@ -135,17 +135,15 @@ def _resolve_colors(
 def _registered_categorical_colors(name: str, values: tuple[int, ...]) -> list[RGBA]:
     """Colour per category value from a registered categorical colormap's 256-LUT.
 
-    Categorical colormaps are stored with each value's colour at the slot
-    ``categorical_slot(value, min, max)`` (see [[utils.colors]]). The request-time
-    match check enforces that the colormap's values equal the product's flag_values,
-    so indexing by that slot recovers the right colour for every value — including
-    transparent ones, which a scan for "non-empty entries" would drop.
+    Categorical colormaps are stored with each value's colour at the slot equal
+    to the value itself (see [[colormap.registry]] / [[utils.colors]].categorical_lut),
+    so indexing directly by value recovers the right colour for every value —
+    including transparent ones, which a scan for "non-empty entries" would drop.
     """
     lut = get_colormap(name)
     if not lut or not values:
         return []
-    lo, hi = min(values), max(values)
-    return [tuple(lut[categorical_slot(v, lo, hi)]) for v in values]  # type: ignore[misc]
+    return [tuple(lut[v]) if 0 <= v <= 255 else (0, 0, 0, 0) for v in values]  # type: ignore[misc]
 
 
 def _parse_flag_colors(raw: Any) -> list[RGBA]:

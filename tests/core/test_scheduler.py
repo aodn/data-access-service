@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -16,7 +17,7 @@ class TestReloadRepository:
     def test_refreshes_snapshot_secret_then_reloads(self, monkeypatch):
         monkeypatch.setattr(Config, "is_profile_in", lambda *a, **k: True)
         repo = _make_repo(reload_result=True)
-        scheduler = TaskScheduler(api=MagicMock(), repositories={"mooring": repo})
+        scheduler = TaskScheduler(api=MagicMock(), sites_repositories={"mooring": repo})
 
         manager = MagicMock()
         manager.attach_mock(repo._configure_snapshot_bucket_s3, "configure")
@@ -28,14 +29,14 @@ class TestReloadRepository:
 
     def test_never_touches_primary_bucket_secret(self):
         repo = _make_repo()
-        scheduler = TaskScheduler(api=MagicMock(), repositories={"mooring": repo})
+        scheduler = TaskScheduler(api=MagicMock(), sites_repositories={"mooring": repo})
         scheduler._reload_repository("mooring", repo)
         repo._configure_s3.assert_not_called()
 
     def test_does_not_raise_when_reload_fails(self):
         repo = _make_repo()
         repo.reload_if_changed.side_effect = RuntimeError("boom")
-        scheduler = TaskScheduler(api=MagicMock(), repositories={"mooring": repo})
+        scheduler = TaskScheduler(api=MagicMock(), sites_repositories={"mooring": repo})
         scheduler._reload_repository("mooring", repo)  # must not raise
 
 
@@ -45,7 +46,7 @@ class TestReloadTask:
         mooring = _make_repo()
         buoy = _make_repo()
         scheduler = TaskScheduler(
-            api=MagicMock(), repositories={"mooring": mooring, "wave-buoy": buoy}
+            api=MagicMock(), sites_repositories={"mooring": mooring, "wave-buoy": buoy}
         )
 
         scheduler._reload_task()
@@ -57,7 +58,7 @@ class TestReloadTask:
         monkeypatch.setattr(Config, "is_profile_in", lambda *a, **k: False)
         monkeypatch.setattr(Config, "resolve_profile", lambda: EnvType.DEV)
         repo = _make_repo()
-        scheduler = TaskScheduler(api=MagicMock(), repositories={"mooring": repo})
+        scheduler = TaskScheduler(api=MagicMock(), sites_repositories={"mooring": repo})
 
         scheduler._reload_task()
 
@@ -69,12 +70,50 @@ class TestReloadTask:
         broken.reload_if_changed.side_effect = RuntimeError("boom")
         healthy = _make_repo()
         scheduler = TaskScheduler(
-            api=MagicMock(), repositories={"mooring": broken, "wave-buoy": healthy}
+            api=MagicMock(),
+            sites_repositories={"mooring": broken, "wave-buoy": healthy},
         )
 
         scheduler._reload_task()  # must not raise
 
         healthy.reload_if_changed.assert_called_once()
+
+
+class TestStoreRefreshTask:
+    def test_refreshes_stores_when_profile_allowed(self, monkeypatch):
+        monkeypatch.setattr(Config, "is_profile_in", lambda *a, **k: True)
+        refresh = MagicMock()
+        monkeypatch.setattr(
+            "data_access_service.core.scheduler.refresh_stores", refresh
+        )
+        scheduler = TaskScheduler(api=MagicMock(), sites_repositories={})
+
+        scheduler._store_refresh_task()
+
+        refresh.assert_called_once()
+
+    def test_skips_on_disallowed_profile(self, monkeypatch):
+        monkeypatch.setattr(Config, "is_profile_in", lambda *a, **k: False)
+        monkeypatch.setattr(Config, "resolve_profile", lambda: EnvType.DEV)
+        refresh = MagicMock()
+        monkeypatch.setattr(
+            "data_access_service.core.scheduler.refresh_stores", refresh
+        )
+        scheduler = TaskScheduler(api=MagicMock(), sites_repositories={})
+
+        scheduler._store_refresh_task()
+
+        refresh.assert_not_called()
+
+    def test_does_not_raise_when_refresh_fails(self, monkeypatch):
+        monkeypatch.setattr(Config, "is_profile_in", lambda *a, **k: True)
+        monkeypatch.setattr(
+            "data_access_service.core.scheduler.refresh_stores",
+            MagicMock(side_effect=RuntimeError("boom")),
+        )
+        scheduler = TaskScheduler(api=MagicMock(), sites_repositories={})
+
+        scheduler._store_refresh_task()  # must not raise
 
 
 class TestStartWithInitialRun:
@@ -84,7 +123,7 @@ class TestStartWithInitialRun:
         api = MagicMock()
         api.wait_until_ready = AsyncMock()
         repo = _make_repo()
-        scheduler = TaskScheduler(api=api, repositories={"mooring": repo})
+        scheduler = TaskScheduler(api=api, sites_repositories={"mooring": repo})
         scheduler._start = MagicMock()
 
         await scheduler.start_with_initial_run()
@@ -95,23 +134,62 @@ class TestStartWithInitialRun:
 
 
 class TestStart:
-    def test_registers_every_2_hours_cron_job(self):
-        scheduler = TaskScheduler(api=MagicMock(), repositories={})
+    def test_registers_reload_cron_job_from_config(self):
+        scheduler = TaskScheduler(api=MagicMock(), sites_repositories={})
         scheduler.scheduler = MagicMock()
 
         scheduler._start()
 
-        scheduler.scheduler.add_job.assert_called_once()
-        kwargs = scheduler.scheduler.add_job.call_args.kwargs
-        fields = {f.name: str(f) for f in kwargs["trigger"].fields}
+        calls = {
+            c.kwargs["id"]: c.kwargs for c in scheduler.scheduler.add_job.call_args_list
+        }
+        fields = {f.name: str(f) for f in calls["reload_task"]["trigger"].fields}
         assert fields["minute"] == "0"  # on the hour
-        assert fields["hour"] == "*/2"  # every 2 hours
+        assert fields["hour"] == "*/2"  # config.yaml default: reload_interval_hours: 2
         scheduler.scheduler.start.assert_called_once()
+
+    def test_registers_store_refresh_cron_job_from_config(self, monkeypatch):
+        stub_config = MagicMock()
+        stub_config.get_sites_reload_interval_hours.return_value = 2
+        stub_config.get_tiler_config.return_value = SimpleNamespace(
+            store_refresh_interval_hours=6
+        )
+        monkeypatch.setattr(Config, "get_config", lambda *a, **k: stub_config)
+        scheduler = TaskScheduler(api=MagicMock(), sites_repositories={})
+        scheduler.scheduler = MagicMock()
+
+        scheduler._start()
+
+        calls = {
+            c.kwargs["id"]: c.kwargs for c in scheduler.scheduler.add_job.call_args_list
+        }
+        fields = {f.name: str(f) for f in calls["store_refresh_task"]["trigger"].fields}
+        assert fields["minute"] == "0"
+        assert fields["hour"] == "*/6"
+
+    def test_registers_reload_cron_job_from_configured_interval(self, monkeypatch):
+        stub_config = MagicMock()
+        stub_config.get_sites_reload_interval_hours.return_value = 3
+        stub_config.get_tiler_config.return_value = SimpleNamespace(
+            store_refresh_interval_hours=4
+        )
+        monkeypatch.setattr(Config, "get_config", lambda *a, **k: stub_config)
+        scheduler = TaskScheduler(api=MagicMock(), sites_repositories={})
+        scheduler.scheduler = MagicMock()
+
+        scheduler._start()
+
+        calls = {
+            c.kwargs["id"]: c.kwargs for c in scheduler.scheduler.add_job.call_args_list
+        }
+        fields = {f.name: str(f) for f in calls["reload_task"]["trigger"].fields}
+        assert fields["minute"] == "0"
+        assert fields["hour"] == "*/3"
 
 
 class TestShutdown:
     def test_shuts_down_running_scheduler(self):
-        scheduler = TaskScheduler(api=MagicMock(), repositories={})
+        scheduler = TaskScheduler(api=MagicMock(), sites_repositories={})
         scheduler.scheduler = MagicMock()
         scheduler.scheduler.running = True
 
@@ -120,7 +198,7 @@ class TestShutdown:
         scheduler.scheduler.shutdown.assert_called_once_with(wait=True)
 
     def test_does_nothing_when_scheduler_not_running(self):
-        scheduler = TaskScheduler(api=MagicMock(), repositories={})
+        scheduler = TaskScheduler(api=MagicMock(), sites_repositories={})
         scheduler.scheduler = MagicMock()
         scheduler.scheduler.running = False
 

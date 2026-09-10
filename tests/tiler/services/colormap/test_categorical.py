@@ -20,7 +20,7 @@ from data_access_service.tiler.services.rendering.visual_tiles import (
     render_bbox,
     render_tile,
 )
-from data_access_service.tiler.utils.colors import build_categorical_lut
+from data_access_service.tiler.utils.colors import categorical_lut
 
 _MCS_COLORS = DEFAULT_CATEGORICAL_PALETTE
 
@@ -104,7 +104,7 @@ def test_explicit_categorical_colormap_beats_flag_colors(monkeypatch):
         3: [11, 12, 13, 255],
         4: [14, 15, 16, 255],
     }
-    lut = build_categorical_lut(categories, (0.0, 4.0))
+    lut = categorical_lut(categories)
     monkeypatch.setattr(reg, "_custom_colormaps", {"my_cat": [tuple(c) for c in lut]})
     monkeypatch.setattr(reg, "_custom_colormap_modes", {"my_cat": "categorical"})
 

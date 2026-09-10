@@ -31,9 +31,10 @@ class DataTileConfig:
     chunk_px: tuple[int, int] = TILE.chunk_px
     padding: int = TILE.padding
     coastal_fill: CoastalFill | None = None
-    # Computed, not settable in products.json — populated lazily from the store's
-    # native dimensions on first request (see get_lod_grids below). This is the one
-    # field mutated after construction despite frozen=True; guarded by _lod_grids_lock.
+    # Computed, not settable in the products_customisation config — populated
+    # lazily from the store's native dimensions on first request (see
+    # get_lod_grids below). This is the one field mutated after construction
+    # despite frozen=True; guarded by _lod_grids_lock.
     lod_grids: dict[int, tuple[int, int]] = field(default_factory=dict)
 
     @staticmethod

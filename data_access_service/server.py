@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-from asyncio import AbstractEventLoop
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
@@ -40,7 +39,7 @@ def api_setup(application: FastAPI) -> API:
     """
     api = API()
     application.state.api_instance = api  # type: ignore
-    application.state.repositories = {}  # type: ignore
+    application.state.sites_repositories = {}  # type: ignore
 
     # Heavy load so try to use a task to complete it in the background
     try:
@@ -73,29 +72,30 @@ async def lifespan(application: FastAPI):
     # Initialize API
     api = api_setup(application)
 
-    session = None
+    sites_duckdb_session = None
     scheduler = None
     background_tasks: tuple[asyncio.Task, ...] = ()
     try:
         if isinstance(Config.get_config(), IntTestConfig):
             yield
         else:
-            session = SitesDuckDBClient()
-            application.state.duckdb_session = session
+            sites_duckdb_session = SitesDuckDBClient()
             # The estimate reads the index on its own :memory: connection, not
             # this one - so retuning sites cannot move the estimate. Built here
             # rather than on first use so a broken read path fails the deploy
             # instead of silently degrading to the (50x slower) live scan.
             init_estimation_client()
-            application.state.repositories = build_repositories(session)
-            scheduler = TaskScheduler(api, application.state.repositories)
-            repository_cache_task = asyncio.create_task(
-                scheduler.start_with_initial_run(), name="repository_cache"
+            application.state.sites_repositories = build_repositories(
+                sites_duckdb_session
+            )
+            scheduler = TaskScheduler(api, application.state.sites_repositories)
+            scheduler_startup_task = asyncio.create_task(
+                scheduler.start_with_initial_run(), name="task_scheduler_startup"
             )
             tiler_warmup_task = asyncio.create_task(
                 run_tiler_warmup(api), name="tiler_warmup"
             )
-            background_tasks = (repository_cache_task, tiler_warmup_task)
+            background_tasks = (scheduler_startup_task, tiler_warmup_task)
             # Set the thread pool size for tiler endpoints to the configured value, as only the tiler endpoints use anyio thread pool.
             limiter = anyio.to_thread.current_default_thread_limiter()
             limiter.total_tokens = (
@@ -115,16 +115,14 @@ async def lifespan(application: FastAPI):
         if scheduler:
             scheduler.shutdown()
         close_estimation_client()
-        if session:
-            session.close()
+        if sites_duckdb_session:
+            sites_duckdb_session.close()
         api.destroy()
 
 
 app = FastAPI(lifespan=lifespan, title="Data Access Service")
 configure_gzip_middleware(app)
-# Register routes once at import time. Including them from lifespan/api_setup would
-# re-mount the same routers on every TestClient (or api_setup) call and produce
-# FastAPI "Duplicate Operation ID" warnings when generating the OpenAPI schema.
+
 app.include_router(api_router)
 app.include_router(tiler_router)
 

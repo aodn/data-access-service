@@ -1,6 +1,6 @@
 """Unit tests for the get_repo route dependency (product resolution + readiness).
 
-get_repo only reads ``request.app.state.repositories`` and the repo's
+get_repo only reads ``request.app.state.sites_repositories`` and the repo's
 ``is_loaded()``, so a lightweight fake request/repo is enough — no FastAPI app,
 DuckDB or S3 needed.
 """
@@ -22,10 +22,12 @@ class _FakeRepo:
         return self._loaded
 
 
-def _request(repositories):
-    # get_repo reaches request.app.state.repositories
+def _request(sites_repositories):
+    # get_repo reaches request.app.state.sites_repositories
     return SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(repositories=repositories))
+        app=SimpleNamespace(
+            state=SimpleNamespace(sites_repositories=sites_repositories)
+        )
     )
 
 
@@ -47,7 +49,7 @@ def test_get_repo_not_loaded_503():
 
 
 def test_get_repo_missing_state_404():
-    # No repositories registered at all (e.g. startup not finished).
+    # No sites_repositories registered at all (e.g. startup not finished).
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
     with pytest.raises(HTTPException) as excinfo:
         get_repo("mooring", request)

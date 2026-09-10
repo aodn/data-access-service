@@ -1,11 +1,11 @@
 """Candidate product derivation from the metadata schema index, and
-products.json override application on top of it.
+products_customisation override application on top of it.
 
 Runs against a hand-built fake index — no API instance, no S3, no registry.
 Mistakes here are invisible at runtime (a wrong grid, an ID that moved under a
 frontend cache), so coverage is deliberately dense. Discovery and override
-application are separate steps (build_candidate_products never sees
-products.json), so they're tested separately too. build_candidate_products no
+application are separate steps (build_candidate_products never sees the
+products_customisation config), so they're tested separately too. build_candidate_products no
 longer filters to zarr itself — that's API.iter_zarr_dataset_variables's job
 (see test_api.py) — so every index here is written as if already filtered.
 """
@@ -144,7 +144,7 @@ def test_source_path_built_from_the_configured_base_url():
 
 
 def test_candidates_take_plain_defaults_with_no_overrides_involved():
-    """build_candidate_products never sees products.json — every candidate is
+    """build_candidate_products never sees the products_customisation config — every candidate is
     at plain defaults until apply_product_overrides runs."""
     candidates = _build({"u1": {"a.zarr": frozenset({"GSLA"})}}, ["GSLA"])
     candidate = candidates["a:gsla"]
@@ -338,6 +338,7 @@ def test_discover_products_loads_config_and_layers_overrides(monkeypatch):
         "load_product_overrides",
         lambda: parse_product_overrides([{"id": "a:gsla", "ocean_masked": True}]),
     )
+    monkeypatch.setattr(discovery, "_load_store_blacklist", lambda: frozenset())
 
     api = FakeAPI({"u1": {"a.zarr": frozenset({"GSLA"})}})
     products = discover_products(api, BASE_URL)
@@ -353,12 +354,69 @@ def test_discover_products_logs_a_stale_override(monkeypatch, caplog):
         "load_product_overrides",
         lambda: parse_product_overrides([{"id": "renamed:gsla", "ocean_masked": True}]),
     )
+    monkeypatch.setattr(discovery, "_load_store_blacklist", lambda: frozenset())
 
     api = FakeAPI({"u1": {"a.zarr": frozenset({"GSLA"})}})
     with caplog.at_level("ERROR"):
         discover_products(api, BASE_URL)
 
     assert "renamed:gsla" in caplog.text
+
+
+# --- store blacklist ----------------------------------------------------------
+
+
+def test_blacklisted_store_is_excluded_from_dataset_variables():
+    index = {
+        "u1": {
+            "keep.zarr": frozenset({"GSLA"}),
+            "drop.zarr": frozenset({"GSLA"}),
+        }
+    }
+    filtered = list(
+        discovery._exclude_blacklisted_stores(_flatten(index), frozenset({"drop"}))
+    )
+    assert [dname for _, dname, _ in filtered] == ["keep.zarr"]
+
+
+def test_blacklist_matches_suffix_stripped_dataset_name():
+    """blacklist entries read the same as products_customisation ids'
+    dataset_name prefix — no trailing .zarr — even though the raw index
+    carries it."""
+    index = {
+        "u1": {"model_sea_level_anomaly_gridded_realtime.zarr": frozenset({"GSLA"})}
+    }
+    filtered = list(
+        discovery._exclude_blacklisted_stores(
+            _flatten(index),
+            frozenset({"model_sea_level_anomaly_gridded_realtime"}),
+        )
+    )
+    assert filtered == []
+
+
+def test_empty_blacklist_excludes_nothing():
+    index = {"u1": {"a.zarr": frozenset({"GSLA"})}}
+    filtered = list(discovery._exclude_blacklisted_stores(_flatten(index), frozenset()))
+    assert [dname for _, dname, _ in filtered] == ["a.zarr"]
+
+
+def test_discover_products_drops_blacklisted_store(monkeypatch):
+    monkeypatch.setattr(discovery, "_load_gridded_variable_specs", lambda: ["GSLA"])
+    monkeypatch.setattr(discovery, "load_product_overrides", lambda: {})
+    monkeypatch.setattr(discovery, "_load_store_blacklist", lambda: frozenset({"drop"}))
+
+    api = FakeAPI(
+        {
+            "u1": {
+                "keep.zarr": frozenset({"GSLA"}),
+                "drop.zarr": frozenset({"GSLA"}),
+            }
+        }
+    )
+    products = discover_products(api, BASE_URL)
+
+    assert set(products) == {"keep:gsla"}
 
 
 # --- the five product IDs that predate derivation ---------------------------
