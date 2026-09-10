@@ -19,11 +19,3 @@ pmtiles:
 estimation:
   config:
     use_fork_process: True
-tiler:
-  config:
-    # Capacity gate for concurrent store opens during startup prewarm.
-    store_prewarm_workers: 8
-    # Max concurrent sync route handlers (each cold slice needs one thread).
-    thread_pool_size: 8
-    # Capacity gate for /animation per-frame S3 fan-out. Sized to the aiobotocore
-    animation_workers: 4
