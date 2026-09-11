@@ -14,6 +14,7 @@ from data_access_service.utils.time_column_utils import (
     build_time_filter,
     partition_timestamp_scalar,
     resolve_time_column,
+    timestamp_partition_filter,
 )
 
 
@@ -189,6 +190,30 @@ class TestBuildTimeFilter(unittest.TestCase):
             dataset.to_table(
                 filter=pc.field("date_hour_UTC") >= pd.to_datetime("2010-08-05")
             )
+
+
+class TestTimestampPartitionFilter(unittest.TestCase):
+    def test_none_when_dataset_is_not_partitioned_by_timestamp(self):
+        dataset = _string_time_dataset(partitioned=False)
+
+        self.assertIsNone(
+            timestamp_partition_filter(
+                dataset, pd.Timestamp("2010-08-05"), pd.Timestamp("2010-08-10")
+            )
+        )
+
+    def test_prunes_to_the_covering_timestamp_buckets(self):
+        dataset = _string_time_dataset()
+        start = pd.Timestamp("2010-08-05")
+        end = pd.Timestamp("2010-08-10 23:59:59.999999999")
+
+        expr = timestamp_partition_filter(dataset, start, end)
+
+        self.assertIsNotNone(expr)
+        rows = dataset.to_table(filter=expr).to_pandas()
+        august = int(pd.Timestamp("2010-08-01").timestamp())
+        self.assertTrue((rows["timestamp"] == august).all())
+        self.assertGreater(len(rows), 0)
 
 
 class TestPartitionTimestampScalar(unittest.TestCase):

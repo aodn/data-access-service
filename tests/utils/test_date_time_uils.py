@@ -1,6 +1,7 @@
 # tests/utils/test_date_time_utils.py
 import unittest
 import pandas as pd
+import pyarrow as pa
 
 from datetime import datetime
 from unittest.mock import MagicMock, Mock, patch
@@ -1092,6 +1093,22 @@ class TestDateTimeUtils(unittest.TestCase):
         with self.assertRaises(ValueError):
             split_date_range_binary(start, end)
 
+    def _parquet_ds_without_timestamp_partition(self, time_name="JULD"):
+        mock_ds = Mock()
+        mock_ds.dname = "test_data.parquet"
+        mock_ds.dataset = Mock()
+        mock_ds.dataset.schema.names = [
+            time_name,
+            "LATITUDE",
+            "LONGITUDE",
+            "TEMP",
+            "PSAL",
+        ]
+        time_field = Mock()
+        time_field.type = pa.timestamp("ns")
+        mock_ds.dataset.schema.field.return_value = time_field
+        return mock_ds
+
     @patch(
         "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
         1000,
@@ -1101,25 +1118,15 @@ class TestDateTimeUtils(unittest.TestCase):
         10,
     )
     @patch(
-        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_time_filter"
-    )
-    @patch(
         "data_access_service.batch.subsetting.helpers.parquet_date_ranges.split_date_range_binary"
     )
     @patch("data_access_service.batch.subsetting.helpers.parquet_date_ranges.log")
-    def test_check_rows_with_date_range(self, mock_log, mock_split, mock_create_filter):
-        mock_ds = Mock()
-        mock_ds.dname = "test_data.parquet"
-        mock_ds.dataset = Mock()
-        mock_ds.dataset.schema = Mock()
-        mock_ds.dataset.schema.names = ["JULD", "LATITUDE", "LONGITUDE", "TEMP", "PSAL"]
-
-        mock_filter = Mock()
-        mock_create_filter.return_value = mock_filter
+    def test_check_rows_with_date_range(self, mock_log, mock_split):
+        mock_ds = self._parquet_ds_without_timestamp_partition()
         mock_ds.dataset.count_rows.side_effect = [2000, 400, 400]
 
         mock_api = Mock()
-        mock_api.map_column_names.return_value = ["JULD"]
+        mock_api.require_time_column.return_value = "JULD"
 
         mock_date_ranges = [
             {
@@ -1160,30 +1167,12 @@ class TestDateTimeUtils(unittest.TestCase):
         "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
         1000,
     )
-    @patch(
-        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_customised_time_filter"
-    )
-    @patch(
-        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_time_filter"
-    )
-    def test_check_rows_falls_back_on_date_out_of_range(
-        self, mock_create_filter, mock_custom_filter
-    ):
-        """create_time_filter raises DataQuery.DateOutOfRangeError; must fall back."""
-        from aodn_cloud_optimised.lib.DataQuery import DateOutOfRangeError
-
-        mock_ds = Mock()
-        mock_ds.dname = "test_data.parquet"
-        mock_ds.dataset = Mock()
-        mock_create_filter.side_effect = DateOutOfRangeError(
-            "date_start=2025-12-31 is out of range of dataset. "
-            "The maximum date_end is 1970-01-01 00:00:01."
-        )
-        mock_custom_filter.return_value = Mock()
+    def test_check_rows_keeps_range_under_the_row_limit(self):
+        mock_ds = self._parquet_ds_without_timestamp_partition("TIME")
         mock_ds.dataset.count_rows.return_value = 50
 
         mock_api = Mock()
-        mock_api.map_column_names.return_value = ["TIME"]
+        mock_api.require_time_column.return_value = "TIME"
 
         date_ranges = [
             {
@@ -1201,36 +1190,18 @@ class TestDateTimeUtils(unittest.TestCase):
         )
 
         self.assertEqual(len(result), 1)
-        mock_custom_filter.assert_called_once()
         mock_ds.dataset.count_rows.assert_called_once()
 
     @patch(
         "data_access_service.batch.subsetting.helpers.parquet_date_ranges.PARQUET_SUBSET_ROW_NUMBER",
         1000,
     )
-    @patch(
-        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_customised_time_filter"
-    )
-    @patch(
-        "data_access_service.batch.subsetting.helpers.parquet_date_ranges.create_time_filter"
-    )
-    def test_check_rows_skips_when_customised_filter_has_no_overlap(
-        self, mock_create_filter, mock_custom_filter
-    ):
-        """When both filters fail (true non-overlap), skip the range instead of crashing."""
-        from aodn_cloud_optimised.lib.DataQuery import DateOutOfRangeError
-
-        mock_ds = Mock()
-        mock_ds.dname = "test_data.parquet"
-        mock_ds.dataset = Mock()
-        mock_create_filter.side_effect = DateOutOfRangeError("out of range")
-        mock_custom_filter.side_effect = ValueError(
-            "Invalid time range after boundary adjustment: "
-            "2025-12-31 >= 1970-01-01 00:00:01"
-        )
+    def test_check_rows_skips_when_count_is_zero(self):
+        mock_ds = self._parquet_ds_without_timestamp_partition("TIME")
+        mock_ds.dataset.count_rows.return_value = 0
 
         mock_api = Mock()
-        mock_api.map_column_names.return_value = ["TIME"]
+        mock_api.require_time_column.return_value = "TIME"
 
         date_ranges = [
             {
@@ -1248,7 +1219,7 @@ class TestDateTimeUtils(unittest.TestCase):
         )
 
         self.assertEqual(result, [])
-        mock_ds.dataset.count_rows.assert_not_called()
+        mock_ds.dataset.count_rows.assert_called_once()
 
     def test_supply_day(self):
         # test supply day to a year-month string

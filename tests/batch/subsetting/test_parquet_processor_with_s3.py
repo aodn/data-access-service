@@ -286,3 +286,140 @@ class TestParquetProcessorWithS3(TestWithS3):
                     ],
                     ignore_errors=True,
                 )
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_parquet_processor_animal_haulout_with_s3(
+        self,
+        aws_clients,
+        setup_resources,
+        upload_test_case_to_s3,
+    ):
+        """Issue 9144: haulout TIME is s_date, not the hive timestamp partition.
+
+        The canned window is timestamp=1735689600 (2025-01-01 unix seconds) with
+        s_date in 2025-12. Mapping TIME onto timestamp would make the temporal
+        extent ~1970 and this subset empty. Timestamp-partition pruning on this
+        branch must still keep that 2025 bucket for a December window.
+        """
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+
+        HAULOUT_KEY: Final = (
+            "animal_haulout_satellite_relay_tagging_location_qc_realtime_qc.parquet"
+        )
+        HAULOUT_UUID: Final = "b2548767-514f-4a31-b65e-36bb894382d5"
+        MASTER_JOB_ID: Final = "9144-animal-haulout-subset"
+        # Canned rows fall in 2025-12; hive bucket is 2025-01-01 unix seconds.
+        HAULOUT_JOB_INDEX = "0"
+
+        aodn = DataQuery.GetAodn()
+        metadata: Metadata = aodn.get_metadata()
+        assert metadata.metadata_catalog().get(HAULOUT_KEY) is not None
+
+        api = API()
+        api.initialize_metadata()
+
+        time_key = api.require_time_column(uuid=HAULOUT_UUID, key=HAULOUT_KEY)
+        assert time_key == "s_date", (
+            f"TIME mapped to {time_key!r}; issue 9144 requires s_date, not the "
+            f"hive partition key timestamp"
+        )
+        assert "timestamp" in api.get_partition_keys(HAULOUT_UUID, HAULOUT_KEY)
+
+        HAULOUT_PREPARATION_PARAMETERS: Final = {
+            "end_date": "non-specified",
+            "date_ranges": json.dumps(
+                {
+                    "0": [
+                        "2025-12-01 00:00:00.000000000",
+                        "2025-12-31 23:59:59.999999999",
+                    ]
+                }
+            ),
+            "master_job_id": MASTER_JOB_ID,
+            "full_metadata_link": (
+                "https://portal.aodn.org.au/details/" f"{HAULOUT_UUID}"
+            ),
+            "type": "sub-setting-data-preparation",
+            "uuid": HAULOUT_UUID,
+            "intermediate_output_folder": f"/tmp/tmpanimalhaulout{MASTER_JOB_ID}",
+            "collection_title": (
+                "IMOS - Animal Tracking Facility - Satellite Relay Tagging "
+                "Program - Near real-time data with quality-controlled locations"
+            ),
+            "suggested_citation": "",
+            "output_format": "csv",
+            # No spatial filter: canned hive `polygon` values do not match the
+            # WKB hex create_bbox_filter compares against, so any MultiPolygon yields
+            # an empty table. This test is about the time window.
+            "multi_polygon": None,
+            "recipient": "someone@utas.edu.au",
+            "key": HAULOUT_KEY,
+            "start_date": "non-specified",
+        }
+
+        with patch.object(AWSHelper, "send_email"):
+            try:
+                prepare_data(
+                    api,
+                    job_index=HAULOUT_JOB_INDEX,
+                    parameters=HAULOUT_PREPARATION_PARAMETERS,
+                )
+
+                bucket_name = config.get_subsetting_bucket_name()
+                response = s3_client.list_objects_v2(Bucket=bucket_name)
+                objects = (
+                    [obj["Key"] for obj in response["Contents"]]
+                    if "Contents" in response
+                    else []
+                )
+                assert f"{MASTER_JOB_ID}/temp/dataschema.json" in objects, (
+                    f"prepare_data did not upload a schema for {HAULOUT_KEY}: "
+                    f"{objects}"
+                )
+                parquet_objects = [key for key in objects if key.endswith(".parquet")]
+                assert parquet_objects, (
+                    f"prepare_data did not upload subset parquet for "
+                    f"{HAULOUT_KEY}: {objects}"
+                )
+
+                helper = AWSHelper()
+                subset_path = (
+                    f"s3://{bucket_name}/"
+                    f"{config.get_s3_temp_folder_name(MASTER_JOB_ID)}"
+                    f"{HAULOUT_KEY}"
+                )
+                subset = helper.read_parquet_from_s3(subset_path)
+                assert len(subset) > 0, (
+                    "subset parquet is empty: TIME likely mapped to hive "
+                    "timestamp (issue 9144) or timestamp-partition pruning "
+                    "dropped the 2025 bucket"
+                )
+
+                date_ranges = json.loads(HAULOUT_PREPARATION_PARAMETERS["date_ranges"])
+                start_date = parse_date(date_ranges[HAULOUT_JOB_INDEX][0])
+                end_date = parse_date(date_ranges[HAULOUT_JOB_INDEX][1])
+
+                times = pd.to_datetime(subset[time_key].compute())
+                if times.dt.tz is None:
+                    times = times.dt.tz_localize("UTC")
+                else:
+                    times = times.dt.tz_convert("UTC")
+
+                assert times.min().year != 1970, (
+                    f"subset time {times.min()} looks like unix seconds read as "
+                    f"nanoseconds (issue 9144 TIME→timestamp mapping)"
+                )
+                assert (
+                    times.min() >= start_date
+                ), f"subset time {times.min()} is before range start {start_date}"
+                assert (
+                    times.max() <= end_date
+                ), f"subset time {times.max()} is after range end {end_date}"
+            finally:
+                shutil.rmtree(config.get_temp_folder(MASTER_JOB_ID), ignore_errors=True)
+                shutil.rmtree(
+                    HAULOUT_PREPARATION_PARAMETERS["intermediate_output_folder"],
+                    ignore_errors=True,
+                )

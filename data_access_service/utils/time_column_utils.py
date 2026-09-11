@@ -19,7 +19,10 @@ import pyarrow as pa
 import pyarrow.dataset as ds
 from pyarrow import compute as pc
 
-from aodn_cloud_optimised.lib.DataQuery import get_timestamps_boundary_values
+from aodn_cloud_optimised.lib.DataQuery import (
+    get_timestamps_boundary_values,
+    query_unique_value,
+)
 
 from data_access_service.utils.date_time_utils import to_naive_utc_string
 
@@ -51,6 +54,8 @@ class TimeColumn:
 
     def to_literal(self, value: pd.Timestamp) -> Any:
         """A pd.Timestamp rendered as a literal comparable with this column."""
+        if not isinstance(value, pd.Timestamp):
+            value = pd.Timestamp(value)
         naive = (
             value.tz_convert("UTC").tz_localize(None) if value.tz is not None else value
         )
@@ -140,6 +145,33 @@ def partition_timestamp_scalar(dataset: ds.Dataset, value) -> pa.Scalar:
     return pa.scalar(int(value), type=ts_type)
 
 
+def timestamp_partition_filter(
+    dataset: ds.Dataset,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> pc.Expression | None:
+    """Hive `timestamp` predicate covering `start`..`end`, or None if there isn't one.
+
+    Partition-only: safe for ``get_fragments``. Do not AND a row-level TIME
+    comparison onto this expression or pyarrow will open the files.
+    """
+    if "timestamp" not in dataset.schema.names:
+        return None
+    try:
+        if not query_unique_value(dataset, "timestamp"):
+            return None
+        partition_start, partition_end = get_timestamps_boundary_values(
+            dataset, to_naive_utc_string(start), to_naive_utc_string(end)
+        )
+    except Exception as e:
+        log.warning("timestamp partition pruning skipped: %s", e)
+        return None
+
+    return (
+        pc.field("timestamp") >= partition_timestamp_scalar(dataset, partition_start)
+    ) & (pc.field("timestamp") <= partition_timestamp_scalar(dataset, partition_end))
+
+
 def build_time_filter(
     dataset: ds.Dataset,
     time_column: TimeColumn,
@@ -158,15 +190,7 @@ def build_time_filter(
         pc.field(time_column.name) <= time_column.to_literal(end)
     )
 
-    if "timestamp" not in dataset.schema.names:
-        # Not partitioned by time, so the row-level comparison is all there is.
+    partition_expr = timestamp_partition_filter(dataset, start, end)
+    if partition_expr is None:
         return expression
-
-    partition_start, partition_end = get_timestamps_boundary_values(
-        dataset, to_naive_utc_string(start), to_naive_utc_string(end)
-    )
-    return (
-        (pc.field("timestamp") >= partition_timestamp_scalar(dataset, partition_start))
-        & (pc.field("timestamp") <= partition_timestamp_scalar(dataset, partition_end))
-        & expression
-    )
+    return partition_expr & expression

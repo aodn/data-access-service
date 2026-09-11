@@ -3,6 +3,11 @@
 The dataset comes from copy of cloud optimized data, using query like this and execute in the
 corresponding ipnb in https://github.com/aodn/aodn_cloud_optimised/tree/main/notebooks
 
+`animal_haulout_satellite_relay_tagging_location_qc_realtime_qc.parquet` is the
+2025 hive window (`timestamp=1735689600`) copied from
+s3://aodn-cloud-optimised/animal_haulout_satellite_relay_tagging_location_qc_realtime_qc.parquet
+for issue 9144: TIME is `s_date`, not the hive `timestamp` partition.
+
 Noted: vessel_satellite_radiance_derived_product.zarr in intended to missing field as negative test case.
 
 ```python
