@@ -4,13 +4,6 @@ from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
 from data_access_service.utils.subset_request_resolver import parse_keys
 
 
-def _as_bool(value) -> bool:
-    """Batch hands every parameter over as a string, so "true" is not True."""
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in ("true", "1", "yes")
-
-
 def get_subset_request(parameters: dict) -> SubsetRequest:
     multi_polygon = parameters[Parameters.MULTI_POLYGON.value]
     return SubsetRequest(
@@ -22,8 +15,9 @@ def get_subset_request(parameters: dict) -> SubsetRequest:
         multi_polygon=parameters[Parameters.MULTI_POLYGON.value],
         bboxes=MultiPolygonHelper(multi_polygon=multi_polygon).bboxes,
         collection_title=parameters.get(Parameters.COLLECTION_TITLE.value),
-        collection_has_multi_datasets=_as_bool(
-            parameters.get(Parameters.COLLECTION_HAS_MULTI_DATASETS.value)
+        # Written by init as "true"/"false"; absent when the job predates it.
+        collection_has_multi_datasets=(
+            parameters.get(Parameters.COLLECTION_HAS_MULTI_DATASETS.value) == "true"
         ),
         full_metadata_link=parameters.get(Parameters.FULL_METADATA_LINK.value),
         suggested_citation=parameters.get(Parameters.SUGGESTED_CITATION.value),

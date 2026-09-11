@@ -97,10 +97,12 @@ def init(api: API, job_id_of_init, parameters):
     preparation_parameters = {
         **parameters,
         # Only init holds an API, so it answers this once for the child jobs,
-        # which need it to name the output file after the collection.
-        Parameters.COLLECTION_HAS_MULTI_DATASETS.value: str(
-            subset_request.collection_has_multi_datasets
-        ).lower(),
+        # which need it to name the output file after the collection. Batch
+        # parameters are strings, so it travels as "true"/"false" - the only
+        # spelling get_subset_request reads back.
+        Parameters.COLLECTION_HAS_MULTI_DATASETS.value: (
+            "true" if subset_request.collection_has_multi_datasets else "false"
+        ),
         Parameters.MASTER_JOB_ID.value: job_id_of_init,
         Parameters.TYPE.value: "sub-setting-data-preparation",
         Parameters.DATE_RANGES.value: json.dumps(date_ranges),

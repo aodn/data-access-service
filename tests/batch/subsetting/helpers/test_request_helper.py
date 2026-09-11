@@ -68,6 +68,18 @@ class TestGetSubsetRequest:
         assert req.full_metadata_link is None
         assert req.suggested_citation is None
 
+    @pytest.mark.parametrize(
+        "sent, expected", [("true", True), ("false", False), (None, False)]
+    )
+    def test_collection_has_multi_datasets_is_read_back(self, sent, expected):
+        """init writes this as "true"/"false" (Batch parameters are strings),
+        and None is a job submitted before the parameter existed."""
+        params = {**_VALID_PARAMETERS}
+        if sent is not None:
+            params["collection_has_multi_datasets"] = sent
+
+        assert get_subset_request(params).collection_has_multi_datasets is expected
+
     def test_explicit_output_format_is_respected(self):
         req = get_subset_request({**_VALID_PARAMETERS, "output_format": "geotiff"})
         assert req.output_format == "geotiff"
