@@ -2,6 +2,7 @@
 
 import heapq
 import logging
+import numpy as np
 import pandas as pd
 import pytz
 
@@ -10,11 +11,12 @@ import pyarrow.dataset as ds
 from pandas._libs import NaTType
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from pyarrow import compute as pc
+
 from aodn_cloud_optimised.lib.DataQuery import (
-    DateOutOfRangeError,
     get_temporal_extent,
-    create_time_filter,
     ParquetDataSource,
+    query_unique_value,
 )
 
 from data_access_service.utils.time_column_utils import (
@@ -30,7 +32,6 @@ from data_access_service.core.constants import (
 from data_access_service.utils.date_time_utils import (
     ensure_timezone,
     split_date_range_binary,
-    to_naive_utc_string,
 )
 
 log = logging.getLogger(__name__)
@@ -63,17 +64,104 @@ def _log_count_rows_retry(retry_state):
     reraise=True,
 )
 def _count_rows_with_retry(dataset, time_filter) -> int:
+    if time_filter is None:
+        return dataset.count_rows()
     return dataset.count_rows(filter=time_filter)
+
+
+def _row_level_time_filter(
+    time_column: TimeColumn, start: pd.Timestamp, end: pd.Timestamp
+) -> ds.Expression:
+    return (pc.field(time_column.name) >= time_column.to_literal(start)) & (
+        pc.field(time_column.name) <= time_column.to_literal(end)
+    )
+
+
+def _count_rows_for_range(
+    dataset, time_column: TimeColumn, start: pd.Timestamp, end: pd.Timestamp
+) -> int:
+    """Count rows in `[start, end]` from the time column. Used when the dataset
+    has no hive `timestamp` partition key."""
+    return _count_rows_with_retry(
+        dataset, _row_level_time_filter(time_column, start, end)
+    )
+
+
+def _unix_seconds(ts) -> int:
+    ts = pd.Timestamp(ts)
+    if ts.tz is None:
+        ts = ts.tz_localize("UTC")
+    else:
+        ts = ts.tz_convert("UTC")
+    return int(ts.timestamp())
+
+
+def _timestamp_partition_buckets(dataset) -> np.ndarray | None:
+    """Sorted hive `timestamp` bucket starts, or None if the dataset has none.
+
+    Path-based: ``query_unique_value`` reads directory names, not file bodies.
+    """
+    if "timestamp" not in dataset.schema.names:
+        return None
+    try:
+        unique = query_unique_value(dataset, "timestamp")
+        if not unique:
+            return None
+        buckets = np.array([np.int64(value) for value in unique])
+        buckets.sort()
+        return buckets
+    except Exception as e:
+        log.warning("timestamp partition keys unreadable: %s", e)
+        return None
+
+
+def _window_overlaps_timestamp_buckets(start, end, buckets: np.ndarray) -> bool:
+    """Whether `[start, end]` can hold rows in any hive `timestamp` bucket.
+
+    Bucket ``i`` covers ``[buckets[i], buckets[i+1])``; the last bucket is
+    unbounded on the right because the key is only the bin start.
+    """
+    window_start = _unix_seconds(start)
+    window_end = _unix_seconds(end)
+    if window_end < int(buckets[0]):
+        return False
+    for i, bucket in enumerate(buckets):
+        bucket_end = int(buckets[i + 1]) if i + 1 < len(buckets) else None
+        if bucket_end is None:
+            return window_end >= int(bucket)
+        if window_start < bucket_end and window_end >= int(bucket):
+            return True
+    return False
+
+
+def _select_ranges_by_timestamp_buckets(
+    date_ranges: list[dict], buckets: np.ndarray
+) -> list[dict]:
+    """Keep windows that overlap a hive `timestamp` bucket. No file is opened."""
+    selected = []
+    for date_range in date_ranges:
+        start, end = date_range["start_date"], date_range["end_date"]
+        if end < start:
+            continue
+        if _window_overlaps_timestamp_buckets(start, end, buckets):
+            selected.append({"start_date": start, "end_date": end})
+    return selected
 
 
 def check_rows_with_date_range(
     api: BaseAPI, uuid: str, key: str, ds: ParquetDataSource, date_ranges: list[dict]
 ) -> list[dict]:
     """
-    Count number of rows with specific monthly range. ignore bbox.
-    If rows number exceeds PARQUET_SUBSET_ROW_NUMBER, split this date range with binary division, until rows number
-    under the safe threshold.
-    If rows number is 0, remove this date range from the list of date_ranges so that to skip further querying data.
+    Prepare parquet monthly windows for download.
+
+    When the dataset is hive-partitioned by ``timestamp``, selection uses the
+    partition directory names only (no footer reads, no time-column scan).
+    Windows that cannot overlap a bucket are dropped; the rest are kept as-is.
+    The caller already clips the request to the metadata temporal extent.
+
+    Without a ``timestamp`` key, count rows on the time column. If a window
+    exceeds PARQUET_SUBSET_ROW_NUMBER, split it by binary division until each
+    piece is under the threshold. A window with 0 rows is dropped.
     Args:
         api: BaseAPI instance for column name mapping
         uuid: Dataset UUID for metadata lookup
@@ -90,12 +178,21 @@ def check_rows_with_date_range(
         return date_ranges
 
     dataset = ds.dataset
+
+    buckets = _timestamp_partition_buckets(dataset)
+    if buckets is not None:
+        log.info(
+            "Selecting date ranges from %s timestamp partition keys (no row scan)",
+            len(buckets),
+        )
+        return _select_ranges_by_timestamp_buckets(date_ranges, buckets)
+
     checked_date_ranges = []
     q = []
 
     time_dim = api.require_time_column(uuid=uuid, key=key)
-    # Resolve once: a string column needs a one-off format check, and the library's
-    # create_time_filter only builds a valid literal for a timestamp column.
+    # Resolve once: a string column needs a one-off format check, and the
+    # literal in the row-level filter must match the stored type.
     time_column = resolve_time_column(dataset, time_dim)
 
     # Go through monthly interval
@@ -112,73 +209,7 @@ def check_rows_with_date_range(
             checked_date_ranges.append({"start_date": start, "end_date": end})
             continue
 
-        # Full timestamps, not "%Y-%m-%d": create_time_filter compares against
-        # pd.to_datetime(end_str), so a day-only end becomes midnight and the
-        # count covers one instant instead of the range. Counting 0 makes the
-        # loop below drop the range, and that data is never downloaded.
-        start_str = to_naive_utc_string(start)
-        end_str = to_naive_utc_string(end)
-
-        if time_column.is_string:
-            # create_time_filter would compare this string column against a
-            # pd.Timestamp, which has no pyarrow kernel (issue 9144), so build
-            # the filter here instead.
-            try:
-                time_filter = create_customised_time_filter(
-                    dataset=dataset,
-                    start=start,
-                    end=end,
-                    time_varname=time_dim,
-                    time_column=time_column,
-                )
-            except ValueError as e:
-                # Fully non-overlapping after clamp (e.g. query after dataset end).
-                log.info(
-                    "Skipping date range %s to %s: no overlap with dataset extent (%s)",
-                    start,
-                    end,
-                    e,
-                )
-                continue
-        else:
-            try:
-                time_filter = create_time_filter(
-                    dataset=dataset,
-                    date_start=start_str,
-                    date_end=end_str,
-                    time_varname=time_dim,
-                )
-            except DateOutOfRangeError as e:
-                # create_time_filter validates against partition/temporal bounds and can
-                # raise false positives; fall back to a filter clamped to real extent.
-                # Import note: catch DataQuery.DateOutOfRangeError (what create_time_filter
-                # raises) — lib.exceptions.DateOutOfRangeError is a separate class.
-                log.info(
-                    "create_time_filter out of range for %s to %s (%s); "
-                    "trying customised time filter",
-                    start_str,
-                    end_str,
-                    e,
-                )
-                try:
-                    time_filter = create_customised_time_filter(
-                        dataset=dataset,
-                        start=start,
-                        end=end,
-                        time_varname=time_dim,
-                        time_column=time_column,
-                    )
-                except ValueError as e2:
-                    # Fully non-overlapping after clamp (e.g. query after dataset end).
-                    log.info(
-                        "Skipping date range %s to %s: no overlap with dataset extent (%s)",
-                        start,
-                        end,
-                        e2,
-                    )
-                    continue
-
-        num_rows = _count_rows_with_retry(dataset, time_filter)
+        num_rows = _count_rows_for_range(dataset, time_column, start, end)
 
         if num_rows == 0:
             # skip the date range if no data in this range
