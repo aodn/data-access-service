@@ -18,6 +18,8 @@ from data_access_service.batch.subsetting.tasks.parquet_collector import (
 from tests.batch.batch_test_consts import PREPARATION_PARAMETERS, INIT_JOB_ID
 from tests.core.test_with_s3 import TestWithS3, REGION
 
+COLLECTION_ZIP_NAME = "Test_Ocean_Data_Collection"
+
 
 class TestDataGeneration(TestWithS3):
 
@@ -102,8 +104,10 @@ class TestDataGeneration(TestWithS3):
                     in objects
                 )
 
-                # Check if the files are compressed and uploaded correctly
-                compressed_s3_key = "999/autonomous_underwater_vehicle.zip"
+                # Check if the files are compressed and uploaded correctly.
+                # The zip is named after the collection, the csv files inside it
+                # stay named after the dataset.
+                compressed_s3_key = f"999/{COLLECTION_ZIP_NAME}.zip"
 
                 # Create dummy subset_request
                 subset_request = subset_request_factory(
@@ -129,7 +133,7 @@ class TestDataGeneration(TestWithS3):
                 assert call_kwargs["recipient"] == "test@example.com"
                 assert "test-dataset-uuid" in call_kwargs["subject"]
                 assert "html_body" in call_kwargs
-                assert "autonomous_underwater_vehicle.zip" in call_kwargs["html_body"]
+                assert f"{COLLECTION_ZIP_NAME}.zip" in call_kwargs["html_body"]
 
                 # Download the zip file and check the content
                 names: list[str] = helper.extract_zip_from_s3(
@@ -144,6 +148,11 @@ class TestDataGeneration(TestWithS3):
                 data_files = [
                     f for f in names if f.endswith(".csv") and "dataschema" not in f
                 ]
+
+                # Renaming the zip must not rename what is inside it.
+                assert data_files[0].startswith(
+                    "autonomous_underwater_vehicle"
+                ), f"csv inside the zip should keep the dataset name, got {data_files[0]}"
 
                 # Check values
                 schema_df = pd.read_csv(f"/tmp/{schema_files[0]}", index_col=0)
@@ -269,8 +278,10 @@ class TestDataGeneration(TestWithS3):
                     in objects
                 )
 
-                # Check if the files are compressed and uploaded correctly
-                compressed_s3_key = "994/aggregated_seabird_nonqc.zip"
+                # Check if the files are compressed and uploaded correctly.
+                # The zip is named after the collection, the csv files inside it
+                # stay named after the dataset.
+                compressed_s3_key = f"994/{COLLECTION_ZIP_NAME}.zip"
 
                 # Create dummy subset_request
                 subset_request = subset_request_factory(
@@ -296,7 +307,7 @@ class TestDataGeneration(TestWithS3):
                 assert call_kwargs["recipient"] == "test@example.com"
                 assert "test-dataset-uuid" in call_kwargs["subject"]
                 assert "html_body" in call_kwargs
-                assert "aggregated_seabird_nonqc.zip" in call_kwargs["html_body"]
+                assert f"{COLLECTION_ZIP_NAME}.zip" in call_kwargs["html_body"]
 
                 # Download the zip file and check the content
                 names: list[str] = helper.extract_zip_from_s3(
@@ -441,8 +452,10 @@ class TestDataGeneration(TestWithS3):
                     in objects
                 )
 
-                # Check if the files are compressed and uploaded correctly
-                compressed_s3_key = "997/aggregated_seabird_nonqc.zip"
+                # Check if the files are compressed and uploaded correctly.
+                # The zip is named after the collection, the csv files inside it
+                # stay named after the dataset.
+                compressed_s3_key = f"997/{COLLECTION_ZIP_NAME}.zip"
 
                 # Create dummy subset_request
                 subset_request = subset_request_factory(
@@ -468,7 +481,7 @@ class TestDataGeneration(TestWithS3):
                 assert call_kwargs["recipient"] == "test@example.com"
                 assert "test-dataset-uuid" in call_kwargs["subject"]
                 assert "html_body" in call_kwargs
-                assert "aggregated_seabird_nonqc.zip" in call_kwargs["html_body"]
+                assert f"{COLLECTION_ZIP_NAME}.zip" in call_kwargs["html_body"]
 
                 # Download the zip file and check the content
                 names: list[str] = helper.extract_zip_from_s3(
