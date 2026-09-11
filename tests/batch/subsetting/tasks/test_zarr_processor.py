@@ -20,6 +20,7 @@ from tests.core.test_with_s3 import TestWithS3, REGION
 # download can be checked cell by cell - the radar store is all NaN.
 RAMSSA_KEY = "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
 RAMSSA_UUID = "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
+COLLECTION_OUTPUT_NAME = "Test_Ocean_Data_Collection"
 
 
 def _multi_polygon_of(*boxes) -> str:
@@ -67,7 +68,7 @@ class TestSubsetZarr(TestWithS3):
             with patch.object(AWSHelper, "send_email") as mock_send_email:
 
                 key = "radar_CoffsHarbour_wind_delayed_qc.zarr"
-                no_ext_key = key.replace(".zarr", "")
+                output_name = COLLECTION_OUTPUT_NAME
                 try:
                     zarr_processor = ZarrProcessor(
                         api,
@@ -84,15 +85,15 @@ class TestSubsetZarr(TestWithS3):
                     )
 
                     assert (
-                        "job_id_888/radar_CoffsHarbour_wind_delayed_qc.nc" in files
+                        f"job_id_888/{output_name}.nc" in files
                     ), "didn't find expected output file"
 
                     # use tempfile to download an object from s3
                     with tempfile.TemporaryDirectory() as tmpdirname:
-                        temp_file_path = Path(tmpdirname) / f"{no_ext_key}.nc"
+                        temp_file_path = Path(tmpdirname) / f"{output_name}.nc"
                         helper.download_file_from_s3(
                             config.get_subsetting_bucket_name(),
-                            f"job_id_888/{no_ext_key}.nc",
+                            f"job_id_888/{output_name}.nc",
                             str(temp_file_path),
                         )
 
@@ -134,7 +135,7 @@ class TestSubsetZarr(TestWithS3):
             with patch.object(AWSHelper, "send_email") as mock_send_email:
 
                 key = "radar_CoffsHarbour_wind_delayed_qc.zarr"
-                no_ext_key = key.replace(".zarr", "")
+                output_name = COLLECTION_OUTPUT_NAME
                 try:
                     zarr_processor = ZarrProcessor(
                         api,
@@ -151,15 +152,15 @@ class TestSubsetZarr(TestWithS3):
                     )
 
                     assert (
-                        "job_id_888/radar_CoffsHarbour_wind_delayed_qc.nc" in files
+                        f"job_id_888/{output_name}.nc" in files
                     ), "didn't find expected output file"
 
                     # use tempfile to download an object from s3
                     with tempfile.TemporaryDirectory() as tmpdirname:
-                        temp_file_path = Path(tmpdirname) / f"{no_ext_key}.nc"
+                        temp_file_path = Path(tmpdirname) / f"{output_name}.nc"
                         helper.download_file_from_s3(
                             config.get_subsetting_bucket_name(),
-                            f"job_id_888/{no_ext_key}.nc",
+                            f"job_id_888/{output_name}.nc",
                             str(temp_file_path),
                         )
 
@@ -194,7 +195,7 @@ class TestSubsetZarr(TestWithS3):
             with patch.object(AWSHelper, "send_email") as mock_send_email:
 
                 key = "radar_CoffsHarbour_wind_delayed_qc.zarr"
-                no_ext_key = key.replace(".zarr", "")
+                output_name = COLLECTION_OUTPUT_NAME
                 try:
                     zarr_processor = ZarrProcessor(
                         api,
@@ -213,15 +214,15 @@ class TestSubsetZarr(TestWithS3):
                     )
 
                     assert (
-                        "job_id_888/radar_CoffsHarbour_wind_delayed_qc.nc" in files
+                        f"job_id_888/{output_name}.nc" in files
                     ), "didn't find expected output file"
 
                     # use tempfile to download an object from s3
                     with tempfile.TemporaryDirectory() as tmpdirname:
-                        temp_file_path = Path(tmpdirname) / f"{no_ext_key}.nc"
+                        temp_file_path = Path(tmpdirname) / f"{output_name}.nc"
                         helper.download_file_from_s3(
                             config.get_subsetting_bucket_name(),
-                            f"job_id_888/{no_ext_key}.nc",
+                            f"job_id_888/{output_name}.nc",
                             str(temp_file_path),
                         )
                 except Exception as ex:
@@ -258,7 +259,7 @@ class TestSubsetZarr(TestWithS3):
 
         with patch("fsspec.core.get_fs_token_paths", mock_get_fs_token_paths):
             with patch.object(AWSHelper, "send_email"):
-                no_ext_key = RAMSSA_KEY.replace(".zarr", "")
+                output_name = COLLECTION_OUTPUT_NAME
                 try:
                     ZarrProcessor(
                         api,
@@ -273,10 +274,10 @@ class TestSubsetZarr(TestWithS3):
                     ).process()
 
                     with tempfile.TemporaryDirectory() as tmpdirname:
-                        temp_file_path = Path(tmpdirname) / f"{no_ext_key}.nc"
+                        temp_file_path = Path(tmpdirname) / f"{output_name}.nc"
                         helper.download_file_from_s3(
                             config.get_subsetting_bucket_name(),
-                            f"job_id_888/{no_ext_key}.nc",
+                            f"job_id_888/{output_name}.nc",
                             str(temp_file_path),
                         )
                         result = xarray.open_dataset(temp_file_path)
@@ -439,8 +440,8 @@ class TestSubsetZarr(TestWithS3):
         west = (150.0, -40.0, 180.0, -38.0)
         east = (-180.0, -40.0, -150.0, -38.0)
 
-        no_ext_key = RAMSSA_KEY.replace(".zarr", "")
-        out_key = f"job_id_888/{no_ext_key}.nc"
+        output_name = COLLECTION_OUTPUT_NAME
+        out_key = f"job_id_888/{output_name}.nc"
 
         def _download(multi_polygon: str) -> xarray.Dataset:
             ZarrProcessor(
@@ -455,7 +456,7 @@ class TestSubsetZarr(TestWithS3):
                 ),
             ).process()
             with tempfile.TemporaryDirectory() as tmpdirname:
-                temp_file_path = Path(tmpdirname) / f"{no_ext_key}.nc"
+                temp_file_path = Path(tmpdirname) / f"{output_name}.nc"
                 helper.download_file_from_s3(
                     config.get_subsetting_bucket_name(),
                     out_key,
@@ -514,7 +515,7 @@ class TestSubsetZarr(TestWithS3):
             with patch.object(AWSHelper, "send_email") as mock_send_email:
 
                 key = "radar_CoffsHarbour_wind_delayed_qc.zarr"
-                no_ext_key = key.replace(".zarr", "")
+                output_name = COLLECTION_OUTPUT_NAME
                 try:
                     zarr_processor = ZarrProcessor(
                         api,
@@ -533,15 +534,15 @@ class TestSubsetZarr(TestWithS3):
                     )
 
                     assert (
-                        "job_id_888/radar_CoffsHarbour_wind_delayed_qc.nc" in files
+                        f"job_id_888/{output_name}.nc" in files
                     ), "didn't find expected output file"
 
                     # use tempfile to download an object from s3
                     with tempfile.TemporaryDirectory() as tmpdirname:
-                        temp_file_path = Path(tmpdirname) / f"{no_ext_key}.nc"
+                        temp_file_path = Path(tmpdirname) / f"{output_name}.nc"
                         helper.download_file_from_s3(
                             config.get_subsetting_bucket_name(),
-                            f"job_id_888/{no_ext_key}.nc",
+                            f"job_id_888/{output_name}.nc",
                             str(temp_file_path),
                         )
                 except Exception as ex:
@@ -571,7 +572,9 @@ class TestSubsetZarr(TestWithS3):
             # Patch fsspec to fix an issue were we cannot pass the storage_options correctly
             with patch.object(AWSHelper, "send_email") as mock_send_email:
                 key = "vessel_satellite_radiance_delayed_qc.zarr"
-                no_ext_key = key.replace(".zarr", "")
+                # This collection holds two datasets, so the selected one is
+                # named after the collection.
+                output_name = f"{COLLECTION_OUTPUT_NAME}-{key.replace('.zarr', '')}"
                 try:
                     zarr_processor = ZarrProcessor(
                         api,
@@ -593,15 +596,15 @@ class TestSubsetZarr(TestWithS3):
                     )
 
                     assert (
-                        f"job_id_888/{no_ext_key}.nc" in files
+                        f"job_id_888/{output_name}.nc" in files
                     ), "didn't find expected output file"
 
                     # use tempfile to download an object from s3
                     with tempfile.TemporaryDirectory() as tmpdirname:
-                        temp_file_path = Path(tmpdirname) / f"{no_ext_key}.nc"
+                        temp_file_path = Path(tmpdirname) / f"{output_name}.nc"
                         helper.download_file_from_s3(
                             config.get_subsetting_bucket_name(),
-                            f"job_id_888/{no_ext_key}.nc",
+                            f"job_id_888/{output_name}.nc",
                             str(temp_file_path),
                         )
 

@@ -1,5 +1,6 @@
 import os
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import List
 
@@ -14,6 +15,7 @@ from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.constants import STR_TIME_UPPER_CASE
 from data_access_service.utils.subset_request_resolver import (
     ResolvedSubsetRequest,
+    collection_has_multi_datasets,
     resolve_subset_request,
 )
 from data_access_service.utils.subset_zarr_helper import selects_no_data, subset_zarr
@@ -53,7 +55,15 @@ class ZarrProcessor:
         self.config = Config.get_config()
         self.log = init_log(self.config)
         self.job_id = job_id
-        self.subset_request = subset_request
+        # Ask the api how many datasets the collection holds rather than trust
+        # the caller: it decides the output file name, and this processor is
+        # also built directly, not only from the batch init that resolves it.
+        self.subset_request = replace(
+            subset_request,
+            collection_has_multi_datasets=collection_has_multi_datasets(
+                api, subset_request.uuid
+            ),
+        )
 
         if resolved is None:
             resolved = resolve_subset_request(
@@ -91,6 +101,10 @@ class ZarrProcessor:
     @property
     def output_format(self) -> str:
         return self.subset_request.output_format
+
+    def __base_name(self, key: str) -> str:
+        """The file name (no extension) the user downloads for `key`."""
+        return self.subset_request.download_base_name(key)
 
     def process(self):
         self.log.info(
@@ -246,7 +260,7 @@ class ZarrProcessor:
 
         with tempfile.TemporaryDirectory() as tempdirname:
             # with ProcessLogger(logger=self.log, task_name="Writing to s3 as netcdf"):
-            temp_netcdf_path = Path(tempdirname) / key.replace(".zarr", ".nc")
+            temp_netcdf_path = Path(tempdirname) / f"{self.__base_name(key)}.nc"
 
             # Write variables one by one to manage memory better
             data_var_names = list(dataset.data_vars.keys())
@@ -319,7 +333,7 @@ class ZarrProcessor:
 
             self.log.info("All variables written successfully")
 
-            s3_key = f"{self.job_id}/{key.replace('.zarr', '.nc')}"
+            s3_key = f"{self.job_id}/{self.__base_name(key)}.nc"
             self.log.info(
                 "Start uploading to s3 bucket: %s, key: %s", bucket_name, s3_key
             )
@@ -330,8 +344,10 @@ class ZarrProcessor:
     def __write_to_s3_as_geotiff(self, dataset: xarray.Dataset, key: str) -> List[str]:
         """Build the GeoTIFF ZIP for the dataset and upload it to S3."""
         lat_name, lon_name, time_name = self.api.resolve_dim_names(self.uuid, key)
+        # The zip is named for the user, the tifs inside it stay named after the
+        # dataset, so the two names are built separately.
         dataset_base = key.replace(".zarr", "")
-        zip_name = f"{dataset_base}_geotiff.zip"
+        zip_name = f"{self.__base_name(key)}.zip"
 
         with tempfile.TemporaryDirectory() as work_dir:
             zip_path = Path(work_dir) / zip_name
