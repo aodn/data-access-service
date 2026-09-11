@@ -263,7 +263,9 @@ def _validate_categorical_request(
 
 
 def _apply_crs(da: xr.DataArray) -> xr.DataArray:
-    return da.rio.write_crs("EPSG:4326").rio.set_spatial_dims(x_dim="lon", y_dim="lat")
+    return da.rio.write_crs("EPSG:4326", inplace=True).rio.set_spatial_dims(
+        x_dim="lon", y_dim="lat", inplace=True
+    )
 
 
 def _to_scalar_parts(
