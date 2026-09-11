@@ -15,6 +15,10 @@ def get_subset_request(parameters: dict) -> SubsetRequest:
         multi_polygon=parameters[Parameters.MULTI_POLYGON.value],
         bboxes=MultiPolygonHelper(multi_polygon=multi_polygon).bboxes,
         collection_title=parameters.get(Parameters.COLLECTION_TITLE.value),
+        # Written by init as "true"/"false"; absent when the job predates it.
+        collection_has_multi_datasets=(
+            parameters.get(Parameters.COLLECTION_HAS_MULTI_DATASETS.value) == "true"
+        ),
         full_metadata_link=parameters.get(Parameters.FULL_METADATA_LINK.value),
         suggested_citation=parameters.get(Parameters.SUGGESTED_CITATION.value),
         output_format=parameters.get(Parameters.OUTPUT_FORMAT.value),

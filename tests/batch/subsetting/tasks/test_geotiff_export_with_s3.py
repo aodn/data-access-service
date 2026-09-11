@@ -43,6 +43,7 @@ UUID = "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
 REQUESTED_DATE = "2011-11-17"
 WEST, SOUTH, EAST, NORTH = 150.0, -40.0, 152.0, -38.0  # Tasman Sea: SST is finite here
 JOB_ID = "job_id_888"
+DOWNLOAD_NAME = "Test_Ocean_Data_Collection"
 
 
 def _bbox_polygon(west, south, east, north):
@@ -117,7 +118,7 @@ class TestGeotiffExportWithS3(TestWithS3):
         ).process()
 
         files = helper.list_all_s3_objects(config.get_subsetting_bucket_name(), "")
-        zip_keys = [f for f in files if f.endswith(f"{base}_geotiff.zip")]
+        zip_keys = [f for f in files if f.endswith(f"{DOWNLOAD_NAME}.zip")]
         assert len(zip_keys) == 1, f"expected one geotiff ZIP, got {zip_keys}"
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -173,8 +174,8 @@ class TestGeotiffExportWithS3(TestWithS3):
             ).process()
 
         files = helper.list_all_s3_objects(config.get_subsetting_bucket_name(), "")
-        zip_key = next(f for f in files if f.endswith(f"{base}_geotiff.zip"))
-        nc_key = next(f for f in files if f.endswith(f"{base}.nc"))
+        zip_key = next(f for f in files if f.endswith(f"{DOWNLOAD_NAME}.zip"))
+        nc_key = next(f for f in files if f.endswith(f"{DOWNLOAD_NAME}.nc"))
 
         with tempfile.TemporaryDirectory() as tmp:
             local_zip = Path(tmp) / "output.zip"
@@ -224,7 +225,7 @@ class TestGeotiffExportWithS3(TestWithS3):
         ).process()
 
         files = helper.list_all_s3_objects(config.get_subsetting_bucket_name(), "")
-        zip_key = next(f for f in files if f.endswith(f"{base}_geotiff.zip"))
+        zip_key = next(f for f in files if f.endswith(f"{DOWNLOAD_NAME}.zip"))
         source = xarray.open_zarr(SAMPLES / KEY)
 
         with tempfile.TemporaryDirectory() as tmp:

@@ -6,6 +6,7 @@ import pandas as pd
 from data_access_service.core.constants import NON_SPECIFIED
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.utils.date_time_utils import parse_date
+from data_access_service.utils.file_naming import build_download_base_name
 from data_access_service.utils.format_utils import SUPPORTED_OUTPUT_FORMATS
 
 # Re-exported: NON_SPECIFIED lives in core.constants so date_time_utils can read
@@ -43,13 +44,24 @@ class SubsetRequest:
         default_factory=list
     )  # parsed from multi_polygon by get_subset_request
 
-    # --- email metadata (optional, shown in the result email) ---
+    # Collection metadata (optional; names the output and fills the email)
     collection_title: Optional[str] = None
+    # True when the collection holds more than one dataset, so the output file
+    # name has to name the dataset as well to stay unique.
+    collection_has_multi_datasets: bool = False
     full_metadata_link: Optional[str] = None
     suggested_citation: Optional[str] = None
 
     def __post_init__(self) -> None:
         self._validate()
+
+    def download_base_name(self, key: str) -> str:
+        """File name (no extension) the user should get for `key`."""
+        return build_download_base_name(
+            collection_title=self.collection_title,
+            key=key,
+            has_multiple_datasets=self.collection_has_multi_datasets,
+        )
 
     def _validate(self) -> None:
         if not self.uuid:

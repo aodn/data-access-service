@@ -123,21 +123,30 @@ def resolve_subset_request(
 
 
 def normalize_request(api, subset_request: SubsetRequest) -> SubsetRequest:
-    """Return the request with "*" keys expanded and non-specified dates
-    resolved to defaults, so every later reader (child jobs, result emails)
-    sees the actual values instead of the raw user input.
+    """Return the request with "*" keys expanded, non-specified dates
+    resolved to defaults and the collection dataset count filled in, so every
+    later reader (child jobs, result emails, output file names) sees the actual
+    values instead of the raw user input.
     """
     start_date, end_date = resolve_non_specified_dates(
         subset_request.start_date, subset_request.end_date
     )
     keys = resolve_keys(api, subset_request.uuid, subset_request.keys)
+    has_multi_datasets = collection_has_multi_datasets(api, subset_request.uuid)
     if (
         start_date == subset_request.start_date
         and end_date == subset_request.end_date
         and keys == subset_request.keys
+        and has_multi_datasets == subset_request.collection_has_multi_datasets
     ):
         return subset_request
-    return replace(subset_request, start_date=start_date, end_date=end_date, keys=keys)
+    return replace(
+        subset_request,
+        start_date=start_date,
+        end_date=end_date,
+        keys=keys,
+        collection_has_multi_datasets=has_multi_datasets,
+    )
 
 
 def parse_keys(raw: Optional[str]) -> List[str]:
@@ -155,6 +164,15 @@ def resolve_keys(api, uuid: str, keys: Optional[List[str]]) -> List[str]:
     if not keys or "*" in keys:
         return list((api.get_mapped_meta_data(uuid) or {}).keys())
     return list(keys)
+
+
+def collection_has_multi_datasets(api, uuid: str) -> bool:
+    """True when the collection holds more than one dataset.
+
+    Asked of the collection, not of the request: a user who picks one of three
+    datasets still gets it named, the same way the portal names a wfs layer.
+    """
+    return len(api.get_mapped_meta_data(uuid) or {}) > 1
 
 
 def resolve_date_range(
