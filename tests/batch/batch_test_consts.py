@@ -16,6 +16,8 @@ INIT_PARAMETERS = {
 
 PREPARATION_PARAMETERS = {
     **INIT_PARAMETERS,
+    # init resolves this for the child jobs; the uuid above holds one dataset.
+    Parameters.COLLECTION_HAS_MULTI_DATASETS.value: "false",
     Parameters.MASTER_JOB_ID.value: INIT_JOB_ID,
     Parameters.TYPE.value: "sub-setting-data-preparation",
     Parameters.DATE_RANGES.value: '{"0": ["2010-02-01 00:00:00.000000000", "2010-04-30 23:59:59.999999999"], "1": ["2010-05-01 00:00:00.000000000", "2010-07-31 23:59:59.999999999"], "2": ["2010-08-01 00:00:00.000000000", "2010-10-31 23:59:59.999999999"], "3": ["2010-11-01 00:00:00.000000000", "2011-01-31 23:59:59.999999999"], "4": ["2011-02-01 00:00:00.000000000", "2011-04-30 23:59:59.999999999"]}',

@@ -96,6 +96,11 @@ def init(api: API, job_id_of_init, parameters):
     # submit data preparation job
     preparation_parameters = {
         **parameters,
+        # Only init holds an API, so it answers this once for the child jobs,
+        # which need it to name the output file after the collection.
+        Parameters.COLLECTION_HAS_MULTI_DATASETS.value: str(
+            subset_request.collection_has_multi_datasets
+        ).lower(),
         Parameters.MASTER_JOB_ID.value: job_id_of_init,
         Parameters.TYPE.value: "sub-setting-data-preparation",
         Parameters.DATE_RANGES.value: json.dumps(date_ranges),

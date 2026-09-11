@@ -14,6 +14,7 @@ class Parameters(Enum):
     INTERMEDIATE_OUTPUT_FOLDER = "intermediate_output_folder"
     INDEX_DATASETS = "index_datasets"
     COLLECTION_TITLE = "collection_title"
+    COLLECTION_HAS_MULTI_DATASETS = "collection_has_multi_datasets"
     FULL_METADATA_LINK = "full_metadata_link"
     SUGGESTED_CITATION = "suggested_citation"
     OUTPUT_FORMAT = "output_format"
