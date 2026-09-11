@@ -7,7 +7,10 @@ from unittest.mock import MagicMock
 
 from data_access_service.core.constants import WHOLE_GLOBE_BBOX
 from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
+from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.subset_request_resolver import (
+    collection_has_multi_datasets,
+    normalize_request,
     resolve_bboxes,
     resolve_date_range,
     resolve_geometry,
@@ -248,3 +251,33 @@ class TestResolveGeometry:
 def test_whole_globe_bbox_bounds():
     assert (WHOLE_GLOBE_BBOX.min_lon, WHOLE_GLOBE_BBOX.max_lon) == (-180, 180)
     assert (WHOLE_GLOBE_BBOX.min_lat, WHOLE_GLOBE_BBOX.max_lat) == (-90, 90)
+
+
+class TestCollectionDatasetCount:
+    """Names the download file, so it is asked of the collection, not of what
+    the user selected"""
+
+    def test_one_dataset_is_not_multi(self):
+        assert collection_has_multi_datasets(_mock_api(["a.zarr"]), UUID) is False
+
+    def test_two_datasets_is_multi(self):
+        assert (
+            collection_has_multi_datasets(_mock_api(["a.zarr", "b.zarr"]), UUID) is True
+        )
+
+    def test_selecting_one_of_two_is_still_multi(self):
+        api = _mock_api(known_keys=["a.zarr", "b.zarr"])
+        request = SubsetRequest(
+            uuid=UUID,
+            keys=["a.zarr"],
+            start_date="2024-01-01",
+            end_date="2024-12-31",
+            recipient="test@example.com",
+            output_format="netcdf",
+            collection_title="Test Collection",
+        )
+
+        normalized = normalize_request(api, request)
+
+        assert normalized.collection_has_multi_datasets is True
+        assert normalized.download_base_name("a.zarr") == "Test_Collection-a"

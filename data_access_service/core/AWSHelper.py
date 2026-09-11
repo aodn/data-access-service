@@ -41,14 +41,25 @@ class AWSHelper:
             return None
 
     def write_csv_to_s3(
-        self, data: dask.dataframe.DataFrame, bucket_name: str, key: str
+        self,
+        data: dask.dataframe.DataFrame,
+        bucket_name: str,
+        key: str,
+        csv_base_name: str | None = None,
     ) -> str:
+        """Write `data` as a zip of csv files at `key`.
+
+        `key` names the zip the user downloads, `csv_base_name` names the csv
+        files inside it. They differ because the zip is named after the
+        collection while the csv files stay named after the dataset; when it is
+        not given, both come from `key` as they always did.
+        """
         target = data.drop(PARTITION_KEY, axis=1).reset_index(drop=True)
         # the max row should be the max excel row limit exclude the header row
         max_excel_row = MAX_CSV_ROW - 1
 
-        # Extract the dataset key name for CSV filenames inside the zip
-        csv_base_name = Path(key).stem
+        if csv_base_name is None:
+            csv_base_name = Path(key).stem
 
         # Create temporary directory with tempfile
         with tempfile.TemporaryDirectory() as temp_dir:
