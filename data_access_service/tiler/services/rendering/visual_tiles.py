@@ -51,17 +51,13 @@ logger = logging.getLogger(__name__)
 # land-cut fill. This dedup is still worth it on its own: it coalesces a
 # burst of concurrent tile requests for the same (product, date) — the
 # common case when a map viewport loads many tiles at once — onto one
-# compute instead of one per tile. See Deduper's docstring for why this
-# matters regardless of CACHE_BACKEND.
+# compute instead of one per tile.
 _fill_dedup = Deduper()
 
 # Coalesces the whole _to_scalar_parts computation (float32 cast + antimeridian
 # split, not just the fill step above) per (source_path, date, variable,
 # coastal_fill). Without this, every concurrent tile/bbox request for the same
-# date independently re-casts the full-resolution grid to float32 — a burst of
-# 20 concurrent tiles for one date measured ~2GB of redundant copies with zero
-# S3/cross-date concurrency involved. See Deduper's docstring for why this
-# matters regardless of CACHE_BACKEND.
+# date independently re-casts the full-resolution grid to float32.
 _scalar_parts_dedup = Deduper()
 
 
