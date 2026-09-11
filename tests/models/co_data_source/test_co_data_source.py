@@ -362,6 +362,34 @@ class TestCODataRegistry:
         result = registry.get_dataset("aodn_dataset.parquet")
         assert result is expected
 
+    def test_get_dataset_reuses_the_same_source_instance(self):
+        registry, mock_aodn_src, _ = _make_registry()
+        expected = MagicMock()
+        mock_aodn_src.get_dataset.return_value = expected
+
+        first = registry.get_dataset("aodn_dataset.parquet")
+        second = registry.get_dataset("aodn_dataset.parquet")
+
+        assert first is second is expected
+        mock_aodn_src.get_dataset.assert_called_once_with("aodn_dataset.parquet")
+
+    def test_get_dataset_does_not_cache_a_miss(self):
+        registry, mock_aodn_src, mock_csiro_src = _make_registry()
+        mock_aodn_src.get_dataset.side_effect = DatasetNotFoundError(
+            dataset_name=UNKNOWN_DATASET, data_source_name=AODN
+        )
+        mock_csiro_src.get_dataset.side_effect = DatasetNotFoundError(
+            dataset_name=UNKNOWN_DATASET, data_source_name=CSIRO
+        )
+
+        with pytest.raises(Exception, match="not found in any data source"):
+            registry.get_dataset(UNKNOWN_DATASET)
+        with pytest.raises(Exception, match="not found in any data source"):
+            registry.get_dataset(UNKNOWN_DATASET)
+
+        assert mock_aodn_src.get_dataset.call_count == 2
+        assert mock_csiro_src.get_dataset.call_count == 2
+
     def test_get_dataset_falls_through_to_next_source_on_not_found(self):
         registry, mock_aodn_src, mock_csiro_src = _make_registry()
 
@@ -375,6 +403,22 @@ class TestCODataRegistry:
 
         result = registry.get_dataset(ONLY_CSIRO_DATASET_NAME)
         assert result is expected
+
+    def test_get_dataset_caches_the_source_that_found_it(self):
+        registry, mock_aodn_src, mock_csiro_src = _make_registry()
+        mock_aodn_src.get_dataset.side_effect = DatasetNotFoundError(
+            ONLY_CSIRO_DATASET_NAME,
+            data_source_name=AODN,
+        )
+        expected = MagicMock()
+        mock_csiro_src.get_dataset.return_value = expected
+
+        first = registry.get_dataset(ONLY_CSIRO_DATASET_NAME)
+        second = registry.get_dataset(ONLY_CSIRO_DATASET_NAME)
+
+        assert first is second is expected
+        mock_aodn_src.get_dataset.assert_called_once()
+        mock_csiro_src.get_dataset.assert_called_once()
 
     def test_get_dataset_raises_when_not_found_in_any_source(self):
         registry, mock_aodn_src, mock_csiro_src = _make_registry()

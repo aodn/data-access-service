@@ -47,6 +47,10 @@ class CODataRegistry:
     def __init__(self):
         log.info("Initializing all Cloud Optimized data sources...")
         self.data_source_list: list[AbstractDataSrc] = [AodnDataSrc(), CsiroDataSrc()]
+        # ParquetDataSource.dataset lists the hive tree on first access
+        # (argo.parquet is ~300k files). One instance per name so
+        # get_temporal_extent and get_datasource share that listing.
+        self._datasets: dict[str, DataSource] = {}
         log.info("All Cloud Optimized data sources initialized")
 
     # since only catalog in DataQuery.Metadata is using by this project now, so only combine the catalogs for now.
@@ -78,17 +82,24 @@ class CODataRegistry:
         return metadata
 
     def get_dataset(self, dataset_name_with_ext: str) -> DataSource:
+        cached = self._datasets.get(dataset_name_with_ext)
+        if cached is not None:
+            log.info("Reusing cached %s dataset", dataset_name_with_ext)
+            return cached
+
         for data_src in self.data_source_list:
             try:
                 log.info(
                     f"Getting {dataset_name_with_ext} dataset from {data_src.get_name()}..."
                 )
-                return data_src.get_dataset(dataset_name_with_ext)
-            except DatasetNotFoundError as e:
+                dataset = data_src.get_dataset(dataset_name_with_ext)
+            except DatasetNotFoundError:
                 # log the exception and continue to try the next data source
                 log.info(
                     f"Dataset {dataset_name_with_ext} not found in data source {data_src}. Trying next data source"
                 )
                 continue
+            self._datasets[dataset_name_with_ext] = dataset
+            return dataset
 
         raise Exception(f"Dataset {dataset_name_with_ext} not found in any data source")
