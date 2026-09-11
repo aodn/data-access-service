@@ -1,11 +1,10 @@
-"""memory_watchdog: a fixed-interval RSS check that forces gc.collect() +
-malloc_trim(0) once RSS crosses threshold_mb — see the module docstring for
-why (xarray/Zarr reference cycles gen2 GC alone can free) and backlog#9208.
+"""memory_watchdog: forces gc.collect() + malloc_trim(0) when RSS crosses
+threshold_mb (see backlog#9208 — xarray/Zarr objects form reference cycles
+that refcounting alone can't free).
 
-The shape being defended: it only ever does the expensive work when RSS is
-actually over threshold; it never swallows cancellation (the lifespan cancels
-this task on shutdown like every other background task); and malloc_trim is a
-safe no-op wherever libc.so.6/malloc_trim isn't available.
+Covers: only triggers above threshold, never swallows cancellation (the
+lifespan cancels this task on shutdown), and malloc_trim safely no-ops where
+libc.so.6 isn't available.
 """
 
 import asyncio

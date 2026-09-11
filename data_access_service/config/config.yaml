@@ -55,7 +55,7 @@ memory_watchdog:
   config:
     enabled: true
     interval_seconds: 60
-    threshold_mb: 2048
+    threshold_mb: 2800
 estimation:
   config:
     s3_prefix: "portal/estimation"
