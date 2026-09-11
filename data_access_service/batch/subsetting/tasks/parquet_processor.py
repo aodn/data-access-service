@@ -165,6 +165,12 @@ def _generate_partition_output(
             checked_date_ranges = check_rows_with_date_range(
                 api, uuid, key, datasource, date_ranges
             )
+            log.info(
+                "Processing %s date window(s) for uuid=%s key=%s",
+                len(checked_date_ranges),
+                uuid,
+                key,
+            )
 
             if polygon is not None:
                 min_lon, min_lat, max_lon, max_lat = polygon.bounds
@@ -174,7 +180,14 @@ def _generate_partition_output(
                 min_lon = None
                 max_lon = None
 
-            for date_range in checked_date_ranges:
+            for index, date_range in enumerate(checked_date_ranges, start=1):
+                log.info(
+                    "Window %s/%s: %s → %s",
+                    index,
+                    len(checked_date_ranges),
+                    date_range["start_date"],
+                    date_range["end_date"],
+                )
                 result: Optional[ddf.DataFrame] = query_data(
                     api,
                     uuid,
@@ -217,6 +230,12 @@ def _generate_partition_output(
 
                     result[PARTITION_KEY] = result[time_key].dt.strftime("%Y-%m")
 
+                    log.info(
+                        "Writing parquet for window %s/%s to %s",
+                        index,
+                        len(checked_date_ranges),
+                        output_path,
+                    )
                     result.to_parquet(
                         output_path,
                         partition_on=[PARTITION_KEY],  # Partition by region column

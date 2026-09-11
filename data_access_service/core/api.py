@@ -4,6 +4,7 @@ import math
 import os
 import gc
 import json
+import time
 import zlib
 
 
@@ -962,7 +963,20 @@ class API(BaseAPI):
                     pc.field(name) == pa.scalar(value, type=field_type)
                 )
 
+        log.info(
+            "Scanning parquet [%s → %s] on %s (this may take a while)",
+            date_start,
+            date_end,
+            time_column.name,
+        )
+        started = time.monotonic()
         df = dataset.to_table(filter=data_filter, columns=columns).to_pandas()
+        log.info(
+            "Finished parquet scan on %s: %s rows in %.1fs",
+            time_column.name,
+            len(df),
+            time.monotonic() - started,
+        )
 
         # Requested columns may leave the time column out, same guard as get_data.
         if time_column.name in df.columns:
@@ -1097,6 +1111,15 @@ class API(BaseAPI):
                             self.map_column_names(uuid, key, columns),
                         )
                     else:
+                        log.info(
+                            "Scanning parquet via library get_data for %s/%s "
+                            "[%s → %s] (this may take a while)",
+                            uuid,
+                            key,
+                            date_start,
+                            date_end,
+                        )
+                        started = time.monotonic()
                         # Accuracy to nanoseconds
                         result = ds.get_data(
                             query_start,
@@ -1110,6 +1133,13 @@ class API(BaseAPI):
                             lat_varname=lat_varname,
                             lon_varname=lon_varname,
                             time_varname=query_time_varname,
+                        )
+                        log.info(
+                            "Finished library get_data for %s/%s: %s rows in %.1fs",
+                            uuid,
+                            key,
+                            0 if result is None else len(result),
+                            time.monotonic() - started,
                         )
 
                     return ddf.from_pandas(

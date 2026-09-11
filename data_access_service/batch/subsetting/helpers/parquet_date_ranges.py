@@ -181,11 +181,15 @@ def check_rows_with_date_range(
 
     buckets = _timestamp_partition_buckets(dataset)
     if buckets is not None:
+        selected = _select_ranges_by_timestamp_buckets(date_ranges, buckets)
         log.info(
-            "Selecting date ranges from %s timestamp partition keys (no row scan)",
+            "Selected %s of %s date window(s) from %s timestamp partition "
+            "keys (no row scan)",
+            len(selected),
+            len(date_ranges),
             len(buckets),
         )
-        return _select_ranges_by_timestamp_buckets(date_ranges, buckets)
+        return selected
 
     checked_date_ranges = []
     q = []
