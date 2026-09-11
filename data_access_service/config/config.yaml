@@ -54,7 +54,7 @@ sites:
 memory_watchdog:
   config:
     enabled: true
-    interval_seconds: 60
+    interval_seconds: 30
     threshold_mb: 2800
 estimation:
   config:
