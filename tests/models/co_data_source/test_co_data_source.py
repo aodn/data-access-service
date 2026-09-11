@@ -6,6 +6,7 @@ Unit tests for the co_data_source package:
   - co_data_registory.py
 """
 
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -372,6 +373,22 @@ class TestCODataRegistry:
 
         assert first is second is expected
         mock_aodn_src.get_dataset.assert_called_once_with("aodn_dataset.parquet")
+
+    def test_get_dataset_concurrent_calls_return_same_instance(self):
+        registry, mock_aodn_src, _ = _make_registry()
+        mock_aodn_src.get_dataset.side_effect = lambda _name: MagicMock()
+        results = [None] * 8
+
+        def worker(index):
+            results[index] = registry.get_dataset("aodn_dataset.parquet")
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert all(result is results[0] for result in results)
 
     def test_get_dataset_does_not_cache_a_miss(self):
         registry, mock_aodn_src, mock_csiro_src = _make_registry()
