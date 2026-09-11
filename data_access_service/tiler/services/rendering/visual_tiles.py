@@ -51,9 +51,14 @@ logger = logging.getLogger(__name__)
 # land-cut fill. This dedup is still worth it on its own: it coalesces a
 # burst of concurrent tile requests for the same (product, date) — the
 # common case when a map viewport loads many tiles at once — onto one
-# compute instead of one per tile. See Deduper's docstring for why this
-# matters regardless of CACHE_BACKEND.
+# compute instead of one per tile.
 _fill_dedup = Deduper()
+
+# Coalesces the whole _to_scalar_parts computation (float32 cast + antimeridian
+# split, not just the fill step above) per (source_path, date, variable,
+# coastal_fill). Without this, every concurrent tile/bbox request for the same
+# date independently re-casts the full-resolution grid to float32.
+_scalar_parts_dedup = Deduper()
 
 
 def _get_filled_values(
@@ -254,7 +259,9 @@ def _validate_categorical_request(
 
 
 def _apply_crs(da: xr.DataArray) -> xr.DataArray:
-    return da.rio.write_crs("EPSG:4326").rio.set_spatial_dims(x_dim="lon", y_dim="lat")
+    return da.rio.write_crs("EPSG:4326", inplace=True).rio.set_spatial_dims(
+        x_dim="lon", y_dim="lat", inplace=True
+    )
 
 
 def _to_scalar_parts(
@@ -293,63 +300,112 @@ def _to_scalar_parts(
     — panning/zooming across many tiles of the same date shares one compute.
     Default to "" for callers that don't need cross-request cache correctness
     (e.g. tests exercising a single call in isolation).
+
+    Deduped per (source_path, date, variable, coastal_fill) — see
+    ``_scalar_parts_dedup``. The returned parts are shared across every
+    concurrent caller for this key, so their underlying arrays are marked
+    read-only (an accidental downstream mutation fails loudly instead of
+    corrupting the shared copy for every other caller).
     """
-    da = ds[variable].astype(np.float32)
-    if coastal_fill is not None:
-        filled = _get_filled_values(
-            source_path,
-            date,
-            variable,
-            coastal_fill,
-            da.values,
-            da.lon.values,
-            da.lat.values,
-        )
-        da = da.copy(data=filled)
+    key = (
+        source_path,
+        date,
+        variable,
+        coastal_fill.max_dist_px if coastal_fill is not None else None,
+    )
 
-    lat_min, lat_max = float(da.lat.min()), float(da.lat.max())
-    lon_min, lon_max = float(da.lon.min()), float(da.lon.max())
-    if not (-90 <= lat_min and lat_max <= 90 and -180 <= lon_min and lon_max <= 360):
-        raise ValueError(
-            f"Dataset '{variable}' does not appear to be in EPSG:4326: "
-            f"lat [{lat_min:.1f}, {lat_max:.1f}], lon [{lon_min:.1f}, {lon_max:.1f}]. "
-            "Expected lat ∈ [−90, 90] and lon ∈ [−180, 360]."
-        )
+    def compute() -> list[xr.DataArray]:
+        da = ds[variable].astype(np.float32)
+        if coastal_fill is not None:
+            filled = _get_filled_values(
+                source_path,
+                date,
+                variable,
+                coastal_fill,
+                da.values,
+                da.lon.values,
+                da.lat.values,
+            )
+            da = da.copy(data=filled)
 
-    if float(da.lon.max()) > 180:
-        normalised = np.where(da.lon.values > 180, da.lon.values - 360, da.lon.values)
-        native_res = abs(float(da.lon.values[1] - da.lon.values[0]))
-        max_gap = float(np.max(np.diff(np.sort(normalised))))
+        lat_min, lat_max = float(da.lat.min()), float(da.lat.max())
+        lon_min, lon_max = float(da.lon.min()), float(da.lon.max())
+        if not (
+            -90 <= lat_min and lat_max <= 90 and -180 <= lon_min and lon_max <= 360
+        ):
+            raise ValueError(
+                f"Dataset '{variable}' does not appear to be in EPSG:4326: "
+                f"lat [{lat_min:.1f}, {lat_max:.1f}], lon [{lon_min:.1f}, {lon_max:.1f}]. "
+                "Expected lat ∈ [−90, 90] and lon ∈ [−180, 360]."
+            )
 
-        if max_gap <= 2 * native_res:
-            # Contiguous after normalisation → global-style wrap is safe.
-            da = da.assign_coords(lon=("lon", normalised)).sortby("lon")
-            return [_apply_crs(da)]
+        if float(da.lon.max()) > 180:
+            normalised = np.where(
+                da.lon.values > 180, da.lon.values - 360, da.lon.values
+            )
+            native_res = abs(float(da.lon.values[1] - da.lon.values[0]))
+            max_gap = float(np.max(np.diff(np.sort(normalised))))
 
-        # Antimeridian straddle: split into two contiguous segments.
-        # Exclude exactly lon=180 from both sides — its half-pixel bound would
-        # land at ±180.x, which exceeds rio_tiler's strict ±180 check.
-        primary = _apply_crs(da.sel(lon=da.lon[da.lon < 180]))
-        minor_da = da.sel(lon=da.lon[da.lon > 180])
-        minor_da = _apply_crs(
-            minor_da.assign_coords(lon=("lon", minor_da.lon.values - 360)).sortby("lon")
-        )
-        return [_apply_crs(primary), minor_da]
+            if max_gap <= 2 * native_res:
+                # Contiguous after normalisation → global-style wrap is safe.
+                da = da.assign_coords(lon=("lon", normalised)).sortby("lon")
+                parts = [_apply_crs(da)]
+            else:
+                # Antimeridian straddle: split into two contiguous segments.
+                # Exclude exactly lon=180 from both sides — its half-pixel bound
+                # would land at ±180.x, which exceeds rio_tiler's strict ±180 check.
+                primary = _apply_crs(da.sel(lon=da.lon[da.lon < 180]))
+                minor_da = da.sel(lon=da.lon[da.lon > 180])
+                minor_da = _apply_crs(
+                    minor_da.assign_coords(
+                        lon=("lon", minor_da.lon.values - 360)
+                    ).sortby("lon")
+                )
+                parts = [primary, minor_da]
+        else:
+            parts = [_apply_crs(da)]
 
-    return [_apply_crs(da)]
+        for part in parts:
+            part.values.setflags(write=False)
+        return parts
+
+    return _scalar_parts_dedup.dedupe(key, compute)
+
+
+_rescale_dedup = Deduper()
 
 
 def _rescale_range(
     parts: list[xr.DataArray],
     rescale: tuple[float, float] | None,
+    *,
+    source_path: str = "",
+    date: str = "",
+    variable: str = "",
+    coastal_fill: CoastalFill | None = None,
 ) -> tuple[float, float] | None:
     """Return (vmin, vmax) from rescale arg or data range; None if no valid data."""
     if rescale is not None:
         return rescale
-    all_valid = np.concatenate([p.values[~np.isnan(p.values)].ravel() for p in parts])
-    if not all_valid.size:
-        return None
-    return float(all_valid.min()), float(all_valid.max())
+
+    def compute() -> tuple[float, float] | None:
+        all_valid = np.concatenate(
+            [p.values[~np.isnan(p.values)].ravel() for p in parts]
+        )
+        if not all_valid.size:
+            return None
+        return float(all_valid.min()), float(all_valid.max())
+
+    if not date:
+        return compute()
+
+    key = (
+        source_path,
+        date,
+        variable,
+        coastal_fill.max_dist_px if coastal_fill is not None else None,
+    )
+    return _rescale_dedup.dedupe(key, compute)
 
 
 def render_tile(
@@ -385,7 +441,14 @@ def render_tile(
         )
         return encode_rgba(result, fmt) if result is not None else empty_tile(fmt)
 
-    vrange = _rescale_range(parts, rescale)
+    vrange = _rescale_range(
+        parts,
+        rescale,
+        source_path=source_path,
+        date=date,
+        variable=variable,
+        coastal_fill=coastal_fill,
+    )
     if vrange is None:
         return empty_tile(fmt)
     vmin, vmax = vrange
@@ -495,7 +558,14 @@ def render_bbox(
         )
         return encode_rgba(result, fmt) if result is not None else empty_tile(fmt)
 
-    vrange = _rescale_range(parts, rescale)
+    vrange = _rescale_range(
+        parts,
+        rescale,
+        source_path=source_path,
+        date=date,
+        variable=variable,
+        coastal_fill=coastal_fill,
+    )
     if vrange is None:
         return empty_tile(fmt)
     vmin, vmax = vrange

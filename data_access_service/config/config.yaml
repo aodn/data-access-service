@@ -50,9 +50,12 @@ sites:
     memory_limit: "800M"
     threads: 4
     region: "ap-southeast-2"
-    # Hours between cron sweeps that check each repository's S3 snapshot
-    # ETag and reload it if changed (see core/scheduler.py).
     reload_interval_hours: 2
+memory_watchdog:
+  config:
+    enabled: true
+    interval_seconds: 30
+    threshold_mb: 2800
 estimation:
   config:
     s3_prefix: "portal/estimation"
@@ -150,9 +153,6 @@ tiler:
   config:
     # Capacity gate for concurrent store opens during startup prewarm.
     store_prewarm_workers: 20
-    # Hours between cron sweeps that re-open every prewarmed store to pick up
-    # newly appended time steps (see core/scheduler.py). Refreshes run one
-    # store at a time, so this bounds staleness, not concurrency.
     store_refresh_interval_hours: 4
     # Max concurrent sync route handlers (each cold slice needs one thread).
     thread_pool_size: 20

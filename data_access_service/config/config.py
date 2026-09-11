@@ -16,6 +16,7 @@ from data_access_service.models.estimation_types import (
     EstimationIndexConfig,
     EstimationReadDuckDBConfig,
 )
+from data_access_service.models.memory_watchdog_types import MemoryWatchdogConfig
 from data_access_service.models.pmtiles_types import (
     HexLayerSpec,
     PmtilesGenerationConfig,
@@ -417,6 +418,14 @@ class Config:
         """
         sconfig = self.config.get("sites", {}).get("config", {})
         return sconfig["reload_interval_hours"]
+
+    def get_memory_watchdog_config(self) -> MemoryWatchdogConfig:
+        mconfig = self.config.get("memory_watchdog", {}).get("config", {})
+        return MemoryWatchdogConfig(
+            enabled=mconfig["enabled"],
+            interval_seconds=mconfig["interval_seconds"],
+            threshold_mb=mconfig["threshold_mb"],
+        )
 
     def get_tiler_config(self) -> TilerConfig:
         redis_env = os.getenv("CACHE_HOST")
