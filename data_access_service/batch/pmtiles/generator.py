@@ -10,7 +10,7 @@ from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.api import BaseAPI
 from data_access_service.utils.memory_utils import log_memory_usage
 
-from .cleanup import remove_stale_pmtiles
+from .cleanup import remove_outdated_pmtiles
 from .processors.hexbin_processor import HexbinProcessor
 from ...models.pmtiles_types import (
     PmtilesVisualizationStyle,
@@ -92,9 +92,9 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
         )
         # Remove pmtiles of datasets no longer in the catalog
         try:
-            remove_stale_pmtiles(work)
+            remove_outdated_pmtiles(work)
         except Exception as e:
-            logger.error("Stale pmtiles cleanup failed: %s", e, exc_info=True)
+            logger.error("Outdated pmtiles cleanup failed: %s", e, exc_info=True)
 
     use_fork = config.get_pmtiles_config().use_fork_process
     logger.info(

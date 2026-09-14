@@ -115,8 +115,8 @@ class PmtilesGenerationConfig:
     # When True (default), the pmtiles batch also run the second phase: builds the
     # estimation index for all after every dataset's pmtiles are done. When False, the pmtiles batch only builds the pmtiles and skips the estimation index.
     build_estimation_index: bool = True
-    # When True, the batch only logs which stale pmtiles it would delete from S3.
-    cleanup_dry_run: bool = True
+    # True: only log which outdated pmtiles would be deleted. Set in config.yaml.
+    cleanup_dry_run: bool = False
 
 
 @dataclass

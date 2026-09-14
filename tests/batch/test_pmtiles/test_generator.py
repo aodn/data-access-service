@@ -38,7 +38,7 @@ def estimation_phase(monkeypatch):
 def cleanup(monkeypatch):
     """Cleanup runs for real otherwise: it would list and delete on S3."""
     stub = MagicMock(return_value=[])
-    monkeypatch.setattr(generator, "remove_stale_pmtiles", stub)
+    monkeypatch.setattr(generator, "remove_outdated_pmtiles", stub)
     return stub
 
 

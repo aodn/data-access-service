@@ -1,7 +1,26 @@
 """Remove pmtiles from S3 whose dataset is no longer in the catalog.
 
-Called once at the start of a full pmtiles batch run, see generator.py.
-Settings come from config.yaml, pmtiles.config: s3_prefix and cleanup_dry_run.
+Called by generator.py at the start of a full batch run.
+Input: the catalog as a list of (uuid, dataset).
+Settings: s3_prefix and cleanup_dry_run in config.yaml.
+
+1. Expected keys. Each parquet dataset in the catalog owns two:
+       {s3_prefix}/{uuid}/{dataset}.pmtiles
+       {s3_prefix}/{uuid}/{dataset}.metadata
+2. Existing keys. Everything under {s3_prefix}/ in S3.
+3. Outdated = existing but not expected.
+   Real example from edge: the dataset
+   mooring_estuarine_coastal_water_quality_monitoring_realtime_qc.parquet
+   moved from uuid 613cd7ce-... to f3c16fdb-... (uuids shortened here).
+
+       key in S3                                  expected?   result
+       f3c16fdb-.../mooring_estuarine_...pmtiles   yes         keep
+       613cd7ce-.../mooring_estuarine_...pmtiles   no          outdated
+4. Safety stop, nothing is deleted when:
+   - the catalog is empty
+   - more than MAX_DELETE_RATIO of the folder is outdated
+5. Delete the outdated keys, one log line per key.
+   cleanup_dry_run True: log "Would delete ..." only, delete nothing.
 """
 
 from data_access_service import Config, init_log
@@ -14,7 +33,7 @@ aws = AWSHelper()
 MAX_DELETE_RATIO = 0.5  # refuse to delete more than half of the folder
 
 
-def remove_stale_pmtiles(work: list[tuple[str, str]]) -> list[str]:
+def remove_outdated_pmtiles(work: list[tuple[str, str]]) -> list[str]:
     """Delete S3 pmtiles of datasets not in ``work`` (the catalog).
 
     ``work`` is a list of (uuid, dataset_name). Returns the deleted keys,
@@ -31,33 +50,33 @@ def remove_stale_pmtiles(work: list[tuple[str, str]]) -> list[str]:
         return []
 
     existing = s3_keys(bucket, prefix)
-    stale = sorted(set(existing) - expected)
+    outdated = sorted(set(existing) - expected)
     logger.info(
-        "Cleanup: %s object(s) in s3://%s/%s/, %s stale, dry_run=%s",
+        "Cleanup: %s object(s) in s3://%s/%s/, %s outdated, dry_run=%s",
         len(existing),
         bucket,
         prefix,
-        len(stale),
+        len(outdated),
         dry_run,
     )
-    if not stale:
+    if not outdated:
         return []
 
-    if len(stale) / len(existing) > MAX_DELETE_RATIO:
+    if len(outdated) / len(existing) > MAX_DELETE_RATIO:
         logger.error(
             "Cleanup refused: %s of %s objects would be deleted, check the catalog",
-            len(stale),
+            len(outdated),
             len(existing),
         )
         return []
 
-    for key in stale:
+    for key in outdated:
         logger.info(
             "%s s3://%s/%s", "Would delete" if dry_run else "Deleting", bucket, key
         )
     if dry_run:
-        return stale
-    return delete_keys(bucket, stale)
+        return outdated
+    return delete_keys(bucket, outdated)
 
 
 def catalog_keys(prefix: str, work: list[tuple[str, str]]) -> set[str]:
@@ -83,9 +102,16 @@ def delete_keys(bucket: str, keys: list[str]) -> list[str]:
             Bucket=bucket,
             Delete={"Objects": [{"Key": key} for key in chunk], "Quiet": True},
         )
-        failed = {error.get("Key") for error in response.get("Errors", [])}
-        for key in failed:
-            logger.error("Failed to delete s3://%s/%s", bucket, key)
+        errors = response.get("Errors", [])
+        for error in errors:
+            logger.error(
+                "Failed to delete s3://%s/%s: %s %s",
+                bucket,
+                error.get("Key"),
+                error.get("Code"),
+                error.get("Message"),
+            )
+        failed = {error.get("Key") for error in errors}
         deleted += [key for key in chunk if key not in failed]
     logger.info(
         "Deleted %s object(s), %s failed", len(deleted), len(keys) - len(deleted)
