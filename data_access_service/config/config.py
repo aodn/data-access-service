@@ -249,7 +249,6 @@ class Config:
 
         return PmtilesGenerationConfig(
             co_bucket=pmconfig.get("co_bucket", "aodn-cloud-optimised"),
-            s3_prefix=pmconfig.get("s3_prefix", "portal/visualization"),
             output_pmtiles_dir=pmconfig["output_pmtiles_dir"],
             staged_parquet_dir=pmconfig["staged_parquet_dir"],
             geojsonseq_dir=pmconfig["geojsonseq_dir"],
@@ -263,8 +262,6 @@ class Config:
             time_group_by=time_group_by,
             use_fork_process=bool(pmconfig.get("use_fork_process", True)),
             build_estimation_index=bool(pmconfig.get("build_estimation_index", True)),
-            # Fallback only, the value is set in config.yaml
-            cleanup_dry_run=bool(pmconfig.get("cleanup_dry_run", False)),
         )
 
     def get_estimation_config(self) -> EstimationIndexConfig:

@@ -22,6 +22,7 @@ def _enable_fork(
         lambda: MagicMock(
             use_fork_process=enabled,
             build_estimation_index=build_estimation_index,
+            bucket_name="b",
         ),
     )
 
@@ -35,45 +36,51 @@ def estimation_phase(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def cleanup(monkeypatch):
-    """Cleanup runs for real otherwise: it would list and delete on S3."""
-    stub = MagicMock(return_value=[])
-    monkeypatch.setattr(generator, "remove_outdated_pmtiles", stub)
-    return stub
+def s3(monkeypatch):
+    """Fake S3 so the outdated file removal never touches AWS. Returns the client."""
+    client = MagicMock()
+    monkeypatch.setattr(generator.aws, "s3", client)
+    monkeypatch.setattr(generator.aws, "list_all_s3_objects", lambda b, p: [])
+    return client
 
 
-class TestCleanup:
-    """Cleanup runs once at the start of a full run, never for a single uuid."""
+class TestRemoveOutdated:
+    """After a full run, files in S3 that no processed dataset owns are deleted."""
 
-    def _run(self, monkeypatch, uuid=None):
+    KEEP = "portal/visualization/uuid-a/a.parquet.pmtiles"
+    OLD = "portal/visualization/uuid-old/old.parquet.pmtiles"
+
+    def _run(self, monkeypatch, uuid=None, ok=True):
         _enable_fork(monkeypatch, True)
         api = MagicMock()
-        api.get_mapped_meta_data.return_value = {
-            "uuid-a": {"a.parquet": {}, "notes.txt": {}},
-            "uuid-b": {"b.parquet": {}},
-        }
+        api.get_mapped_meta_data.return_value = {"uuid-a": {"a.parquet": {}}}
         monkeypatch.setattr(
-            generator, "_generate_pmtiles_for_parquets_in_subprocess", lambda *a: True
+            generator, "_generate_pmtiles_for_parquets_in_subprocess", lambda *a: ok
         )
         monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+        monkeypatch.setattr(
+            generator.aws, "list_all_s3_objects", lambda b, p: [self.KEEP, self.OLD]
+        )
         generate_pmtiles_for_all_parquets(api, uuid=uuid)
 
-    def test_full_run(self, monkeypatch, cleanup):
-        # Gets the parquet datasets only, notes.txt is left out
+    def test_full_run(self, monkeypatch, s3):
         self._run(monkeypatch)
 
-        cleanup.assert_called_once_with(
-            [("uuid-a", "a.parquet"), ("uuid-b", "b.parquet")]
-        )
+        s3.delete_object.assert_called_once_with(Bucket="b", Key=self.OLD)
 
-    def test_single_uuid(self, monkeypatch, cleanup):
+    def test_failed_dataset_keeps_its_files(self, monkeypatch, s3):
+        self._run(monkeypatch, ok=False)
+
+        s3.delete_object.assert_called_once_with(Bucket="b", Key=self.OLD)
+
+    def test_single_uuid(self, monkeypatch, s3):
         self._run(monkeypatch, uuid="uuid-a")
 
-        cleanup.assert_not_called()
+        s3.delete_object.assert_not_called()
 
-    def test_error_ignored(self, monkeypatch, cleanup, estimation_phase):
-        # A cleanup failure must not stop pmtiles generation or Phase 2
-        cleanup.side_effect = RuntimeError("s3 down")
+    def test_error_ignored(self, monkeypatch, s3, estimation_phase):
+        # A removal failure must not stop Phase 2
+        s3.delete_object.side_effect = RuntimeError("s3 down")
 
         self._run(monkeypatch)
 
@@ -414,7 +421,7 @@ class TestUploadMetadata:
         monkeypatch.setattr(
             generator.config,
             "get_pmtiles_config",
-            lambda: MagicMock(bucket_name=bucket, s3_prefix="portal/visualization"),
+            lambda: MagicMock(bucket_name=bucket),
         )
 
         assert _generate_pmtiles_for_parquets(api=None, uuid=uuid, dname=dname) is True
