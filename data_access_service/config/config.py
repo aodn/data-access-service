@@ -24,6 +24,7 @@ from data_access_service.models.pmtiles_types import (
 )
 from data_access_service.models.sites_types import SitesConfig
 from data_access_service.models.tiler_types import TilerConfig
+from data_access_service.models.zarr_chunking_types import ZarrChunkingConfig
 
 
 class EnvType(Enum):
@@ -425,6 +426,15 @@ class Config:
             enabled=mconfig["enabled"],
             interval_seconds=mconfig["interval_seconds"],
             threshold_mb=mconfig["threshold_mb"],
+        )
+
+    def get_zarr_chunking_config(self) -> ZarrChunkingConfig:
+        sconfig = self.config.get("subsetting", {}).get("config", {})
+        return ZarrChunkingConfig(
+            headroom_gb=sconfig["headroom_gb"],
+            target_peak_fraction=sconfig["target_peak_fraction"],
+            min_chunk_mb=sconfig["min_chunk_mb"],
+            memory_fraction=sconfig["memory_fraction"],
         )
 
     def get_tiler_config(self) -> TilerConfig:

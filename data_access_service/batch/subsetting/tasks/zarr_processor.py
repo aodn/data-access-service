@@ -112,6 +112,11 @@ class ZarrProcessor:
         )
         urls: List[str] = []
 
+        # Drop the rest of the catalog now that keys / dates / geometry are
+        # resolved. Keep this uuid (and GetAodn) so the zarr store can still
+        # be opened.
+        self.api.release_memory_for_batch(keep_uuid=self.uuid)
+
         prepare, write = self.__format_handler()
 
         self.log.info("Datasets to process: %s", self.keys)
@@ -271,13 +276,12 @@ class ZarrProcessor:
             with ProcessLogger(
                 logger=self.log, task_name="Step 1: Writing coordinates to NetCDF file"
             ):
-                # First write: Create file with coordinates only (no data variables)
+                # First write: Create file with coordinates only (no data variables).
+                # Do not .compute() first: 2D lat/lon (swath / curvilinear) are
+                # data-sized, and materialising them copies ~3GB into ~6.7GB.
                 coords_only_ds = xarray.Dataset(
                     coords=dataset.coords, attrs=dataset.attrs
                 )
-
-                # Compute coordinates to avoid OOM during write
-                coords_only_ds = coords_only_ds.compute()
 
                 coords_only_ds.to_netcdf(
                     temp_netcdf_path,
@@ -287,7 +291,6 @@ class ZarrProcessor:
                     compute=True,
                 )
 
-                # Clean up after writing coordinates to avoid edge case unexpected memory management
                 del coords_only_ds
                 gc.collect()
 

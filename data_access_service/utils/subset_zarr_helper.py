@@ -228,28 +228,32 @@ def form_geometry_mask(
       - lat/lon on DIFFERENT 1D axes: a regular grid, meshed into the (lat, lon)
         plane.
 
-    The lat/lon values are read here (coordinate-sized, not data-sized); the data
-    variables stay lazy.
+    Same-dims lat/lon (swath / trajectory) can be as large as the data, so
+    they stay lazy: ``.values`` here is what spiked the 8GB Fargate task to
+    ~6.7GB. A regular 1D grid is meshed after the spatial crop, so it is small.
     """
     lat = dataset[lat_name]
     lon = dataset[lon_name]
 
     if lat.dims == lon.dims:
-        lat_values, lon_values = lat.values, lon.values
-        dims = lat.dims
-    elif lat.ndim == 1 and lon.ndim == 1:
+        # Keep dask arrays lazy; shapely runs per chunk.
+        return xarray.apply_ufunc(
+            lambda x, y: shapely.intersects_xy(area, x, y),
+            lon,
+            lat,
+            dask="parallelized",
+            output_dtypes=[bool],
+        )
+    if lat.ndim == 1 and lon.ndim == 1:
         # meshgrid's default indexing gives (lat, lon)-shaped planes
         lon_values, lat_values = np.meshgrid(lon.values, lat.values)
-        dims = lat.dims + lon.dims
-    else:
-        raise ValueError(
-            f"Cannot mask by area: {lat_name} {lat.dims} and {lon_name} {lon.dims} "
-            "are neither 1D axes nor variables on the same dims"
-        )
+        inside = shapely.intersects_xy(area, lon_values, lat_values)
+        return xarray.DataArray(inside, dims=lat.dims + lon.dims)
 
-    # cells whose lat/lon is NaN (curvilinear fill values) fall outside anything
-    inside = shapely.intersects_xy(area, lon_values, lat_values)
-    return xarray.DataArray(inside, dims=dims)
+    raise ValueError(
+        f"Cannot mask by area: {lat_name} {lat.dims} and {lon_name} {lon.dims} "
+        "are neither 1D axes nor variables on the same dims"
+    )
 
 
 def form_dim_indexer(

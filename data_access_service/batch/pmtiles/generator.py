@@ -98,7 +98,7 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
 
     # Drop full raw schemas / non-parquet metadata so the parent (and COW
     # fork children) start each dataset with a smaller baseline RSS.
-    api.release_memory_for_pmtiles_batch()
+    api.release_memory_for_batch(keep_suffix=".parquet", drop_instance=True)
 
     for k, dataset_name in work:
         if use_fork:

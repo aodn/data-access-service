@@ -6,6 +6,9 @@ import os
 import psutil
 import xarray
 
+from data_access_service.config.config import Config
+from data_access_service.models.zarr_chunking_types import ZarrChunkingConfig
+
 
 def get_available_thread_count(log) -> int:
     """Threads to hand dask. Dev/testing stays single-threaded so local runs and
@@ -19,24 +22,45 @@ def get_available_thread_count(log) -> int:
     return cpu_count
 
 
+def _chunking_config() -> ZarrChunkingConfig:
+    return Config.get_config().get_zarr_chunking_config()
+
+
+def _target_peak_bytes(cfg: ZarrChunkingConfig) -> int:
+    total = psutil.virtual_memory().total
+    return min(total - cfg.headroom_bytes, int(total * cfg.target_peak_fraction))
+
+
 def get_time_steps_per_chunk(
     dataset: xarray.Dataset,
     time_dim: str,
     log,
-    memory_fraction: float = 0.1,
 ) -> int:
     """
     Calculate the number of time steps per chunk based on available memory and dataset size.
     This helps to optimize memory usage during processing.
-    the memory_fraction is the fraction of available memory to use for processing. The
-    value is only for safety. Can be adjusted based on the experience.
+    memory_fraction (config) is the fraction of the peak budget to use for one
+    chunk. The value is only for safety (dask/zlib copies).
     """
-    available_memory = psutil.virtual_memory().available
-    log.info("total memory in MB: %d", psutil.virtual_memory().total / (1024 * 1024))
-    log.info(f"Available memory in MB: {available_memory / (1024 * 1024):.2f}")
-    safe_memory_per_thread = int(
-        available_memory * memory_fraction / get_available_thread_count(log)
+    cfg = _chunking_config()
+    vm = psutil.virtual_memory()
+    current_rss = psutil.Process(os.getpid()).memory_info().rss
+    target_peak = _target_peak_bytes(cfg)
+    # Remaining room under the peak cap, not "whatever the OS says is free",
+    # so an 8GB task with 3GB already used does not pick a chunk that lands
+    # at 6.7GB.
+    budget = max(cfg.min_chunk_bytes, target_peak - current_rss)
+    log.info("total memory in MB: %d", vm.total / (1024 * 1024))
+    log.info(
+        "Target peak: %.2f GB, current RSS: %.2f GB, remaining budget: %.2f GB",
+        target_peak / (1024**3),
+        current_rss / (1024**3),
+        budget / (1024**3),
     )
+    safe_memory_per_thread = int(
+        budget * cfg.memory_fraction / get_available_thread_count(log)
+    )
+    safe_memory_per_thread = max(cfg.min_chunk_bytes, safe_memory_per_thread)
     log.info("Chunk size: %d MB per thread", safe_memory_per_thread / (1024**2))
 
     # var.nbytes forces computation - use size * itemsize instead

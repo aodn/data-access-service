@@ -55,7 +55,10 @@ class ProcessLogger(Callback):
             mem_gb = self.process.memory_info().rss / (1024**3)
             peak_gb = self._get_peak_memory_gb()
             self.logger.info(
-                f"{self.task_name} progress: {percent}% ({self.completed_tasks}/{self.total_tasks}) - Memory: {mem_gb:.2f} GB (Peak: {peak_gb:.2f} GB)"
+                f"{self.task_name} progress: {percent}% "
+                f"({self.completed_tasks}/{self.total_tasks}) - "
+                f"Memory: {mem_gb:.2f} GB "
+                f"(Peak: {peak_gb:.2f} GB, process high-water, does not drop)"
             )
             # Remove all milestones that have been reached
             while self.milestones and percent >= self.milestones[0]:

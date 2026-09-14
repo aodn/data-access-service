@@ -323,8 +323,7 @@ class TestApi(unittest.TestCase):
         self.assertIn("good-uuid", api._schema_keys)
         self.assertIn("good_dataset.parquet", api._schema_keys["good-uuid"])
 
-    def test_release_memory_for_pmtiles_batch_drops_raw_and_non_parquet(self):
-        api = API()
+    def _catalog_for_trim_tests(self, api):
         from data_access_service.core.descriptor import Descriptor
 
         api._cached_metadata = {
@@ -339,14 +338,23 @@ class TestApi(unittest.TestCase):
         api._schema_keys = {
             "u1": {
                 "a.parquet": frozenset({"LATITUDE", "LONGITUDE", "TIME"}),
-                "b.zarr": frozenset({"x"}),
+                "b.zarr": frozenset({"WSPD"}),
             },
             "u2": {"c.zarr": frozenset({"y"})},
         }
+        api._partition_keys = {
+            "u1": {"a.parquet": frozenset(), "b.zarr": frozenset()},
+            "u2": {"c.zarr": frozenset()},
+        }
         api._raw = {"u1": {"a.parquet": b"blob", "b.zarr": b"zblob"}}
-        api._instance = object()
 
-        api.release_memory_for_pmtiles_batch()
+    def test_release_memory_for_batch_keeps_parquet_and_drops_instance(self):
+        api = API()
+        handle = object()
+        self._catalog_for_trim_tests(api)
+        api._instance = handle
+
+        api.release_memory_for_batch(keep_suffix=".parquet", drop_instance=True)
 
         self.assertEqual(api._raw, {})
         self.assertIsNone(api._instance)
@@ -356,9 +364,27 @@ class TestApi(unittest.TestCase):
             api._schema_keys["u1"]["a.parquet"],
             frozenset({"LATITUDE", "LONGITUDE", "TIME"}),
         )
-        # map_column_names still works from schema keys alone
         cols = api.map_column_names("u1", "a.parquet", ["LATITUDE"])
         self.assertEqual(cols, ["LATITUDE"])
+
+    def test_release_memory_for_batch_keeps_uuid_and_instance(self):
+        api = API()
+        handle = object()
+        self._catalog_for_trim_tests(api)
+        api._instance = handle
+
+        api.release_memory_for_batch(keep_uuid="u1")
+
+        self.assertEqual(api._raw, {})
+        self.assertIs(api._instance, handle)
+        self.assertEqual(list(api._cached_metadata.keys()), ["u1"])
+        # Whole uuid is kept so collection_has_multi_datasets stays correct.
+        self.assertEqual(
+            set(api._cached_metadata["u1"].keys()), {"a.parquet", "b.zarr"}
+        )
+        self.assertNotIn("u2", api._schema_keys)
+        cols = api.map_column_names("u1", "b.zarr", ["WSPD"])
+        self.assertEqual(cols, ["WSPD"])
 
     def test_normalize_lon(self):
         """Test None"""
