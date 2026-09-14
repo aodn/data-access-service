@@ -89,6 +89,20 @@ def test_to_scalar_parts_antimeridian_straddle_splits_into_two():
     assert parts[1].lon.values.max() < 0
 
 
+def test_render_tile_empty_grid_is_transparent():
+    ds = xr.Dataset(
+        {
+            "GSLA": xr.DataArray(
+                np.zeros((0, 0)),
+                dims=["lat", "lon"],
+                coords={"lat": [], "lon": []},
+            )
+        }
+    )
+    png = visual_renderer.render_tile(ds, "GSLA", 0, 0, 0)
+    assert len(png) > 0
+
+
 def test_to_scalar_parts_rejects_non_geographic_crs():
     """Out-of-range lat/lon should raise — guards against accidentally feeding
     a projected dataset."""

@@ -167,6 +167,7 @@ class RedisMemoizer(CacheBackend):
             return factory()
 
         if cached is not None:
+            log.debug("L1 cache hit — serving slice from Redis, key=%s", redis_key)
             return pickle.loads(cached)
 
         lock_key = f"{redis_key}:lock"

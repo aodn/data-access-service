@@ -121,6 +121,28 @@ def test_tile_unknown_colormap(client):
     assert response.status_code == 400
 
 
+def test_tile_passes_wgs84_bbox_to_load_slice(client):
+    """Visual tiles must spatially subset the Zarr read, not load the full frame."""
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.shared.load_slice",
+            return_value=_make_ds(),
+        ) as load,
+        patch(
+            "data_access_service.core.tiler_routes.visual_tiles.render_tile",
+            return_value=_PNG,
+        ),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/5/0/0.png?date=2024-01-01T00:00:00Z"
+        )
+    assert response.status_code == 200
+    bbox = load.call_args.kwargs.get("bbox")
+    assert bbox is not None
+    assert len(bbox) == 4
+    assert load.call_args.kwargs.get("pad_cells") is not None
+
+
 def test_tile_ok(client):
     with (
         patch(

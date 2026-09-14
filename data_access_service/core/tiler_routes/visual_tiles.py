@@ -28,6 +28,7 @@ from data_access_service.tiler.services.store.spatial import (
     bbox_to_wgs84,
     default_bbox_from_store,
     native_resolution_in_bbox,
+    xyz_tile_wgs84_bbox,
 )
 from data_access_service.tiler.utils.image import (
     AnimatedFormat,
@@ -205,8 +206,15 @@ async def get_tile(
     )
 
     def _do_render() -> bytes:
+        fill = product.visual_tile.coastal_fill
+        pad = 2 + (fill.max_dist_px if fill is not None else 0)
         ds = load_slice_or_404(
-            product.source_path, ts, [variable], ocean_masked=product.ocean_masked
+            product.source_path,
+            ts,
+            [variable],
+            ocean_masked=product.ocean_masked,
+            bbox=xyz_tile_wgs84_bbox(x, y, z),
+            pad_cells=pad,
         )
         return render_tile(
             ds,
@@ -470,8 +478,15 @@ async def get_bbox(
     )
 
     def _do_render() -> bytes:
+        fill = product.visual_tile.coastal_fill
+        pad = 2 + (fill.max_dist_px if fill is not None else 0)
         ds = load_slice_or_404(
-            product.source_path, ts, [variable], ocean_masked=product.ocean_masked
+            product.source_path,
+            ts,
+            [variable],
+            ocean_masked=product.ocean_masked,
+            bbox=bbox_to_wgs84(bbox_tuple, bounds_crs),
+            pad_cells=pad,
         )
         return render_bbox(
             ds,
@@ -675,14 +690,21 @@ async def get_animation(
     # Pass the already-parsed ts (not d) — resolve_timestamp needs a
     # pd.Timestamp, and these came straight from get_available_dates, so
     # re-parsing the string would just redo work already done.
+    fill = product.visual_tile.coastal_fill
+    pad = 2 + (fill.max_dist_px if fill is not None else 0)
+    read_wgs84 = bbox_to_wgs84(bbox_tuple, bounds_crs)
     datasets = await asyncio.gather(
         *(
             anyio.to_thread.run_sync(
-                load_slice_uncached,
-                product.source_path,
-                ts,
-                [variable],
-                product.ocean_masked,
+                functools.partial(
+                    load_slice_uncached,
+                    product.source_path,
+                    ts,
+                    [variable],
+                    product.ocean_masked,
+                    bbox=read_wgs84,
+                    pad_cells=pad,
+                ),
                 limiter=_ANIMATION_LIMITER,
             )
             for _d, ts in frames

@@ -19,6 +19,7 @@ from data_access_service.tiler.services.store.registry import (
     unavailable_date_message,
 )
 from data_access_service.tiler.services.store.slice_loader import load_slice
+from data_access_service.tiler.services.store.spatial import ReadBBox
 from data_access_service.tiler.utils.dates import str_to_utc_timestamp
 
 PRODUCT_EX: dict[str, Example] = {"default": Example(value="sea_level_anomaly")}
@@ -166,10 +167,22 @@ def resolve_timestamp_or_404(product: Product, ts: pd.Timestamp) -> None:
 
 
 def load_slice_or_404(
-    store_url: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
+    store_url: str,
+    ts: pd.Timestamp,
+    variables: list[str],
+    ocean_masked: bool = False,
+    bbox: ReadBBox | None = None,
+    pad_cells: int = 2,
 ):
     try:
-        return load_slice(store_url, ts, variables, ocean_masked)
+        return load_slice(
+            store_url,
+            ts,
+            variables,
+            ocean_masked,
+            bbox=bbox,
+            pad_cells=pad_cells,
+        )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 

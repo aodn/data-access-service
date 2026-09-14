@@ -54,6 +54,23 @@ logger = logging.getLogger(__name__)
 # compute instead of one per tile.
 _fill_dedup = Deduper()
 
+
+def _extent_key(ds: xr.Dataset) -> tuple:
+    """Identify the spatial window of ``ds`` so windowed loads don't share fills."""
+    if ds.sizes.get("lat", 0) == 0 or ds.sizes.get("lon", 0) == 0:
+        return ("empty",)
+    return (
+        round(float(ds.lat.min()), 6),
+        round(float(ds.lat.max()), 6),
+        round(float(ds.lon.min()), 6),
+        round(float(ds.lon.max()), 6),
+    )
+
+
+def _is_empty_grid(ds: xr.Dataset) -> bool:
+    return ds.sizes.get("lat", 0) == 0 or ds.sizes.get("lon", 0) == 0
+
+
 # Coalesces the whole _to_scalar_parts computation (float32 cast + antimeridian
 # split, not just the fill step above) per (source_path, date, variable,
 # coastal_fill). Without this, every concurrent tile/bbox request for the same
@@ -79,7 +96,16 @@ def _get_filled_values(
     marked read-only so an accidental downstream mutation fails loudly instead
     of corrupting it for every other caller.
     """
-    key = (source_path, date, variable, coastal_fill.max_dist_px)
+    key = (
+        source_path,
+        date,
+        variable,
+        coastal_fill.max_dist_px,
+        round(float(lats[0]), 6) if lats.size else 0.0,
+        round(float(lats[-1]), 6) if lats.size else 0.0,
+        round(float(lons[0]), 6) if lons.size else 0.0,
+        round(float(lons[-1]), 6) if lons.size else 0.0,
+    )
 
     def compute() -> np.ndarray:
         filled = inpaint_nearest(values, coastal_fill.max_dist_px).copy()
@@ -312,6 +338,7 @@ def _to_scalar_parts(
         date,
         variable,
         coastal_fill.max_dist_px if coastal_fill is not None else None,
+        _extent_key(ds),
     )
 
     def compute() -> list[xr.DataArray]:
@@ -339,7 +366,7 @@ def _to_scalar_parts(
                 "Expected lat ∈ [−90, 90] and lon ∈ [−180, 360]."
             )
 
-        if float(da.lon.max()) > 180:
+        if float(da.lon.max()) > 180 and da.lon.size > 1:
             normalised = np.where(
                 da.lon.values > 180, da.lon.values - 360, da.lon.values
             )
@@ -363,6 +390,8 @@ def _to_scalar_parts(
                 )
                 parts = [primary, minor_da]
         else:
+            if float(da.lon.max()) > 180:
+                da = da.assign_coords(lon=("lon", da.lon.values - 360))
             parts = [_apply_crs(da)]
 
         for part in parts:
@@ -404,6 +433,15 @@ def _rescale_range(
         date,
         variable,
         coastal_fill.max_dist_px if coastal_fill is not None else None,
+        tuple(
+            (
+                round(float(p.lat.min()), 6),
+                round(float(p.lat.max()), 6),
+                round(float(p.lon.min()), 6),
+                round(float(p.lon.max()), 6),
+            )
+            for p in parts
+        ),
     )
     return _rescale_dedup.dedupe(key, compute)
 
@@ -430,6 +468,8 @@ def render_tile(
     categorical palette). ``coastal_fill`` is ``Product.visual_tile.coastal_fill``;
     ``source_path``/``date`` key its cache (see ``_to_scalar_parts``).
     """
+    if _is_empty_grid(ds):
+        return empty_tile(fmt)
     attrs = ds[variable].attrs
     _validate_categorical_request(variable, attrs, colormap_name, fmt, rescale=rescale)
     parts = _to_scalar_parts(ds, variable, coastal_fill, source_path, date)
@@ -537,6 +577,8 @@ def render_bbox(
     ``coastal_fill`` is ``Product.visual_tile.coastal_fill``;
     ``source_path``/``date`` key its cache (see ``_to_scalar_parts``).
     """
+    if _is_empty_grid(ds):
+        return empty_tile(fmt)
     attrs = ds[variable].attrs
     _validate_categorical_request(variable, attrs, colormap_name, fmt, rescale=rescale)
     parts = _to_scalar_parts(ds, variable, coastal_fill, source_path, date)

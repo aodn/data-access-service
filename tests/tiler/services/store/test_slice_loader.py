@@ -24,13 +24,32 @@ class _FakeZarrSource:
     def __init__(self, ds: xr.Dataset):
         self.zarr_store = ds
 
-    def get_data(self, date_start=None, date_end=None, **_kwargs) -> xr.Dataset:
+    def get_data(
+        self,
+        date_start=None,
+        date_end=None,
+        lat_min=None,
+        lat_max=None,
+        lon_min=None,
+        lon_max=None,
+        **_kwargs,
+    ) -> xr.Dataset:
         ds = self.zarr_store
         time_name = (
             "time" if "time" in ds.dims else "TIME" if "TIME" in ds.dims else None
         )
         if time_name is not None and (date_start is not None or date_end is not None):
-            return ds.sel({time_name: slice(date_start, date_end)})
+            ds = ds.sel({time_name: slice(date_start, date_end)})
+        lat_name = "lat" if "lat" in ds.dims else None
+        if lat_name is not None and (lat_min is not None or lat_max is not None):
+            lat_values = ds[lat_name].values
+            if lat_values[0] > lat_values[-1]:
+                ds = ds.sel({lat_name: slice(lat_max, lat_min)})
+            else:
+                ds = ds.sel({lat_name: slice(lat_min, lat_max)})
+        lon_name = "lon" if "lon" in ds.dims else None
+        if lon_name is not None and (lon_min is not None or lon_max is not None):
+            ds = ds.sel({lon_name: slice(lon_min, lon_max)})
         return ds
 
 
@@ -133,6 +152,46 @@ def test_load_slice_calls_get_data(monkeypatch):
     assert len(calls) == 1
     assert calls[0][1].get("date_start") is not None
     assert calls[0][1].get("date_end") is not None
+    assert calls[0][1].get("lat_min") is None
+    assert calls[0][1].get("lon_min") is None
+
+
+def test_load_slice_passes_bbox_to_get_data(monkeypatch):
+    ds = _ds_with_time(["2024-01-15T13:00:00"])
+    source = _patch_source(monkeypatch, ds)
+    calls: list[dict] = []
+    real_get_data = source.get_data
+
+    def tracking_get_data(*args, **kwargs):
+        calls.append(kwargs)
+        return real_get_data(*args, **kwargs)
+
+    source.get_data = tracking_get_data  # type: ignore[method-assign]
+
+    bbox = (0.0, 0.0, 0.5, 0.5)
+    result = loader.load_slice(
+        "s3://b/x.zarr",
+        pd.Timestamp("2024-01-15T13:00:00"),
+        ["v"],
+        bbox=bbox,
+        pad_cells=0,
+    )
+    assert "lat_min" in calls[0]
+    assert "lon_min" in calls[0]
+    assert result["v"].sizes["lat"] <= 2
+    assert result["v"].sizes["lon"] <= 2
+
+
+def test_load_slice_bbox_is_part_of_cache_key():
+    """Different windows must not share an L1 key (otherwise a small tile
+    would serve a full-frame array, or two tiles would swap data)."""
+    ts = pd.Timestamp("2024-01-15T13:00:00")
+    a = loader._cache_key("s3://b/x.zarr", ts, ["v"], (0.0, 0.0, 0.5, 0.5))
+    b = loader._cache_key("s3://b/x.zarr", ts, ["v"], (0.5, 0.5, 1.0, 1.0))
+    c = loader._cache_key("s3://b/x.zarr", ts, ["v"], None)
+    assert a != b
+    assert a != c
+    assert a == loader._cache_key("s3://b/x.zarr", ts, ["v"], (0.0, 0.0, 0.5, 0.5))
 
 
 # --- ocean_masked flag ---
