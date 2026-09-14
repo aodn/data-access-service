@@ -16,9 +16,11 @@ Long-lived store handles live in their own module ([[store.registry]]).
 Time selection goes through ``aodn_cloud_optimised`` ``ZarrDataSource.get_data``.
 """
 
+import numpy as np
 import pandas as pd
 import xarray as xr
 
+from data_access_service.config.config import Config
 from data_access_service.tiler.services.caching.deduper import Deduper
 from data_access_service.tiler.services.caching.slice_cache import slice_memo
 from data_access_service.tiler.services.rendering.masks import apply_ocean_mask
@@ -33,6 +35,9 @@ from data_access_service.tiler.utils.dates import ts_to_utc_iso
 # Always in-process, independent of CACHE_BACKEND — see Deduper's docstring
 # for why this matters even (especially) under CACHE_BACKEND=none.
 _slice_dedup = Deduper()
+
+
+_DOWNCAST_FLOAT64 = Config.get_config().get_tiler_config().downcast_float64
 
 
 def _ts_for_get_data(ts) -> str:
@@ -94,7 +99,12 @@ def _fetch_slice_from_store(
             if ds.sizes["time"] == 0:
                 raise KeyError(ts)
             ds = ds.isel(time=0)
-        return ds.compute() if hasattr(ds, "compute") else ds
+        ds = ds.compute() if hasattr(ds, "compute") else ds
+        if _DOWNCAST_FLOAT64:
+            for name, da in ds.data_vars.items():
+                if da.dtype == np.float64:
+                    ds[name] = da.astype(np.float32)
+        return ds
     except KeyError as e:
         raise FileNotFoundError(f"No data found for date {ts_to_utc_iso(ts)}") from e
 

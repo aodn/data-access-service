@@ -181,6 +181,7 @@ tiler:
     s3_connect_timeout: 5
     s3_read_timeout: 30
     s3_max_attempts: 2
+    downcast_float64: true
   # Static product-catalogue config, deliberately not overridden by any
   # config-{env}.yaml overlay — it doesn't vary by environment. Read directly
   # off this base file via Config.load_tiler_catalog_config(), bypassing the

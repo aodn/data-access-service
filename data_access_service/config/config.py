@@ -455,6 +455,7 @@ class Config:
             s3_connect_timeout=tconfig["s3_connect_timeout"],
             s3_read_timeout=tconfig["s3_read_timeout"],
             s3_max_attempts=tconfig["s3_max_attempts"],
+            downcast_float64=tconfig["downcast_float64"],
         )
 
     def get_hex_layer_specs(self, dname: str) -> List[HexLayerSpec] | None:
