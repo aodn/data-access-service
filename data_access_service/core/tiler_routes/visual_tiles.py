@@ -2,7 +2,7 @@ import asyncio
 import functools
 
 import anyio
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 from fastapi.openapi.models import Example
 from fastapi.responses import Response
 
@@ -40,13 +40,16 @@ from .products import router as products_router
 from .shared import (
     DATE_EX,
     PRODUCT_EX,
+    TILE_THREAD_LIMITER,
+    ClientDisconnected,
     is_store_available_or_404,
     load_slice_or_404,
+    parse_date_or_422,
     parse_rescale,
     resolve_colormap_or_error,
     resolve_timestamp_or_404,
+    run_cancellable,
     single_variable_or_400,
-    parse_date_or_422,
     visual_product_or_400,
 )
 
@@ -93,7 +96,7 @@ async def get_colormaps(response: Response):
         "Categorical colormaps render discrete equal-width color blocks instead of a smooth gradient."
     ),
 )
-def get_legend(
+async def get_legend(
     name: str,
     rescale: str | None = Query(
         None,
@@ -113,7 +116,12 @@ def get_legend(
     resolve_colormap_or_error(name, status_code=404)
     rescale_range = parse_rescale(rescale)
     try:
-        png = render_legend(name, rescale_range, width, height, orientation)
+        png = await anyio.to_thread.run_sync(
+            functools.partial(
+                render_legend, name, rescale_range, width, height, orientation
+            ),
+            limiter=TILE_THREAD_LIMITER,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return Response(
@@ -132,7 +140,8 @@ def get_legend(
         "`date` must be one of the exact UTC timestamps returned by `/manifest`'s `available_dates`."
     ),
 )
-def get_tile(
+async def get_tile(
+    request: Request,
     product_id: str = Path(openapi_examples=PRODUCT_EX),
     date: str = Query(openapi_examples=DATE_EX),
     z: int = Path(openapi_examples={"default": Example(value=1)}),
@@ -214,9 +223,13 @@ def get_tile(
         )
 
     try:
-        body = _tile_dedup.dedupe(key, _do_render)
+        body = await run_cancellable(
+            request, functools.partial(_tile_dedup.dedupe, key, _do_render)
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except ClientDisconnected as e:
+        raise HTTPException(status_code=499, detail="Client disconnected") from e
 
     return Response(
         content=body, media_type=media_type(ext), headers=IMMUTABLE_CACHE_HEADERS
@@ -382,7 +395,8 @@ def _parse_bbox_and_crs(
         "`date` must be one of the exact UTC timestamps returned by `/manifest`'s `available_dates`."
     ),
 )
-def get_bbox(
+async def get_bbox(
+    request: Request,
     product_id: str = Path(openapi_examples=PRODUCT_EX),
     date: str = Query(openapi_examples=DATE_EX),
     ext: ImageFormat = Path(  # noqa: B008
@@ -476,9 +490,13 @@ def get_bbox(
         )
 
     try:
-        body = _bbox_dedup.dedupe(key, _do_render)
+        body = await run_cancellable(
+            request, functools.partial(_bbox_dedup.dedupe, key, _do_render)
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except ClientDisconnected as e:
+        raise HTTPException(status_code=499, detail="Client disconnected") from e
 
     return Response(
         content=body, media_type=media_type(ext), headers=IMMUTABLE_CACHE_HEADERS
@@ -592,7 +610,11 @@ async def get_animation(
     # Offloaded: each may call get_store, which can block on lib open on
     # cold path or while a TTL refresh is racing the cached entry.
     bbox_tuple, bounds_crs, dst_crs = await anyio.to_thread.run_sync(
-        _parse_bbox_and_crs, bbox, crs, product.source_path
+        _parse_bbox_and_crs,
+        bbox,
+        crs,
+        product.source_path,
+        limiter=TILE_THREAD_LIMITER,
     )
 
     rescale_range = parse_rescale(rescale)
@@ -600,7 +622,9 @@ async def get_animation(
     # render_bbox_animation, where the loaded slice's attrs are available; a
     # ValueError there is mapped to 400 below.
 
-    available = await anyio.to_thread.run_sync(get_available_dates, product.source_path)
+    available = await anyio.to_thread.run_sync(
+        get_available_dates, product.source_path, limiter=TILE_THREAD_LIMITER
+    )
     if not available:
         raise HTTPException(
             status_code=404,
@@ -636,7 +660,13 @@ async def get_animation(
     dates = [d for d, _ts in frames]
 
     resolved_w, resolved_h = await anyio.to_thread.run_sync(
-        _resolve_resolution, product.source_path, bbox_tuple, bounds_crs, width, height
+        _resolve_resolution,
+        product.source_path,
+        bbox_tuple,
+        bounds_crs,
+        width,
+        height,
+        limiter=TILE_THREAD_LIMITER,
     )
 
     # Fan out the per-frame S3 reads in parallel on the anyio pool, gated by
@@ -677,7 +707,8 @@ async def get_animation(
                 coastal_fill=product.visual_tile.coastal_fill,
                 source_path=product.source_path,
                 dates=dates,
-            )
+            ),
+            limiter=TILE_THREAD_LIMITER,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

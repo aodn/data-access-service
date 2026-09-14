@@ -1,11 +1,15 @@
 """Helpers shared across the three routers (products, data_tiles, visual_tiles)."""
 
+from collections.abc import Callable
 from http import HTTPStatus
+from typing import TypeVar
 
+import anyio
 import pandas as pd
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from fastapi.openapi.models import Example
 
+from data_access_service.config.config import Config
 from data_access_service.tiler.services.colormap.resolver import resolve_colormap
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.product.registry import get_product
@@ -19,6 +23,56 @@ from data_access_service.tiler.utils.dates import str_to_utc_timestamp
 
 PRODUCT_EX: dict[str, Example] = {"default": Example(value="sea_level_anomaly")}
 DATE_EX: dict[str, Example] = {"default": Example(value="2024-02-24T00:00:00Z")}
+
+T = TypeVar("T")
+
+TILE_THREAD_LIMITER = anyio.CapacityLimiter(
+    Config.get_config().get_tiler_config().thread_pool_size
+)
+
+_DISCONNECT_POLL_INTERVAL = 0.1
+
+
+class ClientDisconnected(Exception):
+    """Raised by run_cancellable when the client disconnects before fn completes."""
+
+
+async def run_cancellable(request: Request, fn: Callable[[], T]) -> T:
+    """Run blocking fn on TILE_THREAD_LIMITER, racing it against
+    client-disconnect detection.
+
+    - Disconnect while fn is still queued for a thread: fn never runs.
+    - Disconnect after fn has started: a running thread can't be
+      stopped, so fn keeps running in the background; this raises
+      ClientDisconnected right away instead of waiting, and discards
+      fn's result once it's done.
+    - No disconnect: waits for fn and returns its result normally.
+    """
+    outcome: list[T] = []
+
+    async def _runner(tg: anyio.abc.TaskGroup) -> None:
+        outcome.append(
+            await anyio.to_thread.run_sync(
+                fn, abandon_on_cancel=True, limiter=TILE_THREAD_LIMITER
+            )
+        )
+        tg.cancel_scope.cancel()
+
+    async def _watch_disconnect(tg: anyio.abc.TaskGroup) -> None:
+        while not await request.is_disconnected():
+            await anyio.sleep(_DISCONNECT_POLL_INTERVAL)
+        tg.cancel_scope.cancel()
+
+    try:
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_runner, tg)
+            tg.start_soon(_watch_disconnect, tg)
+    except* Exception as eg:
+        raise eg.exceptions[0] from None
+
+    if not outcome:
+        raise ClientDisconnected()
+    return outcome[0]
 
 
 _tiler_ready = False

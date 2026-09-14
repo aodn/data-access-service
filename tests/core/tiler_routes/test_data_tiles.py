@@ -1,5 +1,5 @@
 import json
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import numpy as np
 import pandas as pd
@@ -247,6 +247,34 @@ def test_tile_ok(client):
     assert response.headers["content-type"] == "image/png"
 
 
+def test_tile_cancelled_client_disconnect_short_circuits_to_499(client):
+    """A client gone before the render is dispatched (still queued for a
+    thread-pool slot) must 499 without ever invoking render_tile — see
+    run_cancellable / issue #9195."""
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.data_tiles.get_lod_grids",
+            return_value=_LOD_GRIDS,
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.shared.load_slice",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.data_tiles.render_tile"
+        ) as render_mock,
+        patch(
+            "starlette.requests.Request.is_disconnected",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/1/0/0.png?date=2024-01-01T00:00:00Z"
+        )
+        render_mock.assert_not_called()
+    assert response.status_code == 499
+
+
 # --- /{product}/manifest.json?date=... ---
 
 
@@ -286,6 +314,27 @@ def test_manifest_missing_store(client):
         )
     assert response.status_code == 404
     assert "s3://bucket/missing.zarr" in response.json()["detail"]
+
+
+def test_manifest_cancelled_client_disconnect_short_circuits_to_499(client):
+    """Same short-circuit as the tile endpoint: a gone client must not pay
+    for load_slice to run."""
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.data_tiles.get_lod_grids",
+            return_value=_LOD_GRIDS,
+        ),
+        patch("data_access_service.core.tiler_routes.shared.load_slice") as load_mock,
+        patch(
+            "starlette.requests.Request.is_disconnected",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/manifest.json?date=2024-01-01T00:00:00Z"
+        )
+        load_mock.assert_not_called()
+    assert response.status_code == 499
 
 
 def test_manifest_ok(client):

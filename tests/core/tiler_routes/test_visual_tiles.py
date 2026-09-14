@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import numpy as np
 import pandas as pd
@@ -139,6 +139,30 @@ def test_tile_ok(client):
     assert response.headers["content-type"] == "image/png"
 
 
+def test_tile_cancelled_client_disconnect_short_circuits_to_499(client):
+    """A client gone before the render is dispatched (still queued for a
+    thread-pool slot) must 499 without ever invoking render_tile — see
+    run_cancellable / issue #9195."""
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.shared.load_slice",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.visual_tiles.render_tile"
+        ) as render_mock,
+        patch(
+            "starlette.requests.Request.is_disconnected",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/5/0/0.png?date=2024-01-01T00:00:00Z"
+        )
+        render_mock.assert_not_called()
+    assert response.status_code == 499
+
+
 def test_tile_ok_with_rescale(client):
     with (
         patch(
@@ -249,6 +273,32 @@ def test_bbox_png_ok(client):
         )
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
+
+
+def test_bbox_cancelled_client_disconnect_short_circuits_to_499(client):
+    """Same short-circuit as the raster tile endpoint, for /bbox."""
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.shared.load_slice",
+            return_value=_make_ds(),
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.visual_tiles.render_bbox"
+        ) as render_mock,
+        patch(
+            "data_access_service.core.tiler_routes.visual_tiles.default_bbox_from_store",
+            return_value=(140.0, -40.0, 150.0, -30.0),
+        ),
+        patch(
+            "starlette.requests.Request.is_disconnected",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/bbox.png?date=2024-01-01T00:00:00Z"
+        )
+        render_mock.assert_not_called()
+    assert response.status_code == 499
 
 
 def test_bbox_webp_ok(client):

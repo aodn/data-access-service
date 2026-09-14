@@ -56,11 +56,7 @@ logger = logging.getLogger(__name__)
 
 _tiler_config = Config.get_config().get_tiler_config()
 
-# Capacity gate for concurrent store opens during prewarm. Bounded to the S3
-# connection ceiling, not CPU. Runs on the shared anyio pool but a separate
-# budget so a many-product startup can't transiently consume tile-handler slots.
 _STORE_PREWARM_LIMITER = anyio.CapacityLimiter(_tiler_config.store_prewarm_workers)
-
 _PREWARM_MAX_ATTEMPTS = 3
 _PREWARM_BACKOFF_SECONDS = 1.0
 

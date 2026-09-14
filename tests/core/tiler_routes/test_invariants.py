@@ -6,14 +6,46 @@ failures (date round-tripping, the two tile coordinate systems). If any of these
 fail, the change needs a coordinated review — not a test update.
 """
 
+import inspect
 from unittest.mock import patch
 
 import numpy as np
 import xarray as xr
+from fastapi.routing import APIRoute
 
 from data_access_service.config.tiler.constants import LOD, TILE
+from data_access_service.core.tiler_routes import data_tiles, products, visual_tiles
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.utils.dates import str_to_utc_timestamp
+
+# --- Tiler-exclusive thread pool --------------------------------------------
+#
+# Every tiler route handler must be `async def`, dispatching any blocking work
+# itself via TILE_THREAD_LIMITER (directly, or through run_cancellable) — never
+# a plain sync `def`, which FastAPI would instead auto-dispatch onto anyio's
+# process-wide default thread limiter. That would silently let tiler traffic
+# draw on (and be throttled by) the same budget as the main, non-tiler API.
+# See tiler/technical.md §12.
+
+
+def test_every_tiler_endpoint_is_async():
+    routers = (data_tiles.router, visual_tiles.router, products.router)
+    endpoints = [
+        (r.path, r.endpoint)
+        for router in routers
+        for r in router.routes
+        if isinstance(r, APIRoute)
+    ]
+    assert endpoints, "no tiler routes found — test fixture broken"
+    sync_endpoints = [
+        f"{path} -> {ep.__name__}"
+        for path, ep in endpoints
+        if not inspect.iscoroutinefunction(ep)
+    ]
+    assert not sync_endpoints, (
+        "sync def tiler endpoint(s) found, which bypass TILE_THREAD_LIMITER: "
+        f"{sync_endpoints}"
+    )
 
 
 # --- LOD / tile geometry contract -----------------------------------------
