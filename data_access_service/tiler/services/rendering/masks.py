@@ -195,7 +195,7 @@ def apply_ocean_mask(ds: xr.Dataset, variables: list[str]) -> xr.Dataset:
     valid_da = xr.DataArray(
         valid, dims=("lat", "lon"), coords={"lat": ds.lat, "lon": ds.lon}
     )
-    
+
     out = ds.copy(deep=False)
     for v in variables:
         out[v] = ds[v].where(valid_da)
