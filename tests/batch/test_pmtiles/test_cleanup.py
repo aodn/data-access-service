@@ -102,3 +102,11 @@ def test_batch_limit(monkeypatch):
     first, second = delete.call_args_list
     assert len(first.kwargs["Delete"]["Objects"]) == 1000
     assert len(second.kwargs["Delete"]["Objects"]) == 1
+
+
+def test_dry_run_argument_overrides_config(monkeypatch):
+    # Config says delete, the caller asks for dry run, so nothing is deleted
+    delete = stub_s3(monkeypatch, [CURRENT_PMTILES, REMOVED_PMTILES], dry_run=False)
+
+    assert remove_outdated_pmtiles(CATALOG, dry_run=True) == [REMOVED_PMTILES]
+    delete.assert_not_called()

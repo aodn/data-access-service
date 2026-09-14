@@ -4,6 +4,11 @@ Called by generator.py at the start of a full batch run.
 Input: the catalog as a list of (uuid, dataset).
 Settings: s3_prefix and cleanup_dry_run in config.yaml.
 
+Dry run on your machine, needs the AWS credentials of that environment:
+    PROFILE=edge poetry run python -m data_access_service.batch.pmtiles.cleanup
+It loads the catalog, logs one "Would delete" line per file, deletes nothing.
+Dry run in the batch: set cleanup_dry_run: True in config-<env>.yaml.
+
 1. Expected keys. Each parquet dataset in the catalog owns two:
        {s3_prefix}/{uuid}/{dataset}.pmtiles
        {s3_prefix}/{uuid}/{dataset}.metadata
@@ -33,16 +38,20 @@ aws = AWSHelper()
 MAX_DELETE_RATIO = 0.5  # refuse to delete more than half of the folder
 
 
-def remove_outdated_pmtiles(work: list[tuple[str, str]]) -> list[str]:
+def remove_outdated_pmtiles(
+    work: list[tuple[str, str]], dry_run: bool | None = None
+) -> list[str]:
     """Delete S3 pmtiles of datasets not in ``work`` (the catalog).
 
-    ``work`` is a list of (uuid, dataset_name). Returns the deleted keys,
-    or in dry run the keys it would delete.
+    ``work`` is a list of (uuid, dataset_name). ``dry_run`` overrides the
+    config value when given. Returns the deleted keys, or in dry run the
+    keys it would delete.
     """
     pm_config = config.get_pmtiles_config()
     bucket = pm_config.bucket_name
     prefix = pm_config.s3_prefix
-    dry_run = pm_config.cleanup_dry_run
+    if dry_run is None:
+        dry_run = pm_config.cleanup_dry_run
 
     expected = catalog_keys(prefix, work)
     if not expected:
@@ -117,3 +126,18 @@ def delete_keys(bucket: str, keys: list[str]) -> list[str]:
         "Deleted %s object(s), %s failed", len(deleted), len(keys) - len(deleted)
     )
     return deleted
+
+
+if __name__ == "__main__":
+    # Local dry run, see the docstring at the top
+    from data_access_service import API
+
+    api = API()
+    api.initialize_metadata()
+    work = [
+        (uuid, dname)
+        for uuid, datasets in sorted(api.get_mapped_meta_data(uuid=None).items())
+        for dname in datasets
+        if dname.endswith(".parquet")
+    ]
+    remove_outdated_pmtiles(work, dry_run=True)
