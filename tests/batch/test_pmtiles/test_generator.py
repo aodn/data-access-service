@@ -34,6 +34,52 @@ def estimation_phase(monkeypatch):
     return stub
 
 
+@pytest.fixture(autouse=True)
+def cleanup(monkeypatch):
+    """Cleanup runs for real otherwise: it would list and delete on S3."""
+    stub = MagicMock(return_value=[])
+    monkeypatch.setattr(generator, "remove_stale_pmtiles", stub)
+    return stub
+
+
+class TestCleanup:
+    """Cleanup runs once at the start of a full run, never for a single uuid."""
+
+    def _run(self, monkeypatch, uuid=None):
+        _enable_fork(monkeypatch, True)
+        api = MagicMock()
+        api.get_mapped_meta_data.return_value = {
+            "uuid-a": {"a.parquet": {}, "notes.txt": {}},
+            "uuid-b": {"b.parquet": {}},
+        }
+        monkeypatch.setattr(
+            generator, "_generate_pmtiles_for_parquets_in_subprocess", lambda *a: True
+        )
+        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+        generate_pmtiles_for_all_parquets(api, uuid=uuid)
+
+    def test_full_run(self, monkeypatch, cleanup):
+        # Gets the parquet datasets only, notes.txt is left out
+        self._run(monkeypatch)
+
+        cleanup.assert_called_once_with(
+            [("uuid-a", "a.parquet"), ("uuid-b", "b.parquet")]
+        )
+
+    def test_single_uuid(self, monkeypatch, cleanup):
+        self._run(monkeypatch, uuid="uuid-a")
+
+        cleanup.assert_not_called()
+
+    def test_error_ignored(self, monkeypatch, cleanup, estimation_phase):
+        # A cleanup failure must not stop pmtiles generation or Phase 2
+        cleanup.side_effect = RuntimeError("s3 down")
+
+        self._run(monkeypatch)
+
+        estimation_phase.assert_called_once()
+
+
 class TestBatchProcessIsolation:
     def test_all_parquets_forks_one_child_per_parquet(self, monkeypatch):
         _enable_fork(monkeypatch, True)
