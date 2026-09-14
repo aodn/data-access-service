@@ -56,6 +56,15 @@ memory_watchdog:
     enabled: true
     interval_seconds: 30
     threshold_mb: 2800
+subsetting:
+  config:
+    # 8GB Fargate task: leave ~2GB so peak stays around 6GB (zlib/dask copies
+    # on top of the chunk). Larger hosts keep 25% instead.
+    headroom_gb: 2
+    target_peak_fraction: 0.7
+    min_chunk_mb: 32
+    # Fraction of the remaining peak budget to use for one dask chunk.
+    memory_fraction: 0.1
 estimation:
   config:
     s3_prefix: "portal/estimation"

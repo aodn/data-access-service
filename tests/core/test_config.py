@@ -21,6 +21,17 @@ def test_pmtiles_use_fork_process_default():
     assert pm.use_fork_process is True
 
 
+def test_zarr_chunking_config_from_yaml():
+    yaml_cfg = Config.get_config(EnvType.TESTING).config["subsetting"]["config"]
+    cfg = Config.get_config(EnvType.TESTING).get_zarr_chunking_config()
+    assert cfg.headroom_gb == yaml_cfg["headroom_gb"]
+    assert cfg.target_peak_fraction == yaml_cfg["target_peak_fraction"]
+    assert cfg.min_chunk_mb == yaml_cfg["min_chunk_mb"]
+    assert cfg.memory_fraction == yaml_cfg["memory_fraction"]
+    assert cfg.headroom_bytes == int(yaml_cfg["headroom_gb"] * 1024**3)
+    assert cfg.min_chunk_bytes == int(yaml_cfg["min_chunk_mb"] * 1024**2)
+
+
 def test_tiler_co_bucket_defaults_when_absent_from_yaml():
     """Not in config.yaml's tiler section yet (unify with parquet/pmtiles'
     co_bucket later); falls back to the same bucket name they default to,

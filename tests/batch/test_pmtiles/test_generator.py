@@ -114,7 +114,9 @@ class TestBatchProcessIsolation:
         generate_pmtiles_for_all_parquets(api, uuid="uuid-b")
 
         assert calls == [("uuid-b", "b.parquet")]
-        api.release_memory_for_pmtiles_batch.assert_called_once()
+        api.release_memory_for_batch.assert_called_once_with(
+            keep_suffix=".parquet", drop_instance=True
+        )
 
     def test_all_parquets_uuid_filter_no_match_skips_workers(self, monkeypatch):
         _enable_fork(monkeypatch, True)
@@ -132,7 +134,7 @@ class TestBatchProcessIsolation:
 
         fake_run.assert_not_called()
         # No work: still avoid trimming? Current code returns before trim when empty.
-        api.release_memory_for_pmtiles_batch.assert_not_called()
+        api.release_memory_for_batch.assert_not_called()
 
     def test_fork_helper_success_exit(self, monkeypatch):
         api = MagicMock()

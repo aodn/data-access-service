@@ -192,11 +192,17 @@ class BaseAPI:
             )
         return time_varname
 
-    def release_memory_for_pmtiles_batch(self) -> None:
-        """Optional hook: free memory the PMTiles batch job no longer needs.
+    def release_memory_for_batch(
+        self,
+        *,
+        keep_uuid: str | None = None,
+        keep_suffix: str | None = None,
+        drop_instance: bool = False,
+    ) -> None:
+        """Optional hook: drop catalog dicts a batch job no longer needs.
 
-        Default is a no-op. Concrete :class:`API` drops raw schemas, non-parquet
-        entries, and the GetAodn handle after the work list is materialised.
+        Default is a no-op. Concrete :class:`API` keeps matching descriptors
+        and schema field-name sets, and drops ``_raw``.
         """
 
     def _extract_coordinate(
@@ -583,52 +589,78 @@ class API(BaseAPI):
             raw_bytes / (1024 * 1024),
         )
 
-    def release_memory_for_pmtiles_batch(self) -> None:
-        """Drop structures the PMTiles batch job does not need after listing work.
+    def release_memory_for_batch(
+        self,
+        *,
+        keep_uuid: str | None = None,
+        keep_suffix: str | None = None,
+        drop_instance: bool = False,
+    ) -> None:
+        """Drop catalog dicts this batch job does not need.
 
-        Retains parquet-only descriptors and schema field-name sets (for
-        ``map_column_names``). Drops full compressed raw schemas, non-parquet
-        entries, and the GetAodn handle — fork children inherit this slimmer
-        state via copy-on-write.
+        Always drops ``_raw`` (compressed schemas). Keeps descriptors,
+        schema field-name sets, and partition-key sets that match:
+
+        * ``keep_uuid`` — only this uuid (zarr subset; every dataset on it
+          so ``collection_has_multi_datasets`` stays correct).
+        * ``keep_suffix`` — only names with this suffix (PMTiles: ``.parquet``).
+
+        ``drop_instance`` is True when the job does not load data through
+        GetAodn (PMTiles uses DuckDB/S3). False when the zarr store is
+        still needed.
         """
-        parquet_cached: Dict[str, Dict[str, Descriptor]] = {}
-        parquet_schema: Dict[str, Dict[str, frozenset[str]]] = {}
-        parquet_partitions: Dict[str, Dict[str, frozenset[str]]] = {}
+        if keep_uuid is not None and keep_uuid not in self._cached_metadata:
+            log.warning(
+                "batch memory trim: uuid=%s not in cached metadata, "
+                "leaving catalog as-is",
+                keep_uuid,
+            )
+            return
+
+        kept_cached: Dict[str, Dict[str, Descriptor]] = {}
+        kept_schema: Dict[str, Dict[str, frozenset[str]]] = {}
+        kept_partitions: Dict[str, Dict[str, frozenset[str]]] = {}
 
         for uuid, datasets in self._cached_metadata.items():
+            if keep_uuid is not None and uuid != keep_uuid:
+                continue
             kept = {
                 name: desc
                 for name, desc in datasets.items()
-                if name.endswith(".parquet")
+                if keep_suffix is None or name.endswith(keep_suffix)
             }
             if not kept:
                 continue
-            parquet_cached[uuid] = kept
+            kept_cached[uuid] = kept
             src_keys = self._schema_keys.get(uuid, {})
-            parquet_schema[uuid] = {
+            kept_schema[uuid] = {
                 name: src_keys[name] for name in kept if name in src_keys
             }
-            # Must survive the trim: map_column_names needs it to keep rejecting
-            # partition keys in the fork children.
+            # Must survive the trim: map_column_names needs it to keep
+            # rejecting partition keys.
             src_partitions = self._partition_keys.get(uuid, {})
-            parquet_partitions[uuid] = {
+            kept_partitions[uuid] = {
                 name: src_partitions[name] for name in kept if name in src_partitions
             }
 
-        self._cached_metadata = parquet_cached
-        self._schema_keys = parquet_schema
-        self._partition_keys = parquet_partitions
+        self._cached_metadata = kept_cached
+        self._schema_keys = kept_schema
+        self._partition_keys = kept_partitions
         self._raw.clear()
-        # Data loading for PMTiles goes through DuckDB/S3, not GetAodn.
-        self._instance = None
+        if drop_instance:
+            self._instance = None
         self._release_library_metadata_cache()
-        self._log_retained_metadata_size("after pmtiles batch trim")
+        self._log_retained_metadata_size("after batch catalog trim")
 
         process = psutil.Process()
         rss_mb = process.memory_info().rss / (1024 * 1024)
         log.info(
-            "PMTiles batch memory trim complete. RSS = %.2f MB",
+            "Batch catalog trim complete. RSS = %.2f MB "
+            "(keep_uuid=%s keep_suffix=%s drop_instance=%s)",
             rss_mb,
+            keep_uuid,
+            keep_suffix,
+            drop_instance,
         )
 
     def get_api_status(self) -> bool:
