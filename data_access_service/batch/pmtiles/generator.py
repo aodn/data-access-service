@@ -235,8 +235,9 @@ def _generate_pmtiles_for_parquets(api: BaseAPI, uuid: str, dname: str) -> bool:
                 # TODO: please use functions like is_local_pmtiles_valid() in pmtiles_util to verify the new generated pmtiles file
                 #  is valid or not before uploading to S3. We don't want to upload an invalid pmtiles file to S3 and cause errors
                 # [Raymond] Is the function is_local_pmtiles_valid() in pmtiles_util.py reliable? Seems not
-                bucket = config.get_pmtiles_config().bucket_name
-                s3_dir = f"portal/visualization/{uuid}"
+                pm_config = config.get_pmtiles_config()
+                bucket = pm_config.bucket_name
+                s3_dir = f"{pm_config.s3_prefix}/{uuid}"
                 aws.upload_file_to_s3(
                     pmtiles_path,
                     bucket,

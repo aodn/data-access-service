@@ -21,9 +21,14 @@ REMOVED_METADATA = "portal/visualization/uuid-removed/z.parquet.metadata"
 
 def stub_s3(monkeypatch, keys, dry_run=False, delete_errors=()):
     """Fake settings and S3 content. Returns the S3 delete call spy."""
-    monkeypatch.setattr(cleanup, "DRY_RUN", dry_run)
     monkeypatch.setattr(
-        cleanup.config, "get_pmtiles_config", lambda: MagicMock(bucket_name=BUCKET)
+        cleanup.config,
+        "get_pmtiles_config",
+        lambda: MagicMock(
+            bucket_name=BUCKET,
+            s3_prefix="portal/visualization",
+            cleanup_dry_run=dry_run,
+        ),
     )
     monkeypatch.setattr(cleanup.aws, "list_all_s3_objects", lambda b, p: list(keys))
     delete = MagicMock(return_value={"Errors": [{"Key": k} for k in delete_errors]})

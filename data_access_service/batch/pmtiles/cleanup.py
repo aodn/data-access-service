@@ -1,6 +1,7 @@
 """Remove pmtiles from S3 whose dataset is no longer in the catalog.
 
 Called once at the start of a full pmtiles batch run, see generator.py.
+Settings come from config.yaml, pmtiles.config: s3_prefix and cleanup_dry_run.
 """
 
 from data_access_service import Config, init_log
@@ -10,9 +11,6 @@ config = Config.get_config()
 logger = init_log(config)
 aws = AWSHelper()
 
-# Settings
-S3_PREFIX = "portal/visualization"  # same folder generator.py uploads to
-DRY_RUN = True  # True: only log what would be deleted
 MAX_DELETE_RATIO = 0.5  # refuse to delete more than half of the folder
 
 
@@ -22,22 +20,25 @@ def remove_stale_pmtiles(work: list[tuple[str, str]]) -> list[str]:
     ``work`` is a list of (uuid, dataset_name). Returns the deleted keys,
     or in dry run the keys it would delete.
     """
-    bucket = config.get_pmtiles_config().bucket_name
+    pm_config = config.get_pmtiles_config()
+    bucket = pm_config.bucket_name
+    prefix = pm_config.s3_prefix
+    dry_run = pm_config.cleanup_dry_run
 
-    expected = catalog_keys(work)
+    expected = catalog_keys(prefix, work)
     if not expected:
-        logger.warning("Cleanup skipped: catalog has no parquet datasets")
+        logger.error("Cleanup skipped: catalog has no parquet datasets")
         return []
 
-    existing = s3_keys(bucket)
+    existing = s3_keys(bucket, prefix)
     stale = sorted(set(existing) - expected)
     logger.info(
         "Cleanup: %s object(s) in s3://%s/%s/, %s stale, dry_run=%s",
         len(existing),
         bucket,
-        S3_PREFIX,
+        prefix,
         len(stale),
-        DRY_RUN,
+        dry_run,
     )
     if not stale:
         return []
@@ -52,25 +53,25 @@ def remove_stale_pmtiles(work: list[tuple[str, str]]) -> list[str]:
 
     for key in stale:
         logger.info(
-            "%s s3://%s/%s", "Would delete" if DRY_RUN else "Deleting", bucket, key
+            "%s s3://%s/%s", "Would delete" if dry_run else "Deleting", bucket, key
         )
-    if DRY_RUN:
+    if dry_run:
         return stale
     return delete_keys(bucket, stale)
 
 
-def catalog_keys(work: list[tuple[str, str]]) -> set[str]:
+def catalog_keys(prefix: str, work: list[tuple[str, str]]) -> set[str]:
     """The .pmtiles and .metadata key of every dataset in the catalog."""
     return {
-        f"{S3_PREFIX}/{uuid}/{dname}{ext}"
+        f"{prefix}/{uuid}/{dname}{ext}"
         for uuid, dname in work
         for ext in (".pmtiles", ".metadata")
     }
 
 
-def s3_keys(bucket: str) -> list[str]:
+def s3_keys(bucket: str, prefix: str) -> list[str]:
     """Every key inside the pmtiles folder in S3."""
-    return aws.list_all_s3_objects(bucket, f"{S3_PREFIX}/")
+    return aws.list_all_s3_objects(bucket, f"{prefix}/")
 
 
 def delete_keys(bucket: str, keys: list[str]) -> list[str]:

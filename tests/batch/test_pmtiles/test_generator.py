@@ -414,7 +414,7 @@ class TestUploadMetadata:
         monkeypatch.setattr(
             generator.config,
             "get_pmtiles_config",
-            lambda: MagicMock(bucket_name=bucket),
+            lambda: MagicMock(bucket_name=bucket, s3_prefix="portal/visualization"),
         )
 
         assert _generate_pmtiles_for_parquets(api=None, uuid=uuid, dname=dname) is True
