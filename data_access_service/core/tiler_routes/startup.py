@@ -17,7 +17,10 @@ import anyio
 
 from data_access_service.config.config import Config
 from data_access_service.core.api import API
-from data_access_service.core.tiler_routes.shared import mark_tiler_ready
+from data_access_service.core.tiler_routes.shared import (
+    TILE_THREAD_LIMITER,
+    mark_tiler_ready,
+)
 from data_access_service.tiler.services.colormap.registry import load_colormaps
 from data_access_service.tiler.services.product.discovery import discover_products
 from data_access_service.tiler.services.product.registry import load_products
@@ -40,8 +43,8 @@ async def run_tiler_warmup(api: API) -> None:
         )
         load_products(products)
         load_colormaps()
-        await anyio.to_thread.run_sync(warmup_resample)
-        await anyio.to_thread.run_sync(warmup_visual)
+        await anyio.to_thread.run_sync(warmup_resample, limiter=TILE_THREAD_LIMITER)
+        await anyio.to_thread.run_sync(warmup_visual, limiter=TILE_THREAD_LIMITER)
 
         outcomes = await prewarm_stores(
             sorted({product.source_path for product in products.values()})

@@ -4,7 +4,6 @@ import os
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
-import anyio
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -103,11 +102,6 @@ async def lifespan(application: FastAPI):
                 scheduler_startup_task,
                 tiler_warmup_task,
                 memory_watchdog_task,
-            )
-            # Set the thread pool size for tiler endpoints to the configured value, as only the tiler endpoints use anyio thread pool.
-            limiter = anyio.to_thread.current_default_thread_limiter()
-            limiter.total_tokens = (
-                Config.get_config().get_tiler_config().thread_pool_size
             )
 
             yield

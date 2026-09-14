@@ -1,4 +1,6 @@
-from fastapi import APIRouter, HTTPException, Path, Query, Response
+import functools
+
+from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from fastapi.openapi.models import Example
 
 from data_access_service.config.http_cache import IMMUTABLE_CACHE_HEADERS
@@ -11,11 +13,13 @@ from .products import router as products_router
 from .shared import (
     DATE_EX,
     PRODUCT_EX,
+    ClientDisconnected,
     get_product_or_404,
     is_store_available_or_404,
     load_slice_or_404,
     parse_date_or_422,
     resolve_timestamp_or_404,
+    run_cancellable,
 )
 
 router = APIRouter()
@@ -32,7 +36,8 @@ router.include_router(products_router)
         "`date` must be one of the exact UTC timestamps returned by `/manifest`'s `available_dates`."
     ),
 )
-def get_tile(
+async def get_tile(
+    request: Request,
     product_id: str = Path(openapi_examples=PRODUCT_EX),
     date: str = Query(openapi_examples=DATE_EX),
     z: int = Path(openapi_examples={"default": Example(value=1)}),
@@ -58,16 +63,26 @@ def get_tile(
         )
 
     variables = product.variables
-    png_bytes = render_tile(
-        product,
-        lambda: load_slice_or_404(
-            product.source_path, ts, variables, ocean_masked=product.ocean_masked
-        ),
-        z,
-        x,
-        y,
-        date,
-    )
+    try:
+        png_bytes = await run_cancellable(
+            request,
+            functools.partial(
+                render_tile,
+                product,
+                lambda: load_slice_or_404(
+                    product.source_path,
+                    ts,
+                    variables,
+                    ocean_masked=product.ocean_masked,
+                ),
+                z,
+                x,
+                y,
+                date,
+            ),
+        )
+    except ClientDisconnected as e:
+        raise HTTPException(status_code=499, detail="Client disconnected") from e
     return Response(
         content=png_bytes, media_type="image/png", headers=IMMUTABLE_CACHE_HEADERS
     )
@@ -84,7 +99,8 @@ def get_tile(
     response_model=DataTileManifestResponse,
     response_model_exclude_none=True,
 )
-def get_manifest(
+async def get_manifest(
+    request: Request,
     response: Response,
     product_id: str = Path(openapi_examples=PRODUCT_EX),
     date: str = Query(openapi_examples=DATE_EX),
@@ -95,8 +111,18 @@ def get_manifest(
     resolve_timestamp_or_404(product, ts)
     get_lod_grids(product)
     variables = product.variables
-    ds = load_slice_or_404(
-        product.source_path, ts, variables, ocean_masked=product.ocean_masked
-    )
+    try:
+        ds = await run_cancellable(
+            request,
+            functools.partial(
+                load_slice_or_404,
+                product.source_path,
+                ts,
+                variables,
+                ocean_masked=product.ocean_masked,
+            ),
+        )
+    except ClientDisconnected as e:
+        raise HTTPException(status_code=499, detail="Client disconnected") from e
     response.headers.update(IMMUTABLE_CACHE_HEADERS)
     return DataTileManifestResponse(**render_manifest(product, ds))

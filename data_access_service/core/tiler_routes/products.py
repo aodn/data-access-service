@@ -1,6 +1,9 @@
+import functools
 import logging
 import math
 
+import anyio
+import pandas as pd
 import xarray as xr
 from fastapi import APIRouter, HTTPException, Path, Query, Response
 from fastapi.openapi.models import Example
@@ -15,6 +18,7 @@ from data_access_service.tiler.schemas.products import (
     ProductConfig,
     VariableValue,
 )
+from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.product.registry import (
     iter_product_items,
     iter_products,
@@ -28,6 +32,7 @@ from data_access_service.tiler.utils.geo import dataset_bounds
 from .shared import (
     DATE_EX,
     PRODUCT_EX,
+    TILE_THREAD_LIMITER,
     get_product_or_404,
     is_store_available_or_404,
     load_slice_or_404,
@@ -77,7 +82,7 @@ async def get_products(response: Response):
     ),
     response_model=ManifestResponse,
 )
-def get_products_availability(
+async def get_products_availability(
     response: Response,
     from_date: str | None = Query(
         None,
@@ -159,7 +164,7 @@ def get_products_availability(
     ),
     response_model=PointResponse,
 )
-def get_point(
+async def get_point(
     response: Response,
     product_id: str = Path(openapi_examples=PRODUCT_EX),
     date: str = Query(openapi_examples=DATE_EX),
@@ -170,6 +175,19 @@ def get_point(
     is_store_available_or_404(product)
     ts = parse_date_or_422(date)
     resolve_timestamp_or_404(product, ts)
+
+    result = await anyio.to_thread.run_sync(
+        functools.partial(_load_point, product, ts, lat, lon),
+        limiter=TILE_THREAD_LIMITER,
+    )
+
+    response.headers.update(IMMUTABLE_CACHE_HEADERS)
+    return result
+
+
+def _load_point(
+    product: Product, ts: pd.Timestamp, lat: float, lon: float
+) -> PointResponse:
     variables = product.variables
     ds = load_slice_or_404(
         product.source_path, ts, variables, ocean_masked=product.ocean_masked
@@ -186,7 +204,6 @@ def get_point(
             units=point[var].attrs.get("units"),
         )
 
-    response.headers.update(IMMUTABLE_CACHE_HEADERS)
     return PointResponse(
         lat=float(point.lat.values),
         lon=float(point.lon.values),

@@ -139,7 +139,7 @@ flowchart TD
 
 Solid arrows: request/data flow. Dotted arrows: read a shared static asset or fall through to S3, not part of the in-process cache chain.
 
-`sliceCache` (L1) is the only persisted cache node above — under the default `cache_backend: none` ([§10](#10-caching-strategy)) it's a `NullMemoizer` and never actually retains anything between calls, so every request recomputes past that point. The data-tile and visual-tile pipelines have no persistent cache of their own; their dedup nodes (`_processed_dedup`, `_fill_dedup`, `_tile_dedup`/`_bbox_dedup`, alongside L1's own `_slice_dedup`) coalesce concurrent identical in-flight requests regardless of backend — see [§10.3](#103-stampede-protection).
+`sliceCache` (L1) is the only persisted cache node above — with the configured `cache_backend: redis` ([§10](#10-caching-strategy)) it's a `RedisMemoizer` and does retain results between calls, for `slice_cache_ttl_seconds` (600s); under `cache_backend: none` it would instead be a `NullMemoizer` that never retains anything, so every request recomputes past that point. The data-tile and visual-tile pipelines have no persistent cache of their own regardless of backend; their dedup nodes (`_processed_dedup`, `_fill_dedup`, `_tile_dedup`/`_bbox_dedup`, alongside L1's own `_slice_dedup`) coalesce concurrent identical in-flight requests regardless of backend — see [§10.3](#103-stampede-protection).
 
 ### Request flow
 
@@ -162,7 +162,7 @@ mem warm  → load_slice (L1 hit)         → fill compute (dedup'd if concurren
 S3 cold   → load_slice (S3 .compute())  → fill compute (dedup'd if concurrent; only if coastal_fill set) → _to_scalar_parts → XarrayReader.tile/part → colormap + encode
 ```
 
-With the default `cache_backend: none`, "slice warm" describes what _would_ happen with a cache backend implemented for L1 — today every request recomputes past L1, since `NullMemoizer` retains nothing. See [§10](#10-caching-strategy) for the full cache-layer breakdown and [§12.6](#126-a-real-cold-path-finding-chunk-over-read) for a documented cold-path slowness on one production store.
+With the configured `cache_backend: redis`, "slice warm" is the common case: a key already served within the last `slice_cache_ttl_seconds` (600s) is a Redis `GET` + `pickle.loads`, no S3 fetch. Under `cache_backend: none` there is no such state — every request recomputes past L1, since `NullMemoizer` retains nothing, so "slice warm" would never occur. See [§10](#10-caching-strategy) for the full cache-layer breakdown, [§12.7](#127-a-real-cold-path-finding-chunk-over-read) for a documented cold-path slowness on one production store, and [§12.10](#1210-worked-example-memory-footprint-under-real-traffic-chunked-time-product-redis-enabled) for what warm-vs-cold costs in memory on that same store.
 
 ---
 
@@ -491,7 +491,7 @@ GET /visual_tiles/{product_id}/animation.{ext}?from_date=...&to_date=...
 
 **Caching design** — this endpoint deliberately differs from the other tile endpoints: it calls `load_slice_uncached` (`services/store/slice_loader.py`), which bypasses the L1 slice cache entirely, so a rare 30-frame request can't evict hot slices serving the steady-state `/visual_tiles` and `/data_tiles` endpoints.
 
-**Frame loading** — the handler is `async def`. Per-frame `load_slice_uncached` calls are dispatched in parallel via `asyncio.gather(*(anyio.to_thread.run_sync(..., limiter=_ANIMATION_LIMITER) for ...))`, so a cold N-frame request blocks on roughly the slowest single-frame S3 read rather than the serial sum. Frame order is preserved because `gather` returns results in input order. This runs under `_ANIMATION_LIMITER` (`animation_workers`, default 10) — a budget independent of the default tile-handler limiter, so a 30-frame fan-out can't starve tile-handler slots. See [§12.3](#123-one-pool-two-named-budgets).
+**Frame loading** — the handler is `async def`. Per-frame `load_slice_uncached` calls are dispatched in parallel via `asyncio.gather(*(anyio.to_thread.run_sync(..., limiter=_ANIMATION_LIMITER) for ...))`, so a cold N-frame request blocks on roughly the slowest single-frame S3 read rather than the serial sum. Frame order is preserved because `gather` returns results in input order. This runs under `_ANIMATION_LIMITER` (`animation_workers`, default 10) — a budget independent of `TILE_THREAD_LIMITER`, so a 30-frame fan-out can't starve tile-handler slots. See [§12.4](#124-three-named-budgets).
 
 ---
 
@@ -769,13 +769,13 @@ If `lat`/`lon` are still missing after renaming, `_open_store` raises `ValueErro
 
 ## 10. Caching strategy
 
-Single persisted cache tier ordered tile → S3: **L1 (slice) → S3**. Backed by a `CacheBackend` implementation (`services/caching/memoizer.py`) selected via `tiler.cache_backend` in `config/config.yaml` (default, and today the **only implemented**, value: `"none"`). There is no on-disk cache tier — an L1 miss falls straight through to a live Zarr read on S3.
+Single persisted cache tier ordered tile → S3: **L1 (slice) → S3**. Backed by a `CacheBackend` implementation (`services/caching/memoizer.py`) selected via `tiler.cache_backend` in `config/config.yaml` — there is no code-level default (`TilerConfig.cache_backend` is a required field, read straight from `tconfig["cache_backend"]` in `Config.get_tiler_config()`); whatever the YAML says is what runs. **Two backends exist today**: `NullMemoizer` (`cache_backend: "none"` — no caching, no cross-request dedup, every call recomputes) and `RedisMemoizer` (`cache_backend: "redis"` — a distributed cache + cross-instance dedup backed by a Redis-protocol store). `config/config.yaml`'s base config sets `cache_backend: "redis"` with `slice_cache_ttl_seconds: 600`, and no per-environment overlay overrides it, so Redis is what's actually running — see [§12.10](#1210-worked-example-memory-footprint-under-real-traffic-chunked-time-product-redis-enabled) for a concrete memory walkthrough under that configuration. There is no on-disk cache tier either way — an L1 miss (cold under `none`, or a cold/expired key under `redis`) falls straight through to a live Zarr read on S3.
 
-The processed-grid step above L1 (resample/normalise for data tiles, inpaint+land-cut for visual tiles) has no persistent cache of its own — only in-process `Deduper` coalescing (see [§10.3](#103-stampede-protection)). It was dropped deliberately: once L1 is backed by a real `CacheBackend`, the expensive part of a miss (the S3/Zarr fetch) is already covered there, and the remaining resample/inpaint recompute is comparatively cheap (numba-JIT'd, ~5× the `xr.interp` baseline — see [§7.4](#74-resample-and-normalize-numba-jit)) and only lost between non-concurrent requests, not within a burst. Keeping it out of the cache stack also avoids storing large per-(product, date, lod) processed grids in a future distributed backend.
+The processed-grid step above L1 (resample/normalise for data tiles, inpaint+land-cut for visual tiles) has no persistent cache of its own — only in-process `Deduper` coalescing (see [§10.3](#103-stampede-protection)). It was dropped deliberately: with L1 backed by a real `CacheBackend`, the expensive part of a miss (the S3/Zarr fetch) is already covered there, and the remaining resample/inpaint recompute is comparatively cheap (numba-JIT'd, ~5× the `xr.interp` baseline — see [§7.4](#74-resample-and-normalize-numba-jit)) and only lost between non-concurrent requests, not within a burst. Keeping it out of the cache stack also avoids storing large per-(product, date, lod) processed grids in the distributed backend.
 
-`CacheBackend` is a one-method interface (`get_or_compute(key, factory)`); `NullMemoizer` is the only concrete implementation today — every call recomputes, nothing is cached or deduplicated across requests. The interface exists so a distributed backend (e.g. Redis-backed, for sharing cache state across horizontally-scaled instances) can be added later by implementing `CacheBackend` and wiring it into `create_memoizer()` — no such backend exists in the code today; treat any doc or comment claiming otherwise as aspirational, not current behaviour.
+`CacheBackend` is a one-method interface (`get_or_compute(key, factory)`). `RedisMemoizer` (`services/caching/memoizer.py`) pickles values into a Redis/Valkey-protocol store (in deployment, AWS ElastiCache for Valkey, addressed via `CACHE_HOST`); a cold key is guarded by a short-lived `SET NX EX` lock so only the first caller across the whole fleet runs `factory()` — other instances poll for that winner's result (`_wait_for_result`, every `_POLL_INTERVAL_SECONDS`, up to `_MAX_WAIT_SECONDS = 20`) instead of recomputing, falling back to a local `factory()` only if the wait budget is exceeded (e.g. the lock holder died mid-compute). Any Redis error (connection refused, timeout, ...) fails open — log a warning and call `factory()` directly — matching the tiler's general bias toward availability over strict caching. `NullMemoizer` remains the explicit opt-out (`cache_backend: "none"`) for local dev without a reachable Redis/Valkey instance, or for deliberately disabling caching.
 
-Because caching is off by default, the **in-process `Deduper`** (below) is the only thing standing between a burst of identical concurrent requests and a burst of identical concurrent S3 fetches — it is not optional infrastructure, it's the load-bearing piece.
+Even with `RedisMemoizer` live, the **in-process `Deduper`** (below) still matters: it collapses a same-process burst of identical requests into one caller *before* any of them reach Redis, so only one thread per process ever pays a lock-acquire/`GET`/`SET` round trip for a given key, rather than every thread in the burst separately discovering "someone else already has the lock." Under `cache_backend: none` it's the *only* protection against a concurrent burst redoing the same work, since there is no lock at all in that mode.
 
 ### 10.1 Store singleton (`services/store/registry.py`, `StoreRegistry`)
 
@@ -783,7 +783,7 @@ Caches the open Zarr store handle (lazy, metadata + coordinate arrays only). Sha
 
 Freshness is decoupled from the request path entirely — a request only ever serves the currently-published handle, so reads never block on freshness beyond the very first open per URL:
 
-- **Startup** — `prewarm_stores` opens every registered store concurrently on the shared anyio pool, gated by `_STORE_PREWARM_LIMITER` (`store_prewarm_workers`, default 6), so the cache is warm before most requests arrive.
+- **Startup** — `prewarm_stores` opens every registered store concurrently on the shared anyio pool, gated by `_STORE_PREWARM_LIMITER` (`store_prewarm_workers`, default 10), so the cache is warm before most requests arrive.
 - **First-ever open** — the request blocks until `xr.open_zarr` completes; concurrent requests for the same URL wait on the same `concurrent.futures.Future` (keyed per-URL in `_in_flight`) rather than each opening independently. Opens of _different_ URLs proceed in parallel.
 - **Later opens** — once published, a store is served as-is regardless of age. Picking up newly appended time steps is entirely the job of a periodic cron sweep (`StoreRegistry.refresh_all`, driven by `core/scheduler.py`'s `TaskScheduler`, every `store_refresh_interval_hours`, default 4) that walks every URL already in `_stores` and re-opens it **one at a time** — sequential by design, so staleness is bounded by the sweep interval regardless of how often (or rarely) a store is requested, without ever opening more than one store's metadata concurrently.
 
@@ -797,7 +797,7 @@ Alongside the dataset, the registry builds a per-URL `{timestamp: (raw_timestamp
 
 Primary consumers are **visual_tiles** (every tile request calls `load_slice`) and **data_tiles** (every tile request calls `load_slice` unless `_processed_dedup` already has a concurrent compute in flight for the same grid) and **data_tiles manifest/point** (always need `ds` directly).
 
-Under `cache_backend: none`, every request is an L1 miss by design — there is no on-disk fallback either, so a subsequent request for the same key pays a full cold S3 fetch identical to a first-ever cold request.
+Under `cache_backend: none`, every request is an L1 miss by design — there is no on-disk fallback either, so a subsequent request for the same key pays a full cold S3 fetch identical to a first-ever cold request. Under the configured `cache_backend: redis`, a key is only cold the first time it's requested within `slice_cache_ttl_seconds` (600s) fleet-wide; every other request for that key in the window — same instance or not, concurrent or minutes later — is a Redis `GET` + `pickle.loads`, skipping the S3/Zarr fetch entirely. See [§12.10](#1210-worked-example-memory-footprint-under-real-traffic-chunked-time-product-redis-enabled) for what that means in practice for a time-chunked product.
 
 ### 10.3 Stampede protection
 
@@ -812,7 +812,7 @@ Each `Deduper` instance lives with its one consumer:
 
 Outside this pairing, `StoreRegistry._in_flight` deduplicates store opens with its own per-URL Future map, which `Deduper` deliberately does not model.
 
-`Deduper` only coordinates threads within one process — it does nothing across horizontally-scaled instances. With `cache_backend: none` and no distributed lock implemented, a burst of identical requests landing on _different_ instances each pays its own S3 fetch; only within a single instance is the burst collapsed to one fetch.
+`Deduper` only coordinates threads within one process — it does nothing across horizontally-scaled instances by itself. Under `cache_backend: none`, with no distributed lock at all, a burst of identical requests landing on _different_ instances each pays its own S3 fetch; only within a single instance is the burst collapsed to one fetch. Under the configured `cache_backend: redis`, cross-instance stampede protection comes from `RedisMemoizer`'s `SET NX EX` lock (see [§10](#10-caching-strategy)): the first instance to win the lock computes and publishes to Redis, and every other instance's own `Deduper`-collapsed representative thread polls Redis for that result instead of independently fetching from S3 — so a burst landing across multiple instances still collapses to one real S3 fetch, not one per instance, as long as the winner publishes before `_MAX_WAIT_SECONDS` (20s) elapses for the pollers.
 
 ---
 
@@ -820,7 +820,7 @@ Outside this pairing, `StoreRegistry._in_flight` deduplicates store opens with i
 
 ### 11.1 Shared lifespan (`data_access_service/server.py`)
 
-The tiler shares a single FastAPI `lifespan` with the rest of `data-access-service`. On startup, the lifespan sets the anyio default thread-pool size from `tiler.thread_pool_size` (since tiler routes are the only sync `def` handlers using it) and schedules the tiler's own startup coroutine, `run_tiler_warmup` (`core/tiler_routes/startup.py`), as one of several background `asyncio.Task`s alongside the rest of the app's own startup work (e.g. `scheduler_startup_task` for the non-tiler API's `TaskScheduler`, which also drives the tiler's own store-refresh cron sweep — see [§10.1](#101-store-singleton-servicesstoreregistrypy-storeregistry)).
+The tiler shares a single FastAPI `lifespan` with the rest of `data-access-service`. On startup, the lifespan schedules the tiler's own startup coroutine, `run_tiler_warmup` (`core/tiler_routes/startup.py`), as one of several background `asyncio.Task`s alongside the rest of the app's own startup work (e.g. `scheduler_startup_task` for the non-tiler API's `TaskScheduler`, which also drives the tiler's own store-refresh cron sweep — see [§10.1](#101-store-singleton-servicesstoreregistrypy-storeregistry)). The tiler's thread-pool budget (`TILE_THREAD_LIMITER`) is not part of this lifespan setup — it's a dedicated `anyio.CapacityLimiter` constructed once at import time in `core/tiler_routes/shared.py`, entirely separate from anyio's process-wide default limiter that the rest of the app uses. See [§12.2](#122-the-tiler-thread-pool).
 
 ### 11.2 `run_tiler_warmup` (`core/tiler_routes/startup.py`)
 
@@ -833,8 +833,8 @@ async def run_tiler_warmup(api: API) -> None:
         candidates = discover_products(api, base_url)      # load config, fan out, layer overrides
 
         load_colormaps()
-        await anyio.to_thread.run_sync(warmup_resample)   # numba JIT warmup, see §7.4
-        await anyio.to_thread.run_sync(warmup_visual)     # rio-tiler warmup
+        await anyio.to_thread.run_sync(warmup_resample, limiter=TILE_THREAD_LIMITER)  # numba JIT warmup, see §7.4
+        await anyio.to_thread.run_sync(warmup_visual, limiter=TILE_THREAD_LIMITER)    # rio-tiler warmup
 
         outcomes = await prewarm_stores(                  # per-URL outcome map
             sorted({p.source_path for p in candidates.values()}))
@@ -885,76 +885,100 @@ Phase 1 deliberately checks _presence_ and _time-indexability_ only — not dime
 
 ### 11.4 What prewarm does and doesn't do
 
-`prewarm_stores` opens each unique Zarr store's **metadata only** (`xr.open_zarr`, no data chunks) via `services/store/registry.py` — it does not populate the L1 slice cache with any actual data. Since `cache_backend` defaults to `none`, L1 population wouldn't help anyway (nothing survives between requests); the value of prewarming is purely to avoid the first request to each store paying the metadata-open cost.
+`prewarm_stores` opens each unique Zarr store's **metadata only** (`xr.open_zarr`, no data chunks) via `services/store/registry.py` — it does not populate the L1 slice cache with any actual data, regardless of `cache_backend`. Under `cache_backend: none` this population wouldn't help anyway (nothing survives between requests); under the configured `cache_backend: redis` it still wouldn't help, since prewarm never calls `load_slice` for any (store, date) — only the store handle itself is warmed. Either way, the value of prewarming is purely to avoid the first request to each store paying the metadata-open cost.
 
 ### 11.5 Other background actions
 
 | Trigger                     | Action                                                                                       | Mechanism                                                                                                                                                                           |
 | --------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `prewarm_stores` at startup | Open each unique Zarr store URL (metadata only) and report a per-URL outcome                 | Fans out on the anyio pool, gated by `_STORE_PREWARM_LIMITER` (`store_prewarm_workers`, default 6); operational failures get 3 attempts with exponential backoff                    |
+| `prewarm_stores` at startup | Open each unique Zarr store URL (metadata only) and report a per-URL outcome                 | Fans out on the anyio pool, gated by `_STORE_PREWARM_LIMITER` (`store_prewarm_workers`, default 10); operational failures get 3 attempts with exponential backoff                    |
 | Cron sweep, every `store_refresh_interval_hours` | Re-open every currently-published Zarr store to pick up new timestamps; the currently-published handle keeps serving requests until its refresh completes | `StoreRegistry.refresh_all`, scheduled by `TaskScheduler` (`core/scheduler.py`, APScheduler `CronTrigger`); one store at a time, so refreshes never overlap regardless of how many stores are registered |
 
 ---
 
 ## 12. Concurrency: event loop and threading
 
-The server combines an **asyncio event loop** (for FastAPI/Uvicorn request multiplexing and background tasks) with a **single bounded thread pool** (anyio's, for all CPU- and I/O-heavy work). Named capacity budgets carve slices out of that one pool for specific fan-outs (`_ANIMATION_LIMITER`, `_STORE_PREWARM_LIMITER`) so background/burst work cannot starve request serving.
+The server combines an **asyncio event loop** (for FastAPI/Uvicorn request multiplexing and background tasks) with a **single bounded thread pool** (anyio's, for all CPU- and I/O-heavy work). Named capacity budgets carve slices out of that one pool for specific fan-outs (`TILE_THREAD_LIMITER`, `_ANIMATION_LIMITER`, `_STORE_PREWARM_LIMITER`) so background/burst work cannot starve request serving — and, since every tiler endpoint dispatches explicitly, so tiler traffic and the main (non-tiler) API can never starve each other either.
 
-### 12.1 Why most endpoints are `def`, not `async def`
+### 12.1 Every tiler endpoint is `async def`
 
 ```python
 @router.get("/{product_id}/{z}/{x}/{y}.{ext}")
-def get_tile(date: str = Query(...), ...):
+async def get_tile(request: Request, ...):
+    ...
+    body = await run_cancellable(request, functools.partial(_do_render))
     ...
 ```
 
-These are **synchronous** `def` functions. FastAPI/Starlette routes sync handlers to a thread pool managed by `anyio` (`anyio.to_thread.current_default_thread_limiter()`, whose `total_tokens` the shared lifespan sets to `tiler.thread_pool_size`).
+Every tiler route handler is `async def`, but the actual work — `render_tile`, `render_bbox`, `load_slice_or_404`, the point/manifest lookups, etc. — is still plain, blocking, synchronous code; none of it was rewritten to be async. What changed is *who dispatches it to a thread*: instead of letting FastAPI/Starlette auto-dispatch a sync `def` handler onto anyio's process-wide default thread limiter, each handler explicitly calls `anyio.to_thread.run_sync(fn, limiter=TILE_THREAD_LIMITER)` — directly, or via `shared.run_cancellable` for the four burst-prone handlers that also need cancellation detection ([§12.9](#129-cancelled-tile-requests)).
 
-The reason is twofold:
+The blocking pipelines themselves are still not async, for the same two reasons as ever:
 
-1. **`xarray` / `zarr` / `rio-tiler` are blocking libraries.** None expose async read APIs. If these handlers were `async def`, every blocking call would freeze the event loop.
+1. **`xarray` / `zarr` / `rio-tiler` are blocking libraries.** None expose async read APIs — running them directly on the event loop would freeze it.
 2. **PNG/WebP encoding and numpy resampling are CPU-bound.** Doing that work on the event loop would block every other request for the duration.
 
-#### When does `async def` actually help?
+For a sequential blocking pipeline (`load → process → encode`), splitting it into multiple `to_thread.run_sync` hops adds thread-acquisition overhead with no wall-clock win — so each handler still dispatches its blocking work as *one* call, not several.
 
-There are two distinct kinds of "parallelism":
+#### Why `async def` even for handlers with no cancellation or fan-out need
+
+`get_legend` and `get_point` don't need cancellation detection or independent fan-out — they're `async def` purely so they can dispatch through `TILE_THREAD_LIMITER` by hand. FastAPI's automatic sync-`def` dispatch has no way to pass a custom `limiter=`; it always uses the ambient process-wide default. Any handler that must draw on the tiler-exclusive budget therefore has to do its own dispatch, which means `async def`.
+
+`get_products`, `get_colormaps`, and `get_products_availability` are `async def` too, but dispatch nothing to any thread at all — their work (in-memory registry iteration, cheap store-registry index lookups already guaranteed populated by prewarm before the tiler is ready) is cheap enough to run directly on the event loop. Being `async def` still matters here: it's what keeps them off FastAPI's automatic sync-`def` dispatch, which would otherwise send them to the ambient default limiter regardless of how little work they actually do.
+
+#### When does `async def` help beyond that?
 
 | Kind                           | What it is                                    | Who provides it                                                                                               |
 | ------------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **Within-request parallelism** | One request's internal steps run concurrently | Only `async def` + `asyncio.gather` over **independent** steps. Useless for sequential/dependent steps.       |
-| **Across-request concurrency** | The server handles many requests at once      | Both `def` (via the anyio thread pool) and `async def` (via the loop + thread pool). Same outcome either way. |
+| **Within-request parallelism** | One request's internal steps run concurrently | `async def` + `asyncio.gather` over **independent** steps. Useless for sequential/dependent steps.            |
+| **Client-cancellation detection** | Noticing the client is gone before/while doing work for it | Only `async def` — `Request.is_disconnected()` awaits the ASGI `receive()` channel, which only a running event loop can drive. A sync worker thread has no way to observe this. |
+| **Concurrency-budget isolation** | Dispatching explicitly onto a named limiter, not the ambient default | Only `async def` — a sync `def` handler is always auto-dispatched onto anyio's process-wide default limiter, with no per-route override. |
 
-For a sequential blocking pipeline (`load → process → encode`), wrapping it as `async def` with multiple `to_thread.run_sync` hops adds thread-acquisition overhead with no wall-clock win. This is why tile handlers stay `def`.
-
-`async def` earns its keep in a few concrete cases in this codebase:
+Concretely, in this codebase:
 
 1. **Independent fan-out** — `/animation` reads N frames in parallel via `asyncio.gather`; total time drops from `N × per_frame` to `~max(per_frame)`.
 2. **A running event loop is needed in the handler** (e.g. `run_tiler_warmup` scheduling further background work).
-3. **Selective offload boundaries** — keep cheap parsing/validation on the loop, offload only the heavy step (`get_animation`'s prelude, e.g. `get_available_dates`, bbox/CRS parsing, all offloaded via `anyio.to_thread.run_sync`).
+3. **Selective offload boundaries** — keep cheap parsing/validation on the loop, offload only the heavy step (`get_animation`'s prelude, e.g. `get_available_dates`, bbox/CRS parsing, all offloaded via `anyio.to_thread.run_sync(..., limiter=TILE_THREAD_LIMITER)`).
+4. **Cancellation coordination** — `data_tiles.get_tile`/`get_manifest` and `visual_tiles.get_tile`/`get_bbox` are `async def` *coordinators*: cheap validation runs directly on the event loop, then the (still fully synchronous, unmodified) render/load pipeline is dispatched via `shared.run_cancellable` — see [§12.9](#129-cancelled-tile-requests).
+5. **Budget isolation with no cancellation need** — `get_legend` and `get_point` are `async def` only to reach `TILE_THREAD_LIMITER` by hand; they don't wrap their dispatch in `run_cancellable`.
+6. **No dispatch needed at all** — `get_products`, `get_colormaps`, `get_products_availability` stay `async def` even though their work never leaves the event loop; that's still what keeps them from FastAPI's automatic (and un-overridable) sync-`def` dispatch.
 
-### 12.2 The thread pool
+`tests/core/tiler_routes/test_invariants.py::test_every_tiler_endpoint_is_async` pins this: it walks every registered tiler route and fails if any endpoint is a plain sync `def`, since that would silently fall back to the ambient default limiter.
+
+### 12.2 The tiler thread pool
 
 ```python
-limiter = anyio.to_thread.current_default_thread_limiter()
-limiter.total_tokens = Config.get_config().get_tiler_config().thread_pool_size
+# core/tiler_routes/shared.py, module level
+TILE_THREAD_LIMITER = anyio.CapacityLimiter(
+    Config.get_config().get_tiler_config().thread_pool_size
+)
 ```
 
-The pool has `thread_pool_size` slots (default **20** — see [§14](#14-configuration); note this is meaningfully smaller than a standalone tiler deployment might use, since the same process also serves the non-tiler API). Each in-flight sync request occupies one slot from the start of the handler to its return. The Python GIL means only one thread executes CPU-bound Python at a time, but:
+`TILE_THREAD_LIMITER` is a dedicated `anyio.CapacityLimiter`, sized from `thread_pool_size` (default **20** — see [§14](#14-configuration)) and constructed once at import time in `core/tiler_routes/shared.py`. It is *not* anyio's process-wide default thread limiter — every tiler dispatch (`run_cancellable`, and every other `to_thread.run_sync` call in the tiler routes) passes `limiter=TILE_THREAD_LIMITER` explicitly, so this budget belongs to the tiler exclusively. The main, non-tiler API (`core/routes/data.py`'s sync `def` endpoints and its one explicit `run_in_threadpool` call) is unaffected by this value; it runs on anyio's own stock default limiter instead (see [§12.3](#123-tiler-budget-vs-the-main-apis-budget)).
+
+Each in-flight request occupies one slot from the start of its dispatched work to its return. The Python GIL means only one thread executes CPU-bound Python at a time, but:
 
 - **I/O releases the GIL** — the S3 fetch is mostly `urllib3`/`botocore` socket I/O. While one thread waits on S3, others can run.
 - **numpy/PIL release the GIL during their C-level work** — resampling, normalisation, and PNG/WebP encoding all benefit from real parallelism (modulo the numba parallel-kernel lock, [§7.4](#74-resample-and-normalize-numba-jit)).
 
 Stampede protection (`_slice_dedup`, `_processed_dedup`, `StoreRegistry._in_flight` — [§10.3](#103-stampede-protection)) means that if several requests arrive for the same cold key, only one thread does the work; the others hold their slots blocked on the Future. This caps peak unique work but the held slots still count toward `thread_pool_size`.
 
-### 12.3 One pool, two named budgets
+### 12.3 Tiler budget vs. the main API's budget
 
-Nearly every offload lands in **one** anyio worker pool; what's split into independent slices is the **concurrency budget** on that pool. Both current budgets are `anyio.CapacityLimiter`, acquired inside `to_thread.run_sync(..., limiter=...)`:
+Before this was carved out, the tiler's `thread_pool_size` setting mutated anyio's *process-wide* default thread limiter at app startup (`server.py`'s lifespan) — which meant the main (non-tiler) API's sync `def` routes (`has_data`, `get_temporal_extent`, `get_indexing_values`, the feature-collection endpoints, `get_data`'s `run_in_threadpool` call, ...) were *also* capped at 20, invisibly, despite `thread_pool_size` living under the `tiler:` config block and the setup code's own comment claiming it was tiler-only. `server.py` no longer touches the default limiter at all — the main API now runs on anyio's stock default (`total_tokens=40` as of anyio 4.9), with no dedicated config knob of its own. If the main API ever needs its own bounded budget, that's a separate, deliberate addition (its own named `CapacityLimiter`), not something to restore here.
 
-- **Default limiter** (size `thread_pool_size`, default 20) — used by every sync `def` tile handler and any `to_thread.run_sync(...)` call without an explicit limiter.
-- **`_ANIMATION_LIMITER`** (size `animation_workers`, default 10, module-level in `core/tiler_routes/visual_tiles.py`) — gates the per-frame `load_slice_uncached` fan-out inside `/animation`. Sized to the aiobotocore S3 connection-pool ceiling (~10/host).
-- **`_STORE_PREWARM_LIMITER`** (size `store_prewarm_workers`, default 6, module-level in `services/store/registry.py`) — gates concurrent `xr.open_zarr` opens at startup. Same S3 connection-pool rationale.
+One side effect worth knowing: because `TILE_THREAD_LIMITER` is now computed unconditionally at import time (module level in `shared.py`), `thread_pool_size` takes effect in every environment, including local dev/test runs under `IntTestConfig` — previously the old lifespan-mutation code path was skipped entirely for `IntTestConfig`, so `thread_pool_size` had no effect at all outside a real deployment.
 
-A store-prewarm burst saturating its budget does not reduce the tile-handler budget, and a 30-frame animation does not steal from store-prewarm either.
+### 12.4 Three named budgets
+
+Nearly every offload lands in **one** anyio worker pool; what's split into independent slices is the **concurrency budget** on that pool. All three current tiler budgets are `anyio.CapacityLimiter`s, acquired inside `to_thread.run_sync(..., limiter=...)`:
+
+- **`TILE_THREAD_LIMITER`** (size `thread_pool_size`, default 20, module-level in `core/tiler_routes/shared.py`) — used by every tiler route handler that actually dispatches blocking work, either directly or via `run_cancellable` (a few handlers, e.g. `get_products_availability`, do no dispatch at all — see [§12.1](#121-every-tiler-endpoint-is-async-def)). See [§12.2](#122-the-tiler-thread-pool).
+- **`_ANIMATION_LIMITER`** (size `animation_workers`, default 10, module-level in `core/tiler_routes/visual_tiles.py`) — gates the per-frame `load_slice_uncached` fan-out inside `/animation`. Sized to the S3 connection-pool ceiling.
+- **`_STORE_PREWARM_LIMITER`** (size `store_prewarm_workers`, default 10, module-level in `services/store/registry.py`) — gates concurrent `xr.open_zarr` opens at startup. Same S3 connection-pool ceiling.
+
+Both are sized to a *verified*, not assumed, number: `s3fs.S3FileSystem` caches its instance by constructor kwargs, and every store here builds identical kwargs (anon access, same AODN endpoint/region), so every store — prewarm opens and live chunk reads alike — shares one cached filesystem instance, hence one botocore client, hence one connection pool at botocore's default `max_pool_connections=10`. Raising either limiter past 10 just queues on that pool rather than adding real concurrency.
+
+A store-prewarm burst saturating its budget does not reduce the tile-handler budget, and a 30-frame animation does not steal from store-prewarm either. (The main API's own work, on anyio's stock default limiter, is a fourth, entirely separate budget — see [§12.3](#123-tiler-budget-vs-the-main-apis-budget).)
 
 #### Non-pool worker threads
 
@@ -962,28 +986,69 @@ A store-prewarm burst saturating its budget does not reduce the tile-handler bud
 - **C-extension threads** — Zarr decompression, NumPy via BLAS, and PIL all release the GIL and may use their own internal threads. Total OS thread count is always higher than the sum of the Python-managed threads above.
 - **The numba parallel-kernel lock** ([§7.4](#74-resample-and-normalize-numba-jit)) serialises entry into `prange` regions across whichever anyio worker threads happen to call into the resample/normalize kernels concurrently — it doesn't add threads, it bounds how many parallel regions can be open at once.
 
-### 12.4 Failure modes to watch
+### 12.5 Failure modes to watch
 
-- **`async def` an endpoint by accident.** Any blocking call inside it (`xarray`/`rio-tiler`) will freeze the event loop and serialise every request behind the slowest one. No static check for this — review carefully.
-- **Forget `anyio.to_thread.run_sync` inside an `async def` function.** `prewarm_stores` and `/animation` run on the event loop; any blocking call inside their body must be wrapped or it freezes the loop.
+- **Add a new tiler endpoint as plain sync `def`.** It would silently fall back to anyio's process-wide default limiter instead of `TILE_THREAD_LIMITER` — no error, just an endpoint that (a) isn't isolated from the main API's budget and (b) can't get cancellation detection later without a rewrite. `test_every_tiler_endpoint_is_async` ([§12.1](#121-every-tiler-endpoint-is-async-def)) catches this.
+- **Call `anyio.to_thread.run_sync` in a tiler handler without `limiter=TILE_THREAD_LIMITER`.** Same failure as above, just inside an already-async handler (e.g. a new offload added to `get_animation`'s prelude). No static check for this — review carefully.
+- **Forget `anyio.to_thread.run_sync` inside an `async def` function.** `prewarm_stores`, `/animation`, and every tiler route handler run on the event loop; any blocking call inside their body must be wrapped (directly, or via `run_cancellable`) or it freezes the loop.
 - **Saturate a limiter with the wrong workload.** `_STORE_PREWARM_LIMITER` and `_ANIMATION_LIMITER` are each sized to the S3 connection-pool ceiling for their specific fan-out — don't reuse either for unrelated work.
 
-### 12.5 Per-request paths
+### 12.6 Per-request paths
 
-**Data tile paths.** `load_slice` is lazy — the route handler passes a callable to `render_tile`, invoked only if `_get_processed`'s in-flight dedup doesn't already have a concurrent compute running for the same (product, date, lod):
+**Data tile paths.** `load_slice` is lazy — the `async def` coordinator (`data_tiles.get_tile`) passes a callable to `render_tile`, dispatched as a whole through `run_cancellable` ([§12.9](#129-cancelled-tile-requests)); `load_slice` itself only runs if `_get_processed`'s in-flight dedup doesn't already have a concurrent compute running for the same (product, date, lod):
 
-- **Cold** (always the case under the default `cache_backend: none`) — fetches Zarr chunks from S3 (`.compute()`), resamples, encodes.
-- **Slice warm** (only meaningful with a real L1 cache backend implemented — not the case today) — would skip the S3 fetch; resample still runs (no persistent processed-grid cache — see [§10](#10-caching-strategy)).
+- **Cold** (under `cache_backend: none`, always; under the configured `cache_backend: redis`, only the first request for a given key within `slice_cache_ttl_seconds`) — fetches Zarr chunks from S3 (`.compute()`), resamples, encodes.
+- **Slice warm** (the common case under the configured `cache_backend: redis` once a key has been requested once within the TTL window) — skips the S3 fetch (Redis `GET` + `pickle.loads` instead); resample still runs (no persistent processed-grid cache — see [§10](#10-caching-strategy)).
 
 **Visual tile paths.** No processed-grid cache; each request calls `load_slice` unconditionally, then renders via `XarrayReader`.
 
-### 12.6 A real cold-path finding: chunk over-read
+### 12.7 A real cold-path finding: chunk over-read
 
 A known, investigated slowness on one production product (a satellite SST-class store): the cost is dominated by the S3 Zarr slice fetch, not rendering (resample/normalize/encode measured well under 100ms combined). The store's on-disk chunking spans multiple timestamps per chunk (`time=5` in one case), so reading a single date pulls the whole multi-timestep chunk across every spatial chunk — several times more bytes than the single date actually needs. `Deduper` doesn't help here since the slowness is per-unique-key read volume, not duplicate concurrent work. The real fix is a re-chunked source store (`time=1`, and ideally `float32` instead of `float64`), not application code — this is a store-layout problem, not a serving-layer one.
 
-### 12.7 Capacity, in outline
+### 12.8 Capacity, in outline
 
 Sustained throughput is bound by real resources — CPU cores and the S3 connection pool — that don't scale with `thread_pool_size`. Raising the pool only changes how many concurrent in-flight requests can be _absorbed_ in a burst, at the cost of proportional transient RAM (roughly `min(thread_pool_size, unique_concurrent_cold_keys) × slice_size`, since `Deduper` collapses duplicate keys to one in-flight compute — see [§10.3](#103-stampede-protection)); it does not raise the sustained ceiling once CPU or S3 bandwidth saturates. In production, CloudFront in front of this server absorbs the large majority of repeat tile traffic — most tile URLs are fully deterministic, so a high cache-hit rate at the edge means the origin's thread pool and stampede protection are a backstop for cache misses, not the steady-state load path.
+
+### 12.9 Cancelled tile requests
+
+Mapbox fires a burst of tile requests per date and cancels the previous date's in-flight requests the instant the user moves a date slider. `data_tiles.get_tile`/`get_manifest` and `visual_tiles.get_tile`/`get_bbox` detect this via `shared.run_cancellable(request, fn)`:
+
+```python
+async def get_tile(request: Request, ...):
+    ...  # validation stays sync, directly on the event loop
+    try:
+        png_bytes = await run_cancellable(
+            request, functools.partial(render_tile, product, load_ds, z, x, y, date)
+        )
+    except ClientDisconnected:
+        raise HTTPException(status_code=499, detail="Client disconnected")
+```
+
+`run_cancellable` races `anyio.to_thread.run_sync(fn, abandon_on_cancel=True)` against a `request.is_disconnected()` poll (every 0.1s) inside one `anyio` task group. Python threads can't be forcibly interrupted, so "cancellation" here means exactly two things, both of which fall out of `abandon_on_cancel=True` for free:
+
+- **Still queued for a thread-pool slot** — the awaiting task is cancelled before `fn` ever acquires a slot from `TILE_THREAD_LIMITER`, so `fn` is never invoked. No render/load work is wasted on a client that's already moved on.
+- **Already running on a worker thread** — the coordinator stops waiting and raises `ClientDisconnected` immediately; the thread keeps running `fn` to completion in the background, its result discarded. This is deliberate, not a bug: `fn` is typically `Deduper.dedupe(key, _do_render)` or `render_tile` (which itself dedupes via `_processed_dedup`), so aborting the thread would abort work other still-live requests for the same key are blocked on.
+
+Every other tiler endpoint stays unaffected: `get_legend` and `get_point` dispatch through the same `TILE_THREAD_LIMITER` but without `run_cancellable` (they don't need cancellation detection); `get_products`, `get_colormaps`, and `get_products_availability` dispatch nothing to any thread at all. `async def` on all of them is only about concurrency-budget isolation (or, for the four cancellation coordinators, isolation plus cancellation) — see [§12.1](#121-every-tiler-endpoint-is-async-def).
+
+### 12.10 Worked example: memory footprint under real traffic (chunked-time product, Redis enabled)
+
+The abstract formula in [§12.8](#128-capacity-in-outline) — `min(thread_pool_size, unique_concurrent_cold_keys) × slice_size` — hides two things that matter once you plug in real numbers: what "a slice" actually costs to fetch for a **time-chunked** store, and what "cold" means once a real `CacheBackend` is behind L1. This section works both through for a concrete case.
+
+**Real traffic shape.** The tiler's actual client is a Mapbox-based map viewer, not a synthetic load generator: a user picks one product and one date, and the map fans that single choice out into a burst of `{z}/{x}/{y}` tiles covering the viewport — not one tile per distinct product/date. `/animation` (the one endpoint that walks many dates in one request) is not in active use today. So a burst of `thread_pool_size` (20) concurrent tile requests is not 20 independent `(product, date)` keys — observed traffic puts it at roughly **3–4 distinct combos**, each fanned out to several tiles. `_slice_dedup` ([§10.3](#103-stampede-protection)) collapses every tile in a combo's burst to one `_fetch_slice_from_store` call regardless of how many tiles reference it, so the number of *real* slice computes in flight tracks distinct combos, not request count.
+
+**Concrete product.** `satellite_austemp_heatwave_14day` / `sst_mosaic` is chunked `[5 time, 1000 lat, 1300 lon]` — one on-disk chunk spans 5 dates and is ≈300MB; a single date's share of that is ≈60MB. This is the same store shape flagged in [§12.7](#127-a-real-cold-path-finding-chunk-over-read): Zarr's chunk is the atomic decompression unit, so resolving one date's slice out of a 5-date chunk still decompresses the **whole ≈300MB chunk** transiently — `_fetch_slice_from_store`'s `get_data(...)` + `.compute()` pulls it in, `.isel(time=0)` then keeps only the ≈60MB requested date; the other four dates' worth of decompressed array become garbage the moment that local variable goes out of scope (CPython's refcounting frees it immediately, not at some later GC pause), so this is a sharp, brief spike rather than a sustained cost.
+
+**Redis changes what "cold" means.** `config.yaml` has `cache_backend: "redis"` with `slice_cache_ttl_seconds: 600` configured today (`RedisMemoizer` in `services/caching/memoizer.py` — see [§10](#10-caching-strategy)). Because `_slice_dedup` checks `slice_memo.get_or_compute` before touching S3, a combo's first touch within a 10-minute window is a true cold miss (pays the ≈300MB decompression spike, settles to ≈60MB, then pickles that ≈60MB back to Redis); every other request for that same `(store_url, date, variables)` key — from this instance or any other, concurrent or minutes later — is a Redis `GET` + `pickle.loads`, which costs only the ≈60MB deserialisation and never touches the chunk at all. In map-viewer usage (panning/zooming one product+date, or a second user landing on a recently-viewed date), most of a burst's combos are warm; only combos genuinely new within the TTL window pay the chunk-sized spike.
+
+**Putting numbers on the worst and typical case**, for 3–4 concurrent distinct combos on this product:
+
+- **Worst case** — all 4 combos are simultaneously cold (nobody has requested any of them in the last 10 minutes): transient peak ≈ 4 × (300MB decompress + ~60MB pickle-serialise buffer) ≈ 1.4GB, each spike lasting only as long as its own compute; steady-state during rendering settles to ≈4 × 60MB ≈ 240MB.
+- **Typical case** — most combos are Redis-warm (the common case once a product/date has been viewed once by anyone, within the TTL): each warm combo costs ≈60MB deserialised, no 300MB spike at all; total stays well under the worst case.
+- The remaining requests in a 20-slot burst that aren't the one dedup "winner" per combo hold a `TILE_THREAD_LIMITER` slot each but add negligible memory: they're either blocked on `_slice_dedup`'s `future.result()` (no allocation) or, once the shared slice is ready, doing their own single-tile crop/resample/colormap/PNG-encode (a 256×256 output — KB-to-low-hundreds-of-KB, not comparable to the slice/chunk sizes above).
+
+**Caveat.** This whole analysis leans on `/animation` being unused: `load_slice_uncached` ([§6.3.1](#631-animation-endpoint)) deliberately bypasses L1 so a rare multi-frame request can't evict hot slices from the shared cache — which also means it reintroduces the full uncached chunk-decompression cost per frame, with no Redis backstop. If animation traffic becomes routine, the "few distinct combos, mostly Redis-warm" assumption above no longer holds and this section's numbers need re-deriving against that traffic shape instead.
 
 ---
 
@@ -1104,15 +1169,17 @@ A wrong-layer choice has real costs: making `LOD.max_lods` a freely-edited opera
 
 | Key                       | Default            | Description                                                                                                                                                                  |
 | ------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `store_prewarm_workers`   | `6`                | Capacity-limiter cap for concurrent `xr.open_zarr` opens during startup store prewarm. Sized to the S3 connection pool.                                                      |
+| `store_prewarm_workers`   | `10`               | Capacity-limiter cap for concurrent `xr.open_zarr` opens during startup store prewarm. Sized to the S3 connection pool.                                                      |
 | `store_refresh_interval_hours` | `4`           | Hours between cron sweeps that re-open every prewarmed Zarr store, one at a time, to pick up new timestamps. See [§10.1](#101-store-singleton-servicesstoreregistrypy-storeregistry) and [§11.5](#115-other-background-actions).                                    |
-| `thread_pool_size`        | `20`               | Anyio thread-pool size, shared with the rest of `data-access-service`. Each in-flight sync tiler request uses one slot. See [§12](#12-concurrency-event-loop-and-threading). |
+| `thread_pool_size`        | `20`               | Size of `TILE_THREAD_LIMITER`, a `CapacityLimiter` exclusive to the tiler — not shared with the rest of `data-access-service`, which runs on anyio's own stock default limiter instead. Each in-flight tiler request's dispatched work uses one slot. See [§12](#12-concurrency-event-loop-and-threading). |
 | `animation_workers`       | `10`               | Capacity-limiter cap for `/animation` per-frame S3 fan-out. Sized to the aiobotocore S3 connection pool.                                                                     |
-| `cache_backend`           | `"none"`           | Selects the L1 `CacheBackend` implementation. `"none"` is the only one implemented today — see [§10](#10-caching-strategy).                                                  |
-| `slice_cache_ttl_seconds` | `600`              | Per-entry TTL for the L1 slice cache. Unused while `cache_backend` is `"none"` (no cache backend reads it).                                                                  |
+| `cache_backend`           | `"redis"`          | Selects the L1 `CacheBackend` implementation: `"none"` (`NullMemoizer`, no caching) or `"redis"` (`RedisMemoizer`, distributed cache + cross-instance dedup). No code-level default — required field, whatever the YAML says is what runs. See [§10](#10-caching-strategy).      |
+| `slice_cache_ttl_seconds` | `600`              | Per-entry TTL for the L1 slice cache. Unused while `cache_backend` is `"none"`; under `"redis"` it bounds how long a computed slice stays servable without a fresh S3 fetch. See [§12.10](#1210-worked-example-memory-footprint-under-real-traffic-chunked-time-product-redis-enabled). |
+| `redis_host`              | `"localhost"`      | Redis/Valkey host for the L1 cache when `cache_backend: "redis"`. Overridden by the `CACHE_HOST` env var in deployed environments (which also switches `is_tls` on); the YAML value is for local dev only.                                                                  |
+| `redis_port`              | `6379`             | Redis/Valkey port, paired with `redis_host`.                                                                                                                                 |
 | `s3_anon`                 | `true`             | Anonymous S3 access — correct for the public AODN buckets. `false` lets `fsspec` discover AWS credentials for private buckets.                                               |
 | `s3_connect_timeout`      | `5`                | Seconds for DNS + TCP/TLS handshake.                                                                                                                                         |
 | `s3_read_timeout`         | `30`               | Seconds of socket inactivity before a read fails (per-read, not per-request).                                                                                                |
 | `s3_max_attempts`         | `2`                | Maximum total attempts (initial + retries) per S3 operation, botocore `standard` retry mode.                                                                                 |
 
-There are no Redis/distributed-cache connection settings in the current config — `cache_backend` only accepts `"none"` today; `create_memoizer()` raises `ValueError` for anything else.
+`cache_backend` only accepts `"none"` or `"redis"` — `create_memoizer()` raises `ValueError` for anything else.
