@@ -228,6 +228,14 @@ class Config:
         """
         return 12
 
+    @staticmethod
+    def get_polygon_count_per_job():
+        """
+        Returns the number of polygon partitions to process in each job.
+        This is used to split a dataset without a time column into smaller chunks for processing.
+        """
+        return 20
+
     def get_column_name_mapping(self) -> Dict[str, list[str]]:
         """
         Returns the ordered list of candidate column names for standard coordinate/time fields.
