@@ -28,7 +28,8 @@ def _parse_local_job_parameters(raw: str | None) -> dict:
     """Turn LOCAL_JOBS_PARAM into the same dict Batch puts on the job.
 
     Accepts the parameters object, a describe_jobs job, or {\"jobs\": [...]}.
-    Nested multi_polygon / date_ranges objects are JSON-stringified like Batch.
+    Nested multi_polygon / date_ranges / polygon_ranges objects are
+    JSON-stringified like Batch.
     """
     if not raw or not raw.strip():
         return {}
@@ -50,6 +51,7 @@ def _parse_local_job_parameters(raw: str | None) -> dict:
     for key in (
         Parameters.MULTI_POLYGON.value,
         Parameters.DATE_RANGES.value,
+        Parameters.POLYGON_RANGES.value,
     ):
         if key in loaded and not isinstance(loaded[key], str):
             loaded[key] = json.dumps(loaded[key])
@@ -121,8 +123,16 @@ else:
         )
         missing = [key for key in required if key not in parameters]
         if call_type != "sub-setting":
+            # A dataset without a time column is split by polygon_ranges instead
+            if (
+                Parameters.DATE_RANGES.value not in parameters
+                and Parameters.POLYGON_RANGES.value not in parameters
+            ):
+                missing.append(
+                    f"{Parameters.DATE_RANGES.value} or "
+                    f"{Parameters.POLYGON_RANGES.value}"
+                )
             for key in (
-                Parameters.DATE_RANGES.value,
                 Parameters.MASTER_JOB_ID.value,
                 Parameters.INTERMEDIATE_OUTPUT_FOLDER.value,
             ):
