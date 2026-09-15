@@ -102,8 +102,8 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
     # fork children) start each dataset with a smaller baseline RSS.
     api.release_memory_for_pmtiles_batch()
 
-    # S3 keys of every dataset in this run. Failed datasets are included so
-    # the cleanup below keeps the files from their last successful run.
+    # S3 keys of the dataset files in this run. Failed datasets are included so
+    # the cleanup below keeps the dataset files they already have.
     processed: set[str] = set()
     for k, dataset_name in work:
         if use_fork:
@@ -272,7 +272,7 @@ def _s3_keys(s3_prefix: str, uuid: str, dname: str) -> tuple[str, str]:
 def _remove_outdated_pmtiles(
     pmtiles_config: PmtilesGenerationConfig, processed: set[str]
 ) -> None:
-    """Delete every file in the S3 folder that this run did not process."""
+    """Delete every file in the pmtiles folder not owned by a dataset in this run."""
     bucket = pmtiles_config.bucket_name
     # S3 folders are only key prefixes: deleting the last file removes the folder.
     # A console-created placeholder (key ending in "/") is listed and removed too.
