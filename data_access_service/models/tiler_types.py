@@ -21,3 +21,4 @@ class TilerConfig:
     s3_connect_timeout: int
     s3_read_timeout: int
     s3_max_attempts: int
+    downcast_float64: bool

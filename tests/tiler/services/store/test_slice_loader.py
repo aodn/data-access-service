@@ -221,3 +221,43 @@ def test_concurrent_identical_loads_share_one_compute(monkeypatch):
         calls == 1
     ), "expected exactly one compute; the rest should share it via _slice_dedup"
     assert len(results) == 4
+
+
+# --- float64 -> float32 downcast (config.yaml tiler.downcast_float64) ---
+
+
+def test_load_slice_downcasts_float64_to_float32_when_enabled(monkeypatch):
+    ds = _ds_with_time(["2024-01-15T13:00:00"])
+    ds["v"] = ds["v"].astype(np.float64)
+    _patch_source(monkeypatch, ds)
+    monkeypatch.setattr(loader, "_DOWNCAST_FLOAT64", True)
+
+    result = loader.load_slice(
+        "s3://b/x.zarr", pd.Timestamp("2024-01-15T13:00:00"), ["v"]
+    )
+    assert result["v"].dtype == np.float32
+
+
+def test_load_slice_keeps_float64_when_disabled(monkeypatch):
+    ds = _ds_with_time(["2024-01-15T13:00:00"])
+    ds["v"] = ds["v"].astype(np.float64)
+    _patch_source(monkeypatch, ds)
+    monkeypatch.setattr(loader, "_DOWNCAST_FLOAT64", False)
+
+    result = loader.load_slice(
+        "s3://b/x.zarr", pd.Timestamp("2024-01-15T13:00:00"), ["v"]
+    )
+    assert result["v"].dtype == np.float64
+
+
+def test_load_slice_leaves_non_float64_dtypes_untouched(monkeypatch):
+    """int32 (e.g. category variables like MCS_category) must never be cast."""
+    ds = _ds_with_time(["2024-01-15T13:00:00"])
+    ds["v"] = ds["v"].astype(np.int32)
+    _patch_source(monkeypatch, ds)
+    monkeypatch.setattr(loader, "_DOWNCAST_FLOAT64", True)
+
+    result = loader.load_slice(
+        "s3://b/x.zarr", pd.Timestamp("2024-01-15T13:00:00"), ["v"]
+    )
+    assert result["v"].dtype == np.int32

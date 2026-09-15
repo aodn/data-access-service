@@ -315,7 +315,7 @@ def _to_scalar_parts(
     )
 
     def compute() -> list[xr.DataArray]:
-        da = ds[variable].astype(np.float32)
+        da = ds[variable].astype(np.float32, copy=False)
         if coastal_fill is not None:
             filled = _get_filled_values(
                 source_path,
