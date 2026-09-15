@@ -23,7 +23,7 @@ from data_access_service.models.pmtiles_types import (
     TimeGroupBy,
 )
 from data_access_service.models.sites_types import SitesConfig
-from data_access_service.models.tiler_types import TilerConfig
+from data_access_service.models.tiler_types import TilerConfig, TilerVectorConfig
 from data_access_service.models.zarr_chunking_types import ZarrChunkingConfig
 
 
@@ -455,6 +455,35 @@ class Config:
             s3_connect_timeout=tconfig["s3_connect_timeout"],
             s3_read_timeout=tconfig["s3_read_timeout"],
             s3_max_attempts=tconfig["s3_max_attempts"],
+        )
+
+    def get_tiler_vector_config(self) -> TilerVectorConfig:
+        """DuckDB + output layout for precomputed time-sliced vector cells.
+
+        On-disk databases are placed in a fresh temp directory (same lock
+        avoidance as :meth:`get_sites_config`). ``:memory:`` is left as-is so
+        tests can overlay that value in config-test.yaml.
+        """
+        vconfig = self.config.get("tiler", {}).get("vector", {})
+        database = vconfig["duckdb_database"]
+        temp_dir = vconfig["duckdb_temp_dir"]
+        if database != ":memory:":
+            temp_dir = tempfile.mkdtemp(prefix=temp_dir)
+            database = os.path.join(temp_dir, database)
+        return TilerVectorConfig(
+            duckdb_database=database,
+            duckdb_temp_dir=str(temp_dir),
+            memory_limit=vconfig["memory_limit"],
+            threads=int(vconfig["threads"]),
+            region=vconfig["region"],
+            output_dir=vconfig["output_dir"],
+            max_cells_long_edge=int(vconfig["max_cells_long_edge"]),
+            s3_prefix=vconfig["s3_prefix"],
+            s3_bucket=self.get_datavis_data_bucket_name(),
+            write_s3=bool(vconfig["write_s3"]),
+            keep_local_parquet=bool(vconfig["keep_local_parquet"]),
+            row_group_size=int(vconfig["row_group_size"]),
+            max_time_slices=int(vconfig["max_time_slices"]),
         )
 
     def get_hex_layer_specs(self, dname: str) -> List[HexLayerSpec] | None:

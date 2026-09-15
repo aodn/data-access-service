@@ -11,6 +11,9 @@ from data_access_service.batch.estimation.generator import (
 from data_access_service.batch.pmtiles.generator import (
     generate_pmtiles_for_all_parquets,
 )
+from data_access_service.batch.tiler.generator import (
+    generate_vector_parquet_for_zarrs,
+)
 from data_access_service.batch.sites_parquet.refresher import (
     refresh_sites_parquet_snapshots,
 )
@@ -167,6 +170,13 @@ match call_type:
                 "Estimation index generation restricted to uuid=%s", target_uuid
             )
         generate_estimation_index_for_all_parquets(api=api, uuid=target_uuid or None)
+    case "generate-tiler-vector-for-zarr":
+        api = API()
+        api.initialize_metadata()
+        target_uuid = parameters.get("uuid") or os.getenv("TILER_VECTOR_TARGET_UUID")
+        if target_uuid:
+            logger.info("Tiler vector generation restricted to uuid=%s", target_uuid)
+        generate_vector_parquet_for_zarrs(api=api, uuid=target_uuid or None)
     case "refresh-sites-parquet":
         refresh_sites_parquet_snapshots()
     case _:

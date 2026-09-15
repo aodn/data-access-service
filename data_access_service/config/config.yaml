@@ -181,6 +181,26 @@ tiler:
     s3_connect_timeout: 5
     s3_read_timeout: 30
     s3_max_attempts: 2
+  # Precomputed time-sliced vector cells (DuckDB parquet) for colour-on-the-fly
+  # PNG/WebP. Not under `config:` so TilerConfig's yaml-key check stays intact.
+  vector:
+    duckdb_database: "tiler_vector.duckdb"
+    duckdb_temp_dir: "tiler_duckdb_tmp"
+    memory_limit: "128MB"
+    threads: 2
+    region: "ap-southeast-2"
+    output_dir: "portal/tiler/vector"
+    # Longest lat or lon edge after downsample. Keeps the parquet small for v1.
+    max_cells_long_edge: 256
+    # One parquet per UUID, COPY to s3://{datavis_data}/{s3_prefix}/{uuid}.parquet
+    s3_prefix: "imoslive/tiler"
+    write_s3: true
+    # After S3 upload, delete the local merged parquet (set true in config-dev).
+    keep_local_parquet: false
+    # ~one 256×256 time slice per row group so WHERE timestamp= can skip.
+    row_group_size: 65536
+    # 0 = process every time step. Override in config-dev to cap for faster checks.
+    max_time_slices: 0
   # Static product-catalogue config, deliberately not overridden by any
   # config-{env}.yaml overlay — it doesn't vary by environment. Read directly
   # off this base file via Config.load_tiler_catalog_config(), bypassing the

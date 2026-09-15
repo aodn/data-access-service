@@ -32,6 +32,20 @@ def test_zarr_chunking_config_from_yaml():
     assert cfg.min_chunk_bytes == int(yaml_cfg["min_chunk_mb"] * 1024**2)
 
 
+def test_tiler_vector_config_from_yaml():
+    cfg = Config.get_config(EnvType.TESTING).get_tiler_vector_config()
+    assert cfg.duckdb_database == ":memory:"
+    assert cfg.memory_limit == "128MB"
+    assert cfg.max_cells_long_edge == 32
+    assert cfg.output_dir == "tiler_vector_out"
+    assert cfg.region == "ap-southeast-2"
+    assert cfg.s3_prefix == "tiler"
+    assert cfg.write_s3 is False
+    assert cfg.keep_local_parquet is True
+    assert cfg.max_time_slices == 0
+    assert cfg.s3_bucket == "test-site-snapshot-bucket"
+
+
 def test_tiler_co_bucket_defaults_when_absent_from_yaml():
     """Not in config.yaml's tiler section yet (unify with parquet/pmtiles'
     co_bucket later); falls back to the same bucket name they default to,

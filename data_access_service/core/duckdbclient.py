@@ -25,6 +25,7 @@ from data_access_service.config.config import IntTestConfig
 from data_access_service.models.duckdb_types import DuckDBTuningConfig
 from data_access_service.models.estimation_types import EstimationReadDuckDBConfig
 from data_access_service.models.sites_types import SitesConfig
+from data_access_service.models.tiler_types import TilerVectorConfig
 
 # How often to emit a progress log line while a long query is running.
 _PROGRESS_LOG_INTERVAL_SECONDS = 60
@@ -924,3 +925,180 @@ class EstimationDuckDBClient(DuckDBClient):
 
     def __exit__(self, *_: object) -> None:
         self.close()
+
+
+def _sql_string(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+class TilerDuckDBClient(DuckDBClient):
+    """Per-instance DuckDB client for vector cells.
+
+    Same lifetime model as :class:`SitesDuckDBClient`: one owned connection,
+    a fresh ``cursor()`` per :meth:`execute`. Batch writes unsorted part
+    files, then :meth:`finalize` copies one parquet per UUID
+    ``ORDER BY timestamp, i, j`` to
+    ``output_dir/{uuid}.parquet``. The batch job uploads that file to
+    ``s3://{datavis_data}/{s3_prefix}/{uuid}.parquet`` after merge (DuckDB
+    never writes S3). Reads filter ``timestamp`` (and optional ``variable``)
+    plus an ``i``/``j`` window.
+
+    External file cache is off so parquet blocks are not pinned in RSS.
+    """
+
+    def __init__(self, config: TilerVectorConfig | None = None) -> None:
+        self._config = config or Config.get_config().get_tiler_vector_config()
+        self._database = self._config.duckdb_database
+        self._duckdb_client = None
+        self._active_cursors: set[Any] = set()
+        self._cursors_lock = threading.Lock()
+        self._lock = Lock()
+        self._con = self.get_instance()
+
+    def get_instance(self) -> duckdb.DuckDBPyConnection:
+        if self._duckdb_client is None:
+            with self._lock:
+                if self._duckdb_client is None:
+                    db_config = {
+                        "memory_limit": self._config.memory_limit,
+                        "threads": str(int(self._config.threads)),
+                        "enable_external_file_cache": "false",
+                    }
+                    if self._database != ":memory:":
+                        os.makedirs(self._config.duckdb_temp_dir, exist_ok=True)
+                        db_config["temp_directory"] = self._config.duckdb_temp_dir
+                    db = duckdb.connect(database=self._database, config=db_config)
+                    db.execute("INSTALL httpfs; LOAD httpfs;")
+                    db.execute(f"SET GLOBAL s3_region = '{self._config.region}';")
+                    db.execute("SET GLOBAL TimeZone = 'UTC';")
+                    self._duckdb_client = db
+        return self._duckdb_client
+
+    def execute(self, sql: str, params: Sequence[Any] | None = None):
+        cursor = self._con.cursor()
+        with self._cursors_lock:
+            self._active_cursors.add(cursor)
+        try:
+            if params is None:
+                return cursor.execute(sql)
+            return cursor.execute(sql, params)
+        finally:
+            with self._cursors_lock:
+                self._active_cursors.discard(cursor)
+
+    def close(self) -> None:
+        with self._cursors_lock:
+            cursors = list(self._active_cursors)
+        for cursor in cursors:
+            try:
+                cursor.interrupt()
+            except Exception:
+                pass
+        if self._duckdb_client is not None:
+            with self._lock:
+                self._duckdb_client.close()
+        self._duckdb_client = None
+
+    def __enter__(self) -> TilerDuckDBClient:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+    def local_parquet_path(self, uuid: str) -> str:
+        return os.path.join(self._config.output_dir, f"{uuid}.parquet")
+
+    def s3_key(self, uuid: str) -> str:
+        prefix = self._config.s3_prefix.strip("/")
+        return f"{prefix}/{uuid}.parquet"
+
+    def parquet_uri(self, uuid: str) -> str:
+        """Where readers should look: S3 when ``write_s3``, else the local file."""
+        if self._config.write_s3:
+            return f"s3://{self._config.s3_bucket}/{self.s3_key(uuid)}"
+        return self.local_parquet_path(uuid)
+
+    def parts_glob(self, uuid: str) -> str:
+        return os.path.join(self._config.output_dir, uuid, "parts", "*.parquet")
+
+    def meta_path(self, uuid: str) -> str:
+        uri = self.parquet_uri(uuid)
+        if uri.endswith(".parquet"):
+            return uri[: -len(".parquet")] + ".meta.json"
+        return uri + ".meta.json"
+
+    def write_part(
+        self,
+        uuid: str,
+        timestamp: str,
+        dataset: str,
+        variable: str,
+        frame,
+    ) -> str:
+        """Write one unsorted time-slice part. ``finalize`` merges them."""
+        part_dir = os.path.join(self._config.output_dir, uuid, "parts")
+        os.makedirs(part_dir, exist_ok=True)
+        safe_var = variable.replace("/", "_")
+        path = os.path.join(part_dir, f"{timestamp}_{safe_var}.parquet")
+        self._con.register("cells_in", frame)
+        try:
+            self._con.execute(
+                "COPY ("
+                f"  SELECT {_sql_string(timestamp)} AS timestamp, "
+                f"         {_sql_string(dataset)} AS dataset, "
+                f"         {_sql_string(variable)} AS variable, "
+                "         i::INTEGER AS i, j::INTEGER AS j, value::FLOAT AS value "
+                "  FROM cells_in"
+                f") TO {_sql_string(path)} (FORMAT PARQUET, COMPRESSION ZSTD)"
+            )
+        finally:
+            self._con.unregister("cells_in")
+        return path
+
+    def finalize(self, uuid: str) -> str:
+        """Merge parts to one local parquet, ``ORDER BY timestamp, i, j``.
+
+        Always writes a temp file under ``output_dir``. The batch job uploads
+        that file to S3 afterwards — DuckDB never COPY-TO ``s3://``.
+        """
+        dest = self.local_parquet_path(uuid)
+        os.makedirs(os.path.dirname(os.path.abspath(dest)) or ".", exist_ok=True)
+        glob = self.parts_glob(uuid)
+        rg = int(self._config.row_group_size)
+        self._con.execute(
+            "COPY ("
+            "  SELECT timestamp, dataset, variable, i, j, value "
+            f"  FROM read_parquet({_sql_string(glob)}) "
+            "  ORDER BY timestamp, i, j"
+            f") TO {_sql_string(dest)} "
+            f"(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE {rg})"
+        )
+        return dest
+
+    def read_cells(
+        self,
+        uuid: str,
+        timestamp: str,
+        i_min: int | None = None,
+        i_max: int | None = None,
+        j_min: int | None = None,
+        j_max: int | None = None,
+        variable: str | None = None,
+    ):
+        """Return ``(i, j, value)`` for one timestamp (optional variable + window)."""
+        path = self.parquet_uri(uuid)
+        clauses = [f"timestamp = {_sql_string(timestamp)}"]
+        if variable is not None:
+            clauses.append(f"variable = {_sql_string(variable)}")
+        if i_min is not None:
+            clauses.append(f"i >= {int(i_min)}")
+        if i_max is not None:
+            clauses.append(f"i <= {int(i_max)}")
+        if j_min is not None:
+            clauses.append(f"j >= {int(j_min)}")
+        if j_max is not None:
+            clauses.append(f"j <= {int(j_max)}")
+        where = " WHERE " + " AND ".join(clauses)
+        return self.execute(
+            f"SELECT i, j, value FROM read_parquet({_sql_string(path)}){where}"
+        ).fetchdf()

@@ -7,7 +7,7 @@ aws:
     bucket_name:
       subsetting: aodn-cloud-optimized-subset-dev
       portal_data: aodnportal-dev-data
-      datavis_data: aodn-cloud-optimized-wave-buoy-backup-testing
+      datavis_data: datavis-apps-edge-data
   ses:
     sender_email: no.reply@aodn.org.au
   batch:
@@ -22,3 +22,8 @@ estimation:
     use_fork_process: False
     duckdb:
       threads: 12
+tiler:
+  vector:
+    keep_local_parquet: true
+    threads: 12
+    max_time_slices: 8
