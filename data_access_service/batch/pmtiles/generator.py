@@ -12,6 +12,7 @@ from data_access_service.utils.memory_utils import log_memory_usage
 
 from .processors.hexbin_processor import HexbinProcessor
 from ...models.pmtiles_types import (
+    PmtilesGenerationConfig,
     PmtilesVisualizationStyle,
 )
 
@@ -90,7 +91,8 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
             len(work),
         )
 
-    use_fork = config.get_pmtiles_config().use_fork_process
+    pmtiles_config = config.get_pmtiles_config()
+    use_fork = pmtiles_config.use_fork_process
     logger.info(
         "PMTiles batch process isolation: use_fork_process=%s",
         use_fork,
@@ -100,6 +102,9 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
     # fork children) start each dataset with a smaller baseline RSS.
     api.release_memory_for_batch(keep_suffix=".parquet", drop_instance=True)
 
+    # S3 keys of the dataset files in this run. Failed datasets are included so
+    # the cleanup below keeps the dataset files they already have.
+    processed: set[str] = set()
     for k, dataset_name in work:
         if use_fork:
             ok = _generate_pmtiles_for_parquets_in_subprocess(api, k, dataset_name)
@@ -113,7 +118,16 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
                 k,
                 dataset_name,
             )
+        processed.update(_s3_keys(pmtiles_config.s3_prefix, k, dataset_name))
         log_memory_usage(logger, after_label)
+
+    # Skip the cleanup when nothing was processed, otherwise every file would
+    # be deleted. An empty work list means the metadata failed to load.
+    if uuid is None and processed:
+        try:
+            _remove_outdated_pmtiles(pmtiles_config, processed)
+        except Exception as e:
+            logger.error("Removing outdated pmtiles failed: %s", e, exc_info=True)
 
     # Phase 2: every pmtiles child has exited, so the parent is back to its
     # startup baseline before the index scans start. Same job, same loaded
@@ -229,21 +243,16 @@ def _generate_pmtiles_for_parquets(api: BaseAPI, uuid: str, dname: str) -> bool:
                 # TODO: please use functions like is_local_pmtiles_valid() in pmtiles_util to verify the new generated pmtiles file
                 #  is valid or not before uploading to S3. We don't want to upload an invalid pmtiles file to S3 and cause errors
                 # [Raymond] Is the function is_local_pmtiles_valid() in pmtiles_util.py reliable? Seems not
-                bucket = config.get_pmtiles_config().bucket_name
-                s3_dir = f"portal/visualization/{uuid}"
-                aws.upload_file_to_s3(
-                    pmtiles_path,
-                    bucket,
-                    f"{s3_dir}/{dname}.pmtiles",
+                pmtiles_config = config.get_pmtiles_config()
+                bucket = pmtiles_config.bucket_name
+                pmtiles_key, metadata_key = _s3_keys(
+                    pmtiles_config.s3_prefix, uuid, dname
                 )
+                aws.upload_file_to_s3(pmtiles_path, bucket, pmtiles_key)
                 logger.info(
                     f"Pmtiles file of dataset {dname}, uuid {uuid} uploaded to S3."
                 )
-                aws.upload_file_to_s3(
-                    metadata_path,
-                    bucket,
-                    f"{s3_dir}/{dname}.metadata",
-                )
+                aws.upload_file_to_s3(metadata_path, bucket, metadata_key)
                 logger.info(
                     f"Metadata file of dataset {dname}, uuid {uuid} uploaded to S3."
                 )
@@ -252,6 +261,25 @@ def _generate_pmtiles_for_parquets(api: BaseAPI, uuid: str, dname: str) -> bool:
         return False
 
     return True
+
+
+def _s3_keys(s3_prefix: str, uuid: str, dname: str) -> tuple[str, str]:
+    """The .pmtiles and .metadata key of one dataset in S3."""
+    s3_dir = f"{s3_prefix}/{uuid}"
+    return f"{s3_dir}/{dname}.pmtiles", f"{s3_dir}/{dname}.metadata"
+
+
+def _remove_outdated_pmtiles(
+    pmtiles_config: PmtilesGenerationConfig, processed: set[str]
+) -> None:
+    """Delete every file in the pmtiles folder not owned by a dataset in this run."""
+    bucket = pmtiles_config.bucket_name
+    # S3 folders are only key prefixes: deleting the last file removes the folder.
+    # A console-created placeholder (key ending in "/") is listed and removed too.
+    for key in aws.list_all_s3_objects(bucket, f"{pmtiles_config.s3_prefix}/"):
+        if key not in processed:
+            logger.info("Removing outdated pmtiles s3://%s/%s", bucket, key)
+            aws.s3.delete_object(Bucket=bucket, Key=key)
 
 
 def get_visualization_style(uuid: str, dname: str) -> PmtilesVisualizationStyle:

@@ -22,6 +22,8 @@ def _enable_fork(
         lambda: MagicMock(
             use_fork_process=enabled,
             build_estimation_index=build_estimation_index,
+            bucket_name="b",
+            s3_prefix="portal/visualization",
         ),
     )
 
@@ -32,6 +34,187 @@ def estimation_phase(monkeypatch):
     stub = MagicMock()
     monkeypatch.setattr(generator, "generate_estimation_index_for_all_parquets", stub)
     return stub
+
+
+@pytest.fixture(autouse=True)
+def s3(monkeypatch):
+    """Fake S3 so the outdated file removal never touches AWS. Returns the client."""
+    client = MagicMock()
+    monkeypatch.setattr(generator.aws, "s3", client)
+    monkeypatch.setattr(generator.aws, "list_all_s3_objects", lambda b, p: [])
+    return client
+
+
+class TestRemoveOutdated:
+    """Cleanup at the end of a full run.
+
+    Each dataset listed in the metadata has two files, ``{dataset}.pmtiles`` and
+    ``{dataset}.metadata``, in its uuid folder ``portal/visualization/{uuid}/``.
+    After the run, every file there that does not belong to a dataset in the
+    metadata is deleted. Example, the metadata lists ``uuid-a: a.parquet`` and
+    ``uuid-fail: f.parquet``, and f.parquet fails to generate in this run::
+
+        portal/visualization/
+          uuid-a/
+            a.parquet.pmtiles     kept, refreshed by this run
+            a.parquet.metadata    kept, refreshed by this run
+            b.parquet.pmtiles     deleted, b.parquet is not in the metadata
+            b.parquet.metadata    deleted
+          uuid-old/
+            old.parquet.pmtiles   deleted, uuid-old is not in the metadata
+            old.parquet.metadata  deleted
+          uuid-empty/             deleted, an empty uuid folder (key ends in "/")
+          uuid-fail/
+            f.parquet.pmtiles     kept, f.parquet failed so its last files stay
+            f.parquet.metadata    kept
+
+    S3 folders are only key prefixes, so uuid-old and uuid-empty are gone after
+    this. There is no cleanup at all when the run is for a single uuid or the
+    metadata is empty. A delete error is logged and the run continues.
+    One test per case below.
+    """
+
+    def _run_batch(self, monkeypatch, s3, metadata, s3_files, uuid=None, ok=True):
+        """Run the batch with ``metadata`` loaded and ``s3_files`` in the pmtiles folder. Returns the deleted files."""
+        _enable_fork(monkeypatch, True)
+        api = MagicMock()
+        api.get_mapped_meta_data.return_value = metadata
+        monkeypatch.setattr(
+            generator, "_generate_pmtiles_for_parquets_in_subprocess", lambda *a: ok
+        )
+        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+        monkeypatch.setattr(
+            generator.aws, "list_all_s3_objects", lambda b, p: list(s3_files)
+        )
+        generate_pmtiles_for_all_parquets(api, uuid=uuid)
+        return [call.kwargs["Key"] for call in s3.delete_object.call_args_list]
+
+    def test_keeps_all_when_nothing_outdated(self, monkeypatch, s3):
+        # Every dataset in the metadata is in the run: nothing is deleted
+        deleted = self._run_batch(
+            monkeypatch,
+            s3,
+            metadata={"uuid-a": {"a.parquet": {}}},
+            s3_files=[
+                "portal/visualization/uuid-a/a.parquet.pmtiles",
+                "portal/visualization/uuid-a/a.parquet.metadata",
+            ],
+        )
+
+        assert deleted == []
+
+    def test_deletes_folder_of_removed_uuid(self, monkeypatch, s3):
+        # uuid-old is no longer in the metadata: all its dataset files are deleted
+        deleted = self._run_batch(
+            monkeypatch,
+            s3,
+            metadata={"uuid-a": {"a.parquet": {}}},
+            s3_files=[
+                "portal/visualization/uuid-a/a.parquet.pmtiles",
+                "portal/visualization/uuid-a/a.parquet.metadata",
+                "portal/visualization/uuid-old/old.parquet.pmtiles",
+                "portal/visualization/uuid-old/old.parquet.metadata",
+            ],
+        )
+
+        # Both dataset files go, so the uuid folder goes too (S3 folders are prefixes)
+        assert deleted == [
+            "portal/visualization/uuid-old/old.parquet.pmtiles",
+            "portal/visualization/uuid-old/old.parquet.metadata",
+        ]
+
+    def test_deletes_only_files_of_removed_dataset(self, monkeypatch, s3):
+        # uuid-a now lists only a.parquet: b.parquet files are deleted, a.parquet stays
+        deleted = self._run_batch(
+            monkeypatch,
+            s3,
+            metadata={"uuid-a": {"a.parquet": {}}},
+            s3_files=[
+                "portal/visualization/uuid-a/a.parquet.pmtiles",
+                "portal/visualization/uuid-a/a.parquet.metadata",
+                "portal/visualization/uuid-a/b.parquet.pmtiles",
+                "portal/visualization/uuid-a/b.parquet.metadata",
+            ],
+        )
+
+        assert deleted == [
+            "portal/visualization/uuid-a/b.parquet.pmtiles",
+            "portal/visualization/uuid-a/b.parquet.metadata",
+        ]
+
+    def test_deletes_empty_uuid_folder(self, monkeypatch, s3):
+        # "Create folder" in the AWS console makes an empty file whose key ends
+        # in "/". It is deleted like any other file no dataset in the run owns
+        deleted = self._run_batch(
+            monkeypatch,
+            s3,
+            metadata={"uuid-a": {"a.parquet": {}}},
+            s3_files=[
+                "portal/visualization/uuid-a/a.parquet.pmtiles",
+                "portal/visualization/uuid-old/",
+            ],
+        )
+
+        assert deleted == ["portal/visualization/uuid-old/"]
+
+    def test_keeps_files_of_failed_dataset(self, monkeypatch, s3):
+        # a.parquet fails this run: the dataset files it already has stay
+        deleted = self._run_batch(
+            monkeypatch,
+            s3,
+            metadata={"uuid-a": {"a.parquet": {}}},
+            s3_files=[
+                "portal/visualization/uuid-a/a.parquet.pmtiles",
+                "portal/visualization/uuid-a/a.parquet.metadata",
+                "portal/visualization/uuid-old/old.parquet.pmtiles",
+            ],
+            ok=False,
+        )
+
+        assert deleted == ["portal/visualization/uuid-old/old.parquet.pmtiles"]
+
+    def test_skips_cleanup_for_single_uuid_run(self, monkeypatch, s3):
+        # A run for a single uuid never cleans up
+        deleted = self._run_batch(
+            monkeypatch,
+            s3,
+            metadata={"uuid-a": {"a.parquet": {}}},
+            s3_files=[
+                "portal/visualization/uuid-a/a.parquet.pmtiles",
+                "portal/visualization/uuid-old/old.parquet.pmtiles",
+            ],
+            uuid="uuid-a",
+        )
+
+        assert deleted == []
+
+    def test_skips_cleanup_when_metadata_empty(self, monkeypatch, s3):
+        # Empty metadata means it failed to load, not that every dataset was
+        # removed: nothing is deleted
+        deleted = self._run_batch(
+            monkeypatch,
+            s3,
+            metadata={},
+            s3_files=[
+                "portal/visualization/uuid-a/a.parquet.pmtiles",
+                "portal/visualization/uuid-old/old.parquet.pmtiles",
+            ],
+        )
+
+        assert deleted == []
+
+    def test_continues_after_delete_error(self, monkeypatch, s3, estimation_phase):
+        # A delete error is logged and the estimation phase still runs
+        s3.delete_object.side_effect = RuntimeError("s3 down")
+
+        self._run_batch(
+            monkeypatch,
+            s3,
+            metadata={"uuid-a": {"a.parquet": {}}},
+            s3_files=["portal/visualization/uuid-old/old.parquet.pmtiles"],
+        )
+
+        estimation_phase.assert_called_once()
 
 
 class TestBatchProcessIsolation:
@@ -370,11 +553,11 @@ class TestUploadMetadata:
         monkeypatch.setattr(
             generator.config,
             "get_pmtiles_config",
-            lambda: MagicMock(bucket_name=bucket),
+            lambda: MagicMock(bucket_name=bucket, s3_prefix="test/visualization"),
         )
 
         assert _generate_pmtiles_for_parquets(api=None, uuid=uuid, dname=dname) is True
         assert uploaded == [
-            (pmtiles_path, bucket, f"portal/visualization/{uuid}/{dname}.pmtiles"),
-            (metadata_path, bucket, f"portal/visualization/{uuid}/{dname}.metadata"),
+            (pmtiles_path, bucket, f"test/visualization/{uuid}/{dname}.pmtiles"),
+            (metadata_path, bucket, f"test/visualization/{uuid}/{dname}.metadata"),
         ]
