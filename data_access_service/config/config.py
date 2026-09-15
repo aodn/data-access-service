@@ -338,7 +338,6 @@ class Config:
             sample_files=int(econfig.get("sample_files", 8)),
             sample_rows=int(econfig.get("sample_rows", 50_000)),
             row_group_size=int(econfig.get("row_group_size", 100_000)),
-            use_index_for_estimate=bool(econfig.get("use_index_for_estimate", True)),
             duckdb=self._duckdb_tuning(econfig.get("duckdb", {}), co_bucket=co_bucket),
             read_duckdb=self._estimation_read_duckdb(econfig.get("read_duckdb", {})),
             use_fork_process=bool(econfig.get("use_fork_process", True)),
