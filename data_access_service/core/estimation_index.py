@@ -1,15 +1,18 @@
 """Answer estimate_size for parquet keys from the pre-built index.
 
 The index (built by ``batch/estimation``) turns the row count into one small
-DuckDB query over a few-MB file, instead of listing the dataset and reading up
-to 256 parquet footers on S3. The sidecar next to it carries the numbers that
-are one per dataset: measured CSV bytes per row, measured zip ratio, and the
-date range the index covers.
+DuckDB query over a few-MB file. The sidecar next to it carries the numbers
+that are one per dataset: measured CSV bytes per row, measured zip ratio, and
+the date range the index covers.
 
-Everything here fails soft. When there is no index, when it is too old to
-trust, or when the query errors, the caller falls back to the live scan in
-``size_estimation._estimate_parquet_size`` - an estimate must never fail
-because of this optimisation.
+This is the ONLY way a parquet key is estimated. There is no fallback: the old
+live scan (list the dataset on S3, read up to 256 parquet footers) was removed,
+because it took minutes on the bigger datasets. So when there is no index, when
+it is too old to trust, or when the query errors,
+:func:`read_index_estimate` raises :class:`EstimationIndexUnavailableError` and
+the request fails with that message rather than returning a number we cannot
+stand behind. Rebuild a single key with
+``PUT /estimation-index/{uuid}/{key}``.
 """
 
 import json
@@ -59,14 +62,24 @@ _client_lock = threading.Lock()
 _secret_done: set[tuple[int, str]] = set()
 
 # Failures that mean this module is wrong, not that the index is missing or S3
-# is unhappy. They are logged at ERROR rather than folded into the ordinary
-# fail-soft WARNING, so a refactor cannot quietly turn the index off.
+# is unhappy. Logged at ERROR, so a broken read path is not mistaken for a
+# dataset that was never indexed.
 _BUG_ERRORS = (ImportError, AttributeError, NameError, TypeError)
 
 
 ExtentProvider = Callable[
     [str, str], Tuple[Optional[pd.Timestamp], Optional[pd.Timestamp]]
 ]
+
+
+class EstimationIndexUnavailableError(RuntimeError):
+    """No usable estimation index for this key, so the size cannot be estimated.
+
+    Deliberately NOT a ValueError: estimate_datasets_size skips a ValueError key
+    as "cannot produce this format" and carries on, but a missing index is not
+    about the format - the whole request fails and the message reaches the
+    frontend as the SSE error event.
+    """
 
 
 def set_duckdb_client(client: Optional[EstimationDuckDBClient]) -> None:
@@ -92,19 +105,23 @@ def read_index_estimate(
     output_format: str,
     columns: Optional[List[str]] = None,
     requested_end_date: Optional[pd.Timestamp] = None,
-) -> Optional[dict]:
+) -> dict:
     """Estimate one parquet key from the index.
 
     :param date_start/date_end: the range already trimmed to this key's extent
     :param requested_end_date: the end date the user actually asked for, before
         any trim. Days between the index's last covered day and this are
         extrapolated rather than dropped (see _extrapolate_tail)
-    :return: the same dict shape ``_estimate_parquet_size`` returns, or None
-        when the index cannot be used and the caller must do the live scan
+    :return: the estimate dict
+    :raises EstimationIndexUnavailableError: when this key has no usable index,
+        or the index query fails. There is no fallback path any more
     """
     meta = usable_sidecar(api, uuid, key, output_format)
     if meta is None:
-        return None
+        raise EstimationIndexUnavailableError(
+            f"Size estimate unavailable for {uuid}/{key}: no usable pre-built "
+            "estimation index (see the log for which check rejected it)."
+        )
 
     try:
         client = _get_client()
@@ -116,29 +133,27 @@ def read_index_estimate(
             client, path, meta, date_start, bboxes, requested_end_date
         )
     except _BUG_ERRORS as e:
-        # Not a data or S3 problem - this module is broken. Still fall back
-        # (an estimate must never fail because of this optimisation), but say
-        # so at ERROR: the fallback is 50x slower, so a silent WARNING here is
-        # how a rename went unnoticed in production once already.
+        # Not a data or S3 problem - this module is broken. Logged at ERROR and
+        # kept apart from the missing-index case, because the fix is a code fix,
+        # not a rebuild: a rename went unnoticed in production once already.
         log.error(
-            "estimation index is broken for %s/%s - falling back to the live "
-            "scan, which is far slower. This is a code fault, not a missing "
-            "index: %s",
+            "estimation index read path is broken for %s/%s. This is a code "
+            "fault, not a missing index: %s",
             uuid,
             key,
             e,
             exc_info=True,
         )
-        return None
+        raise EstimationIndexUnavailableError(
+            f"Size estimate failed for {uuid}/{key}: the estimation index read "
+            "path is broken."
+        ) from e
     except Exception as e:
-        log.warning(
-            "estimation index query failed for %s/%s; falling back to the live "
-            "scan: %s",
-            uuid,
-            key,
-            e,
-        )
-        return None
+        log.warning("estimation index query failed for %s/%s: %s", uuid, key, e)
+        raise EstimationIndexUnavailableError(
+            f"Size estimate failed for {uuid}/{key}: could not query the "
+            f"pre-built estimation index ({e})."
+        ) from e
 
     total_rows = rows + extra_rows
     total_uncompressed = int(
@@ -233,13 +248,14 @@ def usable_sidecar(
 ) -> Optional[EstimationSidecarMetadata]:
     """The sidecar for this key, or None when the index must not be used.
 
-    Rejects (and logs the reason): the index switch off, a non-csv format, a
-    missing sidecar, a version this build does not know, and a column set that
-    changed since the build - which is what makes csv_bytes_per_row stale.
+    Rejects (and logs the reason): a non-csv format, a missing sidecar, a
+    version this build does not know, and a column set that changed since the
+    build - which is what makes csv_bytes_per_row stale.
+
+    None is not a soft "carry on" any more. read_index_estimate turns it into
+    EstimationIndexUnavailableError; only sidecar_extent_provider still treats
+    it as "use the live extent scan".
     """
-    estimation_config = Config.get_config().get_estimation_config()
-    if not estimation_config.use_index_for_estimate:
-        return None
     if output_format != OUTPUT_FORMAT_CSV:
         # The index only models the zipped-CSV download.
         return None
@@ -248,12 +264,12 @@ def usable_sidecar(
 
     meta = load_sidecar(uuid, key)
     if meta is None:
+        log.info("no estimation index sidecar for %s/%s", uuid, key)
         return None
 
     if meta.version != ESTIMATION_INDEX_VERSION:
         log.info(
-            "estimation index for %s/%s is version %s, this build reads %s; "
-            "using the live scan",
+            "estimation index for %s/%s is version %s, this build reads %s",
             uuid,
             key,
             meta.version,
@@ -266,8 +282,7 @@ def usable_sidecar(
     if live_fingerprint and meta.schema_fingerprint:
         if live_fingerprint != meta.schema_fingerprint:
             log.info(
-                "estimation index for %s/%s was built for a different column "
-                "set; using the live scan",
+                "estimation index for %s/%s was built for a different column set",
                 uuid,
                 key,
             )
@@ -334,7 +349,7 @@ def _count_rows(
     """SUM(c) over the day range and the bbox(es), in one query.
 
     Several bboxes are one OR chain, so a cell inside two overlapping boxes is
-    counted once - the live scan has to dedupe fragments by path to get that.
+    counted once.
     """
     where, params = _where_clause(meta, date_start, date_end, bboxes)
     sql = f"SELECT COALESCE(SUM(c), 0)::BIGINT FROM read_parquet('{path}')"
@@ -502,8 +517,8 @@ def init_client() -> None:
 
     The server calls this from its lifespan. The point is not the few
     milliseconds it saves on the first estimate - it is that a refactor which
-    breaks this module surfaces as a failed deploy rather than as an estimate
-    that silently falls back to the live scan and gets 50x slower.
+    breaks this module surfaces as a failed deploy rather than as every parquet
+    estimate failing at request time. There is no fallback to soften it now.
     """
     _get_client()
 

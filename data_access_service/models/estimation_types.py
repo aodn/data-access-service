@@ -14,8 +14,9 @@ from typing import Any, Iterable, Optional
 from data_access_service.models.duckdb_types import DuckDBTuningConfig
 
 # Bumped when the parquet columns or the sidecar fields change in a way an
-# older server cannot read. A server ignores an index whose version it does
-# not know and falls back to the live scan.
+# older server cannot read. A server rejects an index whose version it does not
+# know, and since there is no fallback the estimate then fails - so a bump has
+# to go out with a rebuild.
 ESTIMATION_INDEX_VERSION = 1
 
 # Columns of the index parquet (see EstimationIndexBuilder).
@@ -66,9 +67,6 @@ class EstimationIndexConfig:
 
     row_group_size: int
 
-    # Master switch for the request side. False = always use the live scan.
-    use_index_for_estimate: bool
-
     # DuckDB session settings for the build. Its own object, not the pmtiles
     # one, so the two jobs' memory limits move independently.
     duckdb: DuckDBTuningConfig
@@ -90,7 +88,7 @@ class EstimationSidecarMetadata:
     """JSON sidecar written beside the index parquet (``{key}.metadata``).
 
     Everything the request side needs that is one number per dataset, plus
-    enough provenance to notice a stale index and fall back.
+    enough provenance to notice a stale index and reject it.
     """
 
     version: int
