@@ -189,7 +189,8 @@ tiler:
     memory_limit: "128MB"
     threads: 2
     region: "ap-southeast-2"
-    output_dir: "portal/tiler/vector"
+    # Relative paths are resolved under the OS temp dir (e.g. /tmp/tiler_vector).
+    output_dir: "tiler_vector"
     # Longest lat or lon edge after downsample. Keeps the parquet small for v1.
     max_cells_long_edge: 256
     # One parquet per UUID, COPY to s3://{datavis_data}/{s3_prefix}/{uuid}.parquet

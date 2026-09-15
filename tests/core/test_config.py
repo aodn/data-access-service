@@ -1,4 +1,6 @@
 import dataclasses
+import os
+import tempfile
 from types import SimpleNamespace
 
 import pytest
@@ -37,7 +39,7 @@ def test_tiler_vector_config_from_yaml():
     assert cfg.duckdb_database == ":memory:"
     assert cfg.memory_limit == "128MB"
     assert cfg.max_cells_long_edge == 32
-    assert cfg.output_dir == "tiler_vector_out"
+    assert cfg.output_dir == os.path.join(tempfile.gettempdir(), "tiler_vector_out")
     assert cfg.region == "ap-southeast-2"
     assert cfg.s3_prefix == "tiler"
     assert cfg.write_s3 is False

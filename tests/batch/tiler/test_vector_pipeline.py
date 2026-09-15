@@ -1,6 +1,8 @@
 """Minimal vector preprocess + on-the-fly colour → PNG/WebP."""
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -74,6 +76,7 @@ def test_tiler_vector_config_from_yaml():
     assert cfg.keep_local_parquet is True
     assert cfg.max_time_slices == 0
     assert cfg.s3_bucket == "test-site-snapshot-bucket"
+    assert cfg.output_dir == os.path.join(tempfile.gettempdir(), "tiler_vector_out")
 
 
 def _finalize(client, vector_cfg, uuid: str, fragment: dict) -> str:

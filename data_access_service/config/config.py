@@ -470,13 +470,17 @@ class Config:
         if database != ":memory:":
             temp_dir = tempfile.mkdtemp(prefix=temp_dir)
             database = os.path.join(temp_dir, database)
+        output_dir = vconfig["output_dir"]
+        if not os.path.isabs(output_dir):
+            output_dir = os.path.join(tempfile.gettempdir(), output_dir)
+        os.makedirs(output_dir, exist_ok=True)
         return TilerVectorConfig(
             duckdb_database=database,
             duckdb_temp_dir=str(temp_dir),
             memory_limit=vconfig["memory_limit"],
             threads=int(vconfig["threads"]),
             region=vconfig["region"],
-            output_dir=vconfig["output_dir"],
+            output_dir=output_dir,
             max_cells_long_edge=int(vconfig["max_cells_long_edge"]),
             s3_prefix=vconfig["s3_prefix"],
             s3_bucket=self.get_datavis_data_bucket_name(),

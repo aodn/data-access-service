@@ -404,6 +404,7 @@ def generate_vector_parquet_for_zarrs(api: BaseAPI, uuid: str | None = None) -> 
 
     cfg = Config.get_config().get_tiler_vector_config()
     os.makedirs(cfg.output_dir, exist_ok=True)
+    logger.info("Vector working directory: %s", cfg.output_dir)
 
     for catalog_uuid, datasets in by_uuid.items():
         fragments: list[dict] = []
