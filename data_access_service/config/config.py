@@ -117,7 +117,7 @@ class Config:
         return Config._load_tiler_catalog_section("products_customisation")
 
     @staticmethod
-    def resolve_profile(profile: EnvType = None) -> EnvType:
+    def resolve_profile(profile: EnvType | None = None) -> EnvType:
         """Resolve the active profile, falling back to env detection when not given."""
         if profile is None:
             if os.getenv("PYTEST_CURRENT_TEST") is not None:
@@ -133,7 +133,7 @@ class Config:
         return Config.resolve_profile() in env_types
 
     @staticmethod
-    def get_config(profile: EnvType = None):
+    def get_config(profile: EnvType | None = None):
         profile = Config.resolve_profile(profile)
 
         # Use lock to ensure thread-safe singleton instantiation
@@ -177,7 +177,7 @@ class Config:
         val = self.config["aws"]["s3"]["bucket_name"]["subsetting"]
         return val.strip() if isinstance(val, str) else val
 
-    def get_datavis_data_bucket_name(self):
+    def get_datavis_data_bucket_name(self) -> str | None:
         if self.config is None:
             return None
         val = self.config["aws"]["s3"]["bucket_name"]["datavis_data"]
@@ -484,6 +484,11 @@ class Config:
         if not os.path.isabs(output_dir):
             output_dir = os.path.join(tempfile.gettempdir(), output_dir)
         os.makedirs(output_dir, exist_ok=True)
+
+        bucket = self.get_datavis_data_bucket_name()
+        if bucket is None:
+            raise ValueError("Datavis data bucket name is not set")
+
         return TilerVectorConfig(
             duckdb_database=database,
             duckdb_temp_dir=str(temp_dir),
@@ -493,7 +498,7 @@ class Config:
             output_dir=output_dir,
             max_cells_long_edge=int(vconfig["max_cells_long_edge"]),
             s3_prefix=vconfig["s3_prefix"],
-            s3_bucket=self.get_datavis_data_bucket_name(),
+            s3_bucket=bucket,
             write_s3=bool(vconfig["write_s3"]),
             keep_local_parquet=bool(vconfig["keep_local_parquet"]),
             row_group_size=int(vconfig["row_group_size"]),
