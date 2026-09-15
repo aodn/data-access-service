@@ -21,6 +21,12 @@ from data_access_service.models.subset_request import NON_SPECIFIED, SubsetReque
 from data_access_service.batch.subsetting.helpers.data_file_upload import (
     upload_all_files_in_folder_to_temp_s3,
 )
+from data_access_service.batch.subsetting.helpers.parquet_polygon_ranges import (
+    POLYGON_PARTITION,
+    PolygonRange,
+    list_polygon_values,
+    select_polygons_in_range,
+)
 from data_access_service.batch.subsetting.helpers.parquet_date_ranges import (
     check_rows_with_date_range,
     trim_date_range,
@@ -45,7 +51,13 @@ def process_parquet_files(
     subset_request: SubsetRequest,
     start_date: pd.Timestamp | NaTType,
     end_date: pd.Timestamp | NaTType,
+    polygon_range: Optional[PolygonRange] = None,
 ) -> str | None:
+    """Prepare the parquet output of one child job.
+
+    :param polygon_range: set for a dataset without a time column; the child
+        then reads the `polygon` partitions in `[lo, hi)` instead of date windows
+    """
     uuid = subset_request.uuid
     keys = subset_request.keys
     multi_polygon = subset_request.multi_polygon
@@ -83,6 +95,7 @@ def process_parquet_files(
                 start_date,
                 end_date,
                 multi_polygon_dict,
+                polygon_range,
             )
             if has_result:
                 return upload_all_files_in_folder_to_temp_s3(
@@ -254,6 +267,109 @@ def _generate_partition_output(
     return has_data
 
 
+def _generate_polygon_partition_output(
+    api: API,
+    root_folder_path: str,
+    job_index: str,
+    uuid: str,
+    key: str,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
+    polygon_range: PolygonRange,
+    polygon: Optional[ShapelyPolygon] = None,
+    shape_index: int = 0,
+) -> bool:
+    """Write the `polygon` partitions in `polygon_range`, one partition at a time.
+
+    Used for a dataset without a time column, where date windows cannot split
+    the work. Reading one partition at a time bounds memory by the largest
+    partition rather than the whole range.
+    """
+    has_data = False
+    datasource = api.get_datasource(uuid, key)
+    if datasource is None or not isinstance(datasource, ParquetDataSource):
+        return has_data
+
+    schema_path = f"{root_folder_path}/dataschema.json"
+    if not Path(schema_path).exists():
+        table_schema = datasource.get_metadata()
+        os.makedirs(os.path.dirname(schema_path), exist_ok=True)
+        with open(schema_path, "w") as f:
+            json.dump(table_schema, f, indent=2)
+
+        log.info(f"Saved table schema to {schema_path}")
+
+    partition_values = select_polygons_in_range(
+        list_polygon_values(datasource), polygon_range
+    )
+    log.info(
+        "Processing %s polygon partition(s) in range %s for uuid=%s key=%s",
+        len(partition_values),
+        polygon_range,
+        uuid,
+        key,
+    )
+
+    if polygon is not None:
+        min_lon, min_lat, max_lon, max_lat = polygon.bounds
+    else:
+        min_lat = None
+        max_lat = None
+        min_lon = None
+        max_lon = None
+
+    for index, partition_value in enumerate(partition_values, start=1):
+        log.info("Polygon partition %s/%s", index, len(partition_values))
+        result: Optional[ddf.DataFrame] = query_data(
+            api,
+            uuid,
+            key,
+            start_date,
+            end_date,
+            min_lat,
+            max_lat,
+            min_lon,
+            max_lon,
+            scalar_filter={POLYGON_PARTITION: partition_value},
+        )
+        if result is None:
+            log.info(
+                f"No data found for uuid={uuid}, key={key}, polygon partition {index}"
+            )
+            continue
+
+        if polygon is not None:
+            lat_key, lon_key = api.map_column_names(
+                uuid=uuid,
+                key=key,
+                columns=[STR_LATITUDE_UPPER_CASE, STR_LONGITUDE_UPPER_CASE],
+            )
+            result = result.map_partitions(
+                _filter_partition_by_polygon,
+                shapely_poly=polygon,
+                lat_key=lat_key,
+                lon_key=lon_key,
+                meta=result._meta,
+            )
+
+        output_path = f"{root_folder_path}/{key}/part-{job_index}/"
+        # No time column to derive a month from; a label per partition (and per
+        # requested shape) keeps each write in its own directory.
+        result[PARTITION_KEY] = f"polygon-{shape_index}-{index}"
+
+        result.to_parquet(
+            output_path,
+            partition_on=[PARTITION_KEY],
+            compression="zstd",
+            engine="pyarrow",
+            write_index=False,
+        )
+        log.info(f"Saved polygon partition {index} to {output_path}")
+        has_data = True
+
+    return has_data
+
+
 def _generate_partition_output_with_polygon(
     api: API,
     folder_path: str,
@@ -263,24 +379,51 @@ def _generate_partition_output_with_polygon(
     start_date: pd.Timestamp | NaTType,
     end_date: pd.Timestamp | NaTType,
     multi_polygon: MultiPolygon | None,
+    polygon_range: Optional[PolygonRange] = None,
 ) -> bool:
 
     had_data = False
     if multi_polygon is not None:
         # The multiple polygons may overlap, merge those overlaps into
         # non-overlapping polygons
-        for shapely_poly in merge_polygons(multi_polygon):
-            polygon_had_data = _generate_partition_output(
-                api,
-                folder_path,
-                array_index,
-                uuid,
-                key,
-                start_date,
-                end_date,
-                shapely_poly,
-            )
+        for shape_index, shapely_poly in enumerate(merge_polygons(multi_polygon)):
+            if polygon_range is not None:
+                polygon_had_data = _generate_polygon_partition_output(
+                    api,
+                    folder_path,
+                    array_index,
+                    uuid,
+                    key,
+                    start_date,
+                    end_date,
+                    polygon_range,
+                    shapely_poly,
+                    shape_index,
+                )
+            else:
+                polygon_had_data = _generate_partition_output(
+                    api,
+                    folder_path,
+                    array_index,
+                    uuid,
+                    key,
+                    start_date,
+                    end_date,
+                    shapely_poly,
+                )
             had_data = had_data or polygon_had_data
+    elif polygon_range is not None:
+        had_data = _generate_polygon_partition_output(
+            api,
+            folder_path,
+            array_index,
+            uuid,
+            key,
+            start_date,
+            end_date,
+            polygon_range,
+            None,
+        )
     else:
         had_data = _generate_partition_output(
             api,
@@ -312,6 +455,7 @@ def query_data(
     max_lat,
     min_lon,
     max_lon,
+    scalar_filter: Optional[dict] = None,
 ) -> Optional[ddf.DataFrame]:
     log.info(
         f"Querying data for uuid={uuid}, key={key}, start_date={start_date}, end_date={end_date}, "
@@ -320,6 +464,8 @@ def query_data(
         f"lat_min={min_lat}, lat_max={max_lat}, lon_min={min_lon}, lon_max={max_lon}"
     )
 
+    # Only pass scalar_filter when set, so the date-window call is unchanged
+    extra_filters = {} if scalar_filter is None else {"scalar_filter": scalar_filter}
     try:
         df: Optional[ddf.DataFrame] = api.get_dataset(
             uuid=uuid,
@@ -330,6 +476,7 @@ def query_data(
             lat_max=max_lat,
             lon_min=min_lon,
             lon_max=max_lon,
+            **extra_filters,
         )
         if df is not None:
             return df
