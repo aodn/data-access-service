@@ -1,4 +1,4 @@
-"""Helpers shared across the three routers (products, data_tiles, visual_tiles)."""
+"""Helpers shared across products, data_tiles, and visual_tiles routers."""
 
 from collections.abc import Callable
 from http import HTTPStatus
@@ -10,17 +10,12 @@ from fastapi import HTTPException, Request
 from fastapi.openapi.models import Example
 
 from data_access_service.config.config import Config
-from data_access_service.tiler.services.colormap.resolver import resolve_colormap
-from data_access_service.tiler.services.product.product import Product
-from data_access_service.tiler.services.product.registry import get_product
-from data_access_service.tiler.services.store.registry import (
-    is_store_available,
-    resolve_timestamp,
-    unavailable_date_message,
+from data_access_service.tiler.colormap import resolve_colormap_or_error
+from data_access_service.tiler.product import Product, get_product
+from data_access_service.tiler.utils.dates import (
+    compact_timestamp,
+    str_to_utc_timestamp,
 )
-from data_access_service.tiler.services.store.slice_loader import load_slice
-from data_access_service.tiler.services.store.spatial import ReadBBox
-from data_access_service.tiler.utils.dates import str_to_utc_timestamp
 
 PRODUCT_EX: dict[str, Example] = {"default": Example(value="sea_level_anomaly")}
 DATE_EX: dict[str, Example] = {"default": Example(value="2024-02-24T00:00:00Z")}
@@ -39,16 +34,6 @@ class ClientDisconnected(Exception):
 
 
 async def run_cancellable(request: Request, fn: Callable[[], T]) -> T:
-    """Run blocking fn on TILE_THREAD_LIMITER, racing it against
-    client-disconnect detection.
-
-    - Disconnect while fn is still queued for a thread: fn never runs.
-    - Disconnect after fn has started: a running thread can't be
-      stopped, so fn keeps running in the background; this raises
-      ClientDisconnected right away instead of waiting, and discards
-      fn's result once it's done.
-    - No disconnect: waits for fn and returns its result normally.
-    """
     outcome: list[T] = []
 
     async def _runner(tg: anyio.abc.TaskGroup) -> None:
@@ -85,12 +70,6 @@ def mark_tiler_ready() -> None:
 
 
 def require_tiler_ready() -> None:
-    """FastAPI dependency: 503 until tiler startup has finished.
-
-    Mirrors api_instance.get_api_status() on the main data routes — without
-    it, a request arriving before startup completes would just see an empty
-    product/colormap registry instead of a clear "not ready" response.
-    """
     if not _tiler_ready:
         raise HTTPException(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
@@ -105,121 +84,47 @@ def get_product_or_404(product_id: str) -> Product:
     return product
 
 
-def is_store_available_or_404(product: Product) -> None:
-    """Reject a product whose backing store failed its last prewarm.
-
-    The registry holds every discovered candidate regardless of store health
-    (see product/registry.py), so this is what keeps a product with a known-
-    bad store (not gridded, absent, no time dimension) from reaching
-    load_slice at all.
-    """
-    if not is_store_available(product.source_path):
-        raise HTTPException(
-            status_code=404,
-            detail=f"Product {product.id!r} is temporarily unavailable: its store failed to open",
-        )
-
-
 def visual_product_or_400(product_id: str) -> Product:
-    """Look up a product and reject it if it cannot serve visual tiles.
-
-    A registered scalar can still be data-tile-only, so arity alone can't
-    decide this.
-    """
     product = get_product_or_404(product_id)
     if not product.visual:
         raise HTTPException(
             status_code=400,
-            detail=f"Product {product_id!r} does not support visual tiles",
+            detail=f"Product {product_id!r} is not a visual product",
         )
     return product
 
 
 def parse_date_or_422(date: str) -> pd.Timestamp:
-    """Parse ``date`` as a full UTC timestamp, raising 422 on failure."""
     try:
-        return str_to_utc_timestamp(date, require_tz=True)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Invalid date: {date!r} ({e}) — expected a full UTC "
-                "timestamp (e.g. '2024-06-15T23:00:00Z'). Use one of the "
-                "exact values from /manifest's available_dates."
-            ),
-        ) from e
+        return str_to_utc_timestamp(date)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=422, detail=f"Invalid date: {date}") from e
 
 
-def resolve_timestamp_or_404(product: Product, ts: pd.Timestamp) -> None:
-    """Fail fast if ``ts`` does not name an exact instant in the store's time index.
+def resolve_timestamp_or_404(product: Product, ts: pd.Timestamp) -> str:
+    compact = compact_timestamp(ts)
+    if compact not in product.timestamps and str(ts) not in product.timestamps:
+        # also accept ISO stored timestamps
+        from data_access_service.tiler.utils.dates import iso_timestamp
 
-    A cheap dict-lookup mirror of the check ``_fetch_slice_from_store`` performs
-    deep in ``load_slice`` (which still needs to run it there too, to get the
-    raw timestamp for the actual fetch — this doesn't replace that, it just lets
-    a bad date 404 before any further per-request work, e.g. LOD grids, tile
-    bounds).
-    """
-    if resolve_timestamp(product.source_path, ts) is None:
-        raise HTTPException(
-            status_code=404,
-            detail=unavailable_date_message(product.source_path, ts),
-        )
-
-
-def load_slice_or_404(
-    store_url: str,
-    ts: pd.Timestamp,
-    variables: list[str],
-    ocean_masked: bool = False,
-    bbox: ReadBBox | None = None,
-    pad_cells: int = 2,
-):
-    try:
-        return load_slice(
-            store_url,
-            ts,
-            variables,
-            ocean_masked,
-            bbox=bbox,
-            pad_cells=pad_cells,
-        )
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-
-
-def resolve_colormap_or_error(name: str, *, status_code: int = 400) -> None:
-    """Validate a colormap name, raising HTTPException on failure.
-
-    Defaults to 400 (colormap usually arrives as a query param, so an unknown
-    name is a malformed request). Callers exposing it as a path segment pass
-    status_code=404 — the URL points at a resource that does not exist.
-    """
-    try:
-        resolve_colormap(name)
-    except ValueError as e:
-        raise HTTPException(status_code=status_code, detail=str(e)) from e
-
-
-def single_variable_or_400(product: Product, *, context: str) -> str:
-    """Narrow product.variable to a single str, rejecting multi-variable products."""
-    if isinstance(product.variable, list):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Product '{product.id}' has multiple variables; "
-                f"{context} supports single-variable products only."
-            ),
-        )
-    return product.variable
+        iso = iso_timestamp(compact)
+        if iso not in product.timestamps and compact not in product.timestamps:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Date {iso} is not available for product {product.id}",
+            )
+    return compact
 
 
 def parse_rescale(rescale: str | None) -> tuple[float, float] | None:
-    if not rescale:
+    if rescale is None:
         return None
     try:
-        lo, hi = rescale.split(",")
-        return (float(lo), float(hi))
+        lo, hi = (float(p.strip()) for p in rescale.split(","))
     except ValueError as e:
-        raise HTTPException(
-            status_code=400, detail="rescale must be 'min,max', e.g. '-0.5,0.5'"
-        ) from e
+        raise HTTPException(status_code=400, detail="rescale must be 'min,max'") from e
+    return lo, hi
+
+
+def single_variable_or_400(product: Product, context: str = "") -> str:
+    return product.variable

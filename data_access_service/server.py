@@ -21,7 +21,6 @@ from data_access_service.core.estimation_index import (
 from data_access_service.core.memory_watchdog import run_memory_watchdog
 from data_access_service.core.middleware import configure_gzip_middleware
 from data_access_service.core.routes import router as api_router
-from data_access_service.core.scheduler import TaskScheduler
 from data_access_service.core.tiler_routes import router as tiler_router
 from data_access_service.core.tiler_routes.startup import run_tiler_warmup
 from data_access_service.sites.sites_repository import build_repositories
@@ -73,7 +72,6 @@ async def lifespan(application: FastAPI):
     api = api_setup(application)
 
     sites_duckdb_session = None
-    scheduler = None
     background_tasks: tuple[asyncio.Task, ...] = ()
     try:
         if isinstance(Config.get_config(), IntTestConfig):
@@ -88,10 +86,6 @@ async def lifespan(application: FastAPI):
             application.state.sites_repositories = build_repositories(
                 sites_duckdb_session
             )
-            scheduler = TaskScheduler(api, application.state.sites_repositories)
-            scheduler_startup_task = asyncio.create_task(
-                scheduler.start_with_initial_run(), name="task_scheduler_startup"
-            )
             tiler_warmup_task = asyncio.create_task(
                 run_tiler_warmup(api), name="tiler_warmup"
             )
@@ -99,7 +93,6 @@ async def lifespan(application: FastAPI):
                 run_memory_watchdog(), name="memory_watchdog"
             )
             background_tasks = (
-                scheduler_startup_task,
                 tiler_warmup_task,
                 memory_watchdog_task,
             )
@@ -113,9 +106,6 @@ async def lifespan(application: FastAPI):
             with suppress(asyncio.CancelledError):
                 await task
 
-        # Cleanup
-        if scheduler:
-            scheduler.shutdown()
         close_estimation_client()
         if sites_duckdb_session:
             sites_duckdb_session.close()

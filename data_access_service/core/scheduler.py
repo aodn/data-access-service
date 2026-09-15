@@ -8,7 +8,6 @@ from apscheduler.triggers.cron import CronTrigger
 from data_access_service import API, Config
 from data_access_service.config.config import EnvType
 from data_access_service.sites.sites_repository import ParquetRepository
-from data_access_service.tiler.services.store.registry import refresh_stores
 from data_access_service.utils.memory_utils import log_memory_usage
 
 logger = logging.getLogger(__name__)
@@ -82,32 +81,8 @@ class TaskScheduler:
         log_memory_usage(logger, f"after reload check '{name}'")
 
     def _store_refresh_task(self):
-        """Re-open every currently-valid tiler store (the scheduled job).
-
-        Sequential (one store at a time) by design, so this never opens more
-        than one Zarr store's metadata at once regardless of how many stores
-        are registered — the peak-memory/CPU stampede this replaced came from
-        several request-triggered refreshes overlapping.
-        """
-        if not Config.is_profile_in(
-            EnvType.EDGE,
-            EnvType.STAGING,
-            EnvType.PRODUCTION,
-            EnvType.DEV,
-            EnvType.TESTING,
-        ):
-            logger.info(
-                "Skipping store refresh task on '%s' profile", Config.resolve_profile()
-            )
-            return
-        logger.info("Store refresh task is running...")
-        log_memory_usage(logger, "store refresh task start")
-        try:
-            refresh_stores()
-        except Exception:
-            logger.exception("Store refresh task failed")
-        log_memory_usage(logger, "store refresh task end")
-        logger.info("Store refresh task completed")
+        """No-op: parquet-backed tiler has no live Zarr store registry to refresh."""
+        logger.info("Skipping store refresh; parquet tiler does not keep Zarr stores")
 
     def _reload_task(self):
         """Reload every registered repository whose snapshot changed (the scheduled job)."""
@@ -139,19 +114,6 @@ class TaskScheduler:
             ),
             id="reload_task",
             name="Repository snapshot reload task",
-            replace_existing=True,
-            coalesce=True,
-            misfire_grace_time=None,
-        )
-
-        self.scheduler.add_job(
-            self._store_refresh_task,
-            trigger=CronTrigger(
-                hour=f"*/{Config.get_config().get_tiler_config().store_refresh_interval_hours}",
-                minute="0",
-            ),
-            id="store_refresh_task",
-            name="Tiler store refresh task",
             replace_existing=True,
             coalesce=True,
             misfire_grace_time=None,

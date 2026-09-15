@@ -5,8 +5,7 @@ from starlette.testclient import TestClient
 
 from data_access_service.core.tiler_routes.shared import mark_tiler_ready
 from data_access_service.server import app
-from data_access_service.tiler.services.product.product import Product
-from data_access_service.tiler.services.product.registry import PRODUCTS
+from data_access_service.tiler.product import PRODUCTS, Product
 from data_access_service.core.routes.auth import api_key_auth
 
 # A PNG large enough to clear GZipMiddleware's minimum_size, so the no-gzip assertion
@@ -18,7 +17,11 @@ _BIG_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 4000
 def seed_products():
     """test_gzip_skips_image_tiles hits a real product route; seed the one it needs."""
     PRODUCTS["sea_level_anomaly"] = Product(
-        id="sea_level_anomaly", source_path="s3://test/sla.zarr", variable="GSLA"
+        id="sea_level_anomaly",
+        source_path="s3://test/sla.zarr",
+        variable="GSLA",
+        timestamps=("20240101T000000Z",),
+        visual=True,
     )
     yield
     PRODUCTS.pop("sea_level_anomaly", None)
@@ -56,16 +59,9 @@ def test_gzip_skips_image_tiles(client):
     # PNG tiles are already compressed; gzipping them wastes CPU. The image/* deny-list
     # entry must keep them uncompressed even though the body exceeds minimum_size and the
     # client advertises gzip. This guards the Starlette-global monkeypatch in main.py.
-    with (
-        patch("data_access_service.core.tiler_routes.shared.load_slice"),
-        patch(
-            "data_access_service.core.tiler_routes.shared.resolve_timestamp",
-            return_value="raw-ts",
-        ),
-        patch(
-            "data_access_service.core.tiler_routes.visual_tiles.render_tile",
-            return_value=_BIG_PNG,
-        ),
+    with patch(
+        "data_access_service.core.tiler_routes.visual_tiles.render_tile",
+        return_value=_BIG_PNG,
     ):
         response = client.get(
             "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/5/0/0.png?date=2024-01-01T00:00:00Z",

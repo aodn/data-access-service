@@ -13,7 +13,7 @@ import numpy as np
 
 from data_access_service.batch.tiler.generator import local_meta_path
 from data_access_service.core.duckdbclient import TilerDuckDBClient
-from data_access_service.tiler.utils.image import encode_rgba
+from data_access_service.tiler.utils.image import encode_rgba  # parquet-backed encoder
 
 ImageFormat = Literal["png", "webp"]
 

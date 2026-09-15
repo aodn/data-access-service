@@ -1013,10 +1013,13 @@ class TilerDuckDBClient(DuckDBClient):
         return f"{prefix}/{uuid}.parquet"
 
     def parquet_uri(self, uuid: str) -> str:
-        """Where readers should look: S3 when ``write_s3``, else the local file."""
+        """Local file if it exists (dev keep_local), otherwise S3 when enabled."""
+        local = self.local_parquet_path(uuid)
+        if os.path.isfile(local):
+            return local
         if self._config.write_s3:
             return f"s3://{self._config.s3_bucket}/{self.s3_key(uuid)}"
-        return self.local_parquet_path(uuid)
+        return local
 
     def parts_glob(self, uuid: str) -> str:
         return os.path.join(self._config.output_dir, uuid, "parts", "*.parquet")
@@ -1087,6 +1090,10 @@ class TilerDuckDBClient(DuckDBClient):
     ):
         """Return ``(i, j, value)`` for one timestamp (optional variable + window)."""
         path = self.parquet_uri(uuid)
+        if path.startswith("s3://") and self._config.write_s3:
+            self.create_s3_secret(self._config.s3_bucket)
+        if not path.startswith("s3://") and not os.path.isfile(path):
+            raise FileNotFoundError(f"Vector parquet not found: {path}")
         clauses = [f"timestamp = {_sql_string(timestamp)}"]
         if variable is not None:
             clauses.append(f"variable = {_sql_string(variable)}")
