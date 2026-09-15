@@ -23,6 +23,7 @@ def _enable_fork(
             use_fork_process=enabled,
             build_estimation_index=build_estimation_index,
             bucket_name="b",
+            s3_prefix="portal/visualization",
         ),
     )
 
@@ -50,16 +51,20 @@ class TestRemoveOutdated:
     KEEP = "portal/visualization/uuid-a/a.parquet.pmtiles"
     OLD = "portal/visualization/uuid-old/old.parquet.pmtiles"
 
-    def _run(self, monkeypatch, uuid=None, ok=True):
+    def _run(self, monkeypatch, uuid=None, ok=True, metadata=None, listed=None):
         _enable_fork(monkeypatch, True)
         api = MagicMock()
-        api.get_mapped_meta_data.return_value = {"uuid-a": {"a.parquet": {}}}
+        api.get_mapped_meta_data.return_value = (
+            {"uuid-a": {"a.parquet": {}}} if metadata is None else metadata
+        )
         monkeypatch.setattr(
             generator, "_generate_pmtiles_for_parquets_in_subprocess", lambda *a: ok
         )
         monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
         monkeypatch.setattr(
-            generator.aws, "list_all_s3_objects", lambda b, p: [self.KEEP, self.OLD]
+            generator.aws,
+            "list_all_s3_objects",
+            lambda b, p: [self.KEEP, self.OLD] if listed is None else listed,
         )
         generate_pmtiles_for_all_parquets(api, uuid=uuid)
 
@@ -75,6 +80,19 @@ class TestRemoveOutdated:
 
     def test_single_uuid(self, monkeypatch, s3):
         self._run(monkeypatch, uuid="uuid-a")
+
+        s3.delete_object.assert_not_called()
+
+    def test_empty_folder_placeholder_removed(self, monkeypatch, s3):
+        # A console-created folder is a zero-byte key ending in "/"
+        placeholder = "portal/visualization/uuid-old/"
+        self._run(monkeypatch, listed=[self.KEEP, placeholder])
+
+        s3.delete_object.assert_called_once_with(Bucket="b", Key=placeholder)
+
+    def test_nothing_processed_skips_removal(self, monkeypatch, s3):
+        # Empty metadata means it failed to load, not that every dataset is gone
+        self._run(monkeypatch, metadata={})
 
         s3.delete_object.assert_not_called()
 
@@ -421,11 +439,11 @@ class TestUploadMetadata:
         monkeypatch.setattr(
             generator.config,
             "get_pmtiles_config",
-            lambda: MagicMock(bucket_name=bucket),
+            lambda: MagicMock(bucket_name=bucket, s3_prefix="test/visualization"),
         )
 
         assert _generate_pmtiles_for_parquets(api=None, uuid=uuid, dname=dname) is True
         assert uploaded == [
-            (pmtiles_path, bucket, f"portal/visualization/{uuid}/{dname}.pmtiles"),
-            (metadata_path, bucket, f"portal/visualization/{uuid}/{dname}.metadata"),
+            (pmtiles_path, bucket, f"test/visualization/{uuid}/{dname}.pmtiles"),
+            (metadata_path, bucket, f"test/visualization/{uuid}/{dname}.metadata"),
         ]
