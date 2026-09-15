@@ -133,7 +133,9 @@ def _filter_partition_by_polygon(df, shapely_poly, lat_key, lon_key):
         df,
         geometry=gpd.points_from_xy(df[lon_key], df[lat_key]),
     )
-    gdf_filtered = gdf[gdf.within(shapely_poly)]
+    # covered_by, not within: within drops points on the edge, e.g. a site at
+    # longitude -180 when the polygon is the whole earth
+    gdf_filtered = gdf[gdf.covered_by(shapely_poly)]
     return gdf_filtered.drop(columns=["geometry"])
 
 

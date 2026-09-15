@@ -2,10 +2,12 @@ import pytz
 import pandas as pd
 import pytest
 
+from shapely.geometry import box
 from unittest.mock import patch, MagicMock
 from data_access_service.batch.subsetting.tasks.parquet_processor import (
     trim_date_range,
     query_data,
+    _filter_partition_by_polygon,
 )
 
 
@@ -80,3 +82,36 @@ class TestGenerateFunctions:
             max_lon=20,
         )
         assert result is not None
+
+    def test_filter_partition_by_polygon_keeps_points_on_edge(self):
+        df = pd.DataFrame(
+            {
+                "site": ["antimeridian", "north_pole", "inside"],
+                "LATITUDE": [-16.77, 90.0, 10.0],
+                "LONGITUDE": [-180.0, 0.0, 20.0],
+            }
+        )
+        result = _filter_partition_by_polygon(
+            df,
+            shapely_poly=box(-180, -90, 180, 90),
+            lat_key="LATITUDE",
+            lon_key="LONGITUDE",
+        )
+        assert list(result["site"]) == ["antimeridian", "north_pole", "inside"]
+        assert "geometry" not in result.columns
+
+    def test_filter_partition_by_polygon_drops_points_outside(self):
+        df = pd.DataFrame(
+            {
+                "site": ["inside", "edge", "outside"],
+                "LATITUDE": [5.0, 10.0, 10.001],
+                "LONGITUDE": [5.0, 10.0, 5.0],
+            }
+        )
+        result = _filter_partition_by_polygon(
+            df,
+            shapely_poly=box(0, 0, 10, 10),
+            lat_key="LATITUDE",
+            lon_key="LONGITUDE",
+        )
+        assert list(result["site"]) == ["inside", "edge"]
