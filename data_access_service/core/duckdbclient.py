@@ -964,10 +964,14 @@ class TilerDuckDBClient(DuckDBClient):
                         "threads": str(int(self._config.threads)),
                         "enable_external_file_cache": "false",
                     }
-                    if self._database != ":memory:":
-                        os.makedirs(self._config.duckdb_temp_dir, exist_ok=True)
-                        db_config["temp_directory"] = self._config.duckdb_temp_dir
+                    # This is safe for re-use across multiple db connections
+                    # It is a container local disk so not much an issue
+                    os.makedirs(self._config.duckdb_temp_dir, exist_ok=True)
+                    db_config["temp_directory"] = self._config.duckdb_temp_dir
                     db = duckdb.connect(database=self._database, config=db_config)
+
+                    # Disable insertion-order preservation (SET preserve_insertion_order=false)
+                    # as order important
                     db.execute("INSTALL httpfs; LOAD httpfs;")
                     db.execute(f"SET GLOBAL s3_region = '{self._config.region}';")
                     db.execute("SET GLOBAL TimeZone = 'UTC';")

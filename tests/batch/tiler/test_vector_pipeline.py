@@ -261,3 +261,41 @@ def test_generate_vector_parquet_all_uuids_zarr_only(monkeypatch):
 
     generate_vector_parquet_for_zarrs(api, uuid=None)
     assert calls == [("uuid-a", "a.zarr"), ("uuid-b", "b.zarr")]
+
+
+def test_preprocess_dataset_multiple_variables_in_one_go(client, vector_cfg):
+    from data_access_service.batch.tiler.generator import preprocess_dataset
+
+    time = pd.date_range("2024-06-01", periods=2, freq="D")
+    lat = np.linspace(-5.0, 5.0, 8)
+    lon = np.linspace(150.0, 160.0, 10)
+    data1 = np.arange(2 * 8 * 10, dtype=np.float32).reshape(2, 8, 10)
+    data2 = data1 * 2.0
+    ds = xr.Dataset(
+        {
+            "sst": (("time", "lat", "lon"), data1),
+            "anom": (("time", "lat", "lon"), data2),
+        },
+        coords={"time": time, "lat": lat, "lon": lon},
+    )
+
+    frags = preprocess_dataset(
+        ds,
+        variables=["sst", "anom"],
+        uuid="multi-var-demo",
+        dataset="multi.zarr",
+        client=client,
+        config=vector_cfg,
+    )
+
+    assert len(frags) == 2
+    assert [f["variable"] for f in frags] == ["sst", "anom"]
+
+    dest = client.finalize("multi-var-demo")
+    assert Path(dest).is_file()
+
+    # QueryDuckDB to check rows written for both variables
+    df = client.execute(
+        f"SELECT DISTINCT variable FROM read_parquet('{dest}')"
+    ).fetchdf()
+    assert set(df["variable"].tolist()) == {"sst", "anom"}

@@ -85,6 +85,30 @@ def _prepare_time_slice(
     return timestamp, lat, lon, values, _cells_frame(values)
 
 
+def _prepare_dataset_time_slice(
+    timestamp: str,
+    ds_slice: xr.Dataset,
+    variables: list[str],
+    lat_all: np.ndarray,
+    lon_all: np.ndarray,
+    max_edge: int,
+) -> tuple[str, dict[str, tuple[np.ndarray, np.ndarray, np.ndarray, pd.DataFrame]]]:
+    """Compute one time step across multiple variables. Safe to run on a worker thread."""
+    results = {}
+    for var in variables:
+        sl = ds_slice[var]
+        values = np.asarray(sl.values, dtype=np.float32)
+        if values.ndim != 2:
+            values = np.squeeze(values)
+        if values.ndim != 2:
+            raise ValueError(
+                f"expected 2-D slice for variable {var}, got shape {values.shape}"
+            )
+        lat, lon, values = _downsample_slice(lat_all, lon_all, values, max_edge)
+        results[var] = (lat, lon, values, _cells_frame(values))
+    return timestamp, results
+
+
 def _cells_frame(values: np.ndarray) -> pd.DataFrame:
     yy, xx = np.indices(values.shape, dtype=np.int32)
     flat = values.ravel()
@@ -107,38 +131,35 @@ def local_meta_path(output_dir: str, uuid: str) -> str:
     return os.path.join(output_dir, f"{uuid}.meta.json")
 
 
-def preprocess_dataarray(
-    da: xr.DataArray,
+def preprocess_dataset(
+    ds: xr.Dataset,
+    variables: list[str],
     *,
     uuid: str,
     dataset: str,
-    variable: str | None = None,
     client: TilerDuckDBClient | None = None,
     config: TilerVectorConfig | None = None,
-) -> dict:
-    """Append time-slice parts for one variable. Caller must :meth: 'finalize`."""
+) -> list[dict]:
+    """Append time-slice parts for multiple variables in one pass. Caller must :meth:`finalize`."""
     cfg = config or Config.get_config().get_tiler_vector_config()
     own_client = client is None
     client = client or TilerDuckDBClient(cfg)
-    if "lat" not in da.dims or "lon" not in da.dims:
-        raise ValueError("DataArray must have lat and lon dimensions")
+    if "lat" not in ds.dims or "lon" not in ds.dims:
+        raise ValueError("Dataset must have lat and lon dimensions")
 
-    variable = variable or da.name or "value"
-    lat_all = np.asarray(da["lat"].values, dtype=np.float64)
-    lon_all = np.asarray(da["lon"].values, dtype=np.float64)
-    timestamps: list[str] = []
-    vmin = None
-    vmax = None
-    n_i = n_j = 0
-    lat_min = lat_max = lon_min = lon_max = 0.0
+    if not variables:
+        return []
 
-    if "time" in da.dims:
+    lat_all = np.asarray(ds["lat"].values, dtype=np.float64)
+    lon_all = np.asarray(ds["lon"].values, dtype=np.float64)
+
+    if "time" in ds.dims:
         jobs = [
-            (_timestamp_key(t), da.isel(time=i))
-            for i, t in enumerate(da["time"].values)
+            (_timestamp_key(t), ds.isel(time=i))
+            for i, t in enumerate(ds["time"].values)
         ]
     else:
-        jobs = [("na", da)]
+        jobs = [("na", ds)]
 
     cap = int(cfg.max_time_slices)
     if 0 < cap < len(jobs):
@@ -153,16 +174,36 @@ def preprocess_dataarray(
     total = len(jobs)
     log_every = 1 if total <= 20 else min(50, max(1, total // 20))
     logger.info(
-        "Computing %s time slice(s) for %s with %s thread(s); "
+        "Computing %s time slice(s) for %s variable(s) (%s) with %s thread(s); "
         "first zarr chunk fetch can take a while",
         total,
-        variable,
+        len(variables),
+        variables,
         workers,
     )
 
-    def _run(job: tuple[str, xr.DataArray]):
+    var_meta = {
+        var: {
+            "dataset": dataset,
+            "variable": var,
+            "n_i": 0,
+            "n_j": 0,
+            "lat_min": 0.0,
+            "lat_max": 0.0,
+            "lon_min": 0.0,
+            "lon_max": 0.0,
+            "vmin": None,
+            "vmax": None,
+            "timestamps": [],
+        }
+        for var in variables
+    }
+
+    def _run(job: tuple[str, xr.Dataset]):
         ts, sl = job
-        return _prepare_time_slice(ts, sl, lat_all, lon_all, cfg.max_cells_long_edge)
+        return _prepare_dataset_time_slice(
+            ts, sl, variables, lat_all, lon_all, cfg.max_cells_long_edge
+        )
 
     def _iter_prepared() -> Iterator:
         if workers == 1 or total == 1:
@@ -174,47 +215,77 @@ def preprocess_dataarray(
 
     started = time.monotonic()
     try:
-        for done, (timestamp, lat, lon, values, frame) in enumerate(
-            _iter_prepared(), start=1
-        ):
-            client.write_part(uuid, timestamp, dataset, variable, frame)
-            timestamps.append(timestamp)
-            n_i, n_j = int(values.shape[0]), int(values.shape[1])
-            lat_min, lat_max = float(lat.min()), float(lat.max())
-            lon_min, lon_max = float(lon.min()), float(lon.max())
-            finite = values[np.isfinite(values)]
-            if finite.size:
-                lo, hi = float(finite.min()), float(finite.max())
-                vmin = lo if vmin is None else min(vmin, lo)
-                vmax = hi if vmax is None else max(vmax, hi)
+        for done, (timestamp, var_results) in enumerate(_iter_prepared(), start=1):
+            for var, (lat, lon, values, frame) in var_results.items():
+                client.write_part(uuid, timestamp, dataset, var, frame)
+                meta = var_meta[var]
+                meta["timestamps"].append(timestamp)
+                meta["n_i"], meta["n_j"] = int(values.shape[0]), int(values.shape[1])
+                meta["lat_min"], meta["lat_max"] = float(lat.min()), float(lat.max())
+                meta["lon_min"], meta["lon_max"] = float(lon.min()), float(lon.max())
+                finite = values[np.isfinite(values)]
+                if finite.size:
+                    lo, hi = float(finite.min()), float(finite.max())
+                    meta["vmin"] = lo if meta["vmin"] is None else min(meta["vmin"], lo)
+                    meta["vmax"] = hi if meta["vmax"] is None else max(meta["vmax"], hi)
+
             if done == 1 or done % log_every == 0 or done == total:
                 elapsed = time.monotonic() - started
                 logger.info(
-                    "Vector slice %s/%s var=%s ts=%s cells=%s elapsed=%.1fs",
+                    "Vector slice %s/%s vars=%s ts=%s elapsed=%.1fs",
                     done,
                     total,
-                    variable,
+                    len(variables),
                     timestamp,
-                    len(frame),
                     elapsed,
                 )
     finally:
         if own_client:
             client.close()
 
-    return {
-        "dataset": dataset,
-        "variable": variable,
-        "n_i": n_i,
-        "n_j": n_j,
-        "lat_min": lat_min,
-        "lat_max": lat_max,
-        "lon_min": lon_min,
-        "lon_max": lon_max,
-        "vmin": 0.0 if vmin is None else vmin,
-        "vmax": 1.0 if vmax is None else vmax,
-        "timestamps": timestamps,
-    }
+    result_fragments = []
+    for var in variables:
+        meta = var_meta[var]
+        result_fragments.append(
+            {
+                "dataset": meta["dataset"],
+                "variable": meta["variable"],
+                "n_i": meta["n_i"],
+                "n_j": meta["n_j"],
+                "lat_min": meta["lat_min"],
+                "lat_max": meta["lat_max"],
+                "lon_min": meta["lon_min"],
+                "lon_max": meta["lon_max"],
+                "vmin": 0.0 if meta["vmin"] is None else meta["vmin"],
+                "vmax": 1.0 if meta["vmax"] is None else meta["vmax"],
+                "timestamps": meta["timestamps"],
+            }
+        )
+
+    return result_fragments
+
+
+def preprocess_dataarray(
+    da: xr.DataArray,
+    *,
+    uuid: str,
+    dataset: str,
+    variable: str | None = None,
+    client: TilerDuckDBClient | None = None,
+    config: TilerVectorConfig | None = None,
+) -> dict:
+    """Append time-slice parts for one variable. Caller must :meth:`finalize`."""
+    var_name = variable or da.name or "value"
+    ds = xr.Dataset({var_name: da})
+    frags = preprocess_dataset(
+        ds,
+        [var_name],
+        uuid=uuid,
+        dataset=dataset,
+        client=client,
+        config=config,
+    )
+    return frags[0]
 
 
 def _upload_local_file(local_path: str, bucket: str, key: str) -> None:
@@ -359,27 +430,23 @@ def _generate_for_zarr(
         variables,
     )
 
-    fragments: list[dict] = []
-    for variable in variables:
-        try:
-            fragments.append(
-                preprocess_dataarray(
-                    ds[variable],
-                    uuid=uuid,
-                    dataset=dataset_name,
-                    variable=variable,
-                    client=client,
-                    config=config,
-                )
-            )
-        except Exception:
-            logger.exception(
-                "Vector parquet failed uuid=%s dataset=%s variable=%s",
-                uuid,
-                dataset_name,
-                variable,
-            )
-    return fragments
+    try:
+        return preprocess_dataset(
+            ds,
+            variables,
+            uuid=uuid,
+            dataset=dataset_name,
+            client=client,
+            config=config,
+        )
+    except Exception:
+        logger.exception(
+            "Vector parquet failed uuid=%s dataset=%s variables=%s",
+            uuid,
+            dataset_name,
+            variables,
+        )
+        return []
 
 
 def generate_vector_parquet_for_zarrs(api: BaseAPI, uuid: str | None = None) -> None:

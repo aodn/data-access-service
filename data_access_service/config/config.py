@@ -475,6 +475,8 @@ class Config:
         vconfig = self.config.get("tiler", {}).get("vector", {})
         database = vconfig["duckdb_database"]
         temp_dir = vconfig["duckdb_temp_dir"]
+        if not os.path.isabs(temp_dir):
+            temp_dir = os.path.join(tempfile.gettempdir(), temp_dir)
         if database != ":memory:":
             temp_dir = tempfile.mkdtemp(prefix=temp_dir)
             database = os.path.join(temp_dir, database)
