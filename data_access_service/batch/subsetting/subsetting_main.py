@@ -23,9 +23,16 @@ from data_access_service.batch.subsetting.tasks.parquet_processor import (
     process_parquet_files,
 )
 from data_access_service.batch.subsetting.tasks.zarr_processor import ZarrProcessor
+from data_access_service.batch.subsetting.helpers.parquet_polygon_ranges import (
+    list_polygon_values,
+    split_polygon_ranges,
+    uses_polygon_sharding,
+)
 from data_access_service.utils.date_time_utils import (
     split_date_range,
     parse_date,
+    resolve_non_specified_dates,
+    to_utc_bounds,
 )
 from data_access_service.utils.email_templates.no_data_email import (
     NO_DATA_EMAIL_SUBJECT,
@@ -81,15 +88,33 @@ def init(api: API, job_id_of_init, parameters):
         return
 
     # Step 7: Process legacy sub-setting workflow, for parquet keys.
-    #  1. Split the date range into chunks
+    #  1. Split the date range into chunks, or the polygon partitions when the
+    #     dataset has no time column to split on
     #  2. Submit the data preparation job
     #  3. Submit the data collection job
-    month_count_per_job = config.get_month_count_per_job()
-    date_ranges = split_date_range(
-        start_date=resolved_subset_request.start_date,
-        end_date=resolved_subset_request.end_date,
-        month_count_per_job=month_count_per_job,
-    )
+    if uses_polygon_sharding(
+        api, resolved_subset_request.uuid, resolved_subset_request.keys
+    ):
+        polygon_values = set()
+        for key in resolved_subset_request.keys:
+            polygon_values.update(
+                list_polygon_values(
+                    api.get_datasource(resolved_subset_request.uuid, key)
+                )
+            )
+        ranges = split_polygon_ranges(
+            values=list(polygon_values),
+            polygon_count_per_job=config.get_polygon_count_per_job(),
+        )
+        range_parameter = Parameters.POLYGON_RANGES.value
+    else:
+        month_count_per_job = config.get_month_count_per_job()
+        ranges = split_date_range(
+            start_date=resolved_subset_request.start_date,
+            end_date=resolved_subset_request.end_date,
+            month_count_per_job=month_count_per_job,
+        )
+        range_parameter = Parameters.DATE_RANGES.value
 
     aws_client = AWSHelper()
 
@@ -105,7 +130,7 @@ def init(api: API, job_id_of_init, parameters):
         ),
         Parameters.MASTER_JOB_ID.value: job_id_of_init,
         Parameters.TYPE.value: "sub-setting-data-preparation",
-        Parameters.DATE_RANGES.value: json.dumps(date_ranges),
+        range_parameter: json.dumps(ranges),
         Parameters.INTERMEDIATE_OUTPUT_FOLDER.value: config.get_temp_folder(
             job_id_of_init
         ),
@@ -115,7 +140,7 @@ def init(api: API, job_id_of_init, parameters):
         job_queue=config.get_job_queue_name(),
         job_definition=config.get_job_definition_name(),
         parameters=preparation_parameters,
-        array_size=len(date_ranges),
+        array_size=len(ranges),
         dependency_job_id=job_id_of_init,
     )
 
@@ -141,12 +166,24 @@ def prepare_data(api: API, job_index: str | None, parameters) -> str | None:
     # get params
     request = get_subset_request(parameters)
     master_job_id = parameters[Parameters.MASTER_JOB_ID.value]
-    date_ranges = parameters[Parameters.DATE_RANGES.value]
-    date_ranges_dict = json.loads(date_ranges)
     intermediate_output_folder = parameters[Parameters.INTERMEDIATE_OUTPUT_FOLDER.value]
 
     if job_index is None:
         job_index = "0"
+
+    if Parameters.POLYGON_RANGES.value in parameters:
+        return _prepare_polygon_range_data(
+            api,
+            logger,
+            job_index,
+            parameters,
+            request,
+            master_job_id,
+            intermediate_output_folder,
+        )
+
+    date_ranges = parameters[Parameters.DATE_RANGES.value]
+    date_ranges_dict = json.loads(date_ranges)
 
     start_date_str, end_date_str = date_ranges_dict[job_index]
     start_date = parse_date(start_date_str)
@@ -173,6 +210,47 @@ def prepare_data(api: API, job_index: str | None, parameters) -> str | None:
         request,
         start_date,
         end_date,
+    )
+
+
+def _prepare_polygon_range_data(
+    api: API,
+    logger,
+    job_index: str,
+    parameters,
+    request: SubsetRequest,
+    master_job_id: str,
+    intermediate_output_folder: str,
+) -> str | None:
+    polygon_ranges_dict = json.loads(parameters[Parameters.POLYGON_RANGES.value])
+    polygon_range = polygon_ranges_dict[job_index]
+    # The dataset has no time column, so get_dataset ignores the dates. They
+    # are still passed down because it requires timezone-aware bounds.
+    start_date, end_date = to_utc_bounds(
+        *resolve_non_specified_dates(request.start_date, request.end_date)
+    )
+
+    logger.info(
+        f"""
+    ==============================
+    UUID: {request.uuid}
+    KEY: {request.keys}
+    Polygon Ranges: {polygon_ranges_dict}
+    Multi Polygon: {request.multi_polygon}
+    Polygon Range:{polygon_range}
+    ==============================
+    """
+    )
+
+    return process_parquet_files(
+        api,
+        master_job_id,
+        job_index,
+        intermediate_output_folder,
+        request,
+        start_date,
+        end_date,
+        polygon_range=polygon_range,
     )
 
 

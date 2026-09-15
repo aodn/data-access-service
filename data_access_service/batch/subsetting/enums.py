@@ -9,6 +9,7 @@ class Parameters(Enum):
     MULTI_POLYGON = "multi_polygon"
     RECIPIENT = "recipient"
     DATE_RANGES = "date_ranges"
+    POLYGON_RANGES = "polygon_ranges"
     TYPE = "type"
     MASTER_JOB_ID = "master_job_id"
     INTERMEDIATE_OUTPUT_FOLDER = "intermediate_output_folder"
