@@ -45,6 +45,17 @@ def _block_reduce(arr: np.ndarray, factor: int) -> np.ndarray:
 def _downsample_slice(
     lat: np.ndarray, lon: np.ndarray, values: np.ndarray, max_edge: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    When converting large native spatial grids into parquet files for map tile generation, high-resolution grids
+    can produce excessively large files. _downsample_slice caps the maximum grid dimension (longest of ny or nx)
+    to a configurable size (max_edge, derived from max_cells_long_edge in configuration) by spatial block-averaging.
+    This keeps memory consumption low and parquet output files small.
+    :param lat:
+    :param lon:
+    :param values:
+    :param max_edge:
+    :return:
+    """
     ny, nx = values.shape
     longest = max(ny, nx)
     if longest <= max_edge:
@@ -105,7 +116,7 @@ def preprocess_dataarray(
     client: TilerDuckDBClient | None = None,
     config: TilerVectorConfig | None = None,
 ) -> dict:
-    """Append time-slice parts for one variable. Caller must :meth:`finalize`."""
+    """Append time-slice parts for one variable. Caller must :meth: 'finalize`."""
     cfg = config or Config.get_config().get_tiler_vector_config()
     own_client = client is None
     client = client or TilerDuckDBClient(cfg)
@@ -130,7 +141,7 @@ def preprocess_dataarray(
         jobs = [("na", da)]
 
     cap = int(cfg.max_time_slices)
-    if cap > 0 and len(jobs) > cap:
+    if 0 < cap < len(jobs):
         logger.info(
             "Capping %s time slices to max_time_slices=%s",
             len(jobs),

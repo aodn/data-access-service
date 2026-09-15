@@ -25,5 +25,5 @@ estimation:
 tiler:
   vector:
     keep_local_parquet: true
-    threads: 12
-    max_time_slices: 8
+    threads: 2
+    max_time_slices: 0
