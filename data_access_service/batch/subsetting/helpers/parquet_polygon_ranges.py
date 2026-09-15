@@ -10,9 +10,10 @@ init and a child.
 """
 
 import logging
+import re
 from typing import Optional
 
-from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, query_unique_value
+from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
 
 from data_access_service.core.api import BaseAPI
 
@@ -32,16 +33,31 @@ def uses_polygon_sharding(api: BaseAPI, uuid: str, keys: list[str]) -> bool:
     if not keys:
         return False
     for key in keys:
-        if api.resolve_dim_names(uuid, key)[2] is not None:
-            return False
+        # Partition keys first: an unknown key has none, and resolving its
+        # column names would raise on the missing metadata
         if POLYGON_PARTITION not in api.get_partition_keys(uuid, key):
+            return False
+        if api.resolve_dim_names(uuid, key)[2] is not None:
             return False
     return True
 
 
+_POLYGON_IN_PATH = re.compile(rf".*/{POLYGON_PARTITION}=([^/]*)/")
+
+
 def list_polygon_values(datasource: ParquetDataSource) -> list[str]:
-    """Sorted `polygon` partition values. Reads directory names, not files."""
-    return sorted(query_unique_value(datasource.dataset, POLYGON_PARTITION))
+    """Sorted `polygon` partition values. Reads directory names, not files.
+
+    Not query_unique_value: it caches by id(dataset) and never evicts, so a new
+    dataset that reuses a collected one's id gets that dataset's polygons.
+    """
+    return sorted(
+        {
+            match.group(1)
+            for fragment in datasource.dataset.get_fragments()
+            if (match := _POLYGON_IN_PATH.match(fragment.path))
+        }
+    )
 
 
 def _shortest_boundary(previous: str, current: str) -> str:

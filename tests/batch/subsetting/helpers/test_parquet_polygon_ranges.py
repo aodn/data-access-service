@@ -1,9 +1,14 @@
 import json
 from unittest.mock import MagicMock
 
+import pyarrow as pa
+import pyarrow.dataset as pa_ds
+import pyarrow.parquet as pq
 import pytest
+from aodn_cloud_optimised.lib import DataQuery
 
 from data_access_service.batch.subsetting.helpers.parquet_polygon_ranges import (
+    list_polygon_values,
     select_polygons_in_range,
     split_polygon_ranges,
     uses_polygon_sharding,
@@ -141,3 +146,35 @@ class TestUsesPolygonSharding:
 
     def test_no_keys(self):
         assert not uses_polygon_sharding(MagicMock(), "uuid", [])
+
+    def test_unknown_key_skips_column_lookup(self):
+        # init with a key missing from the metadata must not resolve its columns
+        api = MagicMock()
+        api.get_partition_keys.return_value = frozenset()
+        api.resolve_dim_names.side_effect = KeyError("not_exist")
+
+        assert not uses_polygon_sharding(api, "uuid", ["not_exist"])
+
+
+class TestListPolygonValues:
+    def test_ignores_stale_query_unique_value_cache(self, tmp_path):
+        values = _polygon_values(3)
+        pq.write_to_dataset(
+            pa.table({"site": ["s0", "s1", "s2"], "polygon": values}),
+            root_path=str(tmp_path),
+            partition_cols=["polygon"],
+        )
+        datasource = MagicMock()
+        datasource.dataset = pa_ds.dataset(
+            str(tmp_path), format="parquet", partitioning="hive"
+        )
+        # what a collected dataset with the same id would have left behind
+        DataQuery._partition_value_cache[(id(datasource.dataset), "polygon")] = {
+            "stale"
+        }
+        try:
+            assert list_polygon_values(datasource) == sorted(values)
+        finally:
+            DataQuery._partition_value_cache.pop(
+                (id(datasource.dataset), "polygon"), None
+            )
