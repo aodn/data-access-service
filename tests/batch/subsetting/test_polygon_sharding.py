@@ -129,9 +129,9 @@ def _run_init(monkeypatch, api, resolved_keys=(KEY,)) -> MagicMock:
         ),
     )
     monkeypatch.setattr(
-        subsetting_main.Config.get_config(),
+        subsetting_main.Config,
         "get_polygon_count_per_job",
-        lambda: 3,
+        staticmethod(lambda: 3),
     )
     aws_helper = MagicMock()
     monkeypatch.setattr(
