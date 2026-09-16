@@ -319,10 +319,10 @@ def _publish_meta(client: TilerDuckDBClient, uuid: str, payload: dict) -> None:
 
 def _publish_parquet(client: TilerDuckDBClient, uuid: str, local_path: str) -> str:
     """Upload the local merged parquet to S3 when configured; return the URI."""
-    dest = client.parquet_uri(uuid)
     if not client._config.write_s3:
         logger.info("write_s3=false; parquet stays at %s", local_path)
-        return dest
+        return local_path
+    s3_uri = f"s3://{client._config.s3_bucket}/{client.s3_key(uuid)}"
     try:
         _upload_local_file(local_path, client._config.s3_bucket, client.s3_key(uuid))
     except Exception:
@@ -335,7 +335,7 @@ def _publish_parquet(client: TilerDuckDBClient, uuid: str, local_path: str) -> s
             os.remove(local_path)
         except OSError:
             logger.warning("Could not remove temp parquet %s", local_path)
-    return dest
+    return s3_uri
 
 
 def _zarr_work_list(api: BaseAPI, uuid: str | None) -> list[tuple[str, str]]:

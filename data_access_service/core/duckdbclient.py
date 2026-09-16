@@ -1091,10 +1091,11 @@ class TilerDuckDBClient(DuckDBClient):
         j_min: int | None = None,
         j_max: int | None = None,
         variable: str | None = None,
+        source_path: str | None = None,
     ):
         """Return ``(i, j, value)`` for one timestamp (optional variable + window)."""
-        path = self.parquet_uri(uuid)
-        if path.startswith("s3://") and self._config.write_s3:
+        path = source_path or self.parquet_uri(uuid)
+        if path.startswith("s3://"):
             self.create_s3_secret(self._config.s3_bucket)
         if not path.startswith("s3://") and not os.path.isfile(path):
             raise FileNotFoundError(f"Vector parquet not found: {path}")

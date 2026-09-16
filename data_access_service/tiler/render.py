@@ -67,6 +67,7 @@ def render_window(
         j_min=j_min,
         j_max=j_max,
         variable=product.variable,
+        source_path=product.source_path,
     )
     h = i_max - i_min + 1
     w = j_max - j_min + 1
@@ -222,6 +223,7 @@ def lookup_point(product: Product, date: str, lat: float, lon: float) -> float |
         j_min=j,
         j_max=j,
         variable=product.variable,
+        source_path=product.source_path,
     )
     if cells.empty:
         return None
