@@ -236,6 +236,13 @@ tiler:
     - id: model_sea_level_anomaly_gridded_realtime:ucur+vcur
       ocean_masked: true
 csiro:
+  # The collection id changes with every new data version, so it is resolved
+  # from the permanent Fedora PID on each call, through these two URLs.
+  collection_url: https://data.csiro.au/dap/ws/v2/collections/{fedora_pid}
+  key_request_url: https://data.csiro.au/dap/api/v2/collections/{collection_id}/files/s3
+  # Subfolder of the collection folder that holds the parquet.
+  data_folder: data/
+  request_timeout_seconds: 30
   datasets:
     - dataset_name: uwy_csiro.parquet
-      key_request_url: https://data.csiro.au/dap/api/v2/collections/72626/files/s3
+      fedora_pid: csiro:72626

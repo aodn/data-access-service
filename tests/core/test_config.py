@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from data_access_service.config.config import Config, EnvType
+from data_access_service.models.co_datasource.csiro.csiro_types import CsiroConfig
 from data_access_service.models.tiler_types import TilerConfig
 
 
@@ -74,3 +75,21 @@ def test_get_tiler_config_raises_on_missing_yaml_key(missing):
 
     with pytest.raises(KeyError):
         Config.get_tiler_config(stub)
+
+
+def test_csiro_config_fields_all_come_from_yaml():
+    """Same field-by-field construction as the tiler config, same check: a new
+    CsiroConfig field must reach the YAML, not just the dataclass."""
+    yaml_keys = set(Config.get_config(EnvType.TESTING).config["csiro"])
+    assert {f.name for f in dataclasses.fields(CsiroConfig)} == yaml_keys
+
+
+def test_csiro_urls_are_templates_the_code_can_fill_in():
+    """The env overlays only carry `datasets`, so these come from the base
+    config.yaml through the deep merge."""
+    csiro = Config.get_config(EnvType.TESTING).get_csiro_config()
+
+    assert csiro.collection_url.format(fedora_pid="csiro:1").endswith("/csiro:1")
+    assert csiro.key_request_url.format(collection_id=2).endswith("/2/files/s3")
+    assert csiro.data_folder == "data/"
+    assert csiro.request_timeout_seconds > 0

@@ -4,7 +4,7 @@ from typing import Optional
 from aodn_cloud_optimised.lib.DataQuery import DataSource, Metadata, GetAodn
 
 from data_access_service.exceptions.dataset_not_found_error import DatasetNotFoundError
-from data_access_service.models.co_data_source.dataset_location import DatasetLocation
+from data_access_service.models.co_datasource.dataset_location import DatasetLocation
 
 AODN = "aodn"
 CSIRO = "csiro"

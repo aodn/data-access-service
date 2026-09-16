@@ -53,8 +53,8 @@ from data_access_service.utils.time_column_utils import (
     resolve_time_column,
 )
 
-from data_access_service.models.co_data_source.co_data_registory import CODataRegistry
-from data_access_service.models.co_data_source.csiro_data_src import CsiroDataSrc
+from data_access_service.models.co_datasource.co_data_registory import CODataRegistry
+from data_access_service.models.co_datasource.csiro.csiro_data_src import CsiroDataSrc
 
 log = logging.getLogger(__name__)
 

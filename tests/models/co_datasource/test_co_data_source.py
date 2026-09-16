@@ -1,8 +1,8 @@
 """
-Unit tests for the co_data_source package:
+Unit tests for the co_datasource package:
   - abstract_data_src.py  (via a concrete stub)
   - aodn_data_src.py
-  - csiro_data_src.py
+  - csiro/csiro_data_src.py
   - co_data_registory.py
 """
 
@@ -13,14 +13,14 @@ import pytest
 
 from data_access_service import Config
 from data_access_service.exceptions.dataset_not_found_error import DatasetNotFoundError
-from data_access_service.models.co_data_source.abstract_data_src import (
+from data_access_service.models.co_datasource.abstract_data_src import (
     AbstractDataSrc,
     AODN,
     CSIRO,
 )
-from data_access_service.models.co_data_source.aodn_data_src import AodnDataSrc
-from data_access_service.models.co_data_source.csiro_data_src import CsiroDataSrc
-from data_access_service.models.co_data_source.co_data_registory import CODataRegistry
+from data_access_service.models.co_datasource.aodn_data_src import AodnDataSrc
+from data_access_service.models.co_datasource.csiro.csiro_data_src import CsiroDataSrc
+from data_access_service.models.co_datasource.co_data_registory import CODataRegistry
 
 # ---------------------------------------------------------------------------
 # Helpers / shared fixtures
@@ -30,7 +30,7 @@ KNOWN_DATASET = "some_dataset.parquet"
 UNKNOWN_DATASET = "does_not_exist.parquet"
 
 config = Config.get_config()
-ONLY_CSIRO_DATASET_NAME = config.get_csiro_datasets()[0]["dataset_name"]
+ONLY_CSIRO_DATASET_NAME = config.get_csiro_config().datasets[0]["dataset_name"]
 
 
 def _make_mock_get_aodn(catalog: dict | None = None) -> MagicMock:
@@ -112,7 +112,7 @@ class TestAodnDataSrc:
     def _make_src(self) -> tuple[AodnDataSrc, MagicMock]:
         mock_aodn = _make_mock_get_aodn(catalog={KNOWN_DATASET: {"info": 1}})
         with patch(
-            "data_access_service.models.co_data_source.aodn_data_src.GetAodn",
+            "data_access_service.models.co_datasource.aodn_data_src.GetAodn",
             return_value=mock_aodn,
         ):
             src = AodnDataSrc()
@@ -162,13 +162,36 @@ class TestAodnDataSrc:
 # CsiroDataSrc
 # ---------------------------------------------------------------------------
 
+# CSIRO answers the Fedora PID with the collection id of the latest version,
+# then answers that id with the keys.
+_CSIRO_COLLECTION_RESPONSE = {
+    "dataCollectionId": 75215,
+    "versionNumber": 4,
+}
+
 _CSIRO_API_RESPONSE = {
     "accessKey": "AKID",
     "secretAccessKey": "SECRET",
     "endPointUrl": "https://s3.example.com",
     "bucket": "dapprd-mnf",
-    "remoteDirectory": "dapprd-mnf/000072626v001",
+    "remoteDirectory": "dapprd-mnf/000072626v004",
 }
+
+
+def _mock_response(payload, status_code=200):
+    response = MagicMock()
+    response.status_code = status_code
+    response.json.return_value = payload
+    return response
+
+
+def _patch_csiro_requests(*responses):
+    """Patch requests.get with one mock response per expected CSIRO call."""
+    return patch(
+        "data_access_service.models.co_datasource.csiro.csiro_data_src.requests.get",
+        side_effect=list(responses),
+    )
+
 
 _CSIRO_DATASET_METADATA = {
     "global_attributes": {
@@ -184,22 +207,18 @@ def _patch_csiro(api_response=None, metadata=None):
     if metadata is None:
         metadata = _CSIRO_DATASET_METADATA
 
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = api_response
-
     mock_dataset = MagicMock()
     mock_dataset.get_metadata.return_value = dict(metadata)  # mutable copy
 
     mock_aodn = MagicMock()
     mock_aodn.get_dataset.return_value = mock_dataset
 
-    requests_patch = patch(
-        "data_access_service.models.co_data_source.csiro_data_src.requests.get",
-        return_value=mock_response,
+    requests_patch = _patch_csiro_requests(
+        _mock_response(_CSIRO_COLLECTION_RESPONSE),
+        _mock_response(api_response),
     )
     get_aodn_patch = patch(
-        "data_access_service.models.co_data_source.csiro_data_src.GetAodn",
+        "data_access_service.models.co_datasource.csiro.csiro_data_src.GetAodn",
         return_value=mock_aodn,
     )
     return requests_patch, get_aodn_patch, mock_aodn
@@ -231,15 +250,26 @@ class TestCsiroDataSrc:
         result = src.get_dataset(ONLY_CSIRO_DATASET_NAME)
         assert result is mock_aodn.get_dataset.return_value
 
-    def test_init_raises_when_api_returns_non_200(self):
-        mock_response = MagicMock()
-        mock_response.status_code = 403
-
-        with patch(
-            "data_access_service.models.co_data_source.csiro_data_src.requests.get",
-            return_value=mock_response,
+    def test_init_raises_when_key_request_returns_non_200(self):
+        with _patch_csiro_requests(
+            _mock_response(_CSIRO_COLLECTION_RESPONSE),
+            _mock_response({}, status_code=403),
         ):
-            with pytest.raises(Exception, match="Failed to get keys from CSIRO"):
+            with pytest.raises(
+                Exception, match="Failed to get temporary access keys from CSIRO"
+            ):
+                CsiroDataSrc()
+
+    def test_init_raises_when_collection_lookup_returns_non_200(self):
+        with _patch_csiro_requests(_mock_response({}, status_code=503)):
+            with pytest.raises(
+                Exception, match="Failed to get collection id from CSIRO"
+            ):
+                CsiroDataSrc()
+
+    def test_init_raises_when_collection_has_no_id(self):
+        with _patch_csiro_requests(_mock_response({"versionNumber": 4})):
+            with pytest.raises(Exception, match="dataCollectionId"):
                 CsiroDataSrc()
 
     def test_init_raises_when_remote_directory_format_unexpected(self):
@@ -277,21 +307,17 @@ class TestCsiroDataSrc:
         )
 
     def test_init_raises_when_metadata_is_not_dict(self):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = _CSIRO_API_RESPONSE
-
         mock_dataset = MagicMock()
         mock_dataset.get_metadata.return_value = "not-a-dict"
 
         mock_aodn = MagicMock()
         mock_aodn.get_dataset.return_value = mock_dataset
 
-        with patch(
-            "data_access_service.models.co_data_source.csiro_data_src.requests.get",
-            return_value=mock_response,
+        with _patch_csiro_requests(
+            _mock_response(_CSIRO_COLLECTION_RESPONSE),
+            _mock_response(_CSIRO_API_RESPONSE),
         ), patch(
-            "data_access_service.models.co_data_source.csiro_data_src.GetAodn",
+            "data_access_service.models.co_datasource.csiro.csiro_data_src.GetAodn",
             return_value=mock_aodn,
         ):
             with pytest.raises(
@@ -325,10 +351,10 @@ def _make_registry(aodn_catalog=None, csiro_catalog=None):
     mock_csiro_src.get_metadata_catalog.return_value = dict(csiro_catalog)
 
     with patch(
-        "data_access_service.models.co_data_source.co_data_registory.AodnDataSrc",
+        "data_access_service.models.co_datasource.co_data_registory.AodnDataSrc",
         return_value=mock_aodn_src,
     ), patch(
-        "data_access_service.models.co_data_source.co_data_registory.CsiroDataSrc",
+        "data_access_service.models.co_datasource.co_data_registory.CsiroDataSrc",
         return_value=mock_csiro_src,
     ):
         registry = CODataRegistry()

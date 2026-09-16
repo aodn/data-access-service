@@ -11,6 +11,7 @@ import yaml
 from botocore.client import BaseClient
 from dotenv import load_dotenv
 
+from data_access_service.models.co_datasource.csiro.csiro_types import CsiroConfig
 from data_access_service.models.duckdb_types import DuckDBTuningConfig
 from data_access_service.models.estimation_types import (
     EstimationIndexConfig,
@@ -259,9 +260,15 @@ class Config:
             else None
         )
 
-    def get_csiro_datasets(self) -> list:
-        """Returns list of dicts, each with 'dataset_name' and 'key_request_url'."""
-        return self.config["csiro"]["datasets"] if self.config is not None else []
+    def get_csiro_config(self) -> CsiroConfig:
+        cconfig = self.config["csiro"] if self.config is not None else {}
+        return CsiroConfig(
+            collection_url=cconfig["collection_url"],
+            key_request_url=cconfig["key_request_url"],
+            data_folder=cconfig["data_folder"],
+            request_timeout_seconds=int(cconfig["request_timeout_seconds"]),
+            datasets=cconfig.get("datasets", []),
+        )
 
     def get_api_key(self):
         return os.getenv("API_KEY")

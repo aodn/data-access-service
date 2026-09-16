@@ -1,9 +1,8 @@
 """CSIRO hosted cloud optimised datasets.
 
 CSIRO keeps its parquet in its own bucket behind its own S3 endpoint, and the
-keys to read it are short lived (about two days) and handed out by the
-collection's key request URL. Two very different readers need that access, so
-both live here:
+keys to read it are short lived (about two days) and handed out per collection.
+Two very different readers need that access, so both live here:
 
 * :class:`CsiroDataSrc` wraps it in a ``GetAodn`` handle for the API.
 * :func:`locate_csiro_dataset` hands it to the batch jobs as a
@@ -19,18 +18,13 @@ import requests
 from aodn_cloud_optimised.lib.DataQuery import Metadata, DataSource, GetAodn
 
 from data_access_service.config.config import Config
-from data_access_service.models.co_data_source.abstract_data_src import (
+from data_access_service.models.co_datasource.abstract_data_src import (
     AbstractDataSrc,
     CSIRO,
 )
-from data_access_service.models.co_data_source.dataset_location import DatasetLocation
+from data_access_service.models.co_datasource.dataset_location import DatasetLocation
 
 log = logging.getLogger(__name__)
-
-# CSIRO puts the parquet under a "data/" folder inside the collection folder.
-_DATA_FOLDER = "data/"
-
-_REQUEST_TIMEOUT_SECONDS = 30
 
 
 @dataclass(frozen=True)
@@ -39,7 +33,7 @@ class CsiroS3Access:
 
     bucket: str
     # Path of the dataset's parent folder inside the bucket, ending with "/",
-    # e.g. "000072626v001/data/".
+    # e.g. "000072626v004/data/".
     prefix: str
     # Endpoint with scheme, e.g. "https://s3.data.csiro.au".
     endpoint_url: str
@@ -69,18 +63,20 @@ class CsiroS3Access:
         )
 
 
-def get_csiro_key_request_url(dataset_name: str) -> Optional[str]:
-    """The configured key request URL, or None when the dataset is not CSIRO's."""
-    for dataset in Config.get_config().get_csiro_datasets():
+def get_csiro_fedora_pid(dataset_name: str) -> Optional[str]:
+    """The configured Fedora PID, or None when the dataset is not CSIRO's."""
+    for dataset in Config.get_config().get_csiro_config().datasets:
         if dataset.get("dataset_name") == dataset_name:
-            return dataset.get("key_request_url")
+            return dataset.get("fedora_pid")
     return None
 
 
-def request_csiro_s3_access(dataset_name: str, key_request_url: str) -> CsiroS3Access:
-    """Ask CSIRO for temporary keys for one dataset."""
-    log.info("Requesting temporary access keys for CSIRO dataset '%s'...", dataset_name)
-    response = requests.get(key_request_url, timeout=_REQUEST_TIMEOUT_SECONDS)
+def _call_csiro_api(
+    url: str, dataset_name: str, asking_for: str, timeout_seconds: int
+) -> dict:
+    """GET one CSIRO endpoint, or raise saying which call failed."""
+    log.info("Requesting %s for CSIRO dataset '%s'...", asking_for, dataset_name)
+    response = requests.get(url, timeout=timeout_seconds)
     log.info(
         "Received response for CSIRO dataset '%s', status code: %s",
         dataset_name,
@@ -88,11 +84,46 @@ def request_csiro_s3_access(dataset_name: str, key_request_url: str) -> CsiroS3A
     )
     if response.status_code != 200:
         raise Exception(
-            f"Failed to get keys from CSIRO for dataset '{dataset_name}', "
+            f"Failed to get {asking_for} from CSIRO for dataset '{dataset_name}', "
             f"status code: {response.status_code}"
         )
+    return response.json()
 
-    res = response.json()
+
+def request_csiro_s3_access(dataset_name: str, fedora_pid: str) -> CsiroS3Access:
+    """Ask CSIRO for temporary keys for the latest version of one dataset.
+
+    Two calls: CSIRO mints a new collection id for every data version, so a
+    remembered id silently returns the old version's files.
+    """
+    csiro = Config.get_config().get_csiro_config()
+
+    collection = _call_csiro_api(
+        csiro.collection_url.format(fedora_pid=fedora_pid),
+        dataset_name,
+        asking_for="collection id",
+        timeout_seconds=csiro.request_timeout_seconds,
+    )
+    collection_id = collection.get("dataCollectionId")
+    if collection_id is None:
+        raise Exception(
+            f"CSIRO returned no dataCollectionId for dataset '{dataset_name}' "
+            f"(Fedora PID '{fedora_pid}')"
+        )
+    log.info(
+        "CSIRO dataset '%s' (PID '%s') is collection %s, version %s",
+        dataset_name,
+        fedora_pid,
+        collection_id,
+        collection.get("versionNumber"),
+    )
+
+    res = _call_csiro_api(
+        csiro.key_request_url.format(collection_id=collection_id),
+        dataset_name,
+        asking_for="temporary access keys",
+        timeout_seconds=csiro.request_timeout_seconds,
+    )
     bucket = res["bucket"]
     remote_directory = res["remoteDirectory"]
     if not remote_directory.startswith(bucket + "/"):
@@ -101,9 +132,10 @@ def request_csiro_s3_access(dataset_name: str, key_request_url: str) -> CsiroS3A
     # The trailing slash is not guaranteed, so strip and re-add it rather than
     # gluing "data/" straight onto the collection folder name.
     collection_dir = remote_directory[len(bucket) + 1 :].strip("/")
+    data_folder = csiro.data_folder
     access = CsiroS3Access(
         bucket=bucket,
-        prefix=f"{collection_dir}/{_DATA_FOLDER}" if collection_dir else _DATA_FOLDER,
+        prefix=f"{collection_dir}/{data_folder}" if collection_dir else data_folder,
         endpoint_url=res["endPointUrl"],
         access_key=res["accessKey"],
         secret_access_key=res["secretAccessKey"],
@@ -120,17 +152,17 @@ def request_csiro_s3_access(dataset_name: str, key_request_url: str) -> CsiroS3A
 class CsiroDataSrc(AbstractDataSrc):
     """
     Integrates with CSIRO cloud optimised datasets.
-    Supports multiple datasets, each with its own key_request_url, as configured in the config YAML.
+    Supports multiple datasets, each with its own fedora_pid, as configured in the config YAML.
     """
 
     def __init__(self):
         self.name = CSIRO
         config = Config.get_config()
-        self.__datasets = config.get_csiro_datasets()
+        self.__datasets = config.get_csiro_config().datasets
         # dict of dataset_name -> GetAodn instance
         self.__data_srcs: dict[str, GetAodn] = {
             ds["dataset_name"]: self.__init_data_src(
-                ds["dataset_name"], ds["key_request_url"]
+                ds["dataset_name"], ds["fedora_pid"]
             )
             for ds in self.__datasets
         }
@@ -161,11 +193,11 @@ class CsiroDataSrc(AbstractDataSrc):
         Keys are requested per call because they expire: a long job that
         resolved once at start-up could find them dead by the time it reads.
         """
-        key_request_url = get_csiro_key_request_url(dataset_name_with_ext)
-        if key_request_url is None:
+        fedora_pid = get_csiro_fedora_pid(dataset_name_with_ext)
+        if fedora_pid is None:
             return None
         return request_csiro_s3_access(
-            dataset_name_with_ext, key_request_url
+            dataset_name_with_ext, fedora_pid
         ).to_dataset_location()
 
     def __build_metadata_catalog(self) -> dict:
@@ -185,8 +217,8 @@ class CsiroDataSrc(AbstractDataSrc):
             catalog[dataset_name] = metadata
         return catalog
 
-    def __init_data_src(self, dataset_name: str, key_request_url: str) -> GetAodn:
-        access = request_csiro_s3_access(dataset_name, key_request_url)
+    def __init_data_src(self, dataset_name: str, fedora_pid: str) -> GetAodn:
+        access = request_csiro_s3_access(dataset_name, fedora_pid)
         csiro = GetAodn(
             bucket_name=access.bucket,
             prefix=access.prefix,
