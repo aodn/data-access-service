@@ -442,21 +442,30 @@ def test_non_csv_format_is_rejected(index):
         _estimate(output_format="netcdf")
 
 
-def test_query_failure_raises(index, monkeypatch):
+def test_query_failure_raises_and_logs_at_warning(index, monkeypatch, caplog):
+    """An S3 or DuckDB failure is an operational problem: the request fails, but
+    it is only a WARNING - there is nothing in the code to fix."""
     index()
     failing = MagicMock()
     failing.execute.side_effect = RuntimeError("s3 is unhappy")
     monkeypatch.setattr(estimation_index, "_get_client", lambda: failing)
     monkeypatch.setattr(estimation_index, "_ensure_secret", lambda c: None)
 
-    with pytest.raises(EstimationIndexUnavailableError, match="could not query"):
-        _estimate()
+    with caplog.at_level("WARNING"):
+        with pytest.raises(
+            EstimationIndexUnavailableError, match="could not read the pre-built"
+        ):
+            _estimate()
+
+    assert "s3 is unhappy" in caplog.text
+    assert not [r for r in caplog.records if r.levelname == "ERROR"]
 
 
-def test_broken_read_path_raises_and_logs_at_error(index, monkeypatch, caplog):
-    """A TypeError here means this module is broken, not that the index is
-    missing. It must be logged at ERROR so a rename cannot pass for a dataset
-    that was simply never indexed."""
+def test_broken_read_path_logs_at_error(index, monkeypatch, caplog):
+    """A TypeError here means THIS MODULE is broken, not that the index is
+    missing. The user-facing message is the same either way, so the log level is
+    what separates them - it must be ERROR, so a rename cannot pass for a
+    dataset that was simply never indexed."""
     index()
     broken = MagicMock()
     broken.execute.side_effect = TypeError("signature changed")
@@ -465,11 +474,12 @@ def test_broken_read_path_raises_and_logs_at_error(index, monkeypatch, caplog):
 
     with caplog.at_level("ERROR"):
         with pytest.raises(
-            EstimationIndexUnavailableError, match="read path is broken"
+            EstimationIndexUnavailableError, match="could not read the pre-built"
         ):
             _estimate()
 
-    assert "is broken" in caplog.text
+    errors = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert errors and "read path is broken" in errors[0].getMessage()
 
 
 def test_unavailable_index_fails_the_whole_request(index, monkeypatch):

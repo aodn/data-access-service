@@ -116,11 +116,14 @@ def read_index_estimate(
     :raises EstimationIndexUnavailableError: when this key has no usable index,
         or the index query fails. There is no fallback path any more
     """
+    # The message of every raise below reaches the frontend as the SSE error
+    # event, so it says what the user cannot get and for which key. WHY the
+    # index was rejected is logged, not sent: it is ours to act on, not theirs.
     meta = usable_sidecar(api, uuid, key, output_format)
     if meta is None:
         raise EstimationIndexUnavailableError(
-            f"Size estimate unavailable for {uuid}/{key}: no usable pre-built "
-            "estimation index (see the log for which check rejected it)."
+            f"Size estimate unavailable for {uuid}/{key}: this dataset has no "
+            "usable pre-built estimation index."
         )
 
     try:
@@ -145,14 +148,14 @@ def read_index_estimate(
             exc_info=True,
         )
         raise EstimationIndexUnavailableError(
-            f"Size estimate failed for {uuid}/{key}: the estimation index read "
-            "path is broken."
+            f"Size estimate unavailable for {uuid}/{key}: could not read the "
+            "pre-built estimation index."
         ) from e
     except Exception as e:
         log.warning("estimation index query failed for %s/%s: %s", uuid, key, e)
         raise EstimationIndexUnavailableError(
-            f"Size estimate failed for {uuid}/{key}: could not query the "
-            f"pre-built estimation index ({e})."
+            f"Size estimate unavailable for {uuid}/{key}: could not read the "
+            "pre-built estimation index."
         ) from e
 
     total_rows = rows + extra_rows
