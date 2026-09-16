@@ -4,11 +4,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from data_access_service.models.co_data_source.aodn_data_src import AodnDataSrc
-from data_access_service.models.co_data_source.co_data_registory import (
+from data_access_service.models.co_datasource.aodn_data_src import AodnDataSrc
+from data_access_service.models.co_datasource.co_data_registory import (
     resolve_dataset_location,
 )
-from data_access_service.models.co_data_source.dataset_location import DatasetLocation
+from data_access_service.models.co_datasource.dataset_location import DatasetLocation
 
 CSIRO_DATASET = "uwy_csiro.parquet"
 AODN_DATASET = "argo.parquet"
@@ -40,7 +40,7 @@ def _patch_keys(
 ):
     """Patch both CSIRO calls: the collection lookup, then the key request."""
     return patch(
-        "data_access_service.models.co_data_source.csiro_data_src.requests.get",
+        "data_access_service.models.co_datasource.csiro.csiro_data_src.requests.get",
         side_effect=[
             _mock_response(
                 {**CSIRO_COLLECTION_RESPONSE, **(collection_overrides or {})}
@@ -87,7 +87,7 @@ class TestResolveDatasetLocation:
 
     def test_collection_lookup_failure_is_reported(self):
         failing = patch(
-            "data_access_service.models.co_data_source.csiro_data_src.requests.get",
+            "data_access_service.models.co_datasource.csiro.csiro_data_src.requests.get",
             return_value=_mock_response({}, status_code=503),
         )
         with failing, pytest.raises(Exception, match="collection id"):
@@ -112,7 +112,7 @@ class TestResolveDatasetLocation:
                 return DatasetLocation(bucket="second-provider")
 
         monkeypatch.setattr(
-            "data_access_service.models.co_data_source.co_data_registory._DATA_SOURCES",
+            "data_access_service.models.co_datasource.co_data_registory._DATA_SOURCES",
             [_Declines, _Claims],
         )
 

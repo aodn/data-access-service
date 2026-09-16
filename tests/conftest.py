@@ -57,11 +57,11 @@ def mock_co_data_sources(mocker):
     mock_csiro.get_metadata_catalog.return_value = {}
 
     # mocker.patch(
-    #     "data_access_service.models.co_data_source.co_data_registory.AodnDataSrc",
+    #     "data_access_service.models.co_datasource.co_data_registory.AodnDataSrc",
     #     return_value=mock_aodn,
     # )
     mocker.patch(
-        "data_access_service.models.co_data_source.co_data_registory.CsiroDataSrc",
+        "data_access_service.models.co_datasource.co_data_registory.CsiroDataSrc",
         return_value=mock_csiro,
     )
 

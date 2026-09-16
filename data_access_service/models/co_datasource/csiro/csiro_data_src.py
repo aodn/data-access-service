@@ -18,11 +18,11 @@ import requests
 from aodn_cloud_optimised.lib.DataQuery import Metadata, DataSource, GetAodn
 
 from data_access_service.config.config import Config
-from data_access_service.models.co_data_source.abstract_data_src import (
+from data_access_service.models.co_datasource.abstract_data_src import (
     AbstractDataSrc,
     CSIRO,
 )
-from data_access_service.models.co_data_source.dataset_location import DatasetLocation
+from data_access_service.models.co_datasource.dataset_location import DatasetLocation
 
 log = logging.getLogger(__name__)
 

@@ -34,7 +34,7 @@ class TestKeyMapping(TestWithS3):
         )
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
-    @patch("data_access_service.models.co_data_source.co_data_registory.CsiroDataSrc")
+    @patch("data_access_service.models.co_datasource.co_data_registory.CsiroDataSrc")
     def test_special_time_column(
         self,
         mock_csiro_cls,

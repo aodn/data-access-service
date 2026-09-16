@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from data_access_service.config.config import Config, EnvType
-from data_access_service.models.csiro_types import CsiroConfig
+from data_access_service.models.co_datasource.csiro.csiro_types import CsiroConfig
 from data_access_service.models.tiler_types import TilerConfig
 
 

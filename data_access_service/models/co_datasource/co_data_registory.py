@@ -8,13 +8,13 @@ from aodn_cloud_optimised.lib.DataQuery import (
 )
 
 from data_access_service.exceptions.dataset_not_found_error import DatasetNotFoundError
-from data_access_service.models.co_data_source.abstract_data_src import (
+from data_access_service.models.co_datasource.abstract_data_src import (
     AbstractDataSrc,
     AODN,
 )
-from data_access_service.models.co_data_source.aodn_data_src import AodnDataSrc
-from data_access_service.models.co_data_source.csiro_data_src import CsiroDataSrc
-from data_access_service.models.co_data_source.dataset_location import DatasetLocation
+from data_access_service.models.co_datasource.aodn_data_src import AodnDataSrc
+from data_access_service.models.co_datasource.csiro.csiro_data_src import CsiroDataSrc
+from data_access_service.models.co_datasource.dataset_location import DatasetLocation
 from data_access_service.utils.common_utils import compare_dict_keys
 
 log = logging.getLogger(__name__)

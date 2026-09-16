@@ -10,10 +10,10 @@ from data_access_service.core.constants import (
     STR_TIME_UPPER_CASE,
 )
 from data_access_service.core.duckdbclient import PmTileDuckDBClient
-from data_access_service.models.co_data_source.co_data_registory import (
+from data_access_service.models.co_datasource.co_data_registory import (
     resolve_dataset_location,
 )
-from data_access_service.models.co_data_source.dataset_location import DatasetLocation
+from data_access_service.models.co_datasource.dataset_location import DatasetLocation
 from data_access_service.models.duckdb_types import DuckDBTuningConfig
 from data_access_service.utils.memory_utils import log_memory_usage
 

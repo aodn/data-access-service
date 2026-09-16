@@ -11,7 +11,7 @@ import yaml
 from botocore.client import BaseClient
 from dotenv import load_dotenv
 
-from data_access_service.models.csiro_types import CsiroConfig
+from data_access_service.models.co_datasource.csiro.csiro_types import CsiroConfig
 from data_access_service.models.duckdb_types import DuckDBTuningConfig
 from data_access_service.models.estimation_types import (
     EstimationIndexConfig,

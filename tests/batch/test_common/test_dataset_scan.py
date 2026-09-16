@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from data_access_service.batch.common.dataset_scan import DatasetScanBase
-from data_access_service.models.co_data_source.dataset_location import DatasetLocation
+from data_access_service.models.co_datasource.dataset_location import DatasetLocation
 
 CSIRO_DATASET = "uwy_csiro.parquet"
 AODN_DATASET = "argo.parquet"
