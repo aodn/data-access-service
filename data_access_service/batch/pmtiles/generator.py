@@ -102,9 +102,13 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
     # fork children) start each dataset with a smaller baseline RSS.
     api.release_memory_for_pmtiles_batch()
 
-    # S3 keys of the dataset files in this run. Failed datasets are included so
-    # the cleanup below keeps the dataset files they already have.
-    processed: set[str] = set()
+    # Every dataset in the metadata keeps its two S3 files, whether or not it
+    # generates in this run. Anything else under the prefix is outdated.
+    keep = {
+        key
+        for k, dataset_name in work
+        for key in _s3_keys(pmtiles_config.s3_prefix, k, dataset_name)
+    }
     for k, dataset_name in work:
         if use_fork:
             ok = _generate_pmtiles_for_parquets_in_subprocess(api, k, dataset_name)
@@ -118,14 +122,13 @@ def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
                 k,
                 dataset_name,
             )
-        processed.update(_s3_keys(pmtiles_config.s3_prefix, k, dataset_name))
         log_memory_usage(logger, after_label)
 
-    # Skip the cleanup when nothing was processed, otherwise every file would
+    # Skip the cleanup when there is nothing to keep, otherwise every file would
     # be deleted. An empty work list means the metadata failed to load.
-    if uuid is None and processed:
+    if uuid is None and keep:
         try:
-            _remove_outdated_pmtiles(pmtiles_config, processed)
+            _remove_outdated_pmtiles(pmtiles_config, keep)
         except Exception as e:
             logger.error("Removing outdated pmtiles failed: %s", e, exc_info=True)
 
@@ -270,14 +273,31 @@ def _s3_keys(s3_prefix: str, uuid: str, dname: str) -> tuple[str, str]:
 
 
 def _remove_outdated_pmtiles(
-    pmtiles_config: PmtilesGenerationConfig, processed: set[str]
+    pmtiles_config: PmtilesGenerationConfig, keep: set[str]
 ) -> None:
-    """Delete every file in the pmtiles folder not owned by a dataset in this run."""
+    """Delete every key under the pmtiles prefix that is not in ``keep``.
+
+    A uuid dropped from the metadata has no key in ``keep``, so all its files
+    go, and with them its folder: S3 folders are only key prefixes, and a
+    console-created placeholder (key ending in "/") is listed and deleted like
+    any other key. Example, the metadata lists ``uuid-a: a.parquet`` only::
+
+        keep = {portal/visualization/uuid-a/a.parquet.pmtiles,
+                portal/visualization/uuid-a/a.parquet.metadata}
+
+        key listed under portal/visualization/       in keep   action
+        uuid-a/a.parquet.pmtiles                     yes       kept
+        uuid-a/a.parquet.metadata                    yes       kept
+        uuid-a/b.parquet.pmtiles                     no        deleted
+        uuid-old/                                    no        deleted
+        uuid-old/old.parquet.pmtiles                 no        deleted
+        uuid-old/old.parquet.metadata                no        deleted
+
+        after: only uuid-a/a.parquet.* remain, the uuid-old folder is gone
+    """
     bucket = pmtiles_config.bucket_name
-    # S3 folders are only key prefixes: deleting the last file removes the folder.
-    # A console-created placeholder (key ending in "/") is listed and removed too.
     for key in aws.list_all_s3_objects(bucket, f"{pmtiles_config.s3_prefix}/"):
-        if key not in processed:
+        if key not in keep:
             logger.info("Removing outdated pmtiles s3://%s/%s", bucket, key)
             aws.s3.delete_object(Bucket=bucket, Key=key)
 

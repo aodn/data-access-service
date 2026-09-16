@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -11,6 +12,9 @@ from data_access_service.batch.pmtiles.generator import (
     generate_pmtiles_for_parquets,
 )
 from data_access_service.models.pmtiles_types import PmtilesVisualizationStyle
+from tests.core.test_with_s3 import TestWithS3
+
+log = logging.getLogger(__name__)
 
 
 def _enable_fork(
@@ -215,6 +219,151 @@ class TestRemoveOutdated:
         )
 
         estimation_phase.assert_called_once()
+
+
+class TestRemoveOutdatedOnS3(TestWithS3):
+    """The full batch against a LocalStack S3 bucket, so the real listing and
+    delete calls run instead of the fakes in the ``s3`` fixture above.
+
+    S3 has no folder objects. The console shows a folder for every key prefix,
+    and "Create folder" in the console only adds an empty placeholder key that
+    ends in "/". So deleting every key under ``uuid-old/`` is what removes the
+    uuid folder, there is nothing else to delete::
+
+        metadata: uuid-a -> a.parquet
+                  uuid-b -> b1.parquet, b2.parquet
+                  (uuid-old and uuid-old2 are not listed)
+
+        S3 before the batch               S3 after the batch
+        portal/visualization/             portal/visualization/
+          uuid-a/                           uuid-a/
+            a.parquet.pmtiles                 a.parquet.pmtiles
+            a.parquet.metadata                a.parquet.metadata
+          uuid-b/                           uuid-b/
+            b1.parquet.pmtiles                b1.parquet.pmtiles
+            b1.parquet.metadata               b1.parquet.metadata
+            b2.parquet.pmtiles                b2.parquet.pmtiles
+            b2.parquet.metadata               b2.parquet.metadata
+          uuid-old/                         (gone)
+            <placeholder key "uuid-old/">
+            old.parquet.pmtiles
+            old.parquet.metadata
+          uuid-old2/                        (gone)
+            old1.parquet.pmtiles
+            old1.parquet.metadata
+            old2.parquet.pmtiles
+            old2.parquet.metadata
+    """
+
+    BUCKET = "pmtiles-test"
+
+    @pytest.fixture
+    def s3(self, monkeypatch, aws_clients):
+        """Overrides the module fixture: a LocalStack bucket behind the real AWSHelper."""
+        s3_client, _, _ = aws_clients
+        s3_client.create_bucket(Bucket=self.BUCKET)
+        monkeypatch.setattr(generator.aws, "s3", s3_client)
+        return s3_client
+
+    def _folders(self, s3) -> list[str]:
+        """The uuid folders the S3 console shows under portal/visualization/."""
+        page = s3.list_objects_v2(
+            Bucket=self.BUCKET, Prefix="portal/visualization/", Delimiter="/"
+        )
+        return [p["Prefix"] for p in page.get("CommonPrefixes", [])]
+
+    def _objects_under(self, s3, prefix: str) -> list[str]:
+        """Every S3 object under ``prefix``, the empty placeholder included. Example::
+
+        _objects_under(s3, "portal/visualization/uuid-old/") == [
+            "portal/visualization/uuid-old/",
+            "portal/visualization/uuid-old/old.parquet.metadata",
+            "portal/visualization/uuid-old/old.parquet.pmtiles",
+        ]
+        """
+        return generator.aws.list_all_s3_objects(self.BUCKET, prefix)
+
+    def _run_batch(self, monkeypatch, metadata):
+        """Run the full batch for all uuids with ``metadata`` loaded. Generation
+        itself is stubbed out, so the files already in S3 stand for its output."""
+        monkeypatch.setattr(
+            generator.config,
+            "get_pmtiles_config",
+            lambda: MagicMock(
+                use_fork_process=True,
+                build_estimation_index=True,
+                bucket_name=self.BUCKET,
+                s3_prefix="portal/visualization",
+            ),
+        )
+        monkeypatch.setattr(
+            generator, "_generate_pmtiles_for_parquets_in_subprocess", lambda *a: True
+        )
+        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+        api = MagicMock()
+        api.get_mapped_meta_data.return_value = metadata
+        generate_pmtiles_for_all_parquets(api, uuid=None)
+
+    def test_uuid_folder_missing_from_metadata_is_gone_after_batch(
+        self, s3, monkeypatch
+    ):
+        # Given: four uuid folders, uuid-a and uuid-old with one dataset each,
+        # uuid-b and uuid-old2 with two. uuid-old also has the empty
+        # placeholder key the console "Create folder" button adds
+        for key in [
+            "portal/visualization/uuid-a/a.parquet.pmtiles",
+            "portal/visualization/uuid-a/a.parquet.metadata",
+            "portal/visualization/uuid-b/b1.parquet.pmtiles",
+            "portal/visualization/uuid-b/b1.parquet.metadata",
+            "portal/visualization/uuid-b/b2.parquet.pmtiles",
+            "portal/visualization/uuid-b/b2.parquet.metadata",
+            "portal/visualization/uuid-old/",
+            "portal/visualization/uuid-old/old.parquet.pmtiles",
+            "portal/visualization/uuid-old/old.parquet.metadata",
+            "portal/visualization/uuid-old2/old1.parquet.pmtiles",
+            "portal/visualization/uuid-old2/old1.parquet.metadata",
+            "portal/visualization/uuid-old2/old2.parquet.pmtiles",
+            "portal/visualization/uuid-old2/old2.parquet.metadata",
+        ]:
+            s3.put_object(Bucket=self.BUCKET, Key=key, Body=b"")
+        log.info("Folders before the batch: %s", self._folders(s3))
+        assert self._folders(s3) == [
+            "portal/visualization/uuid-a/",
+            "portal/visualization/uuid-b/",
+            "portal/visualization/uuid-old/",
+            "portal/visualization/uuid-old2/",
+        ]
+
+        # When: the metadata lists uuid-a and uuid-b only and the batch runs
+        # for all uuids
+        self._run_batch(
+            monkeypatch,
+            metadata={
+                "uuid-a": {"a.parquet": {}},
+                "uuid-b": {"b1.parquet": {}, "b2.parquet": {}},
+            },
+        )
+
+        # Then: the uuid-old and uuid-old2 folders are gone, nothing is left
+        # under them
+        log.info("Folders after the batch: %s", self._folders(s3))
+        assert self._folders(s3) == [
+            "portal/visualization/uuid-a/",
+            "portal/visualization/uuid-b/",
+        ]
+        assert self._objects_under(s3, "portal/visualization/uuid-old/") == []
+        assert self._objects_under(s3, "portal/visualization/uuid-old2/") == []
+        # And: the uuid-a and uuid-b files are untouched
+        assert self._objects_under(s3, "portal/visualization/uuid-a/") == [
+            "portal/visualization/uuid-a/a.parquet.metadata",
+            "portal/visualization/uuid-a/a.parquet.pmtiles",
+        ]
+        assert self._objects_under(s3, "portal/visualization/uuid-b/") == [
+            "portal/visualization/uuid-b/b1.parquet.metadata",
+            "portal/visualization/uuid-b/b1.parquet.pmtiles",
+            "portal/visualization/uuid-b/b2.parquet.metadata",
+            "portal/visualization/uuid-b/b2.parquet.pmtiles",
+        ]
 
 
 class TestBatchProcessIsolation:
