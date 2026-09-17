@@ -8,11 +8,12 @@ caller (``batch.tiler.parquet_generator``/``generator``) publishes instead
 
 Not a cache in the strict sense: handles are not evicted (the URL set is
 bounded by the discovered product catalogue) and are never refreshed from a
-request path - each batch run opens what it needs once. A per-store
-``{timestamp: (raw_timestamp, iso_string)}`` index is built alongside the
-source so a timestamp can be resolved in O(1) instead of scanning every
-timestamp. The tiler addresses data by exact UTC instant, not by calendar
-day — see ``tiler/technical.md`` §9.
+request path - each batch run opens what it needs once. Timestamp resolution
+(exact UTC instant, not calendar day — see ``tiler/technical.md`` §9) is a
+live-API concern (``tiler.services.store.registry``, reading ``metadata.json``
+sidecars this job writes); the batch job itself just reads a store's full
+``time`` coordinate directly (see ``parquet_generator.generate_parquet``), so
+this module builds no timestamp index of its own.
 
 Single source of truth is the lib ``ZarrDataSource`` (opened with
 ``chunks=None`` so dask is not built at open time; native coord names for
@@ -20,12 +21,11 @@ Single source of truth is the lib ``ZarrDataSource`` (opened with
 which derives a normalised view on demand.
 
 ``prewarm`` also decides whether a store is fit to serve tiler requests at
-all (grid shape, time dimension) and records the verdict in ``_failed_stores``
-— ``is_available`` is a plain membership check against it, meant to gate
-requests before they ever reach ``get_store``/``load_slice``. A store only
-leaves that set on a later successful prewarm; there is no per-request
-self-heal for a store once prewarm has marked it failed (that is a cron job's
-job, not a request's).
+all (grid shape, time dimension) and reports the per-URL outcome directly to
+its caller (``generator.generate_tiler_parquet_for_all_products``), which
+uses that return value to skip stores that failed — there is no separate
+"is this store healthy" query elsewhere, since a batch run only ever prewarms
+once per store per run.
 """
 
 from __future__ import annotations
@@ -44,7 +44,6 @@ from aodn_cloud_optimised.lib import DataQuery
 
 from data_access_service.config.config import Config
 from data_access_service.config.tiler.constants import COORD_NAMES
-from data_access_service.tiler.utils.dates import ts_to_utc_iso
 
 if TYPE_CHECKING:
     from aodn_cloud_optimised.lib.DataQuery import ZarrDataSource
@@ -122,18 +121,6 @@ def _resolve_zarr_source(store_url: str) -> ZarrDataSource:
     return source
 
 
-def _build_time_index(ds: xr.Dataset) -> dict[pd.Timestamp, tuple[object, str]]:
-    """Return {timestamp: (raw_timestamp, iso_string)} for the dataset's time
-    coord, or {}.
-    """
-    if "time" not in ds.dims:
-        return {}
-    times = ds.coords["time"].values
-    if len(times) == 0:
-        return {}
-    return {pd.Timestamp(ts): (ts, ts_to_utc_iso(ts)) for ts in times}
-
-
 def _open_store(store_url: str) -> ZarrDataSource:
     """Resolve via lib and normalise its dataset in place to time/lat/lon."""
     source = _resolve_zarr_source(store_url)
@@ -157,8 +144,6 @@ class StoreRegistry:
     def __init__(self) -> None:
         self._stores: dict[str, ZarrDataSource] = {}
         self._in_flight: dict[str, concurrent.futures.Future] = {}
-        self._time_index: dict[str, dict[pd.Timestamp, tuple[object, str]]] = {}
-        self._failed_stores: dict[str, BaseException] = {}
         self._lock = threading.Lock()
 
     def _ensure_open(self, store_url: str) -> ZarrDataSource:
@@ -179,9 +164,12 @@ class StoreRegistry:
 
         try:
             source = _open_store(store_url)
-            index = _build_time_index(source.zarr_store)
-            self._publish(store_url, source, index)
-            logger.info(f"Store opened: {store_url} (timestamp_count={len(index)})")
+            self._publish(store_url, source)
+            logger.info(
+                "Store opened: %s (timestamp_count=%d)",
+                store_url,
+                source.zarr_store.sizes["time"],
+            )
             future.set_result(source)
         except Exception as e:
             future.set_exception(e)
@@ -199,36 +187,9 @@ class StoreRegistry:
         """Return the long-lived ``ZarrDataSource`` for ``store_url`` (opens if needed)."""
         return self._ensure_open(store_url)
 
-    def time_index(self, store_url: str) -> dict[pd.Timestamp, tuple[object, str]]:
-        """Return the {timestamp: (raw_timestamp, iso_string)} map for
-        ``store_url`` (or empty dict)."""
-        with self._lock:
-            return self._time_index.get(store_url, {})
-
-    def resolve_timestamp(self, store_url: str, ts: pd.Timestamp) -> object | None:
-        """Resolve an already-parsed UTC timestamp to the store's raw
-        timestamp value, or None if no such instant exists.
-        """
-        entry = self.time_index(store_url).get(ts)
-        return entry[0] if entry is not None else None
-
-    def is_available(self, store_url: str) -> bool:
-        """True unless the last prewarm of ``store_url`` recorded a failure."""
-        with self._lock:
-            return store_url not in self._failed_stores
-
-    def _mark_failed(self, store_url: str, error: BaseException) -> None:
-        with self._lock:
-            self._failed_stores[store_url] = error
-
-    def _mark_healthy(self, store_url: str) -> None:
-        with self._lock:
-            self._failed_stores.pop(store_url, None)
-
     async def _prewarm_one(self, store_url: str) -> BaseException | None:
         """Open one URL and confirm it can serve tiler requests. None on
-        success, else the exception — also recorded via ``_mark_failed`` so
-        ``is_available`` reflects it immediately.
+        success, else the exception.
 
         Not-a-grid, not-there, and no-time-dimension are confirmed and not
         retried; anything else gets bounded retries with backoff.
@@ -239,20 +200,16 @@ class StoreRegistry:
                 await anyio.to_thread.run_sync(
                     self._ensure_open, store_url, limiter=_STORE_PREWARM_LIMITER
                 )
-                self._mark_healthy(store_url)
                 return None
             except NotGriddedStoreError as e:
                 logger.info(f"Store is not a lat/lon grid, skipping: {store_url} ({e})")
-                self._mark_failed(store_url, e)
                 return e
             except NoTimeDimensionError as e:
                 logger.info(f"Store has no time dimension, skipping: {store_url} ({e})")
-                self._mark_failed(store_url, e)
                 return e
             except FileNotFoundError as e:
                 # Usually an upstream rename the catalogue hasn't caught up with.
                 logger.warning(f"Store does not exist: {store_url} ({e})")
-                self._mark_failed(store_url, e)
                 return e
             except Exception as e:
                 last_error = e
@@ -269,14 +226,10 @@ class StoreRegistry:
                         f"{store_url}",
                         exc_info=e,
                     )
-        self._mark_failed(store_url, last_error)
         return last_error
 
     async def prewarm(self, store_urls: list[str]) -> dict[str, BaseException | None]:
         """Open every URL in parallel and report the per-URL outcome.
-
-        Moves the one-time S3 metadata cost from the first user request to server
-        startup, and lets get_products_availability respond fast on first call.
 
         Returns ``{url: None on success, else the exception}``.
         """
@@ -320,19 +273,11 @@ class StoreRegistry:
         with self._lock:
             self._stores.clear()
             self._in_flight.clear()
-            self._time_index.clear()
-            self._failed_stores.clear()
 
-    def _publish(
-        self,
-        store_url: str,
-        source: ZarrDataSource,
-        index: dict[pd.Timestamp, tuple[object, str]],
-    ) -> None:
-        """Atomically replace source and time index for a URL."""
+    def _publish(self, store_url: str, source: ZarrDataSource) -> None:
+        """Publish the opened source for a URL."""
         with self._lock:
             self._stores[store_url] = source
-            self._time_index[store_url] = index
 
 
 store_registry = StoreRegistry()
@@ -344,39 +289,6 @@ def get_store(store_url: str) -> xr.Dataset:
 
 def get_datasource(store_url: str) -> ZarrDataSource:
     return store_registry.get_datasource(store_url)
-
-
-def is_store_available(store_url: str) -> bool:
-    return store_registry.is_available(store_url)
-
-
-def get_available_dates(store_url: str) -> list[tuple[str, pd.Timestamp]]:
-    """Return [(iso_string, timestamp)] sorted by timestamp, for `store_url`."""
-    get_store(store_url)  # ensures the time index for this URL is populated
-    index = store_registry.time_index(store_url)
-    return [(iso, ts) for ts, (_raw, iso) in index.items()]
-
-
-def resolve_timestamp(store_url: str, ts: pd.Timestamp) -> object | None:
-    get_store(store_url)  # ensures the time index for this URL is populated
-    return store_registry.resolve_timestamp(store_url, ts)
-
-
-def unavailable_date_message(store_url: str, ts: pd.Timestamp) -> str:
-    """ "No data for date ..." message, with a latest-available-date hint.
-
-    Shared by the route-level fail-fast guard (``shared.resolve_timestamp_or_404``)
-    and the deep check in ``slice_loader._fetch_slice_from_store``, so the two
-    call sites can't drift apart.
-    """
-    index = store_registry.time_index(store_url)
-    latest = index[max(index)][1] if index else None
-    hint = (
-        f" Latest available date is {latest!r}."
-        if latest
-        else " No dates are available."
-    )
-    return f"No data for date {ts_to_utc_iso(ts)!r}.{hint}"
 
 
 async def prewarm_stores(store_urls: list[str]) -> dict[str, BaseException | None]:

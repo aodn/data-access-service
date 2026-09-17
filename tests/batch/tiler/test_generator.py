@@ -5,10 +5,8 @@ import pytest
 
 from data_access_service.batch.tiler import generator
 from data_access_service.batch.tiler.generator import (
-    TilerParquetGenerationInProgressError,
     _group_by_store,
     generate_tiler_parquet_for_all_products,
-    generate_tiler_parquet_for_store,
 )
 from data_access_service.models.tiler_types import TilerParquetConfig
 from data_access_service.tiler.services.product.product import Product
@@ -201,13 +199,3 @@ class TestGenerateForAllProducts:
         generate_tiler_parquet_for_all_products(api=MagicMock())
 
         assert calls == ["s3://b/x.zarr"]
-
-
-class TestGenerateForStore:
-    def test_rejects_concurrent_call(self, monkeypatch):
-        generator._generation_lock.acquire()
-        try:
-            with pytest.raises(TilerParquetGenerationInProgressError):
-                generate_tiler_parquet_for_store("s3://b/x.zarr", "uuid-a", ["v"])
-        finally:
-            generator._generation_lock.release()

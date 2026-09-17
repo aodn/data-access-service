@@ -13,7 +13,6 @@ from data_access_service.batch.tiler.zarr_registry import (
     NoTimeDimensionError,
     NotGriddedStoreError,
     StoreRegistry,
-    is_store_available,
     prewarm_stores,
     store_registry,
 )
@@ -295,56 +294,6 @@ async def test_no_time_dimension_store_is_not_retried(monkeypatch):
     await prewarm_stores(["s3://b/notime.zarr"])
 
     assert calls == ["s3://b/notime.zarr"]
-
-
-# --- availability -------------------------------------------------------------
-
-
-def test_never_prewarmed_store_is_available_by_default():
-    """Optimistic default: nothing has classified this URL as failed, so a
-    caller that bypasses prewarm entirely (tests, a request racing startup)
-    is not blocked by it."""
-    assert is_store_available("s3://b/never-touched.zarr") is True
-
-
-@pytest.mark.asyncio
-async def test_successfully_opened_store_is_available(monkeypatch):
-    _patch_resolve(monkeypatch, {"s3://b/ok.zarr": _make_ds(time=2, lat=4, lon=4)})
-
-    await prewarm_stores(["s3://b/ok.zarr"])
-
-    assert is_store_available("s3://b/ok.zarr") is True
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "url,broken",
-    [
-        ("s3://b/flat.zarr", _make_ds(time=2, lon=4)),
-        ("s3://b/notime.zarr", _make_ds(lat=4, lon=4)),
-        ("s3://b/gone.zarr", FileNotFoundError("No such file")),
-        ("s3://b/bad.zarr", RuntimeError("nope")),
-    ],
-)
-async def test_failed_store_is_unavailable(monkeypatch, url, broken):
-    _patch_resolve(monkeypatch, {url: broken})
-
-    await prewarm_stores([url])
-
-    assert is_store_available(url) is False
-
-
-@pytest.mark.asyncio
-async def test_a_store_that_recovers_on_a_later_prewarm_becomes_available(monkeypatch):
-    _patch_resolve(monkeypatch, {"s3://b/flaky.zarr": RuntimeError("s3 down")})
-    await prewarm_stores(["s3://b/flaky.zarr"])
-    assert is_store_available("s3://b/flaky.zarr") is False
-
-    # Store starts opening cleanly (e.g. a later cron re-prewarm).
-    _patch_resolve(monkeypatch, {"s3://b/flaky.zarr": _make_ds(time=2, lat=4, lon=4)})
-    await prewarm_stores(["s3://b/flaky.zarr"])
-
-    assert is_store_available("s3://b/flaky.zarr") is True
 
 
 @pytest.mark.asyncio

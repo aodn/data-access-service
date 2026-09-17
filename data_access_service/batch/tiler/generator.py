@@ -15,7 +15,6 @@ follow-up work, not implemented yet.
 
 import json
 import os
-import threading
 from datetime import datetime, timezone
 
 import anyio
@@ -35,14 +34,6 @@ from data_access_service.utils.memory_utils import log_memory_usage
 
 config = Config.get_config()
 logger = init_log(config)
-
-# Same reason as estimation/pmtiles: one run per process, because the build
-# owns the process-global store registry and DuckDB connections.
-_generation_lock = threading.Lock()
-
-
-class TilerParquetGenerationInProgressError(RuntimeError):
-    """Raised when a build is requested while another is already running."""
 
 
 def _group_by_store(products: dict[str, Product]) -> dict[str, tuple[str, list[str]]]:
@@ -196,23 +187,6 @@ def _build_in_subprocess(
         store_url,
     )
     return False
-
-
-def generate_tiler_parquet_for_store(
-    store_url: str, uuid: str, variables: list[str]
-) -> bool:
-    """One store, rejecting the call when another build is already running."""
-    if not _generation_lock.acquire(blocking=False):
-        raise TilerParquetGenerationInProgressError(
-            "Another tiler parquet generation is already running in this "
-            f"process; rejected request for store {store_url}. Retry later."
-        )
-    try:
-        return build_tiler_parquet(
-            store_url, uuid, variables, config.get_tiler_parquet_config()
-        )
-    finally:
-        _generation_lock.release()
 
 
 def build_tiler_parquet(
