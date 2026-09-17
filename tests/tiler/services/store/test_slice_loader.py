@@ -85,9 +85,7 @@ def _write_variable_parquet(output_dir, variable: str, rows: list[tuple]) -> Non
     path = output_dir / "x" / f"{variable}.parquet"
     path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(":memory:")
-    con.execute(
-        "CREATE TABLE t (timestamp VARCHAR, i INTEGER, j INTEGER, value FLOAT)"
-    )
+    con.execute("CREATE TABLE t (timestamp VARCHAR, i INTEGER, j INTEGER, value FLOAT)")
     for row in rows:
         con.execute("INSERT INTO t VALUES (?, ?, ?, ?)", row)
     con.execute(f"COPY t TO '{path}' (FORMAT PARQUET)")
@@ -100,9 +98,7 @@ def _ts(t: str) -> str:
 
 def test_load_slice_returns_dataset_for_known_date(output_dir):
     _seed_metadata(["2024-01-15T13:00:00"], [0.0, 1.0], [0.0, 1.0])
-    _write_variable_parquet(
-        output_dir, "v", [(_ts("2024-01-15T13:00:00"), 0, 0, 1.0)]
-    )
+    _write_variable_parquet(output_dir, "v", [(_ts("2024-01-15T13:00:00"), 0, 0, 1.0)])
 
     result = loader.load_slice(STORE_URL, pd.Timestamp("2024-01-15T13:00:00"), ["v"])
     assert "v" in result.data_vars
@@ -135,12 +131,8 @@ def test_load_slice_raises_when_resolved_timestamp_was_never_converted(output_di
     store's full time index, but only some of those timestamps actually made
     it into the parquet. Requesting one that didn't must 404 (via
     FileNotFoundError), not silently return an all-NaN slice."""
-    _seed_metadata(
-        ["2024-01-15T13:00:00", "2024-01-16T13:00:00"], [0.0], [0.0]
-    )
-    _write_variable_parquet(
-        output_dir, "v", [(_ts("2024-01-15T13:00:00"), 0, 0, 1.0)]
-    )
+    _seed_metadata(["2024-01-15T13:00:00", "2024-01-16T13:00:00"], [0.0], [0.0])
+    _write_variable_parquet(output_dir, "v", [(_ts("2024-01-15T13:00:00"), 0, 0, 1.0)])
 
     with pytest.raises(FileNotFoundError, match="2024-01-16T13:00:00"):
         loader.load_slice(STORE_URL, pd.Timestamp("2024-01-16T13:00:00"), ["v"])
@@ -169,9 +161,7 @@ def test_load_slice_resolves_exact_timestamp_among_several(output_dir):
 def test_load_slice_reads_only_the_requested_timestamp(output_dir):
     """The duckdb filter must select rows for the exact requested instant,
     never leak another timestamp's values into the reconstructed slice."""
-    _seed_metadata(
-        ["2024-01-15T13:00:00", "2024-01-15T14:00:00"], [0.0], [0.0]
-    )
+    _seed_metadata(["2024-01-15T13:00:00", "2024-01-15T14:00:00"], [0.0], [0.0])
     _write_variable_parquet(
         output_dir,
         "v",
@@ -235,9 +225,7 @@ def test_concurrent_identical_loads_share_one_compute(output_dir, monkeypatch):
     parquet read independently. This is what `_slice_dedup` (services.caching.deduper)
     protects — see its docstring for why this matters even without a cache."""
     _seed_metadata(["2024-01-15T13:00:00"], [0.0], [0.0])
-    _write_variable_parquet(
-        output_dir, "v", [(_ts("2024-01-15T13:00:00"), 0, 0, 1.0)]
-    )
+    _write_variable_parquet(output_dir, "v", [(_ts("2024-01-15T13:00:00"), 0, 0, 1.0)])
 
     calls = 0
     proceed = threading.Event()

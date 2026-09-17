@@ -93,9 +93,7 @@ def _fetch_slice_from_store(
             arr, dims=("lat", "lon"), attrs=dict(var_meta.attrs)
         )
 
-    return xr.Dataset(
-        data_vars, coords={"lat": meta.lat, "lon": meta.lon}
-    )
+    return xr.Dataset(data_vars, coords={"lat": meta.lat, "lon": meta.lon})
 
 
 def load_slice(

@@ -164,9 +164,7 @@ class StoreRegistry:
         logged and does not stop the sweep.
         """
         with self._lock:
-            urls = (
-                list(self._metadata.keys()) if store_urls is None else store_urls
-            )
+            urls = list(self._metadata.keys()) if store_urls is None else store_urls
         for store_url in urls:
             try:
                 meta = _load_metadata(store_url)

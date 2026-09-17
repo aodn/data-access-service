@@ -334,6 +334,7 @@ class StoreRegistry:
             self._stores[store_url] = source
             self._time_index[store_url] = index
 
+
 store_registry = StoreRegistry()
 
 

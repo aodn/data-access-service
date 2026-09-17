@@ -38,9 +38,7 @@ def _write_variable_parquet(output_dir, dataset_stem, variable, rows):
     path = output_dir / dataset_stem / f"{variable}.parquet"
     path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(":memory:")
-    con.execute(
-        "CREATE TABLE t (timestamp VARCHAR, i INTEGER, j INTEGER, value FLOAT)"
-    )
+    con.execute("CREATE TABLE t (timestamp VARCHAR, i INTEGER, j INTEGER, value FLOAT)")
     for row in rows:
         con.execute("INSERT INTO t VALUES (?, ?, ?, ?)", row)
     con.execute(f"COPY t TO '{path}' (FORMAT PARQUET)")
