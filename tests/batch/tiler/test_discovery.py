@@ -12,16 +12,16 @@ longer filters to zarr itself — that's API.iter_zarr_dataset_variables's job
 
 import pytest
 
-from data_access_service.tiler.schemas.products import parse_product_overrides
-from data_access_service.tiler.services.product import discovery
-from data_access_service.tiler.services.product.discovery import (
+from data_access_service.batch.tiler import discovery
+from data_access_service.batch.tiler.discovery import (
     apply_product_overrides,
     build_candidate_products,
     discover_products,
-    product_id,
     log_unmatched_overrides,
+    product_id,
     source_path,
 )
+from data_access_service.tiler.schemas.products import parse_product_overrides
 from data_access_service.tiler.services.product.product import Product, get_lod_grids
 
 BASE_URL = "s3://aodn-cloud-optimised"

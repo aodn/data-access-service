@@ -25,6 +25,7 @@ from data_access_service.config.config import IntTestConfig
 from data_access_service.models.duckdb_types import DuckDBTuningConfig
 from data_access_service.models.estimation_types import EstimationReadDuckDBConfig
 from data_access_service.models.sites_types import SitesConfig
+from data_access_service.models.tiler_types import TilerDuckDBConfig
 
 # How often to emit a progress log line while a long query is running.
 _PROGRESS_LOG_INTERVAL_SECONDS = 60
@@ -920,6 +921,77 @@ class EstimationDuckDBClient(DuckDBClient):
         self._duckdb_client = None
 
     def __enter__(self) -> EstimationDuckDBClient:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+
+class TilerDuckDBClient(DuckDBClient):
+    """Reads batch-generated parquet slices for the live tiler API.
+
+    Local disk only - no S3, no httpfs, no spill directory: each store's
+    parquet files were already written to local disk by the batch job (see
+    ``batch.tiler.parquet_generator``), and every read is a small point query
+    against one file. Owns one ``:memory:`` connection; like
+    :class:`SitesDuckDBClient`/:class:`EstimationDuckDBClient`, each
+    :meth:`execute` runs on its own cursor so the tiler's request threadpool
+    can read slices concurrently without stepping on each other.
+    """
+
+    def __init__(self, config: Optional[TilerDuckDBConfig] = None) -> None:
+        self._config: TilerDuckDBConfig = (
+            config or Config.get_config().get_tiler_duckdb_config()
+        )
+        self._duckdb_client: Optional[duckdb.DuckDBPyConnection] = None
+        self._active_cursors: set[Any] = set()
+        self._cursors_lock = threading.Lock()
+        self._lock = Lock()
+        self._con = self.get_instance()
+
+    def get_instance(self) -> duckdb.DuckDBPyConnection:
+        """Initialize this client's owned in-memory connection if it does not exist."""
+        if self._duckdb_client is None:
+            with self._lock:
+                if self._duckdb_client is None:
+                    db = duckdb.connect(
+                        database=":memory:",
+                        config={
+                            "memory_limit": self._config.memory_limit,
+                            "threads": str(int(self._config.threads)),
+                        },
+                    )
+                    self._duckdb_client = db
+        return self._duckdb_client
+
+    def execute(self, sql: str, params: Sequence[Any] | None = None):
+        """Run ``sql`` (optionally with bound ``params``) on a fresh cursor."""
+        cursor = self._con.cursor()
+        with self._cursors_lock:
+            self._active_cursors.add(cursor)
+        try:
+            if params is None:
+                return cursor.execute(sql)
+            return cursor.execute(sql, params)
+        finally:
+            with self._cursors_lock:
+                self._active_cursors.discard(cursor)
+
+    def close(self) -> None:
+        """Cancel any in-flight queries, then close the connection."""
+        with self._cursors_lock:
+            cursors = list(self._active_cursors)
+        for cursor in cursors:
+            try:
+                cursor.interrupt()
+            except Exception:
+                pass
+        if self._duckdb_client is not None:
+            with self._lock:
+                self._duckdb_client.close()
+        self._duckdb_client = None
+
+    def __enter__(self) -> TilerDuckDBClient:
         return self
 
     def __exit__(self, *_: object) -> None:

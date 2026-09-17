@@ -1,153 +1,121 @@
-"""Cron-triggered refresh: ``refresh_all`` re-opens every currently-valid
-store sequentially, is never triggered from the request path, and does not
-let one store's failure stop the sweep.
+"""Cron-triggered refresh: ``refresh_stores`` re-reads every currently-loaded
+store's metadata.json sidecar, and does not let one store's failure stop
+the sweep.
 """
 
-import threading
+import json
+from unittest.mock import MagicMock
 
-import numpy as np
-import xarray as xr
+import pytest
 
-from data_access_service.tiler.services.store.registry import StoreRegistry
+from data_access_service.models.tiler_parquet_types import (
+    TilerParquetMetadata,
+    TilerVariableMetadata,
+)
+from data_access_service.tiler.services.store.registry import (
+    get_store,
+    refresh_stores,
+    store_registry,
+)
 
-
-def _make_ds() -> xr.Dataset:
-    return xr.Dataset(
-        {
-            "var": xr.DataArray(
-                np.zeros((1, 2, 2)),
-                dims=("time", "lat", "lon"),
-                coords={
-                    "time": np.array([0], dtype="datetime64[ns]"),
-                    "lat": [0.0, 1.0],
-                    "lon": [0.0, 1.0],
-                },
-            )
-        }
-    )
+STORE_URL = "s3://aodn-cloud-optimised/foo.zarr"
 
 
-class _FakeZarrSource:
-    def __init__(self, ds: xr.Dataset):
-        self.zarr_store = ds
+@pytest.fixture(autouse=True)
+def clear_stores():
+    store_registry.clear()
+    yield
+    store_registry.clear()
 
 
-def _patch_resolve(monkeypatch, factory):
-    """``factory`` is a one-arg callable (store_url) returning a Dataset (or raises)."""
-
-    def resolve(url: str):
-        return _FakeZarrSource(factory(url))
+@pytest.fixture(autouse=True)
+def output_dir(tmp_path, monkeypatch):
+    import data_access_service.tiler.services.store.registry as registry_module
 
     monkeypatch.setattr(
-        "data_access_service.tiler.services.store.registry._resolve_zarr_source",
-        resolve,
+        registry_module.Config.get_config(),
+        "get_tiler_parquet_config",
+        lambda: MagicMock(output_dir=str(tmp_path)),
+    )
+    return tmp_path
+
+
+def _meta(n_i: int) -> TilerParquetMetadata:
+    return TilerParquetMetadata(
+        version=1,
+        uuid="u",
+        dataset="foo.zarr",
+        source_path=STORE_URL,
+        n_i=n_i,
+        n_j=1,
+        lat=[float(x) for x in range(n_i)],
+        lon=[0.0],
+        timestamps=["2024-01-15T13:00:00.000000000Z"],
+        variables={"v": TilerVariableMetadata(dtype="float32", attrs={})},
+        schema_fingerprint="",
+        generated_at="",
     )
 
 
-def test_request_path_never_refreshes_an_already_open_store(monkeypatch):
-    opens: list[str] = []
+def _write_metadata(output_dir, dataset_stem: str, n_i: int) -> None:
+    d = output_dir / dataset_stem
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "metadata.json").write_text(json.dumps(_meta(n_i).to_dict()))
 
-    def factory(url):
-        opens.append(url)
-        return _make_ds()
 
-    _patch_resolve(monkeypatch, factory)
-    store = StoreRegistry()
-
-    first = store.get_datasource("s3://b/a.zarr")
+def test_request_path_never_refreshes_an_already_loaded_store(output_dir):
+    _write_metadata(output_dir, "foo", n_i=2)
+    first = get_store(STORE_URL)
     for _ in range(10):
-        assert store.get_datasource("s3://b/a.zarr") is first
-
-    assert opens == ["s3://b/a.zarr"]  # only the initial open, never a refresh
+        assert get_store(STORE_URL) is first
 
 
-def test_refresh_all_reopens_every_published_store(monkeypatch):
-    opens: list[str] = []
+def test_refresh_stores_rereads_every_loaded_store(output_dir):
+    _write_metadata(output_dir, "foo", n_i=2)
+    get_store(STORE_URL)
 
-    def factory(url):
-        opens.append(url)
-        return _make_ds()
+    _write_metadata(output_dir, "foo", n_i=5)  # sidecar changed on disk
+    refresh_stores()
 
-    _patch_resolve(monkeypatch, factory)
-    store = StoreRegistry()
-    urls = [f"s3://b/{i}.zarr" for i in range(5)]
-    for url in urls:
-        store.get(url)
-    opens.clear()
-
-    store.refresh_all()
-
-    assert opens == urls
+    assert get_store(STORE_URL).sizes["lat"] == 5
 
 
-def test_refresh_all_publishes_a_new_source_object(monkeypatch):
-    _patch_resolve(monkeypatch, lambda url: _make_ds())
-    store = StoreRegistry()
-    store.get("s3://b/a.zarr")
-    first = store.get_datasource("s3://b/a.zarr")
+def test_refresh_publishes_a_new_dataset_object(output_dir):
+    _write_metadata(output_dir, "foo", n_i=2)
+    first = get_store(STORE_URL)
 
-    store.refresh_all()
+    _write_metadata(output_dir, "foo", n_i=2)
+    refresh_stores()
 
-    assert store.get_datasource("s3://b/a.zarr") is not first
-
-
-def test_refresh_all_is_sequential_not_concurrent(monkeypatch):
-    peak = {"current": 0, "max": 0}
-    lock = threading.Lock()
-
-    def factory(url):
-        with lock:
-            peak["current"] += 1
-            peak["max"] = max(peak["max"], peak["current"])
-        with lock:
-            peak["current"] -= 1
-        return _make_ds()
-
-    _patch_resolve(monkeypatch, factory)
-    store = StoreRegistry()
-    urls = [f"s3://b/{i}.zarr" for i in range(20)]
-    for url in urls:
-        store.get(url)
-
-    store.refresh_all()
-
-    assert peak["max"] == 1
+    assert get_store(STORE_URL) is not first
 
 
-def test_one_store_failure_does_not_stop_the_sweep(monkeypatch):
-    refreshing = {"active": False}
+def test_one_store_failure_does_not_stop_the_sweep(output_dir):
+    _write_metadata(output_dir, "foo", n_i=2)
+    _write_metadata(output_dir, "bar", n_i=3)
+    get_store(STORE_URL)
+    get_store("s3://aodn-cloud-optimised/bar.zarr")
 
-    def factory(url):
-        if refreshing["active"] and url == "s3://b/broken.zarr":
-            raise RuntimeError("s3 down")
-        return _make_ds()
+    # "foo"'s sidecar becomes unreadable before the sweep runs.
+    (output_dir / "foo" / "metadata.json").unlink()
 
-    _patch_resolve(monkeypatch, factory)
-    store = StoreRegistry()
-    store.get("s3://b/broken.zarr")
-    store.get("s3://b/healthy.zarr")
-    healthy_first = store.get_datasource("s3://b/healthy.zarr")
+    refresh_stores()  # must not raise
 
-    refreshing["active"] = True
-    store.refresh_all()  # must not raise
-
-    # The failed refresh keeps serving the last-known-good handle...
-    assert store.get_datasource("s3://b/broken.zarr") is not None
-    # ...while the other store's refresh still went through.
-    assert store.get_datasource("s3://b/healthy.zarr") is not healthy_first
+    # "foo" keeps serving its last-known-good dataset...
+    assert get_store(STORE_URL).sizes["lat"] == 2
+    # ...while "bar"'s refresh still went through.
+    assert store_registry.get("s3://aodn-cloud-optimised/bar.zarr").sizes["lat"] == 3
 
 
-def test_refresh_all_skips_stores_never_opened():
-    store = StoreRegistry()
-    store.refresh_all()  # nothing published yet; must not raise
-    assert store._stores == {}
+def test_refresh_stores_skips_stores_never_loaded():
+    refresh_stores()  # nothing published yet; must not raise
+    assert store_registry.time_index(STORE_URL) == {}
 
 
-def test_clear_drops_published_stores(monkeypatch):
-    _patch_resolve(monkeypatch, lambda url: _make_ds())
-    store = StoreRegistry()
-    store.get("s3://b/a.zarr")
+def test_clear_drops_loaded_stores(output_dir):
+    _write_metadata(output_dir, "foo", n_i=2)
+    get_store(STORE_URL)
 
-    store.clear()
+    store_registry.clear()
 
-    assert store._stores == {}
+    assert store_registry._metadata == {}

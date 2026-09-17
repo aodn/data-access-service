@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from data_access_service.tiler.services.store.registry import _build_time_index
+from data_access_service.batch.tiler.zarr_registry import _build_time_index
 from data_access_service.tiler.utils.dates import ts_to_utc_iso
 
 

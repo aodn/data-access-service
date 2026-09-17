@@ -12,8 +12,13 @@ every route handler parses/validates its ``date`` query param exactly once,
 so this module never re-parses a string it was already handed as a
 ``pd.Timestamp``.
 
-Long-lived store handles live in their own module ([[store.registry]]).
-Time selection goes through ``aodn_cloud_optimised`` ``ZarrDataSource.get_data``.
+No zarr here: a slice is read straight from the batch-generated parquet
+files via duckdb, reconstructing the dense ``(lat, lon)`` array from the
+sparse ``(timestamp, i, j, value)`` rows using the sidecar's shape/coords
+(``store.registry.get_store_metadata``). Store handles/metadata live in their
+own module ([[store.registry]]); the actual read SQL — and the shared
+``TilerDuckDBClient`` — live in ``TilerParquetRepository``, one per store
+([[tiler_repository]]).
 """
 
 import pandas as pd
@@ -23,21 +28,19 @@ from data_access_service.tiler.services.caching.deduper import Deduper
 from data_access_service.tiler.services.caching.slice_cache import slice_memo
 from data_access_service.tiler.services.rendering.masks import apply_ocean_mask
 from data_access_service.tiler.services.store.registry import (
-    get_datasource,
-    get_store,
+    _dataset_stem,
+    get_store_metadata,
     resolve_timestamp,
     unavailable_date_message,
 )
-from data_access_service.tiler.utils.dates import ts_to_utc_iso
+from data_access_service.tiler.services.store.tiler_repository import (
+    TilerParquetRepository,
+    _get_client,
+)
 
 # Always in-process, independent of CACHE_BACKEND — see Deduper's docstring
 # for why this matters even (especially) under CACHE_BACKEND=none.
 _slice_dedup = Deduper()
-
-
-def _ts_for_get_data(ts) -> str:
-    """Format a timestamp for ``ZarrDataSource.get_data`` date bounds."""
-    return pd.Timestamp(ts).isoformat()
 
 
 def _warm_coord_indexes(ds: xr.Dataset) -> xr.Dataset:
@@ -51,7 +54,7 @@ def _warm_coord_indexes(ds: xr.Dataset) -> xr.Dataset:
 def _compute_slice_from_store(
     store_url: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
 ) -> xr.Dataset:
-    """Fetch a 2-D slice from the Zarr store. Both `load_slice` and
+    """Fetch a 2-D slice from the store's parquet files. Both `load_slice` and
     `load_slice_uncached` delegate here; they differ only in whether the
     result lands in L1.
 
@@ -68,35 +71,31 @@ def _compute_slice_from_store(
 def _fetch_slice_from_store(
     store_url: str, ts: pd.Timestamp, variables: list[str]
 ) -> xr.Dataset:
-    # Ensure store is open (time index + variable catalogue on normalised view).
-    store = get_store(store_url)
+    meta = get_store_metadata(store_url)
 
-    missing = [v for v in variables if v not in store.data_vars]
+    missing = [v for v in variables if v not in meta.variables]
     if missing:
         raise FileNotFoundError(
             f"Variable(s) {missing} not found in store {store_url!r} "
-            f"(available: {sorted(store.data_vars)})"
+            f"(available: {sorted(meta.variables)})"
         )
 
-    t0 = resolve_timestamp(store_url, ts)
-    if t0 is None:
+    raw_ts = resolve_timestamp(store_url, ts)
+    if raw_ts is None:
         raise FileNotFoundError(unavailable_date_message(store_url, ts))
 
-    try:
-        ds = get_datasource(store_url).get_data(
-            date_start=_ts_for_get_data(t0),
-            date_end=_ts_for_get_data(t0),
+    repo = TilerParquetRepository(_get_client(), _dataset_stem(store_url))
+    data_vars = {}
+    for v in variables:
+        var_meta = meta.variables[v]
+        arr = repo.fetch_variable_slice(v, raw_ts, meta.n_i, meta.n_j, var_meta.dtype)
+        data_vars[v] = xr.DataArray(
+            arr, dims=("lat", "lon"), attrs=dict(var_meta.attrs)
         )
-        ds = ds[variables]
-        # get_data returns a time range (often length 1). Match previous
-        # .sel(time=scalar) behaviour: one frame, time dim dropped.
-        if "time" in ds.dims:
-            if ds.sizes["time"] == 0:
-                raise KeyError(ts)
-            ds = ds.isel(time=0)
-        return ds.compute() if hasattr(ds, "compute") else ds
-    except KeyError as e:
-        raise FileNotFoundError(f"No data found for date {ts_to_utc_iso(ts)}") from e
+
+    return xr.Dataset(
+        data_vars, coords={"lat": meta.lat, "lon": meta.lon}
+    )
 
 
 def load_slice(
@@ -131,8 +130,7 @@ def load_slice_uncached(
 ) -> xr.Dataset:
     """Return a 2-D slice without touching L1.
 
-    Pulls via lib ``get_data``. Used by the animation endpoint so a
-    rare multi-date request doesn't evict another product's hot slices from
-    the shared L1 cache (CACHE_BACKEND=redis).
+    Used by the animation endpoint so a rare multi-date request doesn't evict
+    another product's hot slices from the shared L1 cache (CACHE_BACKEND=redis).
     """
     return _compute_slice_from_store(store_url, ts, variables, ocean_masked)

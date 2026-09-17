@@ -24,7 +24,11 @@ from data_access_service.models.pmtiles_types import (
     TimeGroupBy,
 )
 from data_access_service.models.sites_types import SitesConfig
-from data_access_service.models.tiler_types import TilerConfig
+from data_access_service.models.tiler_types import (
+    TilerConfig,
+    TilerDuckDBConfig,
+    TilerParquetConfig,
+)
 from data_access_service.models.zarr_chunking_types import ZarrChunkingConfig
 
 
@@ -466,10 +470,30 @@ class Config:
             redis_host=redis_env or tconfig.get("redis_host"),
             redis_port=tconfig["redis_port"],
             is_tls=redis_env is not None,
-            s3_anon=tconfig["s3_anon"],
-            s3_connect_timeout=tconfig["s3_connect_timeout"],
-            s3_read_timeout=tconfig["s3_read_timeout"],
-            s3_max_attempts=tconfig["s3_max_attempts"],
+        )
+
+    def get_tiler_duckdb_config(self) -> TilerDuckDBConfig:
+        """DuckDB tuning for TilerDuckDBClient (the ``tiler_duckdb:`` section).
+        Literal defaults, not the estimation read side's: retuning one must
+        not silently move the other.
+        """
+        dconfig = self.config.get("tiler_duckdb", {}).get("config", {})
+        return TilerDuckDBConfig(
+            memory_limit=dconfig.get("memory_limit", "256MB"),
+            threads=int(dconfig.get("threads", 4)),
+        )
+
+    def get_tiler_parquet_config(self) -> TilerParquetConfig:
+        tpconfig = self.config.get("tiler_parquet", {}).get("config", {})
+
+        max_timestamps = tpconfig.get("max_timestamps")
+        return TilerParquetConfig(
+            output_dir=tpconfig.get("output_dir", "tiler_parquets_generated"),
+            batch_days=int(tpconfig.get("batch_days", 30)),
+            max_timestamps=(
+                int(max_timestamps) if max_timestamps is not None else None
+            ),
+            use_fork_process=bool(tpconfig.get("use_fork_process", True)),
         )
 
     def get_hex_layer_specs(self, dname: str) -> List[HexLayerSpec] | None:

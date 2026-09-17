@@ -175,12 +175,6 @@ tiler:
     # This is only for loacal, other envs will read from infra settings.
     redis_host: "localhost"
     redis_port: 6379
-    # True uses anonymous access for s3:// URLs — correct for IMOS's public AODN
-    # buckets. False lets fsspec discover AWS credentials for private buckets.
-    s3_anon: true
-    s3_connect_timeout: 5
-    s3_read_timeout: 30
-    s3_max_attempts: 2
   # Static product-catalogue config, deliberately not overridden by any
   # config-{env}.yaml overlay — it doesn't vary by environment. Read directly
   # off this base file via Config.load_tiler_catalog_config(), bypassing the
@@ -235,6 +229,25 @@ tiler:
           max_dist_px: 4
     - id: model_sea_level_anomaly_gridded_realtime:ucur+vcur
       ocean_masked: true
+tiler_parquet:
+  config:
+    # Local output directory - no S3 upload yet, that's follow-up work.
+    output_dir: "tiler_parquets_generated"
+    # Timestamps fetched per get_data call in the batch conversion.
+    batch_days: 30
+    # Caps each store to its most recent N timestamps. Null converts full
+    # history; set for a local/dev "latest N" sample run.
+    max_timestamps: null
+    # True: the batch run forks one child per store so DuckDB/xarray memory
+    # goes back to the OS on exit. False: run in the main process (local debug).
+    use_fork_process: True
+tiler_duckdb:
+  config:
+    # DuckDB settings for TilerDuckDBClient, which reads the batch-generated
+    # parquet slices inside the live tiler API - local disk only, no S3, so
+    # no temp/spill dir here.
+    memory_limit: "256MB"
+    threads: 4
 csiro:
   # The collection id changes with every new data version, so it is resolved
   # from the permanent Fedora PID on each call, through these two URLs.

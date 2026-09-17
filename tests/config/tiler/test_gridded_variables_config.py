@@ -9,7 +9,7 @@ just a flat list of variable names/pairs — so this exercises the real loader
 Per-product tuning lives in the products_customisation section — see test_products_config.py.
 """
 
-from data_access_service.tiler.services.product.discovery import (
+from data_access_service.batch.tiler.discovery import (
     _load_gridded_variable_specs,
 )
 

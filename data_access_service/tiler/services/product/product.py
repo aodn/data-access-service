@@ -19,6 +19,21 @@ class CoastalFill:
 
     max_dist_px: int
 
+    def to_dict(self) -> dict:
+        return {"max_dist_px": self.max_dist_px}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CoastalFill":
+        return cls(max_dist_px=int(data["max_dist_px"]))
+
+
+def _coastal_fill_to_dict(coastal_fill: "CoastalFill | None") -> dict | None:
+    return coastal_fill.to_dict() if coastal_fill is not None else None
+
+
+def _coastal_fill_from_dict(data: "dict | None") -> "CoastalFill | None":
+    return CoastalFill.from_dict(data) if data is not None else None
+
 
 @dataclass(frozen=True)
 class DataTileConfig:
@@ -77,6 +92,25 @@ class DataTileConfig:
             self._compute_lod_grids(data_width, data_height, self.chunk_px)
         )
 
+    def to_dict(self) -> dict:
+        # lod_grids is excluded: it's a request-time cache computed from the
+        # store's native dimensions (see apply_computed_lod_grids), not
+        # product identity - a serialized Product must not carry a stale copy.
+        return {
+            "chunk_px": list(self.chunk_px),
+            "padding": self.padding,
+            "coastal_fill": _coastal_fill_to_dict(self.coastal_fill),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DataTileConfig":
+        chunk_px = data.get("chunk_px")
+        return cls(
+            chunk_px=tuple(chunk_px) if chunk_px else TILE.chunk_px,
+            padding=int(data.get("padding", TILE.padding)),
+            coastal_fill=_coastal_fill_from_dict(data.get("coastal_fill")),
+        )
+
 
 @dataclass(frozen=True)
 class VisualTileConfig:
@@ -88,6 +122,13 @@ class VisualTileConfig:
     """
 
     coastal_fill: CoastalFill | None = None
+
+    def to_dict(self) -> dict:
+        return {"coastal_fill": _coastal_fill_to_dict(self.coastal_fill)}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "VisualTileConfig":
+        return cls(coastal_fill=_coastal_fill_from_dict(data.get("coastal_fill")))
 
 
 @dataclass(frozen=True)
@@ -112,6 +153,31 @@ class Product:
     @property
     def variables(self) -> list[str]:
         return self.variable if isinstance(self.variable, list) else [self.variable]
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "source_path": self.source_path,
+            "variable": self.variable,
+            "metadata_uuid": self.metadata_uuid,
+            "ocean_masked": self.ocean_masked,
+            "visual": self.visual,
+            "data_tile": self.data_tile.to_dict(),
+            "visual_tile": self.visual_tile.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Product":
+        return cls(
+            id=data["id"],
+            source_path=data["source_path"],
+            variable=data["variable"],
+            metadata_uuid=data.get("metadata_uuid"),
+            ocean_masked=bool(data.get("ocean_masked", False)),
+            visual=bool(data.get("visual", True)),
+            data_tile=DataTileConfig.from_dict(data.get("data_tile", {})),
+            visual_tile=VisualTileConfig.from_dict(data.get("visual_tile", {})),
+        )
 
 
 def get_lod_grids(product: Product) -> dict[int, tuple[int, int]]:
