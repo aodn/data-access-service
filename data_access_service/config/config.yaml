@@ -171,7 +171,7 @@ tiler:
     # store at redis_host/redis_port below — see memoizer.create_memoizer.
     cache_backend: "redis"
     # Per-entry TTL in seconds — unused while cache_backend is "none".
-    slice_cache_ttl_seconds: 600
+    slice_cache_ttl_seconds: 3600
     # This is only for loacal, other envs will read from infra settings.
     redis_host: "localhost"
     redis_port: 6379
