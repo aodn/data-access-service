@@ -9,7 +9,7 @@ from data_access_service.batch.tiler.generator import (
     write_root_metadata,
 )
 from data_access_service.models.tiler_parquet_types import ProductIdentity
-from data_access_service.models.tiler_types import TilerParquetConfig
+from data_access_service.models.tiler_types import TilerDuckDBConfig, TilerParquetConfig
 
 
 def _product(
@@ -27,7 +27,10 @@ def _tp_config(
         output_dir=output_dir,
         batch_days=30,
         max_timestamps=5,
-        use_fork_process=True,
+        duckdb=TilerDuckDBConfig(
+            memory_limit="256MB",
+            threads=1,
+        ),
     )
     base.update(overrides)
     return TilerParquetConfig(**base)
@@ -129,14 +132,14 @@ class TestGenerateForAllProducts:
             "config",
             MagicMock(
                 get_tiler_config=lambda: MagicMock(co_bucket="s3://bucket"),
-                get_tiler_parquet_config=lambda: _tp_config(use_fork_process=False),
+                get_tiler_parquet_config=lambda: _tp_config(),
             ),
         )
 
         calls = []
         monkeypatch.setattr(
             generator,
-            "build_tiler_parquet",
+            "_build_in_subprocess",
             lambda store_url, uuid, variables, tp_config: calls.append(store_url)
             or True,
         )
@@ -167,14 +170,14 @@ class TestGenerateForAllProducts:
             "config",
             MagicMock(
                 get_tiler_config=lambda: MagicMock(co_bucket="s3://bucket"),
-                get_tiler_parquet_config=lambda: _tp_config(use_fork_process=False),
+                get_tiler_parquet_config=lambda: _tp_config(),
             ),
         )
 
         calls = []
         monkeypatch.setattr(
             generator,
-            "build_tiler_parquet",
+            "_build_in_subprocess",
             lambda store_url, uuid, variables, tp_config: calls.append(store_url)
             or True,
         )
@@ -207,17 +210,17 @@ class TestGenerateForAllProducts:
             "config",
             MagicMock(
                 get_tiler_config=lambda: MagicMock(co_bucket="s3://bucket"),
-                get_tiler_parquet_config=lambda: _tp_config(use_fork_process=False),
+                get_tiler_parquet_config=lambda: _tp_config(),
             ),
         )
-        monkeypatch.setattr(generator, "build_tiler_parquet", lambda *a, **k: True)
+        monkeypatch.setattr(generator, "_build_in_subprocess", lambda *a, **k: True)
 
         generate_tiler_parquet_for_all_products(api=MagicMock(), uuid="uuid-new")
 
         root = s3_store["s3://my-bucket/tiler/root_metadata.json"]
         assert sorted(p["id"] for p in root["products"]) == ["old", "p1"]
 
-    def test_forks_one_child_per_store_when_enabled(self, monkeypatch):
+    def test_forks_one_child_per_store(self, monkeypatch):
         _fake_s3_json_store(monkeypatch)
         products = {"p1": _product("p1", "s3://b/x.zarr", "v")}
         monkeypatch.setattr(
@@ -233,7 +236,7 @@ class TestGenerateForAllProducts:
             "config",
             MagicMock(
                 get_tiler_config=lambda: MagicMock(co_bucket="s3://bucket"),
-                get_tiler_parquet_config=lambda: _tp_config(use_fork_process=True),
+                get_tiler_parquet_config=lambda: _tp_config(),
             ),
         )
 

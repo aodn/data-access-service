@@ -239,9 +239,14 @@ tiler_parquet:
     # Caps each store to its most recent N timestamps. Null converts full
     # history; set for a local/dev "latest N" sample run.
     max_timestamps: null
-    # True: the batch run forks one child per store so DuckDB/xarray memory
-    # goes back to the OS on exit. False: run in the main process (local debug).
-    use_fork_process: True
+    # DuckDB tuning for the batch job's own TilerDuckDBClient (one forked per
+    # store - see batch.tiler.generator). Distinct from tiler_duckdb: below,
+    # which tunes the live API's much smaller read-side connection - see
+    # TilerDuckDBConfig for how the two profiles differ.
+    duckdb:
+      duckdb_temp_dir: "tiler_parquet_duckdb_tmp"
+      memory_limit: "3G"
+      threads: 3
 tiler_duckdb:
   config:
     # DuckDB settings for TilerDuckDBClient, which reads the batch-generated

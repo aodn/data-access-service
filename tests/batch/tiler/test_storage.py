@@ -1,4 +1,4 @@
-"""S3 storage: path handling, JSON round-trips, S3 secret setup.
+"""S3 storage: path handling, JSON round-trips.
 
 S3 calls go through a monkeypatched AWSHelper — no real S3/moto needed, since
 this module's own job is composing the right bucket/key and calling AWSHelper
@@ -57,36 +57,3 @@ def test_read_json_returns_none_when_s3_object_missing(monkeypatch):
     monkeypatch.setattr(storage, "AWSHelper", lambda: helper)
 
     assert storage.read_json("s3://bucket/missing.json") is None
-
-
-# --- configure_s3 ---------------------------------------------------------
-
-
-def test_configure_s3_loads_httpfs_and_creates_secret(monkeypatch):
-    con = MagicMock()
-    calls = []
-    monkeypatch.setattr(
-        storage._AdHocDuckDBClient,
-        "create_s3_secret",
-        lambda self, bucket: calls.append(bucket),
-    )
-
-    storage.configure_s3(con, "s3://my-bucket/prefix")
-
-    con.execute.assert_called_once_with("INSTALL httpfs; LOAD httpfs;")
-    assert calls == ["my-bucket"]
-
-
-def test_ad_hoc_duckdb_client_execute_delegates_to_wrapped_connection():
-    con = MagicMock()
-    client = storage._AdHocDuckDBClient(con)
-
-    client.execute("SELECT 1", [1, 2])
-
-    con.execute.assert_called_once_with("SELECT 1", [1, 2])
-
-
-def test_ad_hoc_duckdb_client_close_is_a_no_op():
-    con = MagicMock()
-    storage._AdHocDuckDBClient(con).close()
-    con.close.assert_not_called()

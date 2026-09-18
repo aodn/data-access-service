@@ -22,16 +22,22 @@ class TilerConfig:
 
 @dataclass(frozen=True)
 class TilerDuckDBConfig:
-    """DuckDB settings for reading batch-generated parquet slices inside the
-    live tiler API (``TilerDuckDBClient``), read from the ``tiler_duckdb:``
-    section of config.yaml (see Config.get_tiler_duckdb_config()).
+    """DuckDB settings for :class:`TilerDuckDBClient`, which serves two very
+    different callers on very different tuning:
 
-    Reads are small, already-batched point queries against parquet files the
-    batch job wrote to S3 - no spill directory needed.
+    * The live tiler API's read side (``tiler_duckdb:`` section, see
+      Config.get_tiler_duckdb_config()) - small, already-batched point
+      queries against parquet files the batch job wrote to S3. No spill
+      directory needed, so ``temp_directory`` stays None.
+    * The batch zarr -> parquet conversion job's write side
+      (``tiler_parquet.config.duckdb:``, see Config.get_tiler_parquet_config()),
+      one instance per forked store - a much bigger memory/thread budget and
+      an explicit ``temp_directory`` for spill.
     """
 
     memory_limit: str
     threads: int
+    temp_directory: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -50,6 +56,6 @@ class TilerParquetConfig:
     batch_days: int
     # None converts full history; set for a "latest N" sample run.
     max_timestamps: Optional[int]
-    # True: the batch run forks one child per store so DuckDB/xarray memory
-    # goes back to the OS on exit. False: run in the main process (debug).
-    use_fork_process: bool
+    # Tuning for the batch job's own TilerDuckDBClient (one per forked
+    # store), read from ``tiler_parquet.config.duckdb:``.
+    duckdb: TilerDuckDBConfig

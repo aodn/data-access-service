@@ -928,10 +928,13 @@ class EstimationDuckDBClient(DuckDBClient):
 
 
 class TilerDuckDBClient(DuckDBClient):
-    """Reads batch-generated parquet slices for the live tiler API.
+    """Reads batch-generated parquet slices for the live tiler API, and also
+    (one fresh instance per forked store, via a batch-tuned ``config``) does
+    the batch zarr -> parquet conversion's own writing - see
+    :class:`TilerDuckDBConfig` for how the two profiles differ.
 
-    Every store's parquet files were written to S3 by the batch job (see
-    ``batch.tiler.parquet_generator``), and every read is a small point query
+    Every store's parquet files are written to S3 by the batch job (see
+    ``batch.tiler.parquet_generator``); live reads are a small point query
     against one file. Owns one ``:memory:`` connection; like
     :class:`SitesDuckDBClient`/:class:`EstimationDuckDBClient`, each
     :meth:`execute` runs on its own cursor so the tiler's request threadpool
@@ -955,13 +958,15 @@ class TilerDuckDBClient(DuckDBClient):
         if self._duckdb_client is None:
             with self._lock:
                 if self._duckdb_client is None:
-                    db = duckdb.connect(
-                        database=":memory:",
-                        config={
-                            "memory_limit": self._config.memory_limit,
-                            "threads": str(int(self._config.threads)),
-                        },
-                    )
+                    db_config = {
+                        "memory_limit": self._config.memory_limit,
+                        "threads": str(int(self._config.threads)),
+                    }
+                    # Unset for the live read side: small point queries never
+                    # spill, so there is nothing to bound a directory for.
+                    if self._config.temp_directory:
+                        db_config["temp_directory"] = self._config.temp_directory
+                    db = duckdb.connect(database=":memory:", config=db_config)
                     db.execute("INSTALL httpfs; LOAD httpfs;")
                     db.execute("SET GLOBAL s3_region = 'ap-southeast-2';")
                     self._duckdb_client = db

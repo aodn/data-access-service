@@ -4,9 +4,9 @@ sparse-parquet conversion pipeline.
 Uses the same fake-ZarrDataSource pattern as
 tests/batch/tiler/test_zarr_registry.py so no real S3 access is needed for
 reading zarr. Metadata content and sparse-row correctness are tested as pure
-functions (no I/O at all); generate_parquet's own orchestration (paths,
-configure_s3, SQL targeting) is tested with a mocked DuckDB connection and a
-mocked storage module — no real S3/duckdb-httpfs needed for that either.
+functions (no I/O at all); generate_parquet's own orchestration (paths, SQL
+targeting) is tested with a stubbed TilerDuckDBClient and a mocked storage
+module — no real S3/duckdb-httpfs needed for that either.
 """
 
 from unittest.mock import MagicMock
@@ -176,43 +176,86 @@ def test_sparse_rows_for_slice_all_nan_is_empty():
     assert rows.empty
 
 
-# --- generate_parquet orchestration (mocked con + storage) ----------------
+# --- generate_parquet orchestration (stubbed TilerDuckDBClient + storage) --
+
+
+def _patch_duckdb_client(monkeypatch) -> MagicMock:
+    """Stub gen.TilerDuckDBClient so generate_parquet's own-connection path
+    never touches a real DuckDB/S3 connection. Returns the fake connection
+    handed back by the stub's get_instance(), for callers to inspect."""
+    con = MagicMock()
+
+    class FakeTilerDuckDBClient:
+        def __init__(self, config):
+            self.config = config
+
+        def get_instance(self):
+            return con
+
+    monkeypatch.setattr(gen, "TilerDuckDBClient", FakeTilerDuckDBClient)
+    return con
 
 
 def _run_generate_parquet(monkeypatch, ds, output_dir="s3://my-bucket/tiler", **kwargs):
-    """generate_parquet with a mocked DuckDB connection and storage S3 calls
-    — verifies generate_parquet's own control flow (paths, configure_s3, SQL
-    targeting), not duckdb's real S3 write.
+    """generate_parquet with a stubbed TilerDuckDBClient and storage S3 calls
+    — verifies generate_parquet's own control flow (paths, SQL targeting),
+    not duckdb's real S3 write.
     """
     _patch_source(monkeypatch, ds)
-    monkeypatch.setattr(gen.storage, "configure_s3", lambda con, path: None)
     monkeypatch.setattr(gen.storage, "write_json", lambda path, data: None)
-    con = MagicMock()
+    con = _patch_duckdb_client(monkeypatch)
     return (
         gen.generate_parquet(
-            "s3://bucket/foo.zarr", "uuid-123", ["v"], output_dir, con=con, **kwargs
+            "s3://bucket/foo.zarr",
+            "uuid-123",
+            ["v"],
+            output_dir,
+            duckdb_config=object(),
+            **kwargs,
         ),
         con,
     )
 
 
-def test_generate_parquet_configures_s3_for_the_dataset_directory(monkeypatch):
-    configure_calls = []
-    monkeypatch.setattr(
-        gen.storage, "configure_s3", lambda con, path: configure_calls.append(path)
-    )
+def test_generate_parquet_requires_duckdb_config(monkeypatch):
     _patch_source(monkeypatch, _fake_dataset(["2024-01-01T00:00:00"]))
     monkeypatch.setattr(gen.storage, "write_json", lambda path, data: None)
 
+    with pytest.raises(ValueError, match="duckdb_config"):
+        gen.generate_parquet(
+            "s3://bucket/foo.zarr", "uuid-123", ["v"], "s3://my-bucket/tiler"
+        )
+
+
+def test_generate_parquet_builds_own_client_from_duckdb_config(monkeypatch):
+    """generate_parquet opens its own batch-tuned TilerDuckDBClient from
+    ``duckdb_config`` - it never accepts a caller-supplied connection."""
+    _patch_source(monkeypatch, _fake_dataset(["2024-01-01T00:00:00"]))
+    monkeypatch.setattr(gen.storage, "write_json", lambda path, data: None)
+
+    fake_con = MagicMock()
+    calls = []
+
+    class FakeClient:
+        def __init__(self, config):
+            calls.append(("init", config))
+
+        def get_instance(self):
+            return fake_con
+
+    monkeypatch.setattr(gen, "TilerDuckDBClient", FakeClient)
+
+    config = object()
     gen.generate_parquet(
         "s3://bucket/foo.zarr",
         "uuid-123",
         ["v"],
         "s3://my-bucket/tiler",
-        con=MagicMock(),
+        duckdb_config=config,
     )
 
-    assert configure_calls == ["s3://my-bucket/tiler/foo"]
+    assert ("init", config) in calls
+    assert fake_con.execute.called
 
 
 def test_generate_parquet_writes_sidecar_to_the_composed_s3_path(monkeypatch):
@@ -221,14 +264,14 @@ def test_generate_parquet_writes_sidecar_to_the_composed_s3_path(monkeypatch):
         gen.storage, "write_json", lambda path, data: write_json_calls.append(path)
     )
     _patch_source(monkeypatch, _fake_dataset(["2024-01-01T00:00:00"]))
-    monkeypatch.setattr(gen.storage, "configure_s3", lambda con, path: None)
+    _patch_duckdb_client(monkeypatch)
 
     _, metadata_path = gen.generate_parquet(
         "s3://bucket/foo.zarr",
         "uuid-123",
         ["v"],
         "s3://my-bucket/tiler",
-        con=MagicMock(),
+        duckdb_config=object(),
     )
 
     assert metadata_path == "s3://my-bucket/tiler/foo/metadata.json"

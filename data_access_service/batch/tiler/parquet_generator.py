@@ -1,24 +1,22 @@
 from __future__ import annotations
 
-import argparse
 import logging
 from datetime import datetime, timezone
 
-import duckdb
 import numpy as np
 import pandas as pd
 import xarray as xr
 
-from data_access_service import init_log
 from data_access_service.batch.tiler import storage
 from data_access_service.batch.tiler.zarr_registry import get_datasource, get_store
-from data_access_service.config.config import Config
+from data_access_service.core.duckdbclient import TilerDuckDBClient
 from data_access_service.models.estimation_types import schema_fingerprint
 from data_access_service.models.tiler_parquet_types import (
     TilerParquetMetadata,
     TilerVariableMetadata,
     dataset_stem,
 )
+from data_access_service.models.tiler_types import TilerDuckDBConfig
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +167,7 @@ def generate_parquet(
     output_dir: str,
     batch_days: int = 30,
     max_timestamps: int | None = None,
-    con: "duckdb.DuckDBPyConnection | None" = None,
+    duckdb_config: TilerDuckDBConfig | None = None,
 ) -> tuple[dict[str, str], str]:
     """Convert ``variables`` of ``store_url`` to sparse parquet + write the sidecar.
 
@@ -180,9 +178,13 @@ def generate_parquet(
 
     ``max_timestamps`` caps the run to the store's most recent N timestamps
     (local/dev sampling, or a "latest N" backfill); omit it for a full
-    backfill. ``con`` lets a caller share one DuckDB connection across several
-    stores instead of opening one per call.
+    backfill. ``duckdb_config`` (required) tunes the batch-only
+    ``TilerDuckDBClient`` this function opens for itself - one call per
+    forked store.
     """
+    if duckdb_config is None:
+        raise ValueError("duckdb_config is required")
+
     meta = build_metadata(store_url, uuid, variables)
     dataset_dir = storage.join(output_dir, dataset_stem(store_url))
     metadata_path = write_metadata(meta, dataset_dir)
@@ -193,9 +195,7 @@ def generate_parquet(
     if not raw_timestamps:
         raise ValueError(f"No timestamps to convert for {store_url!r}")
 
-    own_con = con is None
-    con = con or duckdb.connect(":memory:")
-    storage.configure_s3(con, dataset_dir)
+    con = TilerDuckDBClient(config=duckdb_config).get_instance()
     table = f"tiler_rows_{abs(hash((store_url, tuple(variables))))}"
 
     try:
@@ -221,7 +221,11 @@ def generate_parquet(
                     arr = ds[v].isel(time=k).values
                     rows = _sparse_rows_for_slice(arr, frame_ts, meta.dataset, uuid, v)
                     if not rows.empty:
-                        con.execute(f"INSERT INTO {table} SELECT * FROM rows")
+                        con.register("rows", rows)
+                        try:
+                            con.execute(f"INSERT INTO {table} SELECT * FROM rows")
+                        finally:
+                            con.unregister("rows")
 
             logger.info(
                 "tiler parquet generation: %s converted %d/%d timestamps",
@@ -241,55 +245,5 @@ def generate_parquet(
             value_paths[v] = path
     finally:
         con.execute(f"DROP TABLE IF EXISTS {table}")
-        if own_con:
-            con.close()
 
     return value_paths, metadata_path
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("store_url", help="Zarr store URL, e.g. s3://bucket/foo.zarr")
-    parser.add_argument(
-        "uuid",
-        help="Product/collection UUID, recorded in the sidecar for provenance "
-        "(output is placed under a directory named after the zarr store, not this)",
-    )
-    parser.add_argument("variables", help="Comma-separated variable names")
-    parser.add_argument(
-        "output_dir",
-        help="s3://bucket/prefix; a {dataset}/ subdirectory is created under it",
-    )
-    parser.add_argument(
-        "--batch-days",
-        type=int,
-        default=30,
-        help="Timestamps fetched per get_data call (default: 30)",
-    )
-    parser.add_argument(
-        "--max-timestamps",
-        type=int,
-        default=None,
-        help="Convert only the most recent N timestamps (default: all)",
-    )
-    args = parser.parse_args()
-
-    config = Config.get_config()
-    init_log(config)
-
-    variables = [v.strip() for v in args.variables.split(",") if v.strip()]
-    value_paths, metadata_path = generate_parquet(
-        args.store_url,
-        args.uuid,
-        variables,
-        args.output_dir,
-        batch_days=args.batch_days,
-        max_timestamps=args.max_timestamps,
-    )
-    logger.info("Wrote sidecar: %s", metadata_path)
-    for v, path in value_paths.items():
-        logger.info("Wrote %s: %s", v, path)
-
-
-if __name__ == "__main__":
-    main()

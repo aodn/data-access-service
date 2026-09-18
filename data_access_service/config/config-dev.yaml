@@ -21,4 +21,3 @@ estimation:
 tiler_parquet:
   config:
     max_timestamps: 5
-    use_fork_process: False

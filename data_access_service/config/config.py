@@ -495,13 +495,21 @@ class Config:
         output_dir = f"s3://{self.get_datavis_data_bucket_name()}/{s3_prefix}"
 
         max_timestamps = tpconfig.get("max_timestamps")
+        dconfig = tpconfig.get("duckdb", {})
+        temp_dir = tempfile.mkdtemp(
+            prefix=dconfig.get("duckdb_temp_dir", "tiler_parquet_duckdb_tmp")
+        )
         return TilerParquetConfig(
             output_dir=output_dir,
             batch_days=int(tpconfig.get("batch_days", 30)),
             max_timestamps=(
                 int(max_timestamps) if max_timestamps is not None else None
             ),
-            use_fork_process=bool(tpconfig.get("use_fork_process", True)),
+            duckdb=TilerDuckDBConfig(
+                memory_limit=dconfig.get("memory_limit", "3G"),
+                threads=int(dconfig.get("threads", 3)),
+                temp_directory=temp_dir,
+            ),
         )
 
     def get_hex_layer_specs(self, dname: str) -> List[HexLayerSpec] | None:

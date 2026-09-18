@@ -90,24 +90,15 @@ def generate_tiler_parquet_for_all_products(api: API, uuid: str | None = None) -
         logger.warning("No store passed prewarm; nothing to generate")
 
     tp_config = config.get_tiler_parquet_config()
-    logger.info(
-        "Tiler parquet batch process isolation: use_fork_process=%s",
-        tp_config.use_fork_process,
-    )
 
     succeeded: set[str] = set()
     for store_url, (store_uuid, variables) in sorted(work.items()):
-        if tp_config.use_fork_process:
-            ok = _build_in_subprocess(store_url, store_uuid, variables, tp_config)
-            after_label = f"after child for {store_url}"
-        else:
-            ok = build_tiler_parquet(store_url, store_uuid, variables, tp_config)
-            after_label = f"after in-process run for {store_url}"
+        ok = _build_in_subprocess(store_url, store_uuid, variables, tp_config)
         if ok:
             succeeded.add(store_url)
         else:
             logger.error("Tiler parquet worker failed for store=%s", store_url)
-        log_memory_usage(logger, after_label)
+        log_memory_usage(logger, f"after child for {store_url}")
 
     published = [p for p in products.values() if p.source_path in succeeded]
     write_root_metadata(published, tp_config.output_dir)
@@ -206,6 +197,7 @@ def build_tiler_parquet(
             tp_config.output_dir,
             batch_days=tp_config.batch_days,
             max_timestamps=tp_config.max_timestamps,
+            duckdb_config=tp_config.duckdb,
         )
         logger.info(
             "Tiler parquet for store=%s written: sidecar=%s values=%s",
