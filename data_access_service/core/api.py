@@ -1224,11 +1224,17 @@ class API(BaseAPI):
         data, csv on a zarr key) is skipped and reported in the notes instead
         of failing the whole request.
 
+        A parquet key with no usable pre-built index is NOT skipped that way:
+        it has no estimator left at all (see core/estimation_index), so it
+        fails the request and the frontend shows the reason.
+
         :param cancellation: set when the SSE client disconnects; None outside an
             SSE request (batch jobs, tests), which disables the checkpoints
         :return: aggregated estimate dict, or None if no requested key exists
         :raises ValueError: if output_format is none or not supported, the
             dates are unparseable, or NO requested key can produce the format
+        :raises EstimationIndexUnavailableError: if a parquet key has no usable
+            pre-built estimation index
         :raises ClientGoneError: if the client disconnected
         """
         if output_format is None or output_format not in SUPPORTED_OUTPUT_FORMATS:
