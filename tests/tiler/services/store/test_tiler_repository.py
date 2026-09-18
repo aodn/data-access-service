@@ -1,7 +1,7 @@
-"""TilerParquetRepository: the read SQL bound to one store's parquet directory.
+"""TilerParquetRepository: the read SQL for one variable's parquet.
 
 slice_loader's tests cover this indirectly through load_slice; these test the
-repository directly — path construction, the exact-timestamp filter, and NaN
+repository directly — path resolution, the exact-timestamp filter, and NaN
 fill for cells the sparse rows don't cover.
 """
 
@@ -34,8 +34,8 @@ def session():
         yield client
 
 
-def _write_variable_parquet(output_dir, dataset_stem, variable, rows):
-    path = output_dir / dataset_stem / f"{variable}.parquet"
+def _write_variable_parquet(output_dir, parquet_path, rows):
+    path = output_dir / parquet_path
     path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(":memory:")
     con.execute("CREATE TABLE t (timestamp VARCHAR, i INTEGER, j INTEGER, value FLOAT)")
@@ -47,12 +47,12 @@ def _write_variable_parquet(output_dir, dataset_stem, variable, rows):
 
 def test_fetch_variable_slice_fills_only_the_rows_present(output_dir, session):
     _write_variable_parquet(
-        output_dir, "x", "v", [("2024-01-15T13:00:00.000000000Z", 0, 0, 1.5)]
+        output_dir, "x/v.parquet", [("2024-01-15T13:00:00.000000000Z", 0, 0, 1.5)]
     )
-    repo = TilerParquetRepository(session, "x")
+    repo = TilerParquetRepository(session)
 
     arr = repo.fetch_variable_slice(
-        "v", "2024-01-15T13:00:00.000000000Z", n_i=2, n_j=2, dtype="float32"
+        "x/v.parquet", "2024-01-15T13:00:00.000000000Z", n_i=2, n_j=2, dtype="float32"
     )
 
     assert arr.shape == (2, 2)
@@ -64,30 +64,29 @@ def test_fetch_variable_slice_fills_only_the_rows_present(output_dir, session):
 def test_fetch_variable_slice_filters_to_the_exact_timestamp(output_dir, session):
     _write_variable_parquet(
         output_dir,
-        "x",
-        "v",
+        "x/v.parquet",
         [
             ("2024-01-15T13:00:00.000000000Z", 0, 0, 1.0),
             ("2024-01-15T14:00:00.000000000Z", 0, 0, 2.0),
         ],
     )
-    repo = TilerParquetRepository(session, "x")
+    repo = TilerParquetRepository(session)
 
     arr = repo.fetch_variable_slice(
-        "v", "2024-01-15T14:00:00.000000000Z", n_i=1, n_j=1, dtype="float32"
+        "x/v.parquet", "2024-01-15T14:00:00.000000000Z", n_i=1, n_j=1, dtype="float32"
     )
 
     assert arr[0, 0] == 2.0
 
 
-def test_fetch_variable_slice_keyed_by_dataset_stem_not_full_url(output_dir, session):
+def test_fetch_variable_slice_resolves_relative_to_output_dir(output_dir, session):
     _write_variable_parquet(
-        output_dir, "foo", "v", [("2024-01-15T13:00:00.000000000Z", 0, 0, 9.0)]
+        output_dir, "foo/v.parquet", [("2024-01-15T13:00:00.000000000Z", 0, 0, 9.0)]
     )
-    repo = TilerParquetRepository(session, "foo")
+    repo = TilerParquetRepository(session)
 
     arr = repo.fetch_variable_slice(
-        "v", "2024-01-15T13:00:00.000000000Z", n_i=1, n_j=1, dtype="float32"
+        "foo/v.parquet", "2024-01-15T13:00:00.000000000Z", n_i=1, n_j=1, dtype="float32"
     )
 
     assert arr[0, 0] == 9.0
@@ -99,11 +98,15 @@ def test_fetch_variable_slice_raises_when_timestamp_has_zero_rows(output_dir, se
     silently return an all-NaN slice (which broke manifest.json's valueRange:
     NaN -> json_safe_float -> None -> pydantic ValidationError -> 500)."""
     _write_variable_parquet(
-        output_dir, "x", "v", [("2024-01-15T13:00:00.000000000Z", 0, 0, 1.0)]
+        output_dir, "x/v.parquet", [("2024-01-15T13:00:00.000000000Z", 0, 0, 1.0)]
     )
-    repo = TilerParquetRepository(session, "x")
+    repo = TilerParquetRepository(session)
 
     with pytest.raises(FileNotFoundError, match="2024-01-16T00:00:00"):
         repo.fetch_variable_slice(
-            "v", "2024-01-16T00:00:00.000000000Z", n_i=1, n_j=1, dtype="float32"
+            "x/v.parquet",
+            "2024-01-16T00:00:00.000000000Z",
+            n_i=1,
+            n_j=1,
+            dtype="float32",
         )

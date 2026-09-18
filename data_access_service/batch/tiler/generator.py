@@ -9,34 +9,35 @@ sidecar), never live metadata or zarr directly.
 Mirrors ``batch.estimation.generator``: one store per fork so DuckDB/xarray
 memory goes back to the OS between stores.
 
-Writes to a local directory (``TilerParquetConfig.output_dir``) - S3 upload is
-follow-up work, not implemented yet.
+Writes to ``TilerParquetConfig.output_dir``, an S3 URI (see ``batch.tiler.storage``).
 """
 
-import json
 import os
 from datetime import datetime, timezone
 
 import anyio
 
 from data_access_service import Config, init_log
+from data_access_service.batch.tiler import storage
 from data_access_service.batch.tiler.discovery import discover_products
 from data_access_service.batch.tiler.parquet_generator import generate_parquet
 from data_access_service.batch.tiler.zarr_registry import prewarm_stores
 from data_access_service.core.api import API
 from data_access_service.models.tiler_parquet_types import (
     ROOT_METADATA_VERSION,
+    ProductIdentity,
     RootMetadata,
 )
 from data_access_service.models.tiler_types import TilerParquetConfig
-from data_access_service.tiler.services.product.product import Product
 from data_access_service.utils.memory_utils import log_memory_usage
 
 config = Config.get_config()
 logger = init_log(config)
 
 
-def _group_by_store(products: dict[str, Product]) -> dict[str, tuple[str, list[str]]]:
+def _group_by_store(
+    products: dict[str, ProductIdentity],
+) -> dict[str, tuple[str, list[str]]]:
     """``source_path -> (uuid, sorted variable names)``, merged across every
     product discovered for that store - discovery fans one store out into
     several ``Product``s, one per ``gridded_variables`` spec, but the
@@ -112,7 +113,7 @@ def generate_tiler_parquet_for_all_products(api: API, uuid: str | None = None) -
     write_root_metadata(published, tp_config.output_dir)
 
 
-def write_root_metadata(products: list[Product], output_dir: str) -> str:
+def write_root_metadata(products: list[ProductIdentity], output_dir: str) -> str:
     """Upsert ``products`` (by id) into ``root_metadata.json``, so the tiler
     API can rebuild its whole product catalogue from this one file - no live
     metadata call, no zarr open.
@@ -122,13 +123,12 @@ def write_root_metadata(products: list[Product], output_dir: str) -> str:
     full (no-``uuid``) run's ``products`` is the complete current catalogue,
     so it ends up superseding every entry anyway.
     """
-    os.makedirs(output_dir, exist_ok=True)
-    path = os.path.join(output_dir, "root_metadata.json")
+    path = storage.join(output_dir, "root_metadata.json")
 
     existing_by_id: dict[str, dict] = {}
-    if os.path.exists(path):
-        with open(path) as f:
-            existing = RootMetadata.from_dict(json.load(f))
+    existing_data = storage.read_json(path)
+    if existing_data is not None:
+        existing = RootMetadata.from_dict(existing_data)
         existing_by_id = {p["id"]: p for p in existing.products}
 
     for product in products:
@@ -139,8 +139,7 @@ def write_root_metadata(products: list[Product], output_dir: str) -> str:
         generated_at=datetime.now(timezone.utc).isoformat(),
         products=[existing_by_id[pid] for pid in sorted(existing_by_id)],
     )
-    with open(path, "w") as f:
-        json.dump(meta.to_dict(), f)
+    storage.write_json(path, meta.to_dict())
     logger.info(
         "Wrote root metadata: %s (%d product(s) total, %d updated this run)",
         path,

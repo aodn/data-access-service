@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import json
 import logging
-import os
 from datetime import datetime, timezone
 
 import duckdb
@@ -12,13 +10,14 @@ import pandas as pd
 import xarray as xr
 
 from data_access_service import init_log
+from data_access_service.batch.tiler import storage
 from data_access_service.batch.tiler.zarr_registry import get_datasource, get_store
 from data_access_service.config.config import Config
 from data_access_service.models.estimation_types import schema_fingerprint
 from data_access_service.models.tiler_parquet_types import (
-    TILER_PARQUET_METADATA_VERSION,
     TilerParquetMetadata,
     TilerVariableMetadata,
+    dataset_stem,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,13 +33,6 @@ _EXCLUDED_ATTRS = frozenset({"_ChunkSizes"})
 def _dataset_key(store_url: str) -> str:
     """``s3://.../foo.zarr`` -> ``foo.zarr``, matching zarr_registry's own key."""
     return store_url.rstrip("/").rsplit("/", 1)[-1]
-
-
-def _dataset_stem(dataset_key: str) -> str:
-    """``foo.zarr`` -> ``foo``, used as the output filename stem so parquet +
-    sidecar names are keyed by the zarr store, not by a product/collection uuid
-    that may not map 1:1 with it."""
-    return dataset_key.removesuffix(".zarr")
 
 
 def _json_safe(value):
@@ -96,6 +88,7 @@ def build_metadata(
     lat = store["lat"].values
     lon = store["lon"].values
     timestamps = [_ts_native(t) for t in store["time"].values]
+    stem = dataset_stem(store_url)
 
     variable_meta = {
         v: TilerVariableMetadata(
@@ -105,12 +98,12 @@ def build_metadata(
                 for k, val in store[v].attrs.items()
                 if k not in _EXCLUDED_ATTRS
             },
+            parquet_path=f"{stem}/{v}.parquet",
         )
         for v in variables
     }
 
     return TilerParquetMetadata(
-        version=TILER_PARQUET_METADATA_VERSION,
         uuid=uuid,
         dataset=_dataset_key(store_url),
         source_path=store_url,
@@ -126,9 +119,8 @@ def build_metadata(
 
 
 def write_metadata(meta: TilerParquetMetadata, dataset_dir: str) -> str:
-    path = os.path.join(dataset_dir, "metadata.json")
-    with open(path, "w") as f:
-        json.dump(meta.to_dict(), f)
+    path = storage.join(dataset_dir, "metadata.json")
+    storage.write_json(path, meta.to_dict())
     return path
 
 
@@ -192,8 +184,7 @@ def generate_parquet(
     stores instead of opening one per call.
     """
     meta = build_metadata(store_url, uuid, variables)
-    dataset_dir = os.path.join(output_dir, _dataset_stem(meta.dataset))
-    os.makedirs(dataset_dir, exist_ok=True)
+    dataset_dir = storage.join(output_dir, dataset_stem(store_url))
     metadata_path = write_metadata(meta, dataset_dir)
 
     raw_timestamps = list(get_store(store_url)["time"].values)
@@ -204,6 +195,7 @@ def generate_parquet(
 
     own_con = con is None
     con = con or duckdb.connect(":memory:")
+    storage.configure_s3(con, dataset_dir)
     table = f"tiler_rows_{abs(hash((store_url, tuple(variables))))}"
 
     try:
@@ -240,7 +232,7 @@ def generate_parquet(
 
         value_paths: dict[str, str] = {}
         for v in variables:
-            path = os.path.join(dataset_dir, f"{v}.parquet")
+            path = storage.join(dataset_dir, f"{v}.parquet")
             con.execute(
                 f"COPY (SELECT {', '.join(VALUE_COLUMNS)} FROM {table} "
                 f"WHERE variable = {_sql_literal(v)} ORDER BY timestamp) "
@@ -266,7 +258,7 @@ def main() -> None:
     parser.add_argument("variables", help="Comma-separated variable names")
     parser.add_argument(
         "output_dir",
-        help="Parent directory; a {dataset}/ subdirectory is created under it",
+        help="s3://bucket/prefix; a {dataset}/ subdirectory is created under it",
     )
     parser.add_argument(
         "--batch-days",

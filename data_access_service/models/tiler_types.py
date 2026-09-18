@@ -26,9 +26,8 @@ class TilerDuckDBConfig:
     live tiler API (``TilerDuckDBClient``), read from the ``tiler_duckdb:``
     section of config.yaml (see Config.get_tiler_duckdb_config()).
 
-    Local disk only - no S3, no spill directory needed: each read is a small,
-    already-batched point query against a parquet file the batch job wrote
-    onto local disk.
+    Reads are small, already-batched point queries against parquet files the
+    batch job wrote to S3 - no spill directory needed.
     """
 
     memory_limit: str
@@ -40,13 +39,17 @@ class TilerParquetConfig:
     """Settings for the batch zarr -> parquet conversion job
     (``batch.tiler.generator``), read from the ``tiler_parquet:`` section of
     config.yaml (see Config.get_tiler_parquet_config()).
+
+    ``output_dir`` is the base every parquet/metadata path is written under
+    and read back from - always ``s3://{datavis_data bucket}/{s3_prefix}``
+    (see Config.get_tiler_parquet_config()). Batch and the live tiler always
+    agree on it, since both read the same config.
     """
 
-    # Local output directory - no S3 upload yet, that's follow-up work.
     output_dir: str
     batch_days: int
-    # None converts full history; set for a local/dev "latest N" sample.
+    # None converts full history; set for a "latest N" sample run.
     max_timestamps: Optional[int]
     # True: the batch run forks one child per store so DuckDB/xarray memory
-    # goes back to the OS on exit. False: run in the main process (local debug).
+    # goes back to the OS on exit. False: run in the main process (debug).
     use_fork_process: bool

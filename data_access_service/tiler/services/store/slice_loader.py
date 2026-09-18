@@ -17,8 +17,7 @@ files via duckdb, reconstructing the dense ``(lat, lon)`` array from the
 sparse ``(timestamp, i, j, value)`` rows using the sidecar's shape/coords
 (``store.registry.get_store_metadata``). Store handles/metadata live in their
 own module ([[store.registry]]); the actual read SQL — and the shared
-``TilerDuckDBClient`` — live in ``TilerParquetRepository``, one per store
-([[tiler_repository]]).
+``TilerDuckDBClient`` — live in ``TilerParquetRepository`` ([[tiler_repository]]).
 """
 
 import pandas as pd
@@ -28,7 +27,6 @@ from data_access_service.tiler.services.caching.deduper import Deduper
 from data_access_service.tiler.services.caching.slice_cache import slice_memo
 from data_access_service.tiler.services.rendering.masks import apply_ocean_mask
 from data_access_service.tiler.services.store.registry import (
-    _dataset_stem,
     get_store_metadata,
     resolve_timestamp,
     unavailable_date_message,
@@ -84,11 +82,13 @@ def _fetch_slice_from_store(
     if raw_ts is None:
         raise FileNotFoundError(unavailable_date_message(store_url, ts))
 
-    repo = TilerParquetRepository(_get_client(), _dataset_stem(store_url))
+    repo = TilerParquetRepository(_get_client())
     data_vars = {}
     for v in variables:
         var_meta = meta.variables[v]
-        arr = repo.fetch_variable_slice(v, raw_ts, meta.n_i, meta.n_j, var_meta.dtype)
+        arr = repo.fetch_variable_slice(
+            var_meta.parquet_path, raw_ts, meta.n_i, meta.n_j, var_meta.dtype
+        )
         data_vars[v] = xr.DataArray(
             arr, dims=("lat", "lon"), attrs=dict(var_meta.attrs)
         )

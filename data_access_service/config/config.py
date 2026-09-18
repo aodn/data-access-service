@@ -486,9 +486,17 @@ class Config:
     def get_tiler_parquet_config(self) -> TilerParquetConfig:
         tpconfig = self.config.get("tiler_parquet", {}).get("config", {})
 
+        s3_prefix = tpconfig.get("s3_prefix")
+        if not s3_prefix:
+            raise ValueError(
+                "config.yaml's tiler_parquet.config.s3_prefix must be set - the "
+                "tiler batch/read pipeline is S3-only"
+            )
+        output_dir = f"s3://{self.get_datavis_data_bucket_name()}/{s3_prefix}"
+
         max_timestamps = tpconfig.get("max_timestamps")
         return TilerParquetConfig(
-            output_dir=tpconfig.get("output_dir", "tiler_parquets_generated"),
+            output_dir=output_dir,
             batch_days=int(tpconfig.get("batch_days", 30)),
             max_timestamps=(
                 int(max_timestamps) if max_timestamps is not None else None

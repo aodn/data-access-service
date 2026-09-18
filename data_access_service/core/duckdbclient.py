@@ -930,13 +930,13 @@ class EstimationDuckDBClient(DuckDBClient):
 class TilerDuckDBClient(DuckDBClient):
     """Reads batch-generated parquet slices for the live tiler API.
 
-    Local disk only - no S3, no httpfs, no spill directory: each store's
-    parquet files were already written to local disk by the batch job (see
+    Every store's parquet files were written to S3 by the batch job (see
     ``batch.tiler.parquet_generator``), and every read is a small point query
     against one file. Owns one ``:memory:`` connection; like
     :class:`SitesDuckDBClient`/:class:`EstimationDuckDBClient`, each
     :meth:`execute` runs on its own cursor so the tiler's request threadpool
-    can read slices concurrently without stepping on each other.
+    can read slices concurrently without stepping on each other. httpfs and
+    the datavis_data bucket's S3 secret are set up once, on first use.
     """
 
     def __init__(self, config: Optional[TilerDuckDBConfig] = None) -> None:
@@ -948,6 +948,7 @@ class TilerDuckDBClient(DuckDBClient):
         self._cursors_lock = threading.Lock()
         self._lock = Lock()
         self._con = self.get_instance()
+        self.create_s3_secret(Config.get_config().get_datavis_data_bucket_name())
 
     def get_instance(self) -> duckdb.DuckDBPyConnection:
         """Initialize this client's owned in-memory connection if it does not exist."""
@@ -961,6 +962,8 @@ class TilerDuckDBClient(DuckDBClient):
                             "threads": str(int(self._config.threads)),
                         },
                     )
+                    db.execute("INSTALL httpfs; LOAD httpfs;")
+                    db.execute("SET GLOBAL s3_region = 'ap-southeast-2';")
                     self._duckdb_client = db
         return self._duckdb_client
 

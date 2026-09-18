@@ -1,28 +1,19 @@
 """Derive candidate tiler products from the metadata schema index.
 
 Dataset names and UUIDs come from live metadata, not config, so a rename changes
-the derived id instead of leaving a stale one. Candidates carry plain defaults
-only — [[apply_product_overrides]] layers the products_customisation section
-on top by id, as a separate step, so identity-derivation and config-resolution
-never mix.
+the derived id instead of leaving a stale one. Batch only ever produces
+``ProductIdentity`` — which store, which variable(s), which metadata
+collection. Rendering config (``visual``/``ocean_masked``/tile configs, from
+products_customisation) is resolved on the live tiler side, not here — see
+``tiler.services.product.catalog``.
 """
 
-import dataclasses
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 
 from data_access_service.config.config import Config
 from data_access_service.core.api import API
-from data_access_service.tiler.schemas.products import (
-    ProductOverride,
-    load_product_overrides,
-)
-from data_access_service.tiler.services.product.product import (
-    CoastalFill,
-    DataTileConfig,
-    Product,
-    VisualTileConfig,
-)
+from data_access_service.models.tiler_parquet_types import ProductIdentity
 
 logger = logging.getLogger(__name__)
 
@@ -83,13 +74,12 @@ def build_candidate_products(
     dataset_variables: ZarrDatasetVariables,
     specs: list[GriddedVariableSpec],
     base_url: str,
-) -> dict[str, Product]:
-    """Fan each specification out across the catalogue with plain defaults —
-    ocean_masked=False, visual inferred from arity, default tile configs.
-    Matching is case-sensitive. Tuning comes later, from
-    apply_product_overrides.
+) -> dict[str, ProductIdentity]:
+    """Fan each specification out across the catalogue. Matching is
+    case-sensitive. Carries identity only — no rendering config; that's
+    layered on the live tiler side (see ``tiler.services.product.catalog``).
     """
-    candidates: dict[str, Product] = {}
+    candidates: dict[str, ProductIdentity] = {}
     origin: dict[str, str] = {}
     matched_specs: set[int] = set()
 
@@ -113,14 +103,13 @@ def build_candidate_products(
                 )
             origin[pid] = f"uuid {uuid} / {dataset_name}"
 
-            candidates[pid] = Product(
+            candidates[pid] = ProductIdentity(
                 id=pid,
                 source_path=source_path(dataset_name, base_url),
                 # Not `variables`: that would turn a scalar into a
                 # one-element vector product.
                 variable=list(spec) if is_pair else spec,
                 metadata_uuid=uuid,
-                visual=not is_pair,
             )
 
     for position, spec in enumerate(specs):
@@ -147,88 +136,16 @@ def build_candidate_products(
     return candidates
 
 
-def _coastal_fill(config) -> CoastalFill | None:
-    return CoastalFill(max_dist_px=config.max_dist_px) if config else None
-
-
-def _apply_override(product: Product, override: ProductOverride | None) -> Product:
-    if override is None:
-        return product
-
-    visual = product.visual
-    if override.visual is not None:
-        if len(product.variables) == 2 and override.visual:
-            raise ValueError(
-                f"products_customisation override {product.id!r} sets visual: true on "
-                "a variable pair — visual tiles are single-variable only."
-            )
-        visual = override.visual
-
-    return dataclasses.replace(
-        product,
-        visual=visual,
-        ocean_masked=(
-            override.ocean_masked
-            if override.ocean_masked is not None
-            else product.ocean_masked
-        ),
-        data_tile=DataTileConfig(
-            chunk_px=override.data_tile.chunk_px,
-            padding=override.data_tile.padding,
-            coastal_fill=_coastal_fill(override.data_tile.coastal_fill),
-        ),
-        visual_tile=VisualTileConfig(
-            coastal_fill=_coastal_fill(override.visual_tile.coastal_fill),
-        ),
-    )
-
-
-def apply_product_overrides(
-    candidates: Mapping[str, Product],
-    overrides: Mapping[str, ProductOverride],
-) -> dict[str, Product]:
-    """Layer the products_customisation config onto discovered candidates,
-    matched by id (see product_id). A candidate with no matching override is
-    returned unchanged, at its plain defaults.
-    """
-    return {
-        pid: _apply_override(product, overrides.get(pid))
-        for pid, product in candidates.items()
-    }
-
-
-def log_unmatched_overrides(
-    candidates: Mapping[str, Product],
-    overrides: Mapping[str, ProductOverride],
-) -> None:
-    """Report products_customisation overrides that matched no candidate.
-
-    A stale id silently stops its setting applying, so this is loud — but not
-    fatal, since one entry should not take the catalogue down.
-    """
-    unmatched = [pid for pid in overrides if pid not in candidates]
-    if unmatched:
-        logger.error(
-            "%d products_customisation override(s) matched no discovered product, so "
-            "their settings will not apply: %s",
-            len(unmatched),
-            "; ".join(unmatched),
-        )
-
-
-def discover_products(api: API, base_url: str) -> dict[str, Product]:
-    """Single entry point: load the gridded_variables, products_customisation and blacklist
-    sections of config.yaml, fan out across the metadata catalogue (minus
-    blacklisted stores), and layer overrides on top. Everything startup needs
-    from config — no fatal/non-fatal distinction is made here, that's up to
-    the caller (run_tiler_warmup treats the whole call as fatal).
+def discover_products(api: API, base_url: str) -> dict[str, ProductIdentity]:
+    """Single entry point: load the gridded_variables and blacklist sections
+    of config.yaml, and fan out across the metadata catalogue (minus
+    blacklisted stores). No rendering config here — the live tiler layers
+    products_customisation on top of what this returns (see
+    ``tiler.services.product.catalog``).
     """
     specs = _load_gridded_variable_specs()
-    overrides = load_product_overrides()
     blacklist = _load_store_blacklist()
     dataset_variables = _exclude_blacklisted_stores(
         api.iter_zarr_dataset_variables(), blacklist
     )
-    candidates = build_candidate_products(dataset_variables, specs, base_url)
-    log_unmatched_overrides(candidates, overrides)
-    return apply_product_overrides(candidates, overrides)
+    return build_candidate_products(dataset_variables, specs, base_url)

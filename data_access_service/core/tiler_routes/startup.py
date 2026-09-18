@@ -9,15 +9,13 @@ serve a catalogue that 404s on every request. Every other fatal path also
 exits without ``mark_tiler_ready()`` — the failure mode is a 503, never a
 wrong catalogue.
 
-No live API metadata and no zarr here — the whole catalogue comes from
+No live API metadata and no zarr here — the whole catalogue comes from S3:
 ``root_metadata.json`` + each store's ``metadata.json`` sidecar, both
 published by the batch conversion job (``batch.tiler.generator``).
 """
 
 import asyncio
-import json
 import logging
-import os
 
 import anyio
 
@@ -26,23 +24,27 @@ from data_access_service.core.tiler_routes.shared import (
     TILE_THREAD_LIMITER,
     mark_tiler_ready,
 )
-from data_access_service.models.tiler_parquet_types import RootMetadata
+from data_access_service.models.tiler_parquet_types import ProductIdentity, RootMetadata
 from data_access_service.tiler.services.colormap.registry import load_colormaps
+from data_access_service.tiler.services.product.catalog import build_catalog
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.product.registry import load_products
 from data_access_service.tiler.services.rendering.kernels import warmup_resample
 from data_access_service.tiler.services.rendering.visual_tiles import warmup_visual
 from data_access_service.tiler.services.store.registry import prewarm_stores
+from data_access_service.tiler.utils.s3_json import read_json
 
 logger = logging.getLogger(__name__)
 
 
 def _load_root_metadata() -> dict[str, Product]:
     output_dir = Config.get_config().get_tiler_parquet_config().output_dir
-    path = os.path.join(output_dir, "root_metadata.json")
-    with open(path) as f:
-        root = RootMetadata.from_dict(json.load(f))
-    return {p.id: p for p in (Product.from_dict(entry) for entry in root.products)}
+    path = f"{output_dir.rstrip('/')}/root_metadata.json"
+    root = RootMetadata.from_dict(read_json(path))
+    identities = {
+        entry["id"]: ProductIdentity.from_dict(entry) for entry in root.products
+    }
+    return build_catalog(identities)
 
 
 async def run_tiler_warmup() -> None:

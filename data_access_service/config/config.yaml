@@ -231,8 +231,9 @@ tiler:
       ocean_masked: true
 tiler_parquet:
   config:
-    # Local output directory - no S3 upload yet, that's follow-up work.
-    output_dir: "tiler_parquets_generated"
+    # Batch writes/uploads to s3://{aws.s3.bucket_name.datavis_data}/{s3_prefix},
+    # and the live tiler reads from there too (both read this same config).
+    s3_prefix: "tiler"
     # Timestamps fetched per get_data call in the batch conversion.
     batch_days: 30
     # Caps each store to its most recent N timestamps. Null converts full

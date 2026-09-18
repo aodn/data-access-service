@@ -1,77 +1,53 @@
 """Per-URL registry of tiler parquet metadata sidecars.
 
-No zarr access here — the live tiler API never opens a zarr store. All
-zarr-touching work (product discovery, store prewarm against real zarr, the
-zarr -> parquet conversion itself) lives in ``batch.tiler``; this registry
-only reads what that job publishes: each store's ``metadata.json`` sidecar
-(lat/lon/shape/timestamps/variable attrs), read from
-``TilerParquetConfig.output_dir`` (local disk for now; S3 once the batch job
-uploads there — see ``batch.tiler.generator``).
+No zarr access here — all zarr-touching work lives in ``batch.tiler``. This
+registry only reads what that job publishes: each store's ``metadata.json``
+sidecar, from S3 at ``TilerParquetConfig.output_dir``.
 
-``get_store`` returns a coords-only ``xr.Dataset`` (time/lat/lon, no data
-variables) built from the sidecar, so callers that only need the store's
-shape/coordinate range (``product.py::get_lod_grids``, ``masks.py``,
-``data_tiles.py``) keep working unchanged. Actual pixel values come from
-``slice_loader``, which queries the parquet files directly via duckdb.
+``get_store`` returns a coords-only ``xr.Dataset`` (time/lat/lon, no data)
+built from the sidecar. Actual pixel values come from ``slice_loader``,
+which reads the parquet files directly via duckdb.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import threading
 
 import pandas as pd
 import xarray as xr
 
 from data_access_service.config.config import Config
-from data_access_service.models.tiler_parquet_types import TilerParquetMetadata
+from data_access_service.models.tiler_parquet_types import (
+    TilerParquetMetadata,
+    dataset_stem,
+)
 from data_access_service.tiler.utils.dates import ts_to_utc_iso
+from data_access_service.tiler.utils.s3_json import read_json
 
 logger = logging.getLogger(__name__)
 
 
-def _dataset_stem(store_url: str) -> str:
-    """``s3://.../foo.zarr`` -> ``foo``, matching batch.tiler.parquet_generator's own key."""
-    return store_url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".zarr")
-
-
 def _metadata_path(store_url: str) -> str:
     output_dir = Config.get_config().get_tiler_parquet_config().output_dir
-    return os.path.join(output_dir, _dataset_stem(store_url), "metadata.json")
+    return f"{output_dir.rstrip('/')}/{dataset_stem(store_url)}/metadata.json"
 
 
 def _load_metadata(store_url: str) -> TilerParquetMetadata:
-    with open(_metadata_path(store_url)) as f:
-        return TilerParquetMetadata.from_dict(json.load(f))
+    return TilerParquetMetadata.from_dict(read_json(_metadata_path(store_url)))
 
 
 def _build_time_index(meta: TilerParquetMetadata) -> dict[pd.Timestamp, str]:
-    """``{timestamp: raw_timestamp_string}``. The sidecar's own timestamp
-    strings are already the store's native representation (see
-    ``batch.tiler.parquet_generator._ts_native``) and are what the parquet's
-    own ``timestamp`` column holds — the "Z" is stripped only to build the
-    lookup key, since every parsed client timestamp is naive-UTC (see
-    ``tiler.utils.dates.str_to_utc_timestamp``) and a tz-aware/tz-naive
-    ``Timestamp`` comparison raises rather than ever matching.
+    """``{timestamp: raw_timestamp_string}``. "Z" is stripped only for the
+    lookup key — parsed client timestamps are naive-UTC, and a tz-aware key
+    would never match.
     """
     return {pd.Timestamp(raw.rstrip("Z")): raw for raw in meta.timestamps}
 
 
-def _to_dataset(meta: TilerParquetMetadata) -> xr.Dataset:
-    """A coords-only Dataset built from the sidecar — no data, just
-    time/lat/lon, so ``store.sizes["lat"]``/``["lon"]`` (used by
-    ``product.py::get_lod_grids``) and ``store.lat``/``store.lon`` value
-    ranges (used by land/ocean masking) keep working unchanged.
-    """
-    return xr.Dataset(
-        coords={
-            "time": [pd.Timestamp(raw.rstrip("Z")) for raw in meta.timestamps],
-            "lat": meta.lat,
-            "lon": meta.lon,
-        }
-    )
+def _to_dataset(meta: TilerParquetMetadata, times: list[pd.Timestamp]) -> xr.Dataset:
+    """A coords-only Dataset (time/lat/lon, no data) built from the sidecar."""
+    return xr.Dataset(coords={"time": times, "lat": meta.lat, "lon": meta.lon})
 
 
 class StoreRegistry:
@@ -88,7 +64,7 @@ class StoreRegistry:
 
     def _publish(self, store_url: str, meta: TilerParquetMetadata) -> None:
         index = _build_time_index(meta)
-        ds = _to_dataset(meta)
+        ds = _to_dataset(meta, list(index))
         with self._lock:
             self._metadata[store_url] = meta
             self._datasets[store_url] = ds
@@ -135,11 +111,8 @@ class StoreRegistry:
             return store_url not in self._failed_stores
 
     def prewarm(self, store_urls: list[str]) -> dict[str, BaseException | None]:
-        """Load (or confirm already-loaded) every URL's sidecar.
-
-        Returns ``{url: None on success, else the exception}`` — the same
-        contract ``batch.tiler.zarr_registry.prewarm_stores`` uses for the
-        real zarr open, so callers written against either behave the same.
+        """Load every URL's sidecar. Returns ``{url: None on success, else
+        the exception}``.
         """
         outcomes: dict[str, BaseException | None] = {}
         for url in store_urls:
@@ -158,13 +131,12 @@ class StoreRegistry:
         )
         return outcomes
 
-    def refresh(self, store_urls: list[str] | None = None) -> None:
-        """Re-read the sidecar for every currently-loaded store (or
-        ``store_urls`` if given), one at a time. One store's failure is
-        logged and does not stop the sweep.
+    def refresh(self) -> None:
+        """Re-read the sidecar for every currently-loaded store, one at a
+        time. One store's failure is logged and does not stop the sweep.
         """
         with self._lock:
-            urls = list(self._metadata.keys()) if store_urls is None else store_urls
+            urls = list(self._metadata.keys())
         for store_url in urls:
             try:
                 meta = _load_metadata(store_url)
@@ -210,12 +182,7 @@ def resolve_timestamp(store_url: str, ts: pd.Timestamp) -> str | None:
 
 
 def unavailable_date_message(store_url: str, ts: pd.Timestamp) -> str:
-    """ "No data for date ..." message, with a latest-available-date hint.
-
-    Shared by the route-level fail-fast guard (``shared.resolve_timestamp_or_404``)
-    and the deep check in ``slice_loader._fetch_slice_from_store``, so the two
-    call sites can't drift apart.
-    """
+    """ "No data for date ..." message, with a latest-available-date hint."""
     index = store_registry.time_index(store_url)
     latest = ts_to_utc_iso(max(index)) if index else None
     hint = (
@@ -229,10 +196,8 @@ def unavailable_date_message(store_url: str, ts: pd.Timestamp) -> str:
 async def prewarm_stores(store_urls: list[str]) -> dict[str, BaseException | None]:
     """Prewarm every URL and return the per-URL outcome map.
 
-    Async for call-site compatibility with the FastAPI startup path (``await
-    prewarm_stores(...)``) — reading local metadata.json sidecars is fast
-    enough that no real concurrency/threading is needed here, unlike the
-    batch job's zarr prewarm.
+    Async only so the FastAPI startup path can ``await`` it — the actual
+    work is a fast synchronous JSON read.
     """
     return store_registry.prewarm(store_urls)
 

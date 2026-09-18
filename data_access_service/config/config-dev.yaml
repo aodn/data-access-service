@@ -18,3 +18,7 @@ estimation:
     use_fork_process: False
     duckdb:
       threads: 12
+tiler_parquet:
+  config:
+    max_timestamps: 5
+    use_fork_process: False

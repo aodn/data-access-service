@@ -27,7 +27,6 @@ def _seed_metadata(store_url: str, times: list[str]) -> None:
     metadata.json file read — the seam this test suite uses in place of the
     old fake-ZarrDataSource monkeypatch."""
     meta = TilerParquetMetadata(
-        version=1,
         uuid="u",
         dataset=store_url.rsplit("/", 1)[-1],
         source_path=store_url,
@@ -36,7 +35,11 @@ def _seed_metadata(store_url: str, times: list[str]) -> None:
         lat=[0.0],
         lon=[0.0],
         timestamps=[f"{t}.000000000Z" for t in times],
-        variables={"v": TilerVariableMetadata(dtype="float32", attrs={})},
+        variables={
+            "v": TilerVariableMetadata(
+                dtype="float32", attrs={}, parquet_path="v.parquet"
+            )
+        },
         schema_fingerprint="",
         generated_at="",
     )

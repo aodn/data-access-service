@@ -1,12 +1,16 @@
-"""generate_parquet: sparse value parquet(s) + metadata sidecar from a zarr store.
+"""build_metadata / _sparse_rows_for_slice / generate_parquet: the zarr ->
+sparse-parquet conversion pipeline.
 
 Uses the same fake-ZarrDataSource pattern as
-tests/batch/tiler/test_zarr_registry.py so no real S3 access is needed.
+tests/batch/tiler/test_zarr_registry.py so no real S3 access is needed for
+reading zarr. Metadata content and sparse-row correctness are tested as pure
+functions (no I/O at all); generate_parquet's own orchestration (paths,
+configure_s3, SQL targeting) is tested with a mocked DuckDB connection and a
+mocked storage module — no real S3/duckdb-httpfs needed for that either.
 """
 
-import json
+from unittest.mock import MagicMock
 
-import duckdb
 import numpy as np
 import pandas as pd
 import pytest
@@ -75,114 +79,196 @@ def _fake_dataset(times: list[str]) -> xr.Dataset:
     )
 
 
-def test_generate_parquet_writes_sidecar_and_sparse_values(monkeypatch, tmp_path):
-    times = [
-        "2024-01-01T00:00:00",
-        "2024-01-02T00:00:00",
-        "2024-01-03T00:00:00",
-        "2024-01-04T00:00:00",
-    ]
-    _patch_source(monkeypatch, _fake_dataset(times))
+# --- build_metadata -----------------------------------------------------
 
-    value_paths, metadata_path = gen.generate_parquet(
-        "s3://bucket/foo.zarr",
-        "uuid-123",
-        ["v", "flag"],
-        str(tmp_path),
-        batch_days=2,  # forces 2 batches over 4 timestamps
-    )
 
-    # Output lives under a subdirectory named after the zarr store, not the uuid.
-    assert metadata_path == str(tmp_path / "foo" / "metadata.json")
-    assert value_paths["v"] == str(tmp_path / "foo" / "v.parquet")
-    assert value_paths["flag"] == str(tmp_path / "foo" / "flag.parquet")
+def test_build_metadata_grid_and_provenance(monkeypatch):
+    _patch_source(monkeypatch, _fake_dataset(["2024-01-01T00:00:00"]))
 
-    # --- sidecar ---
-    with open(metadata_path) as f:
-        meta = json.load(f)
+    meta = gen.build_metadata("s3://bucket/foo.zarr", "uuid-123", ["v", "flag"])
 
-    assert meta["uuid"] == "uuid-123"
-    assert meta["dataset"] == "foo.zarr"
-    assert meta["source_path"] == "s3://bucket/foo.zarr"
-    assert meta["n_i"] == 2
-    assert meta["n_j"] == 3
-    assert meta["lat"] == [-40.0, -39.5]
-    assert meta["lon"] == [110.0, 110.5, 111.0]
-    assert len(meta["timestamps"]) == 4
+    assert meta.uuid == "uuid-123"
+    assert meta.dataset == "foo.zarr"
+    assert meta.source_path == "s3://bucket/foo.zarr"
+    assert meta.n_i == 2
+    assert meta.n_j == 3
+    assert meta.lat == [-40.0, -39.5]
+    assert meta.lon == [110.0, 110.5, 111.0]
+    assert len(meta.timestamps) == 1
     # str() of the store's own numpy.datetime64 value (not a pandas-trimmed
     # re-rendering of it), plus an explicit UTC marker.
-    assert meta["timestamps"][0] == "2024-01-01T00:00:00.000000000Z"
+    assert meta.timestamps[0] == "2024-01-01T00:00:00.000000000Z"
+
+
+def test_build_metadata_variable_dtype_and_attrs(monkeypatch):
+    _patch_source(monkeypatch, _fake_dataset(["2024-01-01T00:00:00"]))
+
+    meta = gen.build_metadata("s3://bucket/foo.zarr", "uuid-123", ["v", "flag"])
 
     # dtype describes the parquet's value column (always float32), not the
     # source zarr variable's dtype (float64 for "v", int32 for "flag").
-    assert meta["variables"]["v"]["dtype"] == "float32"
-    assert meta["variables"]["v"]["attrs"]["units"] == "degree_C"
-    assert meta["variables"]["flag"]["dtype"] == "float32"
-    assert meta["variables"]["flag"]["attrs"]["flag_values"] == [0, 1]
-    assert meta["variables"]["flag"]["attrs"]["flag_meanings"] == "none present"
+    assert meta.variables["v"].dtype == "float32"
+    assert meta.variables["v"].attrs["units"] == "degree_C"
+    assert meta.variables["flag"].dtype == "float32"
+    assert meta.variables["flag"].attrs["flag_values"] == [0, 1]
+    assert meta.variables["flag"].attrs["flag_meanings"] == "none present"
     # Source-chunking attrs are dropped - meaningless once reshaped into sparse rows.
-    assert "_ChunkSizes" not in meta["variables"]["v"]["attrs"]
-
-    # --- value parquet: "v" (5 finite cells/frame x 4 frames = 20 rows) ---
-    con = duckdb.connect(":memory:")
-    v_rows = con.execute(
-        f"SELECT * FROM read_parquet('{value_paths['v']}') ORDER BY timestamp, i, j"
-    ).fetchall()
-    assert len(v_rows) == 20
-    # The known-NaN cell (i=0, j=1) never appears for "v".
-    assert not any(r[4] == 0 and r[5] == 1 for r in v_rows)
-    first = v_rows[0]
-    assert first[0] == "2024-01-01T00:00:00.000000000Z"
-    assert first[1] == "foo.zarr"
-    assert first[2] == "uuid-123"
-    assert first[3] == "v"
-    assert first[4] == 0 and first[5] == 0
-    assert first[6] == pytest.approx(0.0)
-
-    # --- value parquet: "flag" (all 6 cells/frame x 4 frames = 24 rows) ---
-    flag_rows = con.execute(
-        f"SELECT dataset, uuid, variable, i, j, value "
-        f"FROM read_parquet('{value_paths['flag']}') WHERE i = 1 AND j = 2"
-    ).fetchall()
-    assert len(flag_rows) == 4
-    assert all(
-        r[0] == "foo.zarr" and r[1] == "uuid-123" and r[2] == "flag" and r[5] == 1.0
-        for r in flag_rows
-    )
+    assert "_ChunkSizes" not in meta.variables["v"].attrs
 
 
-def test_generate_parquet_raises_for_unknown_variable(monkeypatch, tmp_path):
+def test_build_metadata_sets_parquet_path_per_variable(monkeypatch):
+    _patch_source(monkeypatch, _fake_dataset(["2024-01-01T00:00:00"]))
+
+    meta = gen.build_metadata("s3://bucket/foo.zarr", "uuid-123", ["v", "flag"])
+
+    assert meta.variables["v"].parquet_path == "foo/v.parquet"
+    assert meta.variables["flag"].parquet_path == "foo/flag.parquet"
+
+
+def test_build_metadata_raises_for_unknown_variable(monkeypatch):
     _patch_source(monkeypatch, _fake_dataset(["2024-01-01T00:00:00"]))
 
     with pytest.raises(FileNotFoundError, match="NOT_A_REAL_VAR"):
+        gen.build_metadata("s3://bucket/foo.zarr", "uuid-123", ["NOT_A_REAL_VAR"])
+
+
+# --- _sparse_rows_for_slice -----------------------------------------------
+
+
+def test_sparse_rows_for_slice_drops_nan_cells():
+    arr = np.array([[0.0, np.nan], [2.0, 3.0]])
+    rows = gen._sparse_rows_for_slice(
+        arr, "2024-01-01T00:00:00.000000000Z", "d", "u", "v"
+    )
+
+    assert len(rows) == 3
+    assert not ((rows["i"] == 0) & (rows["j"] == 1)).any()
+
+
+def test_sparse_rows_for_slice_carries_identity_columns():
+    arr = np.array([[1.0]])
+    rows = gen._sparse_rows_for_slice(
+        arr, "2024-01-01T00:00:00.000000000Z", "d.zarr", "u1", "v"
+    )
+
+    row = rows.iloc[0]
+    assert row["timestamp"] == "2024-01-01T00:00:00.000000000Z"
+    assert row["dataset"] == "d.zarr"
+    assert row["uuid"] == "u1"
+    assert row["variable"] == "v"
+    assert row["i"] == 0 and row["j"] == 0
+    assert row["value"] == pytest.approx(1.0)
+
+
+def test_sparse_rows_for_slice_value_column_is_float32():
+    arr = np.array([[1.0]], dtype=np.float64)
+    rows = gen._sparse_rows_for_slice(
+        arr, "2024-01-01T00:00:00.000000000Z", "d", "u", "v"
+    )
+    assert rows["value"].dtype == np.float32
+
+
+def test_sparse_rows_for_slice_all_nan_is_empty():
+    arr = np.array([[np.nan, np.nan]])
+    rows = gen._sparse_rows_for_slice(
+        arr, "2024-01-01T00:00:00.000000000Z", "d", "u", "v"
+    )
+    assert rows.empty
+
+
+# --- generate_parquet orchestration (mocked con + storage) ----------------
+
+
+def _run_generate_parquet(monkeypatch, ds, output_dir="s3://my-bucket/tiler", **kwargs):
+    """generate_parquet with a mocked DuckDB connection and storage S3 calls
+    — verifies generate_parquet's own control flow (paths, configure_s3, SQL
+    targeting), not duckdb's real S3 write.
+    """
+    _patch_source(monkeypatch, ds)
+    monkeypatch.setattr(gen.storage, "configure_s3", lambda con, path: None)
+    monkeypatch.setattr(gen.storage, "write_json", lambda path, data: None)
+    con = MagicMock()
+    return (
         gen.generate_parquet(
-            "s3://bucket/foo.zarr", "uuid-123", ["NOT_A_REAL_VAR"], str(tmp_path)
-        )
+            "s3://bucket/foo.zarr", "uuid-123", ["v"], output_dir, con=con, **kwargs
+        ),
+        con,
+    )
 
 
-def test_generate_parquet_respects_max_timestamps(monkeypatch, tmp_path):
-    times = [f"2024-01-0{n}T00:00:00" for n in range(1, 5)]
-    _patch_source(monkeypatch, _fake_dataset(times))
+def test_generate_parquet_configures_s3_for_the_dataset_directory(monkeypatch):
+    configure_calls = []
+    monkeypatch.setattr(
+        gen.storage, "configure_s3", lambda con, path: configure_calls.append(path)
+    )
+    _patch_source(monkeypatch, _fake_dataset(["2024-01-01T00:00:00"]))
+    monkeypatch.setattr(gen.storage, "write_json", lambda path, data: None)
+
+    gen.generate_parquet(
+        "s3://bucket/foo.zarr",
+        "uuid-123",
+        ["v"],
+        "s3://my-bucket/tiler",
+        con=MagicMock(),
+    )
+
+    assert configure_calls == ["s3://my-bucket/tiler/foo"]
+
+
+def test_generate_parquet_writes_sidecar_to_the_composed_s3_path(monkeypatch):
+    write_json_calls = []
+    monkeypatch.setattr(
+        gen.storage, "write_json", lambda path, data: write_json_calls.append(path)
+    )
+    _patch_source(monkeypatch, _fake_dataset(["2024-01-01T00:00:00"]))
+    monkeypatch.setattr(gen.storage, "configure_s3", lambda con, path: None)
 
     _, metadata_path = gen.generate_parquet(
         "s3://bucket/foo.zarr",
         "uuid-123",
         ["v"],
-        str(tmp_path),
-        max_timestamps=2,
+        "s3://my-bucket/tiler",
+        con=MagicMock(),
     )
-    with open(metadata_path) as f:
-        meta = json.load(f)
-    # The sidecar's own timestamp list still reflects the full store...
-    assert len(meta["timestamps"]) == 4
 
-    # ...but only the most recent 2 were actually converted to value rows.
-    con = duckdb.connect(":memory:")
-    distinct_ts = con.execute(
-        f"SELECT DISTINCT timestamp FROM read_parquet('{str(tmp_path)}/foo/v.parquet') "
-        "ORDER BY timestamp"
-    ).fetchall()
-    assert [r[0] for r in distinct_ts] == [
+    assert metadata_path == "s3://my-bucket/tiler/foo/metadata.json"
+    assert write_json_calls == ["s3://my-bucket/tiler/foo/metadata.json"]
+
+
+def test_generate_parquet_copy_sql_targets_the_s3_value_path(monkeypatch):
+    (value_paths, _), con = _run_generate_parquet(
+        monkeypatch, _fake_dataset(["2024-01-01T00:00:00"])
+    )
+
+    assert value_paths["v"] == "s3://my-bucket/tiler/foo/v.parquet"
+    copy_sql = [
+        call.args[0] for call in con.execute.call_args_list if "COPY" in call.args[0]
+    ]
+    assert any("s3://my-bucket/tiler/foo/v.parquet" in sql for sql in copy_sql)
+
+
+def test_generate_parquet_respects_max_timestamps(monkeypatch):
+    times = [f"2024-01-0{n}T00:00:00" for n in range(1, 5)]
+    seen_batches = []
+    real_fetch_batch = gen._fetch_batch
+    monkeypatch.setattr(
+        gen,
+        "_fetch_batch",
+        lambda store_url, variables, batch_raw_ts: (
+            seen_batches.append(list(batch_raw_ts))
+            or real_fetch_batch(store_url, variables, batch_raw_ts)
+        ),
+    )
+
+    (_, metadata_path), _ = _run_generate_parquet(
+        monkeypatch, _fake_dataset(times), max_timestamps=2
+    )
+
+    # Only the most recent 2 timestamps were ever fetched/converted...
+    assert len(seen_batches) == 1
+    assert [gen._ts_native(t) for t in seen_batches[0]] == [
         "2024-01-03T00:00:00.000000000Z",
         "2024-01-04T00:00:00.000000000Z",
     ]
+    # ...even though the sidecar's own timestamp list reflects the full store.
+    assert metadata_path == "s3://my-bucket/tiler/foo/metadata.json"

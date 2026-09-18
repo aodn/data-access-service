@@ -82,13 +82,8 @@ class TaskScheduler:
         log_memory_usage(logger, f"after reload check '{name}'")
 
     def _store_refresh_task(self):
-        """Re-open every currently-valid tiler store (the scheduled job).
-
-        Sequential (one store at a time) by design, so this never opens more
-        than one Zarr store's metadata at once regardless of how many stores
-        are registered — the peak-memory/CPU stampede this replaced came from
-        several request-triggered refreshes overlapping.
-        """
+        """Re-read every loaded tiler store's metadata.json sidecar (the
+        scheduled job)."""
         if not Config.is_profile_in(
             EnvType.EDGE,
             EnvType.STAGING,

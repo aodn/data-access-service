@@ -16,32 +16,55 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-# Bumped when the sidecar's fields change in a way an older reader cannot
-# handle. A reader that does not recognise the version falls back to the live
-# zarr read rather than guessing at a possibly-incompatible layout.
-TILER_PARQUET_METADATA_VERSION = 1
+
+def dataset_stem(store_url: str) -> str:
+    """``s3://.../foo.zarr`` -> ``foo``. Shared by batch (writes each store's
+    parquet + sidecar under this name) and the live tiler (reads them back),
+    so both sides always agree on the directory name.
+    """
+    return store_url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".zarr")
 
 
 @dataclass(frozen=True)
 class TilerVariableMetadata:
-    """Per-variable facts the sparse value parquet does not carry."""
+    """Per-variable facts the sparse value parquet does not carry.
+
+    ``parquet_path`` is this variable's parquet file, relative to
+    ``TilerParquetConfig.output_dir`` (e.g. ``satellite_sst_1day_snpp/sst.parquet``)
+    - set once by batch at generation time. ``output_dir`` is local disk today
+    and will become an S3 bucket/prefix once upload lands; either way, a
+    reader just joins the two, never re-derives the relative part.
+    """
 
     dtype: str
     attrs: dict[str, Any]
+    parquet_path: str
 
     def to_dict(self) -> dict[str, Any]:
-        return {"dtype": self.dtype, "attrs": self.attrs}
+        return {
+            "dtype": self.dtype,
+            "attrs": self.attrs,
+            "parquet_path": self.parquet_path,
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TilerVariableMetadata":
-        return cls(dtype=str(data["dtype"]), attrs=dict(data.get("attrs") or {}))
+        return cls(
+            dtype=str(data["dtype"]),
+            attrs=dict(data.get("attrs") or {}),
+            parquet_path=str(data["parquet_path"]),
+        )
 
 
 @dataclass(frozen=True)
 class TilerParquetMetadata:
-    """JSON sidecar written beside a store's value parquet(s) (``{uuid}.metadata.json``)."""
+    """JSON sidecar written beside a store's value parquet(s) (``{uuid}.metadata.json``).
 
-    version: int
+    ``source_path`` is the original zarr URL - provenance only, not read by
+    the tiler. Each variable's own ``parquet_path`` (see
+    ``TilerVariableMetadata``) is what locates its data.
+    """
+
     uuid: str
     dataset: str
     source_path: str
@@ -56,7 +79,6 @@ class TilerParquetMetadata:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "version": self.version,
             "uuid": self.uuid,
             "dataset": self.dataset,
             "source_path": self.source_path,
@@ -73,7 +95,6 @@ class TilerParquetMetadata:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TilerParquetMetadata":
         return cls(
-            version=int(data["version"]),
             uuid=str(data["uuid"]),
             dataset=str(data["dataset"]),
             source_path=str(data["source_path"]),
@@ -91,6 +112,43 @@ class TilerParquetMetadata:
         )
 
 
+@dataclass(frozen=True)
+class ProductIdentity:
+    """A batch-discovered product's identity: which store, which variable(s),
+    which metadata collection. Nothing about how the tiler renders it -
+    ``visual``/``ocean_masked``/tile configs are ``products_customisation``
+    config, resolved only on the live tiler side (see
+    ``tiler.services.product.catalog``) so a config-only change never
+    requires a batch rerun.
+    """
+
+    id: str
+    source_path: str
+    variable: str | list[str]
+    metadata_uuid: str | None = None
+
+    @property
+    def variables(self) -> list[str]:
+        return self.variable if isinstance(self.variable, list) else [self.variable]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "source_path": self.source_path,
+            "variable": self.variable,
+            "metadata_uuid": self.metadata_uuid,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ProductIdentity":
+        return cls(
+            id=data["id"],
+            source_path=data["source_path"],
+            variable=data["variable"],
+            metadata_uuid=data.get("metadata_uuid"),
+        )
+
+
 # Bumped when the manifest's fields change in a way an older reader cannot
 # handle.
 ROOT_METADATA_VERSION = 1
@@ -101,10 +159,10 @@ class RootMetadata:
     """The batch-generated catalogue manifest (``root_metadata.json``, written
     once per batch run at the top of the output directory).
 
-    Lists every product the batch successfully converted - full
-    ``Product.to_dict()`` entries, so the tiler API can rebuild its product
-    registry from this file alone, without calling live metadata or opening
-    any zarr store itself.
+    Lists every product the batch successfully converted - ``ProductIdentity``
+    entries, so the tiler API can rebuild its product catalogue from this file
+    alone (layering ``products_customisation`` on top itself), without calling
+    live metadata or opening any zarr store.
     """
 
     version: int

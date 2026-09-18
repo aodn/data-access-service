@@ -4,7 +4,6 @@ Prewarm reports what happened per URL and decides nothing; only the caller
 can tell "one sidecar missing" from "the tiler is down".
 """
 
-import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,6 +18,8 @@ from data_access_service.tiler.services.store.registry import (
     store_registry,
 )
 
+OUTPUT_DIR = "s3://my-bucket/tiler"
+
 
 @pytest.fixture(autouse=True)
 def clear_stores():
@@ -28,20 +29,27 @@ def clear_stores():
 
 
 @pytest.fixture(autouse=True)
-def output_dir(tmp_path, monkeypatch):
+def output_dir(monkeypatch):
     import data_access_service.tiler.services.store.registry as registry_module
 
     monkeypatch.setattr(
         registry_module.Config.get_config(),
         "get_tiler_parquet_config",
-        lambda: MagicMock(output_dir=str(tmp_path)),
+        lambda: MagicMock(output_dir=OUTPUT_DIR),
     )
-    return tmp_path
+    s3_store: dict[str, dict] = {}
+
+    def fake_read_json(path):
+        if path not in s3_store:
+            raise FileNotFoundError(f"{path!r} not found")
+        return s3_store[path]
+
+    monkeypatch.setattr(registry_module, "read_json", fake_read_json)
+    return s3_store
 
 
 def _meta(source_path: str, dataset: str) -> TilerParquetMetadata:
     return TilerParquetMetadata(
-        version=1,
         uuid="u",
         dataset=dataset,
         source_path=source_path,
@@ -50,18 +58,20 @@ def _meta(source_path: str, dataset: str) -> TilerParquetMetadata:
         lat=[0.0],
         lon=[0.0],
         timestamps=["2024-01-15T13:00:00.000000000Z"],
-        variables={"v": TilerVariableMetadata(dtype="float32", attrs={})},
+        variables={
+            "v": TilerVariableMetadata(
+                dtype="float32", attrs={}, parquet_path="v.parquet"
+            )
+        },
         schema_fingerprint="",
         generated_at="",
     )
 
 
-def _write_metadata(output_dir, dataset_stem: str, source_path: str) -> None:
-    d = output_dir / dataset_stem
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "metadata.json").write_text(
-        json.dumps(_meta(source_path, f"{dataset_stem}.zarr").to_dict())
-    )
+def _write_metadata(s3_store: dict, dataset_stem: str, source_path: str) -> None:
+    s3_store[f"{OUTPUT_DIR}/{dataset_stem}/metadata.json"] = _meta(
+        source_path, f"{dataset_stem}.zarr"
+    ).to_dict()
 
 
 @pytest.mark.asyncio

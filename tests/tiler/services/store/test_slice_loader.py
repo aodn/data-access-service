@@ -62,7 +62,6 @@ def _seed_metadata(
 ) -> None:
     variables = variables or {"v": {"dtype": "float32", "attrs": {}}}
     meta = TilerParquetMetadata(
-        version=1,
         uuid="u",
         dataset="x.zarr",
         source_path=STORE_URL,
@@ -72,7 +71,9 @@ def _seed_metadata(
         lon=lon,
         timestamps=[f"{t}.000000000Z" for t in times],
         variables={
-            k: TilerVariableMetadata(dtype=v["dtype"], attrs=v["attrs"])
+            k: TilerVariableMetadata(
+                dtype=v["dtype"], attrs=v["attrs"], parquet_path=f"x/{k}.parquet"
+            )
             for k, v in variables.items()
         },
         schema_fingerprint="",

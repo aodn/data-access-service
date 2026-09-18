@@ -15,6 +15,24 @@ def test_config_trim():
     assert config.get_datavis_data_bucket_name() == "test-site-snapshot-bucket"
 
 
+def test_tiler_parquet_output_dir_requires_s3_prefix(monkeypatch):
+    config = Config.get_config(EnvType.TESTING)
+    monkeypatch.setitem(config.config, "tiler_parquet", {"config": {}})
+    with pytest.raises(ValueError, match="s3_prefix"):
+        config.get_tiler_parquet_config()
+
+
+def test_tiler_parquet_output_dir_composes_s3_uri_from_prefix(monkeypatch):
+    config = Config.get_config(EnvType.TESTING)
+    monkeypatch.setitem(
+        config.config, "tiler_parquet", {"config": {"s3_prefix": "tiler"}}
+    )
+    assert (
+        config.get_tiler_parquet_config().output_dir
+        == "s3://test-site-snapshot-bucket/tiler"
+    )
+
+
 def test_pmtiles_use_fork_process_default():
     config = Config.get_config(EnvType.TESTING)
     pm = config.get_pmtiles_config()

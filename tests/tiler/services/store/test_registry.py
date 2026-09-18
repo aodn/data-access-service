@@ -1,8 +1,7 @@
-"""The metadata.json-backed store registry: no zarr, just the sidecar batch
-writes plus root_metadata.json's product catalogue.
+"""The metadata.json-backed store registry: no zarr, just the S3 sidecar
+batch writes plus root_metadata.json's product catalogue.
 """
 
-import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,6 +9,7 @@ import pytest
 from data_access_service.models.tiler_parquet_types import (
     TilerParquetMetadata,
     TilerVariableMetadata,
+    dataset_stem,
 )
 from data_access_service.tiler.services.product.product import (
     DataTileConfig,
@@ -17,7 +17,6 @@ from data_access_service.tiler.services.product.product import (
     get_lod_grids,
 )
 from data_access_service.tiler.services.store.registry import (
-    _dataset_stem,
     get_available_dates,
     get_store,
     get_store_metadata,
@@ -28,6 +27,7 @@ from data_access_service.tiler.services.store.registry import (
 )
 
 STORE_URL = "s3://aodn-cloud-optimised/foo.zarr"
+OUTPUT_DIR = "s3://my-bucket/tiler"
 
 
 @pytest.fixture(autouse=True)
@@ -49,7 +49,6 @@ def _meta(
     lon = lon if lon is not None else list(range(n_j))
     times = times if times is not None else ["2024-01-15T13:00:00"]
     return TilerParquetMetadata(
-        version=1,
         uuid="u",
         dataset="foo.zarr",
         source_path=STORE_URL,
@@ -58,36 +57,51 @@ def _meta(
         lat=[float(x) for x in lat],
         lon=[float(x) for x in lon],
         timestamps=[f"{t}.000000000Z" for t in times],
-        variables=variables or {"v": TilerVariableMetadata(dtype="float32", attrs={})},
+        variables=variables
+        or {
+            "v": TilerVariableMetadata(
+                dtype="float32", attrs={}, parquet_path="v.parquet"
+            )
+        },
         schema_fingerprint="",
         generated_at="",
     )
 
 
-def _write_metadata(output_dir, dataset_stem: str, meta: TilerParquetMetadata) -> None:
-    d = output_dir / dataset_stem
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "metadata.json").write_text(json.dumps(meta.to_dict()))
-
-
 @pytest.fixture(autouse=True)
-def output_dir(tmp_path, monkeypatch):
+def output_dir(monkeypatch):
+    """Point the registry at a fake S3 base and give it an in-memory,
+    dict-backed stand-in for S3 objects instead of real S3."""
     import data_access_service.tiler.services.store.registry as registry_module
 
     monkeypatch.setattr(
         registry_module.Config.get_config(),
         "get_tiler_parquet_config",
-        lambda: MagicMock(output_dir=str(tmp_path)),
+        lambda: MagicMock(output_dir=OUTPUT_DIR),
     )
-    return tmp_path
+    s3_store: dict[str, dict] = {}
+
+    def fake_read_json(path):
+        if path not in s3_store:
+            raise FileNotFoundError(f"{path!r} not found")
+        return s3_store[path]
+
+    monkeypatch.setattr(registry_module, "read_json", fake_read_json)
+    return s3_store
+
+
+def _write_metadata(
+    s3_store: dict, dataset_stem: str, meta: TilerParquetMetadata
+) -> None:
+    s3_store[f"{OUTPUT_DIR}/{dataset_stem}/metadata.json"] = meta.to_dict()
 
 
 def test_dataset_stem_strips_zarr_suffix():
-    assert _dataset_stem("s3://aodn-cloud-optimised/foo.zarr/") == "foo"
-    assert _dataset_stem("s3://bucket/prefix/bar.zarr") == "bar"
+    assert dataset_stem("s3://aodn-cloud-optimised/foo.zarr/") == "foo"
+    assert dataset_stem("s3://bucket/prefix/bar.zarr") == "bar"
 
 
-def test_get_store_raises_when_metadata_json_missing():
+def test_get_store_raises_when_metadata_json_missing(output_dir):
     with pytest.raises(FileNotFoundError):
         get_store("s3://x/never-written.zarr")
 
@@ -102,7 +116,9 @@ def test_get_store_returns_coords_only_dataset(output_dir):
 
 def test_get_store_metadata_round_trips_variable_attrs(output_dir):
     variables = {
-        "v": TilerVariableMetadata(dtype="float32", attrs={"units": "degree_C"})
+        "v": TilerVariableMetadata(
+            dtype="float32", attrs={"units": "degree_C"}, parquet_path="v.parquet"
+        )
     }
     _write_metadata(output_dir, "foo", _meta(variables=variables))
     meta = get_store_metadata(STORE_URL)
@@ -115,7 +131,7 @@ def test_is_store_available_true_after_successful_load(output_dir):
     assert is_store_available(STORE_URL) is True
 
 
-def test_is_store_available_false_when_metadata_json_missing():
+def test_is_store_available_false_when_metadata_json_missing(output_dir):
     assert is_store_available("s3://x/never-written.zarr") is True  # optimistic default
     with pytest.raises(FileNotFoundError):
         get_store("s3://x/never-written.zarr")
