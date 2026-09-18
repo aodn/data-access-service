@@ -114,6 +114,7 @@ estimation:
 pmtiles:
   config:
     co_bucket: "aodn-cloud-optimised"
+    s3_prefix: "portal/visualization"
     output_pmtiles_dir: "portal/pmtiles/output"
     staged_parquet_dir: "portal/pmtiles/parquet_staged"
     geojsonseq_dir: "geojsonseq_tmp"

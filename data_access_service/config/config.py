@@ -293,6 +293,7 @@ class Config:
 
         return PmtilesGenerationConfig(
             co_bucket=pmconfig.get("co_bucket", "aodn-cloud-optimised"),
+            s3_prefix=pmconfig.get("s3_prefix", "portal/visualization"),
             output_pmtiles_dir=pmconfig["output_pmtiles_dir"],
             staged_parquet_dir=pmconfig["staged_parquet_dir"],
             geojsonseq_dir=pmconfig["geojsonseq_dir"],
