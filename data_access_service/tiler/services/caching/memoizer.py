@@ -167,6 +167,7 @@ class RedisMemoizer(CacheBackend):
             return factory()
 
         if cached is not None:
+            log.info("Redis cache hit for key %s at %s", redis_key, self._endpoint)
             return pickle.loads(cached)
 
         lock_key = f"{redis_key}:lock"
@@ -190,6 +191,12 @@ class RedisMemoizer(CacheBackend):
                 try:
                     self._client.set(
                         redis_key, pickle.dumps(result), ex=self._ttl_seconds
+                    )
+                    log.info(
+                        "Redis cache write for key %s at %s (ttl=%ss)",
+                        redis_key,
+                        self._endpoint,
+                        self._ttl_seconds,
                     )
                 except redis.exceptions.RedisError as exc:
                     self._log_redis_error(
@@ -227,6 +234,11 @@ class RedisMemoizer(CacheBackend):
                 )
                 return factory()
             if cached is not None:
+                log.info(
+                    "Redis cache hit for key %s at %s (after waiting on in-flight compute)",
+                    redis_key,
+                    self._endpoint,
+                )
                 return pickle.loads(cached)
         log.warning(
             "Timed out waiting for in-flight compute of %s; recomputing locally",
