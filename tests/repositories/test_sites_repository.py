@@ -20,10 +20,14 @@ class _GroupedRepo(ParquetRepository):
     """Mooring-shaped: groups its series by NOMINAL_DEPTH."""
 
     table = "test_mooring"
-    bucket = "test-bucket"
-    snapshot_bucket = "test-snapshot"
-    dataset = "s3://test-bucket/test_mooring.parquet"
-    snapshot_dataset = "s3://test-snapshot/test_mooring.parquet"
+    # Required class attrs (see ParquetRepository.__init_subclass__), but these
+    # tests never call load()/read_snapshot()/write_snapshot(), so there's no
+    # real S3 location to point at — empty strings satisfy the check without
+    # implying a connection to real data.
+    bucket = ""
+    snapshot_bucket = ""
+    dataset = ""
+    snapshot_dataset = ""
     time_column = "TIME"
     site_column = "site_code"
     latitude_column = "LATITUDE"
@@ -36,10 +40,11 @@ class _UngroupedRepo(ParquetRepository):
     """Wave-buoy-shaped: no group dimension."""
 
     table = "test_buoy"
-    bucket = "test-bucket"
-    snapshot_bucket = "test-snapshot"
-    dataset = "s3://test-bucket/test_buoy.parquet"
-    snapshot_dataset = "s3://test-snapshot/test_buoy.parquet"
+    # Unused location fields — see the comment on _GroupedRepo above.
+    bucket = ""
+    snapshot_bucket = ""
+    dataset = ""
+    snapshot_dataset = ""
     time_column = "TIME"
     site_column = "site_name"
     latitude_column = "LATITUDE"
@@ -51,10 +56,11 @@ class _QcRepo(ParquetRepository):
     """Grouped, with both value columns QC-gated."""
 
     table = "test_qc"
-    bucket = "test-bucket"
-    snapshot_bucket = "test-snapshot"
-    dataset = "s3://test-bucket/test_qc.parquet"
-    snapshot_dataset = "s3://test-snapshot/test_qc.parquet"
+    # Unused location fields — see the comment on _GroupedRepo above.
+    bucket = ""
+    snapshot_bucket = ""
+    dataset = ""
+    snapshot_dataset = ""
     time_column = "TIME"
     site_column = "site_code"
     latitude_column = "LATITUDE"
@@ -255,10 +261,10 @@ def test_qc_columns_length_must_match_value_columns_or_be_empty():
 
         class _MismatchedQcRepo(ParquetRepository):
             table = "x"
-            bucket = "test-bucket"
-            snapshot_bucket = "test-snapshot"
-            dataset = "s3://test-bucket/x.parquet"
-            snapshot_dataset = "s3://test-snapshot/x.parquet"
+            bucket = ""
+            snapshot_bucket = ""
+            dataset = ""
+            snapshot_dataset = ""
             time_column = "TIME"
             site_column = "site_code"
             latitude_column = "LATITUDE"
