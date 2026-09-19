@@ -13,11 +13,13 @@ from data_access_service.tiler.services.caching.memoizer import (
 
 def _patch_cache_backend(monkeypatch, backend: str):
     config = Config.get_config()
-    original = config.get_tiler_config()
+    original = config.get_tiler_api_config()
     monkeypatch.setattr(
         config,
-        "get_tiler_config",
-        lambda: dataclasses.replace(original, cache_backend=backend),
+        "get_tiler_api_config",
+        lambda: dataclasses.replace(
+            original, cache=dataclasses.replace(original.cache, backend=backend)
+        ),
     )
 
 
@@ -39,7 +41,7 @@ def test_null_memoizer_is_a_cache_backend():
 
 
 def test_uses_configured_backend_without_patching():
-    # config.yaml's tiler.cache_backend default is "redis"; this checks
+    # config.yaml's tiler.config.api.cache.backend default is "redis"; this checks
     # create_memoizer honors it without needing _patch_cache_backend.
     memo = create_memoizer(namespace="l1", ttl_seconds=60)
     assert isinstance(memo, RedisMemoizer)

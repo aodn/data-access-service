@@ -1,11 +1,8 @@
-"""Web Mercator tile and bbox rendering for the visual_tiles router.
+"""Visual tiles: reproject a slice with rio-tiler, apply a colormap and
+encode PNG or WebP.
 
-Resamples a 2-D scalar field through rio-tiler's XarrayReader, applies a
-colormap LUT from [[colormap.resolver]], and encodes as PNG or WebP. The
-antimeridian split in `_to_scalar_parts` is the one non-obvious bit — regional
-grids that cross 180° E (e.g. GSLA 57–185°E) are split into two segments so
-each fits inside rio_tiler's strict ±180 bound; the parts are composited as
-numpy arrays before the single image encode.
+Grids that cross 180°E are split in two, since rio-tiler requires lon within
+±180; the parts are composited before encoding.
 """
 
 import logging
@@ -47,17 +44,10 @@ from data_access_service.tiler.utils.image import (
 
 logger = logging.getLogger(__name__)
 
-# No persistent cache for the fill step — every call recomputes the inpaint +
-# land-cut fill. This dedup is still worth it on its own: it coalesces a
-# burst of concurrent tile requests for the same (product, date) — the
-# common case when a map viewport loads many tiles at once — onto one
-# compute instead of one per tile.
+# Tiles loading together share one coastal fill.
 _fill_dedup = Deduper()
 
-# Coalesces the whole _to_scalar_parts computation (float32 cast + antimeridian
-# split, not just the fill step above) per (store, date, variable,
-# coastal_fill). Without this, every concurrent tile/bbox request for the same
-# date independently re-casts the full-resolution grid to float32.
+# ...and one _to_scalar_parts.
 _scalar_parts_dedup = Deduper()
 
 
@@ -70,15 +60,8 @@ def _get_filled_values(
     lons: np.ndarray,
     lats: np.ndarray,
 ) -> np.ndarray:
-    """Inpaint + land-cut ``values``, deduped per (store, date, variable,
-    coastal_fill) so concurrent tile/bbox/animation-frame requests for the same
-    date share one compute instead of each redoing distance_transform_edt + the
-    land lookup.
-
-    The returned array is shared across every concurrent caller for this key —
-    marked read-only so an accidental downstream mutation fails loudly instead
-    of corrupting it for every other caller.
-    """
+    """``values`` with the coastal fill applied and land cut out. Shared
+    between callers, so read-only."""
     key = (store, date, variable, coastal_fill.max_dist_px)
 
     def compute() -> np.ndarray:
@@ -92,17 +75,14 @@ def _get_filled_values(
 
 
 def warmup_visual() -> None:
-    """Prime rio_tiler + GDAL warp so the first visual tile request doesn't pay
-    one-time init overhead (warp kernel, projection database, rio_tiler internals).
-    Synchronous; intended to be called once during startup.
-    """
+    """Warm up rio-tiler and GDAL at startup, so the first tile isn't slow."""
     da = xr.DataArray(
         np.zeros((16, 16), dtype=np.float32),
         dims=("lat", "lon"),
         coords={"lat": np.linspace(1.0, 0.0, 16), "lon": np.linspace(0.0, 1.0, 16)},
     )
     da = _apply_crs(da)
-    # Synthetic grayscale LUT — avoids depending on the colormap registry being loaded.
+    # A plain grey LUT, so this doesn't need the colormap registry.
     cm = {i: (i, i, i, 255) for i in range(256)}
     try:
         with XarrayReader(da) as reader:
@@ -116,51 +96,33 @@ def warmup_visual() -> None:
 def _img_to_rgba(
     img: ImageData, cm: dict[int, tuple[int, int, int, int]]
 ) -> np.ndarray:
-    """Apply colormap + data mask to a rescaled ImageData, returning an (H, W, 4) RGBA array.
-
-    Mirrors what ImageData.render() does internally but stops before the PNG encode.
-    Used so the antimeridian composite path can merge numpy arrays directly and encode
-    only once at the end — previously each part was encoded to PNG, then re-decoded,
-    composited, and re-encoded.
-    """
+    """A rescaled image -> (H, W, 4) RGBA, before encoding."""
     rgb, cmap_alpha = apply_cmap(img.data, cm)  # rgb: (3, H, W), cmap_alpha: (H, W)
     rgba = np.empty((rgb.shape[1], rgb.shape[2], 4), dtype=np.uint8)
     rgba[..., 0] = rgb[0]
     rgba[..., 1] = rgb[1]
     rgba[..., 2] = rgb[2]
-    # Combine the colormap's own alpha (e.g. transparent categories) with the
-    # ImageData mask (which marks NaN / out-of-extent pixels). Both are uint8 0/255.
+    # Transparent if the colormap or the data mask says so.
     rgba[..., 3] = np.minimum(cmap_alpha, img.mask.astype(np.uint8))
     return rgba
 
 
 def _img_to_rgba_categorical(img: ImageData, lut: dict[int, RGBA]) -> np.ndarray:
-    """Discrete value→colour lookup for a categorical tile, returning (H, W, 4) RGBA.
-
-    Unlike `_img_to_rgba` there is no rescale: the (nearest-resampled) data values are
-    the raw integer flag codes, cast to uint8 so they index the LUT directly. Casting
-    NaN to 0 is safe — those pixels are zeroed out by `img.mask` in the alpha channel.
-    """
+    """A categorical image -> (H, W, 4) RGBA; each code indexes the LUT."""
     codes = np.nan_to_num(img.data, nan=0.0).astype(np.uint8)  # (1, H, W)
     rgb, cmap_alpha = apply_cmap(codes, lut)
     rgba = np.empty((rgb.shape[1], rgb.shape[2], 4), dtype=np.uint8)
     rgba[..., 0] = rgb[0]
     rgba[..., 1] = rgb[1]
     rgba[..., 2] = rgb[2]
-    # We skip img.rescale() on this path, so img.mask is still float (with NaN for
-    # nodata). Derive validity from the data directly: a pixel is opaque only where
-    # it had real data AND its category colour is opaque (transparent "none" stays clear).
+    # Opaque only where there is data and the colour is opaque.
     valid = (~np.isnan(img.data[0])).astype(np.uint8) * 255
     rgba[..., 3] = np.minimum(cmap_alpha, valid)
     return rgba
 
 
 def _composite_over(base: np.ndarray, top: np.ndarray) -> np.ndarray:
-    """Paint `top`'s opaque pixels over `base` (in place) and return it.
-
-    Used to merge antimeridian-split segments — each segment covers a disjoint
-    region, so a simple alpha>0 overwrite is sufficient (no blending needed).
-    """
+    """Copy ``top``'s opaque pixels onto ``base``."""
     mask = top[..., 3] > 0
     base[mask] = top[mask]
     return base
@@ -171,11 +133,7 @@ def _categorical_composite(
     lut: dict[int, RGBA],
     read: Callable[[XarrayReader], ImageData],
 ) -> np.ndarray | None:
-    """Resample each part via ``read`` through the discrete LUT, composite, return RGBA.
-
-    Shared by the tile and bbox categorical paths — they differ only in the reader
-    call (``.tile`` vs ``.part``). Returns None when no part intersects the request.
-    """
+    """Read, colour and composite each part; None if none intersect."""
     result: np.ndarray | None = None
     for da in parts:
         try:
@@ -197,25 +155,11 @@ def _validate_categorical_request(
     rescale: tuple[float, float] | None = None,
     animated: bool = False,
 ) -> None:
-    """Single gate for every categorical request rule, run before rendering.
+    """Reject invalid categorical requests (ValueError -> 400):
 
-    Lives here (not in the router) because the variable's ``attrs`` — the only way
-    to know whether it's categorical — are already loaded for the render dispatch,
-    so the checks cost no extra store read. Raises ``ValueError``; the router maps
-    that to HTTP 400.
-
-    Rules:
-      * categorical variable → reject lossy (animated) WebP, which smears the hard
-        category boundaries into spurious in-between colours;
-      * categorical variable + ``rescale`` → reject (the discrete-lookup path has no
-        continuous scale, so rescale silently does nothing — a client setting it has
-        a misconception worth surfacing);
-      * categorical variable + an explicit *continuous* colormap → reject (pass a
-        categorical colormap, or omit it for the default palette);
-      * categorical variable + a categorical colormap whose values ≠ flag_values →
-        reject (its colours would map to the wrong codes, silently);
-      * continuous variable + a categorical colormap → reject (its fixed colour
-        slots are meaningless on the scale-dependent ramp path).
+    - categorical variable with WebP, ``rescale``, a continuous colormap, or
+      a categorical colormap whose values differ from flag_values;
+    - continuous variable with a categorical colormap.
     """
     colormap_is_categorical = bool(colormap_name) and is_categorical(colormap_name)
 
@@ -271,41 +215,11 @@ def _to_scalar_parts(
     store: str = "",
     date: str = "",
 ) -> list[xr.DataArray]:
-    """Return float32 DataArrays ready for XarrayReader.
+    """The variable as float32 DataArrays for rio-tiler: one, or two when the
+    grid crosses 180°E (the part east of 180 shifted by -360).
 
-    Returns one element in the common case. Returns two elements when the data
-    straddles the antimeridian (e.g. GSLA: 57–185°E):
-      - primary:  lon < 180  (unchanged)
-      - minor:    lon > 180  shifted by −360  (e.g. 180.2–185 → −179.8 to −175)
-
-    Detection uses a contiguity check on the normalised coordinate array rather
-    than a heuristic threshold: if wrapping lon > 180 to negative values leaves a
-    gap larger than 2× the native resolution, the data is a regional straddle, not
-    a global periodic grid.
-
-    lon == 180 is excluded from both segments so that rioxarray's half-pixel padding
-    keeps each segment's bounds strictly inside the ±180 limit rio_tiler enforces.
-
-    If ``coastal_fill`` is set (``Product.visual_tile.coastal_fill``), NaN gaps
-    are filled from the nearest valid cell before any reprojection — once, on
-    the native-resolution array, so every zoom level's bilinear resample sees
-    the same filled source (mirrors data_tiles' inpaint, but at native
-    resolution rather than an LOD-resampled grid, and independently
-    configurable — see product.VisualTileConfig). Any fill that landed on real
-    land is then cut back off (via the same committed Natural Earth raster
-    data_tiles uses) before reprojection, so every downstream render path —
-    tile, bbox, animation — inherits the cut with no per-projection logic of
-    its own (see rendering.masks module docstring). ``store``/``date``
-    are only used as the cache key for this step (see ``_get_filled_values``)
-    — panning/zooming across many tiles of the same date shares one compute.
-    Default to "" for callers that don't need cross-request cache correctness
-    (e.g. tests exercising a single call in isolation).
-
-    Deduped per (store, date, variable, coastal_fill) — see
-    ``_scalar_parts_dedup``. The returned parts are shared across every
-    concurrent caller for this key, so their underlying arrays are marked
-    read-only (an accidental downstream mutation fails loudly instead of
-    corrupting the shared copy for every other caller).
+    Applies ``coastal_fill`` first, if set. Shared between callers per
+    (store, date, variable, coastal_fill), so read-only.
     """
     key = (
         store,
@@ -347,13 +261,11 @@ def _to_scalar_parts(
             max_gap = float(np.max(np.diff(np.sort(normalised))))
 
             if max_gap <= 2 * native_res:
-                # Contiguous after normalisation → global-style wrap is safe.
+                # Contiguous after wrapping: a global grid.
                 da = da.assign_coords(lon=("lon", normalised)).sortby("lon")
                 parts = [_apply_crs(da)]
             else:
-                # Antimeridian straddle: split into two contiguous segments.
-                # Exclude exactly lon=180 from both sides — its half-pixel bound
-                # would land at ±180.x, which exceeds rio_tiler's strict ±180 check.
+                # Crosses 180°E: split in two, leaving out lon=180 exactly.
                 primary = _apply_crs(da.sel(lon=da.lon[da.lon < 180]))
                 minor_da = da.sel(lon=da.lon[da.lon > 180])
                 minor_da = _apply_crs(
@@ -384,7 +296,7 @@ def _rescale_range(
     variable: str = "",
     coastal_fill: CoastalFill | None = None,
 ) -> tuple[float, float] | None:
-    """Return (vmin, vmax) from rescale arg or data range; None if no valid data."""
+    """``rescale``, else the data range; None if no data."""
     if rescale is not None:
         return rescale
 
@@ -421,15 +333,7 @@ def render_tile(
     store: str = "",
     date: str = "",
 ) -> bytes:
-    """Return a 256×256 Web Mercator tile encoded as ``fmt``.
-
-    Returns a fully transparent tile for tiles outside the data extent. Categorical
-    variables (CF ``flag_values``) take the discrete-lookup path — nearest-neighbour
-    resampling and a value-indexed LUT, no rescale; see [[colormap.categorical]].
-    ``colormap_name`` None means "unspecified" (default viridis ramp / default
-    categorical palette). ``coastal_fill`` is ``Product.visual_tile.coastal_fill``;
-    ``store``/``date`` key its cache (see ``_to_scalar_parts``).
-    """
+    """A 256x256 Web Mercator tile; transparent outside the data."""
     attrs = ds[variable].attrs
     _validate_categorical_request(variable, attrs, colormap_name, fmt, rescale=rescale)
     parts = _to_scalar_parts(ds, variable, coastal_fill, store, date)
@@ -483,11 +387,7 @@ def _bbox_parts_to_rgba(
     cm: dict[int, tuple[int, int, int, int]],
     dst_crs: str = "EPSG:3857",
 ) -> np.ndarray | None:
-    """Resample each antimeridian-split part into the bbox, composite, return RGBA.
-
-    Returns None when the bbox intersects none of the parts (caller decides whether
-    to emit a transparent placeholder or skip).
-    """
+    """Render each part into the bbox and composite; None if none intersect."""
     lon_min, lat_min, lon_max, lat_max = bbox_wgs84
     result: np.ndarray | None = None
     for da in parts:
@@ -527,16 +427,8 @@ def render_bbox(
     store: str = "",
     date: str = "",
 ) -> bytes:
-    """Return an image for an arbitrary bbox encoded as ``fmt``.
-
-    bbox must be (minx, miny, maxx, maxy) in ``crs`` ('EPSG:4326' degrees or 'EPSG:3857'
-    meters) — this controls only how the input numbers are interpreted. ``dst_crs`` is
-    the CRS of the *output* image, independent of ``crs``.
-    Returns a fully transparent tile when the bbox does not intersect the data. Categorical
-    variables take the discrete-lookup path (see [[colormap.categorical]] / `render_tile`).
-    ``coastal_fill`` is ``Product.visual_tile.coastal_fill``;
-    ``store``/``date`` key its cache (see ``_to_scalar_parts``).
-    """
+    """An image of ``bbox`` (in ``crs``), rendered in ``dst_crs``;
+    transparent if it misses the data."""
     attrs = ds[variable].attrs
     _validate_categorical_request(variable, attrs, colormap_name, fmt, rescale=rescale)
     parts = _to_scalar_parts(ds, variable, coastal_fill, store, date)
@@ -594,21 +486,10 @@ def render_bbox_animation(
     store: str = "",
     dates: list[str] | None = None,
 ) -> bytes:
-    """Render the same bbox across ``datasets`` and assemble as an animated image.
+    """The same bbox for each dataset, as an animated image.
 
-    ``crs`` controls only how the input ``bbox`` numbers are interpreted; ``dst_crs``
-    is the CRS of the output frames, independent of ``crs``.
-    When ``rescale`` is None, vmin/vmax is computed across the union of every frame's
-    data so the colour ramp stays stable from frame to frame; computing it per-frame
-    causes flicker in low-variance areas.
-    Frames whose data does not intersect the bbox are emitted as fully transparent
-    so timing stays aligned with the date sequence. Categorical variables take the
-    discrete-lookup path (nearest resampling, value-indexed LUT, no rescale).
-    ``coastal_fill`` is ``Product.visual_tile.coastal_fill``, applied identically
-    to every frame (it's a static per-product setting, not per-date).
-    ``store``/``dates`` (one per ``datasets`` entry) key each frame's fill
-    cache (see ``_to_scalar_parts``) so a repeated animation request — or another
-    endpoint hitting the same (product, date) — reuses each frame's compute.
+    Without ``rescale``, one range across all frames, so colours don't
+    flicker. Frames outside the data are transparent.
     """
     if not datasets:
         raise ValueError("render_bbox_animation requires at least one dataset")

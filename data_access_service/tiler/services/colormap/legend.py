@@ -1,9 +1,5 @@
-"""Color-legend PNG rendering.
-
-A legend is a colored bar plus, optionally, three tick labels (lo, mid, hi).
-Continuous colormaps render as a smooth gradient; categorical colormaps render
-as equal-width blocks, one per registered category.
-"""
+"""Legend PNGs: a colour bar, optionally with lo/mid/hi labels. Categorical
+colormaps show one block per category."""
 
 import io
 
@@ -13,7 +9,7 @@ from PIL import Image, ImageDraw, ImageFont
 from data_access_service.tiler.services.colormap.registry import is_categorical
 from data_access_service.tiler.services.colormap.resolver import resolve_colormap
 
-_LABEL_PX = 20  # pixels reserved alongside the bar for tick labels
+_LABEL_PX = 20  # space for the tick labels
 
 
 def render_legend(
@@ -23,12 +19,8 @@ def render_legend(
     height: int = 40,
     orientation: str = "horizontal",
 ) -> bytes:
-    """Render a linear color legend PNG for the given colormap.
-
-    Raises ``ValueError`` (mapped to HTTP 400 by the router) when ``rescale`` is
-    given for a categorical colormap: lo/mid/hi tick labels describe a continuous
-    scale that discrete categories do not have, so the combination is incoherent.
-    """
+    """A legend PNG for ``colormap_name``. Raises ValueError if ``rescale`` is
+    given for a categorical colormap."""
     categorical = is_categorical(colormap_name)
     if categorical and rescale is not None:
         raise ValueError(
@@ -74,7 +66,7 @@ def _build_colorbar(
     bar_h: int,
     vertical: bool,
 ) -> np.ndarray:
-    """Return a (bar_h, bar_w, 4) uint8 color bar array."""
+    """A (bar_h, bar_w, 4) colour bar."""
     bar = np.zeros((bar_h, bar_w, 4), dtype=np.uint8)
     if categorical:
         active = [lut[i] for i in range(256) if lut[i, 3] > 0]
@@ -125,7 +117,7 @@ def _draw_v_labels(
     draw = ImageDraw.Draw(img)
     font = ImageFont.load_default(size=11)
     lo, hi = rescale
-    # vertical: top = hi, bottom = lo
+    # hi at the top
     ticks = [(hi, 0), ((lo + hi) / 2, height // 2), (lo, height - 1)]
     for val, y in ticks:
         draw.line([(bar_w, y), (bar_w + 3, y)], fill=(80, 80, 80, 255))

@@ -1,9 +1,4 @@
-"""S3 storage for batch-generated parquet + JSON sidecars.
-
-``TilerParquetConfig.output_dir`` is always an ``s3://`` URI (see
-``Config.get_tiler_parquet_config``). Paths join with a plain ``/``, not
-``os.path.join`` (which mangles an ``s3://`` prefix).
-"""
+"""Read and write the batch's JSON files on S3."""
 
 import io
 import json
@@ -22,13 +17,13 @@ def _split_s3(s3_url: str) -> tuple[str, str]:
 
 
 def read_json(path: str) -> dict[str, Any] | None:
-    """The parsed JSON at ``path``, or None if it doesn't exist yet."""
+    """The JSON at ``path``, or None if it doesn't exist."""
     bucket, key = _split_s3(path)
     body = AWSHelper().get_s3_object(bucket, key)
     return json.loads(body) if body is not None else None
 
 
 def write_json(path: str, data: dict[str, Any]) -> None:
-    """Write ``data`` as JSON to ``path`` on S3."""
+    """Write ``data`` as JSON to ``path``."""
     bucket, key = _split_s3(path)
     AWSHelper().upload_fileobj_to_s3(io.BytesIO(json.dumps(data).encode()), bucket, key)

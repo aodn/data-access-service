@@ -1,10 +1,10 @@
-"""Pure color utility functions for building colormap.json LUT entries."""
+"""Color helpers for building colormap LUTs."""
 
 from typing import Any
 
 
 def hex_to_rgba(hex_color: str) -> list[int]:
-    """Convert a CSS hex color string to an [R, G, B, A] list."""
+    """CSS hex color -> [R, G, B, A]."""
     h = hex_color.lstrip("#")
     if len(h) == 3:
         h = "".join(c * 2 for c in h)
@@ -16,7 +16,7 @@ def hex_to_rgba(hex_color: str) -> list[int]:
 
 
 def parse_color(v: Any, label: str) -> list[int]:
-    """Accept a hex string or [r, g, b, a] list and return a validated [R, G, B, A] list."""
+    """A hex string or [r, g, b, a] list -> validated [R, G, B, A]."""
     if isinstance(v, str):
         return hex_to_rgba(v)
     if isinstance(v, list | tuple):
@@ -30,7 +30,7 @@ def parse_color(v: Any, label: str) -> list[int]:
 
 
 def interpolate_colormap(stops: list[list[int]]) -> list[list[int]]:
-    """Linearly interpolate N evenly-spaced RGBA stops to 256 entries."""
+    """Interpolate evenly spaced RGBA stops to 256 entries."""
     import numpy as np
 
     arr = np.array(stops, dtype=float)
@@ -43,13 +43,8 @@ def interpolate_colormap(stops: list[list[int]]) -> list[list[int]]:
 
 
 def categorical_lut(categories: dict[int, list[int]]) -> list[list[int]]:
-    """Map integer category values directly to a 256-entry RGBA LUT.
-
-    Each value is its own slot — no rescaling — so distinct category codes can
-    never collide onto the same slot the way a rescaled mapping could. Values
-    outside 0-255 are skipped (rio-tiler's uint8 LUT can't represent them);
-    categorical products use small non-negative codes in practice.
-    """
+    """A 256-entry LUT with each category code in its own slot. Codes outside
+    0-255 are skipped."""
     lut = [[0, 0, 0, 0] for _ in range(256)]
     for val, color in categories.items():
         if 0 <= val <= 255:

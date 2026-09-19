@@ -2,8 +2,6 @@
 batch writes plus root_metadata.json's product catalogue.
 """
 
-from unittest.mock import MagicMock
-
 import pytest
 
 from data_access_service.models.tiler_parquet_types import (
@@ -68,8 +66,8 @@ def output_dir(monkeypatch):
 
     monkeypatch.setattr(
         registry_module.Config.get_config(),
-        "get_tiler_parquet_config",
-        lambda: MagicMock(output_dir=OUTPUT_DIR),
+        "get_tiler_output_dir",
+        lambda: OUTPUT_DIR,
     )
     s3_store: dict[str, dict] = {}
 

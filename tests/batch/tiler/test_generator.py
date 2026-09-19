@@ -11,7 +11,7 @@ from data_access_service.batch.tiler.generator import (
 from data_access_service.models.tiler_parquet_types import ProductIdentity
 from data_access_service.models.tiler_types import (
     TilerBatchDuckDBConfig,
-    TilerParquetConfig,
+    TilerBatchConfig,
 )
 
 
@@ -19,13 +19,13 @@ def _product(pid: str, store: str, variable, uuid: str = "uuid-a") -> ProductIde
     return ProductIdentity(id=pid, store=store, variable=variable, metadata_uuid=uuid)
 
 
-def _tp_config(
+def _batch_config(
     output_dir: str = "s3://my-bucket/tiler", **overrides
-) -> TilerParquetConfig:
+) -> TilerBatchConfig:
     base = dict(
         output_dir=output_dir,
-        batch_days=30,
-        window_days=5,
+        max_chunks_per_run=2,
+        use_fork_process=True,
         duckdb=TilerBatchDuckDBConfig(
             memory_limit="256MB",
             threads=1,
@@ -33,7 +33,7 @@ def _tp_config(
         ),
     )
     base.update(overrides)
-    return TilerParquetConfig(**base)
+    return TilerBatchConfig(**base)
 
 
 def _fake_s3_json_store(monkeypatch) -> dict[str, dict]:
@@ -162,7 +162,7 @@ class TestGenerateForAllProducts:
             generator,
             "config",
             MagicMock(
-                get_tiler_parquet_config=lambda: _tp_config(),
+                get_tiler_batch_config=lambda: _batch_config(),
             ),
         )
 
@@ -170,7 +170,7 @@ class TestGenerateForAllProducts:
         monkeypatch.setattr(
             generator,
             "_build_in_subprocess",
-            lambda store, uuid, variables, tp_config: calls.append(store)
+            lambda store, uuid, variables, batch_config: calls.append(store)
             or store == "good",
         )
 
@@ -194,7 +194,7 @@ class TestGenerateForAllProducts:
             generator,
             "config",
             MagicMock(
-                get_tiler_parquet_config=lambda: _tp_config(),
+                get_tiler_batch_config=lambda: _batch_config(),
             ),
         )
 
@@ -202,7 +202,7 @@ class TestGenerateForAllProducts:
         monkeypatch.setattr(
             generator,
             "_build_in_subprocess",
-            lambda store, uuid, variables, tp_config: calls.append(store) or True,
+            lambda store, uuid, variables, batch_config: calls.append(store) or True,
         )
 
         generate_tiler_parquet_for_all_products(api=MagicMock(), uuid="uuid-b")
@@ -224,7 +224,7 @@ class TestGenerateForAllProducts:
             generator,
             "config",
             MagicMock(
-                get_tiler_parquet_config=lambda: _tp_config(),
+                get_tiler_batch_config=lambda: _batch_config(),
             ),
         )
         monkeypatch.setattr(generator, "_build_in_subprocess", lambda *a, **k: True)
@@ -247,7 +247,7 @@ class TestGenerateForAllProducts:
             generator,
             "config",
             MagicMock(
-                get_tiler_parquet_config=lambda: _tp_config(),
+                get_tiler_batch_config=lambda: _batch_config(),
             ),
         )
 
@@ -255,7 +255,7 @@ class TestGenerateForAllProducts:
         monkeypatch.setattr(
             generator,
             "_build_in_subprocess",
-            lambda store, uuid, variables, tp_config: calls.append(store) or True,
+            lambda store, uuid, variables, batch_config: calls.append(store) or True,
         )
 
         generate_tiler_parquet_for_all_products(api=MagicMock())
@@ -277,7 +277,7 @@ class TestPublishing:
         monkeypatch.setattr(
             generator,
             "config",
-            MagicMock(get_tiler_parquet_config=lambda: _tp_config()),
+            MagicMock(get_tiler_batch_config=lambda: _batch_config()),
         )
         monkeypatch.setattr(generator, "_build_in_subprocess", lambda *a, **k: True)
         generate_tiler_parquet_for_all_products(api=MagicMock())
@@ -317,7 +317,7 @@ class TestInProcessMode:
             generator,
             "config",
             MagicMock(
-                get_tiler_parquet_config=lambda: _tp_config(use_fork_process=False)
+                get_tiler_batch_config=lambda: _batch_config(use_fork_process=False)
             ),
         )
 
@@ -329,7 +329,7 @@ class TestInProcessMode:
         monkeypatch.setattr(
             generator,
             "build_tiler_parquet",
-            lambda store, uuid, variables, tp_config: calls.append(store) or True,
+            lambda store, uuid, variables, batch_config: calls.append(store) or True,
         )
 
         generate_tiler_parquet_for_all_products(api=MagicMock())
@@ -345,10 +345,10 @@ class TestBuildTilerParquet:
         synced = []
         monkeypatch.setattr(generator, "sync_store", lambda *a, **k: synced.append(a))
 
-        assert generator.build_tiler_parquet("x", "u", ["v"], _tp_config()) is False
+        assert generator.build_tiler_parquet("x", "u", ["v"], _batch_config()) is False
         assert synced == []
 
-    def test_passes_the_window_through(self, monkeypatch):
+    def test_passes_the_chunk_limit_through(self, monkeypatch):
         monkeypatch.setattr(generator, "open_store", lambda store: None)
         seen = {}
 
@@ -358,8 +358,8 @@ class TestBuildTilerParquet:
 
         monkeypatch.setattr(generator, "sync_store", fake_sync)
 
-        assert generator.build_tiler_parquet("x", "u", ["v"], _tp_config()) is True
-        assert seen["window_days"] == 5
+        assert generator.build_tiler_parquet("x", "u", ["v"], _batch_config()) is True
+        assert seen["max_chunks_per_run"] == 2
 
     def test_store_handle_is_released_afterwards(self, monkeypatch):
         monkeypatch.setattr(generator, "open_store", lambda store: None)
@@ -367,7 +367,7 @@ class TestBuildTilerParquet:
         closed = []
         monkeypatch.setattr(generator, "close_store", closed.append)
 
-        generator.build_tiler_parquet("x", "u", ["v"], _tp_config())
+        generator.build_tiler_parquet("x", "u", ["v"], _batch_config())
 
         assert closed == ["x"]
 
@@ -379,4 +379,4 @@ class TestBuildTilerParquet:
 
         monkeypatch.setattr(generator, "sync_store", boom)
 
-        assert generator.build_tiler_parquet("x", "u", ["v"], _tp_config()) is False
+        assert generator.build_tiler_parquet("x", "u", ["v"], _batch_config()) is False

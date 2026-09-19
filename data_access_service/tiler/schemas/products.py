@@ -24,15 +24,8 @@ def _coastal_fill_config(
 
 
 class DataTileConfig(BaseModel):
-    """Fields specific to the /data_tiles pipeline: raw-array chunking/padding
-    and coastal inpainting. Not used by /visual_tiles — see
-    ``product.DataTileConfig`` for the runtime counterpart this mirrors.
-
-    One shape serves both directions: validating the optional "data_tile"
-    block of a products_customisation entry in config.yaml (chunk_px/padding
-    fall back to the same defaults Product itself uses when omitted) and
-    serializing it for GET /products. extra="forbid" catches config typos.
-    """
+    """Data-tile settings: chunking, padding, coastal fill. Used for both the
+    config overrides and the /products response."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -42,10 +35,7 @@ class DataTileConfig(BaseModel):
 
 
 class VisualTileConfig(BaseModel):
-    """Fields specific to the /visual_tiles pipeline: independent coastal-fill
-    opt-in/tuning from DataTileConfig's — see ``product.VisualTileConfig``
-    for the runtime counterpart this mirrors and why it's kept separate.
-    """
+    """Visual-tile settings: coastal fill."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -53,30 +43,18 @@ class VisualTileConfig(BaseModel):
 
 
 class ProductConfig(BaseModel):
-    """The resolved configuration of a product, serialized for GET /products
-    from a live Product (see from_product). extra="forbid" guards it against
-    drifting from Product.
-
-    Served identically at both /tiler/data_tiles/products and
-    /tiler/visual_tiles/products — data_tile/visual_tile are nested (rather
-    than a set of flat fields) so each client can see at a glance which part
-    of the payload is its own pipeline's config (e.g. /visual_tiles has no
-    chunking/padding concept, so those only ever appear under data_tile).
-
-    Fields here must match Product's fields, except for lod_grids (computed,
-    not config).
-    """
+    """A product as returned by /products. Mirrors ``Product``, minus
+    ``lod_grids``."""
 
     model_config = ConfigDict(extra="forbid")
 
     id: str
     store: str
     variable: str | list[str]
-    # Links this product to its GeoNetwork/STAC collection UUID. Null when absent.
+    # The GeoNetwork/STAC collection UUID.
     metadata_uuid: str | None = None
     ocean_masked: bool
-    # Whether /visual_tiles can render this product; ogcapi-java keys its
-    # tile_types on it, so it's required rather than defaulted.
+    # Whether visual tiles are available (ogcapi-java relies on it).
     visual: bool
     data_tile: DataTileConfig = Field(default_factory=DataTileConfig)
     visual_tile: VisualTileConfig = Field(default_factory=VisualTileConfig)
@@ -102,17 +80,8 @@ class ProductConfig(BaseModel):
 
 
 class ProductOverride(BaseModel):
-    """One products_customisation entry in config.yaml: per-product tuning
-    layered onto a candidate discovered by the gridded_variables section + the
-    metadata catalogue (see services/product/discovery.py), matched by the
-    derived ``id`` (``{dataset_name}:{variable(s)}``, see discovery.product_id).
-
-    A candidate with no matching entry here keeps plain defaults
-    (ocean_masked=False, visual inferred from arity, default tile configs).
-    ``visual: true`` on a pair is rejected at application time, mirroring the
-    old per-entry rule now that arity and capability are decided in different
-    places. extra="forbid" catches typos.
-    """
+    """One ``products_customisation`` entry, matched to a product by ``id``.
+    Unset fields keep the product's defaults."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -141,14 +110,12 @@ def parse_product_overrides(raw: Any) -> dict[str, ProductOverride]:
 
 
 def load_product_overrides() -> dict[str, ProductOverride]:
-    raw = Config.get_tiler_products_customisation() or []
+    raw = Config.get_config().get_tiler_products_customisation() or []
     return parse_product_overrides(raw)
 
 
 class DateRange(BaseModel):
-    # Product's full dataset bounds (earliest/latest available date), independent of
-    # the from/to filter applied to `available_dates`. Both None when the product has
-    # no dates at all.
+    # First and last available date, ignoring from/to. None if no dates.
     start: str | None
     end: str | None
 

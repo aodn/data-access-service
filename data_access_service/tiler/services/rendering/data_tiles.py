@@ -1,15 +1,8 @@
-"""Data-tile rendering pipeline.
+"""Data tiles: resample the slice to the LOD grid, cut out the (x, y) chunk
+and encode it as PNG.
 
-End-to-end path for a single ``/data_tiles/{product}/{date}/{z}/{x}/{y}.png``
-request: compute the processed grid for (product, date, lod) via the kernels
-(deduped in-process across concurrent tiles sharing the same grid — see
-``_processed_dedup``), extract the chunk for (x, y) with edge padding, pack
-into RGBA, encode PNG.
-
-Scalar products use a 24-bit normalised uint spread across R/G/B (alpha carries
-the ocean mask). Multi-variable products (e.g. UV currents) put one variable in
-each of R/G with the mask in B (alpha stays opaque so the shader can use B as
-data).
+Scalars are a 24-bit value in R/G/B with the mask in alpha. Pairs put one
+variable each in R and G, the mask in B, and keep alpha opaque.
 """
 
 import math
@@ -30,21 +23,14 @@ from data_access_service.tiler.services.rendering.masks import (
 )
 from data_access_service.tiler.utils.image import encode_rgba
 
-# No persistent cache for the processed grid — every call recomputes it from
-# the L1 slice. This dedup is still worth it on its own: it coalesces a burst
-# of concurrent tile requests for the same (product, date, lod) — the common
-# case when a map viewport loads many tiles at once — onto one compute
-# instead of one per tile. See Deduper's docstring for why this matters
-# regardless of CACHE_BACKEND.
+# Not cached, but tiles loading together share one computation.
 _processed_dedup = Deduper()
 
 
 def _var_range(ds: xr.Dataset, var: str) -> tuple[float, float]:
     lo = float(ds[var].min(skipna=True).values)
     hi = float(ds[var].max(skipna=True).values)
-    # All-NaN slice: min/max return NaN. Fall back to a benign range so the
-    # normalize path produces well-defined zeros; the ocean mask will mark every
-    # pixel transparent.
+    # All-NaN slice: use any range; every pixel is masked anyway.
     if math.isnan(lo) or math.isnan(hi):
         return (0.0, 1.0)
     return (lo, hi) if hi != lo else (lo, lo + 1.0)
@@ -53,17 +39,11 @@ def _var_range(ds: xr.Dataset, var: str) -> tuple[float, float]:
 def _compute_processed(
     product: Product, ds: xr.Dataset, lod: int
 ) -> tuple[list[np.ndarray], np.ndarray]:
-    """Resample every product variable to the LOD grid and normalise.
+    """Resample and normalise each variable on the LOD grid.
 
-    Returns ``(normalised, ocean)`` where:
-      * ``normalised`` is one array per variable in ``product.variables`` order.
-        Scalar products (1 variable) get one ``uint32`` array normalised across
-        24 bits (R/G/B packed in render_tile). Multi-variable products (e.g. UV
-        currents, 2 variables) get one ``uint8`` array per variable, normalised
-        across 8 bits — each variable lives in its own channel.
-      * ``ocean`` is ``uint8`` (0/1), 1 where *every* variable has a valid value.
-        For multi-variable products this prevents one channel encoding a sentinel
-        zero while the mask claims valid data.
+    Returns ``(normalised, ocean)``: one array per variable (24-bit for a
+    scalar, 8-bit per variable for a pair), and a 0/1 mask that is 1 where
+    every variable has a value.
     """
     data_tile = product.data_tile
     grid_cols, grid_rows = data_tile.lod_grids[lod]
@@ -72,14 +52,11 @@ def _compute_processed(
     variables = product.variables
 
     raw = resample_variables_to_grid(ds, variables, total_w, total_h)
-    # Sparse products (e.g. GSLA): extend valid data toward the coast before
-    # normalising, so the filled cells register as valid in the per-variable mask.
+    # Fill toward the coast first, so filled cells count as valid.
     if data_tile.coastal_fill is not None:
         raw = [inpaint_nearest(r, data_tile.coastal_fill.max_dist_px) for r in raw]
 
-    # Scalar: pack one value across 3 bytes (R/G/B) for sub-percent precision over the
-    # data range. Multi-variable: one byte per channel — precision drops to ~0.4%, but
-    # the frontend shader needs each channel independently addressable.
+    # 3 bytes for a scalar, 1 byte per variable for a pair.
     out_max = 16777215 if len(variables) == 1 else 255
     normalised: list[np.ndarray] = []
     valid_masks: list[np.ndarray] = []
@@ -89,7 +66,6 @@ def _compute_processed(
         normalised.append(norm)
         valid_masks.append(valid)
 
-    # ocean = AND of per-variable valid masks (1 where every variable is non-NaN).
     if len(valid_masks) == 1:
         ocean = valid_masks[0]
     else:
@@ -97,15 +73,10 @@ def _compute_processed(
         for vm in valid_masks[1:]:
             ocean &= vm
 
-    # Anomalous values outside the model's valid ocean domain (Product.ocean_masked)
-    # are already nulled on the raw slice (masks.apply_ocean_mask), so they arrive
-    # here as NaN and fall out of the per-variable valid masks above — nothing to do.
     if data_tile.coastal_fill is not None:
         lon_min, lon_max = float(ds.lon.min()), float(ds.lon.max())
         lat_min, lat_max = float(ds.lat.min()), float(ds.lat.max())
-        # Cut the coastal fill (and any data that bled over land) back off using
-        # the real Natural Earth coastline, so we never paint fabricated values
-        # onto land.
+        # Don't paint filled values over land.
         land = land_mask_for_grid(lon_min, lon_max, lat_min, lat_max, total_w, total_h)
         ocean = ocean & ~land
 
@@ -115,9 +86,7 @@ def _compute_processed(
 def _get_processed(
     product: Product, load_ds: Callable[[], xr.Dataset], lod: int, date: str
 ) -> tuple[list[np.ndarray], np.ndarray]:
-    """load_ds only called once per (product, date, lod); concurrent identical
-    requests always share one compute in-process via ``_processed_dedup``.
-    """
+    """The processed grid; concurrent identical requests share one compute."""
     key = (product.store, date, tuple(product.variables), lod)
 
     def compute() -> tuple[list[np.ndarray], np.ndarray]:
@@ -185,9 +154,7 @@ def render_tile(
     img = np.zeros((h, w, 4), dtype=np.uint8)
 
     if len(chunks) == 1:
-        # Scalar: one 24-bit value spread across R/G/B; alpha carries the ocean mask.
-        # Force RGB to 0 for non-ocean pixels so partial PNG decoders still see a clean
-        # transparent boundary even if they ignore alpha.
+        # Scalar: 24-bit value in R/G/B, mask in alpha; RGB zeroed off the mask.
         val = chunks[0]
         img[:, :, 0] = (val >> 16) & 0xFF
         img[:, :, 1] = (val >> 8) & 0xFF
@@ -195,8 +162,7 @@ def render_tile(
         img[:, :, 3] = chunk_m * 255
         img[chunk_m == 0, :3] = 0
     else:
-        # Multi-variable (e.g. UV currents): each variable in its own channel,
-        # mask in the next channel, alpha kept opaque so the shader can use B as data.
+        # Pair: variables in R and G, mask in B, alpha opaque.
         img[:, :, 0] = chunks[0]
         img[:, :, 1] = chunks[1]
         img[:, :, 2] = chunk_m * 255

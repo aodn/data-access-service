@@ -1,11 +1,11 @@
 """The committed gridded_variables section of config.yaml is valid and still
 says what it means.
 
-Discovery only ever sees this section at boot, against real metadata. Loading
+Batch discovery reads this section against real metadata. Loading
 it here makes a semantically-drifted seed fail in CI rather than leaving the
-tiler at 503 on deploy. There's no schema validation layer any more — it's
+batch with no products. There's no schema validation layer any more — it's
 just a flat list of variable names/pairs — so this exercises the real loader
-(services/product/discovery.py::_load_gridded_variable_specs) directly.
+(batch/tiler/discovery.py::_load_gridded_variable_specs) directly.
 Per-product tuning lives in the products_customisation section — see test_products_config.py.
 """
 

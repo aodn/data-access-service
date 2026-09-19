@@ -1,17 +1,8 @@
-"""Tiler warmup, run at app startup from the batch-published catalogue.
+"""Tiler startup: load the catalogue from ``root_metadata.json`` and each
+store's ``metadata.json``, then mark the tiler ready.
 
-Every product listed in ``root_metadata.json`` is published immediately —
-nothing waits on its store's sidecar loading. Per-store health lands in
-``store.registry`` (via ``prewarm_stores``) and is enforced per-request from
-there, not by withholding a product from the registry. The one thing that
-still keeps the tiler unready is every store failing to load, which would
-serve a catalogue that 404s on every request. Every other fatal path also
-exits without ``mark_tiler_ready()`` — the failure mode is a 503, never a
-wrong catalogue.
-
-No live API metadata and no zarr here — the whole catalogue comes from S3:
-``root_metadata.json`` + each store's ``metadata.json`` sidecar, both
-published by the batch conversion job (``batch.tiler.generator``).
+Any failure, or every store failing to load, leaves it unready (503).
+``refresh_catalog`` is also run by the scheduler, to pick up batch changes.
 """
 
 import asyncio
@@ -35,14 +26,17 @@ from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.product.registry import load_products
 from data_access_service.tiler.services.rendering.kernels import warmup_resample
 from data_access_service.tiler.services.rendering.visual_tiles import warmup_visual
-from data_access_service.tiler.services.store.registry import prewarm_stores
+from data_access_service.tiler.services.store.registry import (
+    prewarm_stores,
+    retain_stores,
+)
 from data_access_service.tiler.utils.s3_json import read_json
 
 logger = logging.getLogger(__name__)
 
 
-def _load_root_metadata() -> dict[str, Product]:
-    output_dir = Config.get_config().get_tiler_parquet_config().output_dir
+def _load_catalog() -> dict[str, Product]:
+    output_dir = Config.get_config().get_tiler_output_dir()
     root = RootMetadata.from_dict(read_json(root_metadata_path(output_dir)))
     identities = {
         entry["id"]: ProductIdentity.from_dict(entry) for entry in root.products
@@ -50,19 +44,31 @@ def _load_root_metadata() -> dict[str, Product]:
     return build_catalog(identities)
 
 
+def refresh_catalog() -> tuple[dict[str, Product], dict[str, BaseException | None]]:
+    """Publish the products in ``root_metadata.json``, load the metadata of any
+    store not loaded yet, and forget removed stores. Blocking (S3 reads).
+
+    Returns ``(products, {store: None or the load error})``.
+    """
+    products = _load_catalog()
+    load_products(products)
+    stores = {product.store for product in products.values()}
+    retain_stores(stores)
+    outcomes = prewarm_stores(sorted(stores))
+    return products, outcomes
+
+
 async def run_tiler_warmup() -> None:
     try:
-        products = _load_root_metadata()
-
-        load_products(products)
+        products, outcomes = await anyio.to_thread.run_sync(
+            refresh_catalog, limiter=TILE_THREAD_LIMITER
+        )
         load_colormaps()
         await anyio.to_thread.run_sync(warmup_resample, limiter=TILE_THREAD_LIMITER)
         await anyio.to_thread.run_sync(warmup_visual, limiter=TILE_THREAD_LIMITER)
 
-        outcomes = await prewarm_stores(
-            sorted({product.store for product in products.values()})
-        )
-        if all(outcome is not None for outcome in outcomes.values()):
+        failed = sum(1 for outcome in outcomes.values() if outcome is not None)
+        if failed == len(outcomes):
             raise RuntimeError(
                 f"All {len(outcomes)} store(s) failed to load; refusing to "
                 "mark the tiler ready with a catalogue that would 404 on "
@@ -70,7 +76,6 @@ async def run_tiler_warmup() -> None:
             )
 
         mark_tiler_ready()
-        failed = sum(1 for outcome in outcomes.values() if outcome is not None)
         logger.info(
             "Tiler ready: %d products from %d stores (%d store(s) failed to load)",
             len(products),
@@ -78,6 +83,6 @@ async def run_tiler_warmup() -> None:
             failed,
         )
     except asyncio.CancelledError:
-        raise  # shutdown, not a warmup failure
+        raise  # shutdown
     except Exception:
         logger.critical("Tiler warmup failed; tiler remains unready", exc_info=True)

@@ -1,15 +1,5 @@
-"""Per-store registry of long-lived Zarr handles via aodn_cloud_optimised.
-
-Batch-only: the one place that still opens real zarr stores. The live tiler
-API never touches zarr — it reads what this module's caller
-(``parquet_generator``/``generator``) publishes instead (``root_metadata.json``
-+ each store's ``metadata.json`` sidecar).
-
-Also validates: ``open_store`` checks a store is a lat/lon grid with a time
-dimension and reports the outcome, so ``generator`` can skip broken stores.
-Stores are opened one at a time, each in its own forked worker, so only one
-zarr is ever held in memory.
-"""
+"""Open zarr stores for the batch job, one at a time, and check each is a
+time/lat/lon grid."""
 
 from __future__ import annotations
 
@@ -33,15 +23,15 @@ _OPEN_BACKOFF_SECONDS = 1.0
 
 
 class NotGriddedStoreError(ValueError):
-    """The store opened but is not a lat/lon grid. Retrying will not change it."""
+    """Not a lat/lon grid."""
 
 
 class NoTimeDimensionError(ValueError):
-    """The store opened but has no time dimension; every date request would 404."""
+    """No time dimension."""
 
 
 def _normalise_coords(ds: xr.Dataset, store: str) -> xr.Dataset:
-    """Rename TIME/LATITUDE/LONGITUDE → time/lat/lon and validate dims."""
+    """Rename coords to time/lat/lon and check the dims."""
     rename = {k: v for k, v in COORD_NAMES.items() if k in ds.dims or k in ds.coords}
     if rename:
         ds = ds.rename(rename)
@@ -57,11 +47,7 @@ def _normalise_coords(ds: xr.Dataset, store: str) -> xr.Dataset:
 
 
 def _resolve_zarr_source(store: str) -> ZarrDataSource:
-    """Open a ZarrDataSource via aodn_cloud_optimised, dask disabled.
-
-    ``chunks=None``: reads are single-slice + eager ``.compute()``, so a dask
-    graph just costs open-time memory for nothing.
-    """
+    """Open ``{store}.zarr`` without dask."""
     key = f"{store}.zarr"
     source = DataQuery.GetAodn().get_dataset(key, chunks=None)
     if not isinstance(source, DataQuery.ZarrDataSource):
@@ -72,24 +58,21 @@ def _resolve_zarr_source(store: str) -> ZarrDataSource:
 
 
 def _open_store(store: str) -> ZarrDataSource:
-    """Resolve via lib and normalise its dataset in place to time/lat/lon."""
+    """Open ``store`` with normalised coords."""
     source = _resolve_zarr_source(store)
-    # Overwrite in place so every later reader sees the normalised view.
     source.zarr_store = _normalise_coords(source.zarr_store, store)
     return source
 
 
 class StoreRegistry:
-    """See module docstring for the design. No same-store dedup — the batch
-    job never requests one store twice at once.
-    """
+    """Open zarr handles, by store."""
 
     def __init__(self) -> None:
         self._stores: dict[str, ZarrDataSource] = {}
         self._lock = threading.Lock()
 
     def _ensure_open(self, store: str) -> ZarrDataSource:
-        """Return the long-lived source for ``store``, opening on first request."""
+        """The handle for ``store``, opened on first use."""
         with self._lock:
             source = self._stores.get(store)
         if source is not None:
@@ -105,25 +88,24 @@ class StoreRegistry:
         return source
 
     def get(self, store: str) -> xr.Dataset:
-        """Return a normalised (time/lat/lon) view, opening the source if needed."""
+        """The store's dataset (time/lat/lon)."""
         return self._ensure_open(store).zarr_store
 
     def get_datasource(self, store: str) -> ZarrDataSource:
-        """Return the long-lived ``ZarrDataSource`` for ``store`` (opens if needed)."""
+        """The store's ``ZarrDataSource``."""
         return self._ensure_open(store)
 
     def close(self, store: str) -> None:
-        """Drop ``store``'s handle, so an in-process run holds one at a time."""
+        """Drop ``store``'s handle."""
         with self._lock:
             self._stores.pop(store, None)
 
     def clear(self) -> None:
-        """Drop all cached state. Intended for tests."""
+        """Drop all handles (tests)."""
         with self._lock:
             self._stores.clear()
 
     def _publish(self, store: str, source: ZarrDataSource) -> None:
-        """Publish the opened source for a store."""
         with self._lock:
             self._stores[store] = source
 
@@ -144,12 +126,8 @@ def close_store(store: str) -> None:
 
 
 def open_store(store: str) -> BaseException | None:
-    """Open ``store`` and confirm it can be converted. None on success, else
-    the exception.
-
-    Not-a-grid, not-there, and no-time-dimension are confirmed and not
-    retried; anything else gets bounded retries with backoff.
-    """
+    """Open ``store``. Returns None on success, else the error. Retries
+    only errors that might be transient."""
     last_error: BaseException | None = None
     for attempt in range(1, _OPEN_MAX_ATTEMPTS + 1):
         try:
@@ -162,7 +140,6 @@ def open_store(store: str) -> BaseException | None:
             logger.info(f"Store has no time dimension, skipping: {store} ({e})")
             return e
         except FileNotFoundError as e:
-            # Usually an upstream rename the catalogue hasn't caught up with.
             logger.warning(f"Store does not exist: {store} ({e})")
             return e
         except Exception as e:

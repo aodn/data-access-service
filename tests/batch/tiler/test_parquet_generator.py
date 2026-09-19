@@ -142,22 +142,6 @@ def test_sparse_rows_for_slice_all_nan_is_empty():
     assert gen._sparse_rows_for_slice(np.array([[np.nan, np.nan]])).empty
 
 
-# --- _in_window -------------------------------------------------------------
-
-
-def test_in_window_keeps_days_back_from_the_latest_timestamp():
-    times = list(pd.to_datetime([f"2024-01-0{n}" for n in range(1, 6)]).values)
-
-    kept = gen._in_window(times, window_days=2)
-
-    assert [str(t)[:10] for t in kept] == ["2024-01-03", "2024-01-04", "2024-01-05"]
-
-
-def test_in_window_none_keeps_everything():
-    times = list(pd.to_datetime(["2020-01-01", "2024-01-01"]).values)
-    assert gen._in_window(times, window_days=None) == times
-
-
 # --- sync_store (stubbed TilerBatchDuckDBClient + storage) -------------------
 
 OUTPUT_DIR = "s3://my-bucket/tiler"
@@ -224,7 +208,7 @@ def test_first_run_writes_one_file_per_variable_per_timestamp(monkeypatch):
 
     written, metadata_path = _sync(monkeypatch, _fake_dataset(DAYS), ("v", "flag"))
 
-    assert written == [_ts(1), _ts(2), _ts(3)]
+    assert written == [_ts(3), _ts(2), _ts(1)]
     assert metadata_path == SIDECAR
     assert f"{OUTPUT_DIR}/foo/v/2024-01-01T000000.000000000Z.parquet" in (
         env.parquet_paths()
@@ -259,23 +243,83 @@ def test_new_timestamps_are_appended_without_rewriting_old_ones(monkeypatch):
     assert env.sidecar_timestamps() == [_ts(1), _ts(2), _ts(3)]
 
 
-def test_window_days_limits_the_timestamps_converted(monkeypatch):
+def test_max_chunks_per_run_caps_a_run_newest_first(monkeypatch):
     env = _Env(monkeypatch)
 
-    written, _ = _sync(monkeypatch, _fake_dataset(DAYS), window_days=1)
+    written, _ = _sync(monkeypatch, _fake_dataset(DAYS), max_chunks_per_run=1)
 
-    assert written == [_ts(2), _ts(3)]
-    assert env.sidecar_timestamps() == [_ts(2), _ts(3)]
+    assert written == [_ts(3)]
+    assert env.sidecar_timestamps() == [_ts(3)]
+
+
+def test_capped_runs_carry_on_until_nothing_is_missing(monkeypatch):
+    env = _Env(monkeypatch)
+    _sync(monkeypatch, _fake_dataset(DAYS), max_chunks_per_run=1)
+
+    assert _sync(monkeypatch, _fake_dataset(DAYS), max_chunks_per_run=1)[0] == [_ts(2)]
+    assert _sync(monkeypatch, _fake_dataset(DAYS), max_chunks_per_run=1)[0] == [_ts(1)]
+
+    env.events.clear()
+    assert _sync(monkeypatch, _fake_dataset(DAYS), max_chunks_per_run=1)[0] == []
+    assert env.events == []
+
+
+def _chunked(ds: xr.Dataset, time_chunk: int) -> xr.Dataset:
+    for v in ds.data_vars:
+        ds[v].encoding["chunks"] = (time_chunk, 2, 3)
+    return ds
 
 
 def test_sidecar_is_written_after_the_files_it_lists(monkeypatch):
     env = _Env(monkeypatch)
 
-    _sync(monkeypatch, _fake_dataset(DAYS), batch_days=2)
+    _sync(monkeypatch, _chunked(_fake_dataset(DAYS), 2))
 
-    # Two batches: files for ts 1-2, sidecar, file for ts 3, sidecar.
+    # Zarr chunks [1-2] [3]: file for ts 3, sidecar, files for ts 1-2, sidecar.
     kinds = [kind for kind, _ in env.events]
-    assert kinds == ["parquet", "parquet", "json", "parquet", "json"]
+    assert kinds == ["parquet", "json", "parquet", "parquet", "json"]
+
+
+def test_each_zarr_time_chunk_is_read_once(monkeypatch):
+    env = _Env(monkeypatch)
+    days = [f"2024-01-0{n}T00:00:00" for n in range(1, 8)]
+    fetched = []
+    real_fetch = gen._fetch_batch
+    monkeypatch.setattr(
+        gen,
+        "_fetch_batch",
+        lambda store, variables, ts: fetched.append(len(ts))
+        or real_fetch(store, variables, ts),
+    )
+
+    # Chunks of 3 over 7 days: [1-3] [4-6] [7]; the latest first, then
+    # history newest first.
+    _sync(monkeypatch, _chunked(_fake_dataset(days), 3))
+
+    assert fetched == [1, 3, 3]
+    assert len(env.sidecar_timestamps()) == 7
+
+
+def test_time_chunk_size_takes_the_smallest_across_variables():
+    ds = _chunked(_fake_dataset(DAYS), 3)
+    ds["flag"].encoding["chunks"] = (2, 2, 3)
+
+    assert gen._time_chunk_size(ds, ["v", "flag"]) == 2
+    assert gen._time_chunk_size(ds, ["v"]) == 3
+
+
+def test_time_chunk_size_is_one_without_chunk_encoding():
+    assert gen._time_chunk_size(_fake_dataset(DAYS), ["v"]) == 1
+
+
+def test_missing_by_chunk_skips_handled_timestamps():
+    times = list(pd.to_datetime([f"2024-01-0{n}" for n in range(1, 8)]).values)
+    handled = {gen._ts_native(times[k]) for k in (0, 3, 4)}
+
+    batches = gen._missing_by_chunk(times, handled, chunk_size=3)
+
+    # Chunks [1-3] [4-6] [7], newest first, minus days 1, 4 and 5.
+    assert batches == [[times[6]], [times[5]], [times[1], times[2]]]
 
 
 def test_s3_secret_is_refreshed_before_writing(monkeypatch):
@@ -287,18 +331,25 @@ def test_s3_secret_is_refreshed_before_writing(monkeypatch):
     assert names.index("refresh_s3_secret") < names.index("write_parquet")
 
 
-def test_all_empty_timestamp_is_skipped_and_left_unlisted(monkeypatch):
+def test_all_empty_timestamp_is_recorded_and_not_read_again(monkeypatch):
     env = _Env(monkeypatch)
     ds = _fake_dataset(DAYS)
     ds["v"][1] = np.nan
 
     written, _ = _sync(monkeypatch, ds)
 
-    assert written == [_ts(1), _ts(3)]
+    assert written == [_ts(3), _ts(1)]
     assert env.sidecar_timestamps() == [_ts(1), _ts(3)]
+    assert env.json[SIDECAR]["empty_timestamps"] == [_ts(2)]
+
+    env.events.clear()
+    monkeypatch.setattr(gen, "_fetch_batch", MagicMock())
+    written, _ = _sync(monkeypatch, ds)
+    assert written == []
+    assert env.events == []
 
 
-def test_grid_change_converts_the_window_again(monkeypatch):
+def test_grid_change_converts_the_store_again(monkeypatch):
     env = _Env(monkeypatch)
     _sync(monkeypatch, _fake_dataset(DAYS))
     env.events.clear()
@@ -306,7 +357,7 @@ def test_grid_change_converts_the_window_again(monkeypatch):
     ds = _fake_dataset(DAYS).assign_coords(lat=[-41.0, -40.5])
     written, _ = _sync(monkeypatch, ds)
 
-    assert written == [_ts(1), _ts(2), _ts(3)]
+    assert written == [_ts(3), _ts(2), _ts(1)]
     assert env.json[SIDECAR]["lat"] == [-41.0, -40.5]
 
 

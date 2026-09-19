@@ -1,4 +1,4 @@
-"""Helpers shared across the three routers (products, data_tiles, visual_tiles)."""
+"""Helpers shared by the tiler routers."""
 
 from collections.abc import Callable
 from http import HTTPStatus
@@ -27,27 +27,20 @@ DATE_EX: dict[str, Example] = {"default": Example(value="2024-02-24T00:00:00Z")}
 T = TypeVar("T")
 
 TILE_THREAD_LIMITER = anyio.CapacityLimiter(
-    Config.get_config().get_tiler_config().thread_pool_size
+    Config.get_config().get_tiler_api_config().thread_pool_size
 )
 
 _DISCONNECT_POLL_INTERVAL = 0.1
 
 
 class ClientDisconnected(Exception):
-    """Raised by run_cancellable when the client disconnects before fn completes."""
+    """The client disconnected before the work finished."""
 
 
 async def run_cancellable(request: Request, fn: Callable[[], T]) -> T:
-    """Run blocking fn on TILE_THREAD_LIMITER, racing it against
-    client-disconnect detection.
-
-    - Disconnect while fn is still queued for a thread: fn never runs.
-    - Disconnect after fn has started: a running thread can't be
-      stopped, so fn keeps running in the background; this raises
-      ClientDisconnected right away instead of waiting, and discards
-      fn's result once it's done.
-    - No disconnect: waits for fn and returns its result normally.
-    """
+    """Run ``fn`` in a tile thread, raising ClientDisconnected as soon as
+    the client goes away. A queued ``fn`` then never runs; a running one
+    finishes in the background and its result is dropped."""
     outcome: list[T] = []
 
     async def _runner(tg: anyio.abc.TaskGroup) -> None:
@@ -84,12 +77,7 @@ def mark_tiler_ready() -> None:
 
 
 def require_tiler_ready() -> None:
-    """FastAPI dependency: 503 until tiler startup has finished.
-
-    Mirrors api_instance.get_api_status() on the main data routes — without
-    it, a request arriving before startup completes would just see an empty
-    product/colormap registry instead of a clear "not ready" response.
-    """
+    """503 until tiler startup has finished."""
     if not _tiler_ready:
         raise HTTPException(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
@@ -105,13 +93,7 @@ def get_product_or_404(product_id: str) -> Product:
 
 
 def is_store_available_or_404(product: Product) -> None:
-    """Reject a product whose backing store failed its last prewarm.
-
-    The registry holds every discovered candidate regardless of store health
-    (see product/registry.py), so this is what keeps a product with a known-
-    bad store (not gridded, absent, no time dimension) from reaching
-    load_slice at all.
-    """
+    """404 if the product's store failed to load."""
     if not is_store_available(product.store):
         raise HTTPException(
             status_code=404,
@@ -120,11 +102,7 @@ def is_store_available_or_404(product: Product) -> None:
 
 
 def visual_product_or_400(product_id: str) -> Product:
-    """Look up a product and reject it if it cannot serve visual tiles.
-
-    A registered scalar can still be data-tile-only, so arity alone can't
-    decide this.
-    """
+    """The product, or 400 if it has no visual tiles."""
     product = get_product_or_404(product_id)
     if not product.visual:
         raise HTTPException(
@@ -135,7 +113,7 @@ def visual_product_or_400(product_id: str) -> Product:
 
 
 def parse_date_or_422(date: str) -> pd.Timestamp:
-    """Parse ``date`` as a full UTC timestamp, raising 422 on failure."""
+    """Parse ``date`` as a UTC timestamp, or 422."""
     try:
         return str_to_utc_timestamp(date, require_tz=True)
     except ValueError as e:
@@ -150,14 +128,7 @@ def parse_date_or_422(date: str) -> pd.Timestamp:
 
 
 def resolve_timestamp_or_404(product: Product, ts: pd.Timestamp) -> None:
-    """Fail fast if ``ts`` does not name an exact instant in the store's time index.
-
-    A cheap dict-lookup mirror of the check ``_fetch_slice_from_store`` performs
-    deep in ``load_slice`` (which still needs to run it there too, to get the
-    raw timestamp for the actual fetch — this doesn't replace that, it just lets
-    a bad date 404 before any further per-request work, e.g. LOD grids, tile
-    bounds).
-    """
+    """404 early if ``ts`` isn't one of the store's timestamps."""
     if resolve_timestamp(product.store, ts) is None:
         raise HTTPException(
             status_code=404,
@@ -175,12 +146,8 @@ def load_slice_or_404(
 
 
 def resolve_colormap_or_error(name: str, *, status_code: int = 400) -> None:
-    """Validate a colormap name, raising HTTPException on failure.
-
-    Defaults to 400 (colormap usually arrives as a query param, so an unknown
-    name is a malformed request). Callers exposing it as a path segment pass
-    status_code=404 — the URL points at a resource that does not exist.
-    """
+    """Raise ``status_code`` (400, or 404 for a path segment) for an unknown
+    colormap."""
     try:
         resolve_colormap(name)
     except ValueError as e:
@@ -188,7 +155,7 @@ def resolve_colormap_or_error(name: str, *, status_code: int = 400) -> None:
 
 
 def single_variable_or_400(product: Product, *, context: str) -> str:
-    """Narrow product.variable to a single str, rejecting multi-variable products."""
+    """The product's single variable, or 400 for a variable pair."""
     if isinstance(product.variable, list):
         raise HTTPException(
             status_code=400,

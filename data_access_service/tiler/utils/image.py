@@ -1,14 +1,8 @@
-"""RGBA → PNG / WebP encoders shared by the data and visual renderers.
+"""RGBA image encoders.
 
-PNG is the only format valid for **data tiles** — the shader decodes RGB bytes
-as raw values, so ``optimize=False`` is mandatory (PIL's optimiser can mutate
-fully-transparent pixels, which would corrupt the encoded data).
-
-**Visual tiles** also accept WebP. Lossy WebP at quality ~85 gives 40–70%
-smaller files than PNG for smooth colour ramps (typical ocean rendering) with
-no human-perceptible difference. Lossy WebP is unsuitable for categorical
-colormaps (hard colour boundaries get ringing artefacts) — the router rejects
-that combination at the request layer.
+Data tiles must be PNG with ``optimize=False``: the client decodes the bytes
+as values. Visual tiles may also be lossy WebP, except for categorical
+colormaps.
 """
 
 import io
@@ -23,11 +17,11 @@ ImageFormat = Literal["png", "webp"]
 AnimatedFormat = Literal["gif", "apng", "webp"]
 
 _WEBP_QUALITY = 85
-_WEBP_METHOD = 4  # PIL default; 0=fast/lower-quality, 6=slow/best
+_WEBP_METHOD = 4  # 0 fast .. 6 best
 
 
 def encode_rgba(arr: np.ndarray, fmt: ImageFormat = "png") -> bytes:
-    """Encode an (H, W, 4) uint8 RGBA array as PNG or WebP bytes."""
+    """(H, W, 4) uint8 RGBA -> PNG or WebP bytes."""
     buf = io.BytesIO()
     img = Image.fromarray(arr, "RGBA")
     if fmt == "webp":
@@ -66,12 +60,8 @@ def animated_media_type(fmt: AnimatedFormat) -> str:
 def encode_rgba_animation(
     frames: list[np.ndarray], fmt: AnimatedFormat, duration_ms: int
 ) -> bytes:
-    """Encode a sequence of (H, W, 4) uint8 RGBA frames as an animated image.
-
-    GIF quantises the colormap to a 256-colour palette — fine for smooth ramps,
-    visibly lossy for categorical. WebP and APNG keep full RGBA fidelity; the
-    router rejects WebP for categorical colormaps the same way the static path does.
-    """
+    """RGBA frames -> an animated GIF, WebP or APNG. GIF is limited to 256
+    colours."""
     if not frames:
         raise ValueError("encode_rgba_animation requires at least one frame")
 
@@ -81,7 +71,6 @@ def encode_rgba_animation(
     buf = io.BytesIO()
 
     if fmt == "gif":
-        # GIF needs paletted frames; PIL handles RGBA → P quantisation when save_all is set.
         head.save(
             buf,
             format="GIF",

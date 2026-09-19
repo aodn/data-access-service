@@ -1,11 +1,5 @@
-"""In-memory ``Product`` registry, published once at startup by tiler warmup.
-
-Products arrive already derived ([[discovery]]) but not yet store-verified —
-every discovered candidate is published unconditionally. Whether a product's
-backing store actually opened is tracked separately by
-``store.registry.is_store_available`` and enforced per-request, not by
-registry membership.
-"""
+"""The in-memory product catalogue, loaded at startup. Store health is
+checked per request (``store.registry``), not here."""
 
 import logging
 
@@ -13,8 +7,7 @@ from data_access_service.tiler.services.product.product import Product
 
 logger = logging.getLogger(__name__)
 
-# Dict identity is load-bearing: test fixtures and the prewarm race-guard
-# (``PRODUCTS.get(p.id) is not p``) rely on this object being mutated in place.
+# Updated in place, never replaced: callers hold a reference to it.
 PRODUCTS: dict[str, Product] = {}
 
 
@@ -23,7 +16,7 @@ def get_product(product_id: str) -> Product | None:
 
 
 def iter_products() -> list[Product]:
-    # A list, not a view: a concurrent publish would break a caller's loop.
+    # A copy, so a concurrent update can't break the caller's loop.
     return list(PRODUCTS.values())
 
 

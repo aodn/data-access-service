@@ -50,8 +50,8 @@ def output_dir(tmp_path, monkeypatch):
     """Point the registry + slice_loader at a scratch output directory."""
     monkeypatch.setattr(
         repo_module.Config.get_config(),
-        "get_tiler_parquet_config",
-        lambda: MagicMock(output_dir=str(tmp_path)),
+        "get_tiler_output_dir",
+        lambda: str(tmp_path),
     )
     return tmp_path
 
@@ -263,3 +263,53 @@ def test_concurrent_identical_loads_share_one_compute(output_dir, monkeypatch):
         calls == 1
     ), "expected exactly one compute; the rest should share it via _slice_dedup"
     assert len(results) == 4
+
+
+def test_cold_reads_are_limited_to_four_at_a_time(output_dir, monkeypatch):
+    days = [f"2024-01-0{n}T00:00:00" for n in range(1, 9)]
+    _seed_metadata(days, [0.0], [0.0])
+
+    lock = threading.Lock()
+    active = 0
+    peak = 0
+
+    def slow_fetch(self, *args, **kwargs):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.05)
+        with lock:
+            active -= 1
+        return np.zeros((1, 1), dtype=np.float32)
+
+    monkeypatch.setattr(
+        repo_module.TilerParquetRepository, "fetch_variable_slice", slow_fetch
+    )
+
+    threads = [
+        threading.Thread(
+            target=loader.load_slice_uncached, args=(STORE, pd.Timestamp(d), ["v"])
+        )
+        for d in days
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert peak == 4
+
+
+def test_cache_hit_skips_the_cold_read_limit(output_dir, monkeypatch):
+    _seed_metadata(["2024-01-15T13:00:00"], [0.0], [0.0])
+    cached = loader.xr.Dataset({"v": (("lat", "lon"), [[1.0]])})
+    monkeypatch.setattr(
+        loader.slice_memo, "get_or_compute", lambda key, factory: cached
+    )
+    limit = MagicMock()
+    monkeypatch.setattr(loader, "_COLD_READ_LIMIT", limit)
+
+    loader.load_slice(STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"])
+
+    limit.__enter__.assert_not_called()

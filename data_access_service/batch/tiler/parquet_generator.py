@@ -28,7 +28,7 @@ _EXCLUDED_ATTRS = frozenset({"_ChunkSizes"})
 
 
 def _json_safe(value):
-    """CF attrs sometimes carry numpy scalars/arrays; json.dump can't handle those."""
+    """numpy values -> plain Python, for JSON."""
     if isinstance(value, np.generic):
         return value.item()
     if isinstance(value, np.ndarray):
@@ -41,25 +41,16 @@ def _ts_native(ts) -> str:
 
 
 def _ts_for_get_data(ts) -> str:
-    """ISO string for ``ZarrDataSource.get_data``'s date bounds.
-
-    Pure query plumbing, never written anywhere: ``get_data`` matches against
-    the store's own naive-UTC time index via pandas, and pandas' own
-    ``isoformat()`` rendering is what's proven to parse back correctly there
-    (mirrors ``slice_loader._ts_for_get_data``, used for the same reason on
-    the live read path).
-    """
+    """Date bound for ``ZarrDataSource.get_data``."""
     return pd.Timestamp(ts).isoformat()
 
 
 def build_metadata(
     store: str, uuid: str, variables: list[str], timestamps: list[str]
 ) -> TilerParquetMetadata:
-    """Grid + per-variable metadata for ``store``, listing ``timestamps`` as
-    converted. Touches only coords/attrs, never the (potentially huge) value
-    data.
-    """
-    ds = get_store(store)  # normalised time/lat/lon view; coords are eager
+    """The sidecar for ``store``: grid, variable attrs and ``timestamps``.
+    Reads coords and attrs only."""
+    ds = get_store(store)
 
     missing = [v for v in variables if v not in ds.data_vars]
     if missing:
@@ -109,8 +100,7 @@ def write_metadata(meta: TilerParquetMetadata, output_dir: str, store: str) -> s
 
 
 def _same_layout(a: TilerParquetMetadata, b: TilerParquetMetadata) -> bool:
-    """Whether files written under ``a`` are still valid under ``b``: same
-    grid and same variables."""
+    """Same grid and variables, so files written under ``a`` still fit ``b``."""
     return (
         a.n_i == b.n_i
         and a.n_j == b.n_j
@@ -124,16 +114,8 @@ def _same_content(a: TilerParquetMetadata, b: TilerParquetMetadata) -> bool:
     return replace(a, generated_at="") == replace(b, generated_at="")
 
 
-def _in_window(raw_timestamps: list, window_days: int | None) -> list:
-    """The store's timestamps within ``window_days`` of its latest one."""
-    if window_days is None or not raw_timestamps:
-        return raw_timestamps
-    start = max(raw_timestamps) - np.timedelta64(window_days, "D")
-    return [t for t in raw_timestamps if t >= start]
-
-
 def _sparse_rows_for_slice(arr: np.ndarray) -> pd.DataFrame:
-    """One (lat, lon) slice -> sparse rows, finite values only."""
+    """A (lat, lon) slice as (i, j, value) rows, NaNs dropped."""
     finite = np.isfinite(arr)
     i_idx, j_idx = np.nonzero(finite)
     return pd.DataFrame(
@@ -145,13 +127,29 @@ def _sparse_rows_for_slice(arr: np.ndarray) -> pd.DataFrame:
     )
 
 
-def _fetch_batch(store: str, variables: list[str], batch_raw_ts: list) -> xr.Dataset:
-    """One ``get_data`` call spanning ``batch_raw_ts``, computed eagerly.
+def _time_chunk_size(ds: xr.Dataset, variables: list[str]) -> int:
+    """The zarr time chunk size (smallest across ``variables``, 1 if unknown)."""
+    sizes = [
+        ds[v].encoding["chunks"][ds[v].dims.index("time")]
+        for v in variables
+        if ds[v].encoding.get("chunks")
+    ]
+    return min(sizes) if sizes else 1
 
-    Mirrors ``slice_loader._fetch_slice_from_store``'s call shape but over a
-    range instead of a single instant, so multiple output timestamps share one
-    S3 round trip.
-    """
+
+def _missing_by_chunk(
+    all_times: list, handled: set[str], chunk_size: int
+) -> list[list]:
+    """Unhandled timestamps grouped by zarr time chunk, newest chunk first."""
+    chunks: dict[int, list] = {}
+    for k, t in enumerate(all_times):
+        if _ts_native(t) not in handled:
+            chunks.setdefault(k // chunk_size, []).append(t)
+    return [chunks[c] for c in sorted(chunks, reverse=True)]
+
+
+def _fetch_batch(store: str, variables: list[str], batch_raw_ts: list) -> xr.Dataset:
+    """Read ``batch_raw_ts`` from the zarr into memory."""
     ds = get_datasource(store).get_data(
         date_start=_ts_for_get_data(batch_raw_ts[0]),
         date_end=_ts_for_get_data(batch_raw_ts[-1]),
@@ -167,77 +165,82 @@ def sync_store(
     uuid: str,
     variables: list[str],
     output_dir: str,
-    batch_days: int = 30,
-    window_days: int | None = None,
+    max_chunks_per_run: int | None = None,
     duckdb_config: TilerBatchDuckDBConfig | None = None,
 ) -> tuple[list[str], str]:
-    """Bring ``store``'s parquet + sidecar up to date with its zarr.
+    """Convert every zarr timestamp that has no parquet yet, one zarr time
+    chunk at a time.
 
-    Only timestamps not already listed in the existing sidecar are converted;
-    files already written are never rewritten. If the grid or variable set
-    changed since the last run, the old timestamps are dropped from the
-    sidecar and the window is converted again.
+    - ``max_chunks_per_run`` caps the chunks per run (None: no cap).
+    - Existing files are never rewritten; a grid or variable change starts
+      the store over.
+    - All-NaN timestamps are recorded as empty and not read again.
+    - The sidecar is saved after each chunk, after its files.
 
-    ``window_days`` limits the run to timestamps within that many days of the
-    store's latest one; None converts the full history. ``batch_days`` is
-    how many timestamps one ``get_data`` call fetches.
-
-    The sidecar is rewritten after every batch that added timestamps (so an
-    interrupted run keeps its progress, and never lists a timestamp before
-    its files exist), and otherwise only if its content changed.
-
-    Returns ``(new timestamps written, metadata_path)``.
+    Returns ``(timestamps written, metadata_path)``.
     """
     if duckdb_config is None:
         raise ValueError("duckdb_config is required")
 
     fresh = build_metadata(store, uuid, variables, timestamps=[])
     existing = read_metadata(output_dir, store)
-    done: set[str] = set()
+    converted: set[str] = set()
+    empty: set[str] = set()
     if existing is not None:
         if _same_layout(existing, fresh):
-            done = set(existing.timestamps)
+            converted = set(existing.timestamps)
+            empty = set(existing.empty_timestamps)
         else:
             logger.warning(
                 "Grid or variables of %s changed since the last run; "
-                "converting its window again",
+                "converting it again",
                 store,
             )
 
-    window = _in_window(list(get_store(store)["time"].values), window_days)
-    pending = [t for t in window if _ts_native(t) not in done]
+    ds_store = get_store(store)
+    missing = _missing_by_chunk(
+        list(ds_store["time"].values),
+        converted | empty,
+        _time_chunk_size(ds_store, variables),
+    )
+    batches = missing if max_chunks_per_run is None else missing[:max_chunks_per_run]
     logger.info(
-        "Tiler parquet sync for %s: %d timestamp(s) in window, %d new",
+        "Tiler parquet sync for %s: %d zarr chunk(s) with missing timestamps, "
+        "%d this run",
         store,
-        len(window),
-        len(pending),
+        len(missing),
+        len(batches),
     )
 
-    converted = set(done)
+    def current() -> TilerParquetMetadata:
+        return replace(
+            fresh, timestamps=sorted(converted), empty_timestamps=sorted(empty)
+        )
+
     written: list[str] = []
+    sidecar_written = False
     metadata_path = store_metadata_path(output_dir, store)
 
     with TilerBatchDuckDBClient(duckdb_config) as client:
-        for start in range(0, len(pending), batch_days):
-            batch_raw_ts = pending[start : start + batch_days]
-            written_before = len(written)
+        for n, batch_raw_ts in enumerate(batches, start=1):
+            changed = False
             ds = _fetch_batch(store, variables, batch_raw_ts)
             batch_ts_set = {_ts_native(t) for t in batch_raw_ts}
-            # A long backfill can outlive the credentials the client started with.
+            # Long runs can outlive the S3 credentials.
             client.refresh_s3_secret()
 
             for k in range(ds.sizes["time"]):
                 ts = _ts_native(ds["time"].values[k])
                 if ts not in batch_ts_set:
-                    # get_data's range can spill outside [batch_raw_ts[0], batch_raw_ts[-1]]
-                    # if the store has no exact instant at the boundary.
+                    # get_data can return instants outside the batch.
                     continue
+                changed = True
                 frames = {
                     v: _sparse_rows_for_slice(ds[v].isel(time=k).values)
                     for v in variables
                 }
                 if all(f.empty for f in frames.values()):
-                    # Nothing to draw; left unlisted so a later run checks again.
+                    empty.add(ts)
                     continue
                 for v, frame in frames.items():
                     client.write_parquet(
@@ -246,19 +249,19 @@ def sync_store(
                 converted.add(ts)
                 written.append(ts)
 
-            if len(written) > written_before:
-                write_metadata(
-                    replace(fresh, timestamps=sorted(converted)), output_dir, store
-                )
+            if changed:
+                write_metadata(current(), output_dir, store)
+                sidecar_written = True
             logger.info(
-                "Tiler parquet sync for %s: %d/%d new timestamp(s) processed",
+                "Tiler parquet sync for %s: %d/%d chunk(s) processed",
                 store,
-                min(start + batch_days, len(pending)),
-                len(pending),
+                n,
+                len(batches),
             )
 
-    final = replace(fresh, timestamps=sorted(converted))
-    if not written and (existing is None or not _same_content(existing, final)):
-        write_metadata(final, output_dir, store)
+    if not sidecar_written and (
+        existing is None or not _same_content(existing, current())
+    ):
+        write_metadata(current(), output_dir, store)
 
     return written, metadata_path

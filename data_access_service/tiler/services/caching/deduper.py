@@ -1,4 +1,4 @@
-"""In-process in-flight request coalescing — no caching, nothing to evict."""
+"""Share one in-flight computation between concurrent callers."""
 
 import concurrent.futures
 import threading
@@ -9,28 +9,11 @@ T = TypeVar("T")
 
 
 class Deduper:
-    """Stops concurrent callers with the same key from redoing the same work.
+    """If a call for ``key`` is already running, wait for its result instead
+    of running ``factory()`` again. Nothing is cached.
 
-    Content-agnostic: doesn't know or care what ``factory()`` does (S3 fetch,
-    resample, render, ...). If a call for ``key`` is already in flight, later
-    callers block and share its result instead of each running ``factory()``
-    themselves. Must be driven from a worker thread (sync ``def`` handler or
-    ``anyio.to_thread.run_sync``), never directly from an ``async def`` on the
-    event loop — waiting on the result is a blocking call.
-
-    Still worth it even where a distributed-lock ``CacheBackend`` (e.g. a future
-    Redis-backed one, ``CACHE_BACKEND=redis``) sits behind it:
-
-    - A distributed lock only dedupes when a non-"none" backend is actually
-      configured. ``CACHE_BACKEND=none`` (this project's default) has no lock
-      at all, so this is the *only* protection against a concurrent burst
-      redoing the same work — not an optimisation on top of something else.
-    - Even with the distributed lock enabled, without this every thread in a
-      local burst would each make its own round trip to the backend (e.g. a
-      failed `SET NX` + a `pubsub` subscribe + wait) to discover someone else
-      already won. This coalesces the whole local burst into one contender
-      first, so only one thread per process ever touches the backend for a
-      given key.
+    Blocks, so call it from a worker thread, not the event loop. Also saves
+    Redis round trips: only one thread per process asks Redis for a key.
     """
 
     def __init__(self) -> None:

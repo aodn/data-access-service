@@ -46,12 +46,7 @@ router = APIRouter()
 
 
 def _require_point_in_bounds(ds: xr.Dataset, lat: float, lon: float) -> None:
-    """Raise 404 if (lat, lon) falls outside the dataset's coverage.
-
-    sel(method="nearest") snaps unconditionally, so without this guard an
-    out-of-bounds request silently returns the edge cell. Bounds match those
-    advertised by /manifest.
-    """
+    """404 if (lat, lon) is outside the data, instead of snapping to the edge."""
     lon_min, lon_max, lat_min, lat_max = dataset_bounds(ds)
     if not (lat_min <= lat <= lat_max and lon_min <= lon <= lon_max):
         raise HTTPException(
@@ -113,8 +108,6 @@ async def get_products_availability(
     from_ts = parse_date_or_422(from_date) if from_date else None
     to_ts = parse_date_or_422(to_date) if to_date else None
 
-    # iter_product_items returns a snapshot list so a concurrent reload can't
-    # raise RuntimeError ("dictionary changed size during iteration") here.
     items = iter_product_items()
     if metadata_uuid is not None:
         items = [
@@ -136,8 +129,7 @@ async def get_products_availability(
         all_dates = get_available_dates(product.store)
         if not all_dates:
             continue
-        # full_date_range is the product's full dataset bounds, independent of from/to;
-        # available_dates below is the from/to-filtered subset.
+        # full_date_range ignores from/to; available_dates doesn't.
         dates = [
             d
             for d, ts in all_dates

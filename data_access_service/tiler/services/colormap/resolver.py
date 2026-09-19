@@ -1,9 +1,4 @@
-"""Colormap name → LUT resolution for the rendering pipeline.
-
-Distinct from [[colormap.registry]]: that module handles persistence and the
-custom registry on disk. This module is the runtime fallback chain used by
-every render call — custom → rio-tiler → matplotlib.
-"""
+"""Look up a colormap by name: custom, then rio-tiler, then matplotlib."""
 
 import numpy as np
 
@@ -11,11 +6,7 @@ from data_access_service.tiler.services.colormap.registry import get_colormap
 
 
 def resolve_colormap(name: str) -> dict[int, tuple[int, int, int, int]]:
-    """Return a rio-tiler colormap dict for the given name.
-
-    Checks custom colormaps first, then rio-tiler's built-ins, then matplotlib
-    so that diverging colormaps like RdBu_r are also available.
-    """
+    """The rio-tiler colormap dict for ``name``."""
     from rio_tiler.colormap import cmap as _rio_cmap
 
     entries = get_colormap(name)

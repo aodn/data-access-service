@@ -1,13 +1,5 @@
-"""Per-store registry of tiler parquet metadata sidecars.
-
-No zarr access here — all zarr-touching work lives in ``batch.tiler``. This
-registry only reads what that job publishes: each store's ``metadata.json``
-sidecar, from S3 at ``TilerParquetConfig.output_dir``.
-
-``get_store_metadata`` returns the sidecar itself (grid, timestamps,
-per-variable dtype/attrs). Actual pixel values come from ``slice_loader``,
-which reads the parquet files directly via duckdb.
-"""
+"""Each store's ``metadata.json`` (grid, timestamps, variable attrs),
+loaded from S3 and cached."""
 
 from __future__ import annotations
 
@@ -28,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def _metadata_path(store: str) -> str:
-    output_dir = Config.get_config().get_tiler_parquet_config().output_dir
+    output_dir = Config.get_config().get_tiler_output_dir()
     return store_metadata_path(output_dir, store)
 
 
@@ -37,17 +29,12 @@ def _load_metadata(store: str) -> TilerParquetMetadata:
 
 
 def _build_time_index(meta: TilerParquetMetadata) -> dict[pd.Timestamp, str]:
-    """``{timestamp: raw_timestamp_string}``. "Z" is stripped only for the
-    lookup key — parsed client timestamps are naive-UTC, and a tz-aware key
-    would never match.
-    """
+    """``{naive-UTC timestamp: raw timestamp string}``."""
     return {pd.Timestamp(raw.rstrip("Z")): raw for raw in meta.timestamps}
 
 
 class StoreRegistry:
-    """See module docstring. Loads each store's sidecar once, on first
-    request, and caches it in-process; ``refresh`` re-reads it.
-    """
+    """Store metadata, loaded on first use; ``refresh`` re-reads it."""
 
     def __init__(self) -> None:
         self._metadata: dict[str, TilerParquetMetadata] = {}
@@ -84,21 +71,16 @@ class StoreRegistry:
             return self._time_index.get(store, {})
 
     def resolve_timestamp(self, store: str, ts: pd.Timestamp) -> str | None:
-        """Resolve an already-parsed UTC timestamp to the store's native
-        timestamp string (the parquet's own ``timestamp`` column value), or
-        None if no such instant exists.
-        """
+        """The store's raw timestamp string for ``ts``, or None."""
         return self.time_index(store).get(ts)
 
     def is_available(self, store: str) -> bool:
-        """True unless the last prewarm of ``store`` recorded a failure."""
+        """False if ``store``'s metadata failed to load."""
         with self._lock:
             return store not in self._failed_stores
 
     def prewarm(self, stores: list[str]) -> dict[str, BaseException | None]:
-        """Load every store's sidecar. Returns ``{store: None on success, else
-        the exception}``.
-        """
+        """Load every store's metadata. Returns ``{store: None or the error}``."""
         outcomes: dict[str, BaseException | None] = {}
         for store in stores:
             try:
@@ -117,9 +99,7 @@ class StoreRegistry:
         return outcomes
 
     def refresh(self) -> None:
-        """Re-read the sidecar for every currently-loaded store, one at a
-        time. One store's failure is logged and does not stop the sweep.
-        """
+        """Re-read every loaded store's metadata; failures are logged."""
         with self._lock:
             stores = list(self._metadata.keys())
         for store in stores:
@@ -130,8 +110,17 @@ class StoreRegistry:
             except Exception:
                 logger.exception(f"Store metadata refresh failed: {store}")
 
+    def retain(self, stores: set[str]) -> None:
+        """Forget every store not in ``stores``."""
+        with self._lock:
+            for store in set(self._metadata) | set(self._failed_stores):
+                if store not in stores:
+                    self._metadata.pop(store, None)
+                    self._time_index.pop(store, None)
+                    self._failed_stores.pop(store, None)
+
     def clear(self) -> None:
-        """Drop all cached state. Intended for tests."""
+        """Drop everything (tests)."""
         with self._lock:
             self._metadata.clear()
             self._time_index.clear()
@@ -150,19 +139,19 @@ def is_store_available(store: str) -> bool:
 
 
 def get_available_dates(store: str) -> list[tuple[str, pd.Timestamp]]:
-    """Return [(iso_string, timestamp)] sorted by timestamp, for `store`."""
-    get_store_metadata(store)  # ensures the time index for this store is populated
+    """``[(iso_string, timestamp)]`` for ``store``, sorted."""
+    get_store_metadata(store)  # loads the time index
     index = store_registry.time_index(store)
     return [(ts_to_utc_iso(ts), ts) for ts in index]
 
 
 def resolve_timestamp(store: str, ts: pd.Timestamp) -> str | None:
-    get_store_metadata(store)  # ensures the time index for this store is populated
+    get_store_metadata(store)  # loads the time index
     return store_registry.resolve_timestamp(store, ts)
 
 
 def unavailable_date_message(store: str, ts: pd.Timestamp) -> str:
-    """ "No data for date ..." message, with a latest-available-date hint."""
+    """ "No data for date ..." with the latest available date."""
     index = store_registry.time_index(store)
     latest = ts_to_utc_iso(max(index)) if index else None
     hint = (
@@ -173,15 +162,16 @@ def unavailable_date_message(store: str, ts: pd.Timestamp) -> str:
     return f"No data for date {ts_to_utc_iso(ts)!r}.{hint}"
 
 
-async def prewarm_stores(stores: list[str]) -> dict[str, BaseException | None]:
-    """Prewarm every store and return the per-store outcome map.
-
-    Async only so the FastAPI startup path can ``await`` it — the actual
-    work is a fast synchronous JSON read.
-    """
+def prewarm_stores(stores: list[str]) -> dict[str, BaseException | None]:
+    """Load the metadata of each store not loaded yet (failed ones are retried)."""
     return store_registry.prewarm(stores)
 
 
+def retain_stores(stores: set[str]) -> None:
+    """Forget stores that are no longer in the catalogue."""
+    store_registry.retain(stores)
+
+
 def refresh_stores() -> None:
-    """Re-read every currently-loaded store's metadata.json (the periodic cron sweep)."""
+    """Re-read every loaded store's metadata (cron)."""
     store_registry.refresh()

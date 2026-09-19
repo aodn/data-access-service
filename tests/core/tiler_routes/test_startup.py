@@ -7,6 +7,7 @@ fails to load.
 """
 
 import asyncio
+import threading
 
 import pytest
 
@@ -35,7 +36,7 @@ def warmup_env(monkeypatch):
 
         return _fn
 
-    async def fake_prewarm(urls):
+    def fake_prewarm(urls):
         calls.append("prewarm")
         state["prewarm_urls"] = urls
         return state["outcomes"]
@@ -50,8 +51,8 @@ def warmup_env(monkeypatch):
 
     monkeypatch.setattr(
         startup,
-        "_load_root_metadata",
-        lambda: (calls.append("load_root_metadata"), state["candidates"])[1],
+        "_load_catalog",
+        lambda: (calls.append("load_catalog"), state["candidates"])[1],
     )
     monkeypatch.setattr(startup, "load_colormaps", record("colormaps"))
     monkeypatch.setattr(startup, "warmup_resample", record("resample"))
@@ -71,7 +72,7 @@ async def test_happy_path_publishes_then_prewarms_then_marks_ready(warmup_env):
     assert state["ready"] is True
     assert state["published"] == state["candidates"]
     # Publication does not wait on store health.
-    assert calls.index("load_root_metadata") < calls.index("publish")
+    assert calls.index("load_catalog") < calls.index("publish")
     assert calls.index("publish") < calls.index("prewarm")
     assert calls.index("prewarm") < calls.index("mark_ready")
 
@@ -85,7 +86,7 @@ async def test_missing_root_metadata_leaves_the_tiler_unready(
     def boom():
         raise FileNotFoundError("root_metadata.json not found")
 
-    monkeypatch.setattr(startup, "_load_root_metadata", boom)
+    monkeypatch.setattr(startup, "_load_catalog", boom)
 
     with caplog.at_level("CRITICAL"):
         await run_tiler_warmup()
@@ -158,7 +159,7 @@ async def test_a_partial_store_failure_still_reaches_ready(warmup_env):
 @pytest.mark.parametrize(
     "failing_step",
     [
-        "_load_root_metadata",
+        "_load_catalog",
         "load_products",
     ],
 )
@@ -187,10 +188,10 @@ async def test_cancellation_is_re_raised_not_logged_as_failure(
     CancelledError would turn every shutdown into a spurious CRITICAL."""
     calls, state = warmup_env
 
-    async def cancelled(urls):
+    def cancelled():
         raise asyncio.CancelledError()
 
-    monkeypatch.setattr(startup, "prewarm_stores", cancelled)
+    monkeypatch.setattr(startup, "load_colormaps", cancelled)
 
     with caplog.at_level("CRITICAL"):
         with pytest.raises(asyncio.CancelledError):
@@ -205,3 +206,46 @@ def restore_tiler_readiness():
     saved = shared._tiler_ready
     yield
     shared._tiler_ready = saved
+
+
+def test_refresh_catalog_publishes_and_loads_the_new_stores(warmup_env):
+    calls, state = warmup_env
+    state["candidates"] = {
+        "a:v": Product(id="a:v", store="a", variable="v"),
+        "b:v": Product(id="b:v", store="b", variable="v"),
+    }
+
+    products, _ = startup.refresh_catalog()
+
+    assert products == state["candidates"]
+    assert state["published"] == state["candidates"]
+    assert state["prewarm_urls"] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_catalogue_is_loaded_off_the_event_loop(warmup_env, monkeypatch):
+    loop_thread = threading.current_thread()
+    seen = []
+    monkeypatch.setattr(
+        startup,
+        "prewarm_stores",
+        lambda stores: seen.append(threading.current_thread()) or {"a": None},
+    )
+
+    await run_tiler_warmup()
+
+    assert seen and seen[0] is not loop_thread
+
+
+def test_refresh_catalog_forgets_removed_stores(warmup_env, monkeypatch):
+    calls, state = warmup_env
+    kept = []
+    monkeypatch.setattr(startup, "retain_stores", kept.append)
+    state["candidates"] = {
+        "a:v": Product(id="a:v", store="a", variable="v"),
+        "b:v": Product(id="b:v", store="b", variable="v"),
+    }
+
+    startup.refresh_catalog()
+
+    assert kept == [{"a", "b"}]

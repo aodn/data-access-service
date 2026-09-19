@@ -947,7 +947,7 @@ class TilerDuckDBClient(DuckDBClient):
 
     def __init__(self, config: Optional[TilerDuckDBConfig] = None) -> None:
         self._config: TilerDuckDBConfig = (
-            config or Config.get_config().get_tiler_duckdb_config()
+            config or Config.get_config().get_tiler_api_config().duckdb
         )
         self._duckdb_client: Optional[duckdb.DuckDBPyConnection] = None
         self._active_cursors: set[Any] = set()
@@ -964,6 +964,8 @@ class TilerDuckDBClient(DuckDBClient):
                     db_config = {
                         "memory_limit": self._config.memory_limit,
                         "threads": str(int(self._config.threads)),
+                        # Slices are cached in L1 (slice_cache)
+                        "enable_external_file_cache": False,
                     }
                     db = duckdb.connect(database=":memory:", config=db_config)
                     db.execute("INSTALL httpfs; LOAD httpfs;")

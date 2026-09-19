@@ -1,10 +1,5 @@
-"""Resolve the live product catalogue from batch-published identities.
-
-``root_metadata.json`` carries only ``ProductIdentity`` (which store, which
-variable(s), which metadata collection) — no rendering config. This module
-layers ``products_customisation`` on top at load time, so changing that
-config only needs a tiler restart, not a batch rerun.
-"""
+"""Build the product catalogue: batch-published identities plus the
+``products_customisation`` config."""
 
 import dataclasses
 import logging
@@ -76,10 +71,7 @@ def apply_product_overrides(
     candidates: Mapping[str, Product],
     overrides: Mapping[str, ProductOverride],
 ) -> dict[str, Product]:
-    """Layer the products_customisation config onto ``candidates``, matched by
-    id. A candidate with no matching override is returned unchanged, at its
-    plain defaults.
-    """
+    """Apply each override to the candidate with the same id."""
     return {
         pid: _apply_override(product, overrides.get(pid))
         for pid, product in candidates.items()
@@ -90,11 +82,7 @@ def log_unmatched_overrides(
     candidates: Mapping[str, Product],
     overrides: Mapping[str, ProductOverride],
 ) -> None:
-    """Report products_customisation overrides that matched no candidate.
-
-    A stale id silently stops its setting applying, so this is loud — but not
-    fatal, since one entry should not take the catalogue down.
-    """
+    """Log overrides whose id matches no product."""
     unmatched = [pid for pid in overrides if pid not in candidates]
     if unmatched:
         logger.error(
@@ -106,9 +94,7 @@ def log_unmatched_overrides(
 
 
 def build_catalog(identities: Mapping[str, ProductIdentity]) -> dict[str, Product]:
-    """Single entry point: turn batch-published identities into the live
-    Product catalogue, with products_customisation layered on top by id.
-    """
+    """The live product catalogue from batch-published identities."""
     overrides = load_product_overrides()
     candidates = {
         pid: _default_product(identity) for pid, identity in identities.items()

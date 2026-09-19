@@ -1,11 +1,5 @@
-"""Build the JSON manifest returned by ``/data_tiles/{product}/{date}/manifest.json``.
-
-Pure product introspection: takes a product and a slice dataset, returns the
-bounds + per-variable value range + per-LOD grid metadata the WebGL shader
-needs to decode raw data tiles. No rendering, no caching — lives next to the
-product domain rather than the rendering pipeline because the output is a
-description of the product's data shape on this date, not a pixel artifact.
-"""
+"""The data-tile manifest: bounds, value ranges and LOD grids the client
+needs to decode raw tiles."""
 
 from typing import Any
 
@@ -67,10 +61,7 @@ def render_manifest(product: Product, ds: xr.Dataset) -> dict[str, Any]:
         ],
         "lods": lod_meta,
     }
-    # Categorical (CF flag_values) variable: surface the discrete codes and their
-    # labels so the client can decode and label raw values without a second request.
-    # parse_flag_values_and_meanings drops flagMeanings when absent or misaligned
-    # with flagValues, so the key is simply omitted in that case.
+    # Categorical variables also get their codes, and labels when available.
     attrs = ds[product.variable].attrs
     if is_categorical_variable(attrs):
         values, labels = parse_flag_values_and_meanings(attrs)

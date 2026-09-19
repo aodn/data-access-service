@@ -1,24 +1,8 @@
-"""Slice loading.
+"""Load a (store, timestamp, variables) slice from parquet as a dense
+(lat, lon) dataset. Concurrent identical loads share one read, and results
+are cached in L1 (``slice_cache``)."""
 
-``load_slice`` returns a fully-computed 2-D slice for a (store, timestamp,
-variables) tuple. Concurrent identical requests always share one compute
-in-process via ``_slice_dedup`` (independent of ``CACHE_BACKEND``); when
-``CACHE_BACKEND=redis``, ``slice_memo`` additionally coalesces across
-instances and caches the result (see ``services.caching.slice_cache``).
-
-Callers pass an already-parsed ``pd.Timestamp`` (from
-``core.tiler_routes.shared.parse_date_or_422``), not a raw date string —
-every route handler parses/validates its ``date`` query param exactly once,
-so this module never re-parses a string it was already handed as a
-``pd.Timestamp``.
-
-No zarr here: a slice is read straight from the batch-generated parquet
-files via duckdb, reconstructing the dense ``(lat, lon)`` array from the
-sparse ``(timestamp, i, j, value)`` rows using the sidecar's shape/coords
-(``store.registry.get_store_metadata``). Store handles/metadata live in their
-own module ([[store.registry]]); the actual read SQL — and the shared
-``TilerDuckDBClient`` — live in ``TilerParquetRepository`` ([[tiler_repository]]).
-"""
+import threading
 
 import pandas as pd
 import xarray as xr
@@ -36,13 +20,13 @@ from data_access_service.tiler.services.store.tiler_repository import (
     _get_client,
 )
 
-# Always in-process, independent of CACHE_BACKEND — see Deduper's docstring
-# for why this matters even (especially) under CACHE_BACKEND=none.
 _slice_dedup = Deduper()
+
+_COLD_READ_LIMIT = threading.BoundedSemaphore(4)
 
 
 def _warm_coord_indexes(ds: xr.Dataset) -> xr.Dataset:
-    """Force-build the lazy pandas index engine for lat/lon, once, here."""
+    """Build the lat/lon indexes now, not on first use."""
     for dim in ("lon", "lat"):
         if dim in ds.indexes:
             ds.indexes[dim].is_unique
@@ -52,14 +36,7 @@ def _warm_coord_indexes(ds: xr.Dataset) -> xr.Dataset:
 def _compute_slice_from_store(
     store: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
 ) -> xr.Dataset:
-    """Fetch a 2-D slice from the store's parquet files. Both `load_slice` and
-    `load_slice_uncached` delegate here; they differ only in whether the
-    result lands in L1.
-
-    When ``ocean_masked`` is set, anomalous values outside the model's valid ocean
-    domain are nulled here (masks.apply_ocean_mask) so every downstream consumer
-    inherits the cut.
-    """
+    """Read the slice, applying the ocean mask if ``ocean_masked``."""
     result = _fetch_slice_from_store(store, ts, variables)
     if ocean_masked:
         result = apply_ocean_mask(result, variables)
@@ -82,16 +59,17 @@ def _fetch_slice_from_store(
     if raw_ts is None:
         raise FileNotFoundError(unavailable_date_message(store, ts))
 
-    repo = TilerParquetRepository(_get_client())
-    data_vars = {}
-    for v in variables:
-        var_meta = meta.variables[v]
-        arr = repo.fetch_variable_slice(
-            store, v, raw_ts, meta.n_i, meta.n_j, var_meta.dtype
-        )
-        data_vars[v] = xr.DataArray(
-            arr, dims=("lat", "lon"), attrs=dict(var_meta.attrs)
-        )
+    with _COLD_READ_LIMIT:
+        repo = TilerParquetRepository(_get_client())
+        data_vars = {}
+        for v in variables:
+            var_meta = meta.variables[v]
+            arr = repo.fetch_variable_slice(
+                store, v, raw_ts, meta.n_i, meta.n_j, var_meta.dtype
+            )
+            data_vars[v] = xr.DataArray(
+                arr, dims=("lat", "lon"), attrs=dict(var_meta.attrs)
+            )
 
     return xr.Dataset(data_vars, coords={"lat": meta.lat, "lon": meta.lon})
 
@@ -99,17 +77,8 @@ def _fetch_slice_from_store(
 def load_slice(
     store: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
 ) -> xr.Dataset:
-    """
-    Return a fully-computed 2D (lat × lon) slice for the given store, timestamp,
-    and variables. ``ts`` must name an exact instant in the store's time index —
-    no nearest-match fallback. Coordinate names are normalised to
-    ``time``/``lat``/``lon`` before return.
-
-    ``ocean_masked`` (from ``Product.ocean_masked``) nulls anomalous values outside
-    the valid model domain. It's a deterministic function of the cache key (a store
-    + variable set maps to one product), so it stays out of the key; the masked
-    slice is what L1 caches.
-    """
+    """The slice at exact instant ``ts``, cached in L1. ``ocean_masked`` is
+    fixed per product, so it isn't part of the cache key."""
     cache_key = (store, ts, tuple(sorted(variables)))
 
     def compute() -> xr.Dataset:
@@ -126,9 +95,5 @@ def load_slice(
 def load_slice_uncached(
     store: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
 ) -> xr.Dataset:
-    """Return a 2-D slice without touching L1.
-
-    Used by the animation endpoint so a rare multi-date request doesn't evict
-    another product's hot slices from the shared L1 cache (CACHE_BACKEND=redis).
-    """
+    """The slice without L1, for animations, so they don't evict hot slices."""
     return _compute_slice_from_store(store, ts, variables, ocean_masked)

@@ -1,23 +1,4 @@
-"""Cross-request dedup + caching for the L1 slice cache, plus backend selection.
-
-``CacheBackend`` is the shared contract; ``NullMemoizer`` and ``RedisMemoizer``
-are the current implementations (see ``create_memoizer`` below, chosen via
-``CACHE_BACKEND``). ``RedisMemoizer`` talks to a Redis-protocol store — in
-deployment that's an AWS ElastiCache for Valkey cluster, addressed via the
-``CACHE_HOST`` env var (see ``Config.get_tiler_config``); there's no local
-container in docker-compose.yml, so local runs need ``CACHE_HOST`` pointed at
-a reachable Redis/Valkey instance or ``CACHE_BACKEND=none`` to skip caching.
-
-In-process dedup-only coalescing (``services.caching.deduper.Deduper``) is a
-separate, simpler concern that doesn't fit this module's cache-or-recompute
-contract — it never stores anything. Each ``Deduper`` instance lives with its
-one consumer (e.g. ``rendering.data_tiles._processed_dedup``,
-``store.slice_loader._slice_dedup``), not paired with a ``CacheBackend`` here.
-
-NOT a replacement for ``services.store.registry.StoreRegistry`` — that adds TTL +
-stale-while-revalidate + background refresh on top of the dedup pattern, which
-this module deliberately does not model.
-"""
+"""L1 cache backends: none, or Redis/Valkey (``CACHE_HOST`` when deployed)."""
 
 import logging
 import pickle
@@ -37,21 +18,15 @@ log = logging.getLogger(__name__)
 
 
 class CacheBackend(ABC):
-    """Shared contract for cache + cross-instance dedup implementations.
-
-    ``get_or_compute`` is the only method any production caller invokes.
-    """
+    """A cache that also dedupes across instances."""
 
     @abstractmethod
     def get_or_compute(self, key: Hashable, factory: Callable[[], T]) -> T:
-        """Return cached value, wait on an in-flight compute, or run ``factory()`` once."""
+        """The cached value, else wait for another compute, else run ``factory()``."""
 
 
 class NullMemoizer(CacheBackend):
-    """No caching, no dedup — every call runs ``factory()``. Explicit opt-out
-    backend for ``CACHE_BACKEND=none``; a stampede of concurrent identical
-    requests will all recompute, which is the accepted cost of disabling
-    caching entirely."""
+    """No cache: every call runs ``factory()``."""
 
     def get_or_compute(self, key: Hashable, factory: Callable[[], T]) -> T:
         return factory()
@@ -67,22 +42,11 @@ end
 
 
 class RedisMemoizer(CacheBackend):
-    """Distributed cache + cross-instance dedup backed by a Redis-protocol-
-    compatible store (Redis or Valkey). Values are pickled — safe here because
-    the store is only reachable from this service's own instances, the same
-    trust boundary the in-process ``Deduper`` already relies on.
+    """Shared cache in Redis/Valkey, values pickled.
 
-    Cross-instance stampede protection: the first caller for a cold key wins a
-    short-lived ``SET NX EX`` lock and runs ``factory()``; other callers poll
-    for the winner's result instead of recomputing, falling back to computing
-    it themselves if the wait budget is exceeded (bounds latency if the lock
-    holder dies mid-compute).
-
-    Any Redis error — connection refused, timeout, etc. — fails open: log a
-    warning and call ``factory()`` directly, matching the rest of the tiler's
-    bias toward availability over strict caching (``StoreRegistry``'s
-    stale-while-revalidate, ``Deduper`` as the load-bearing piece when
-    ``CACHE_BACKEND=none``).
+    On a miss, the first caller takes a short lock and computes; others poll
+    for its result, and compute themselves if it takes too long. Any Redis
+    error falls back to calling ``factory()`` directly.
     """
 
     _LOCK_TTL_SECONDS = 30
@@ -98,8 +62,7 @@ class RedisMemoizer(CacheBackend):
         self._endpoint = (
             f"{conn_kwargs.get('host', 'unknown')}:{conn_kwargs.get('port', 'unknown')}"
         )
-        # Connection failures are common in local dev without Redis; log the
-        # actionable message once so every request doesn't dump a traceback.
+        # Log a connection failure once, not on every request.
         self._connection_error_logged = False
 
     def _key(self, key: Hashable) -> str:
@@ -113,16 +76,15 @@ class RedisMemoizer(CacheBackend):
         *,
         recovery: str,
     ) -> None:
-        """Log Redis failures with host/port context; de-noise connection errors."""
+        """Log a Redis error; connection errors only once."""
         if isinstance(exc, redis.exceptions.ConnectionError):
             if not self._connection_error_logged:
-                # Strip trailing period from redis-py messages so we don't get "refused.."
                 detail = str(exc).rstrip(".")
                 log.warning(
                     "Cannot connect to Redis/Valkey at %s during %s for key %s: %s. "
                     "%s. "
                     "For local dev without a cache, set CACHE_BACKEND=none "
-                    "(or tiler.cache_backend: none in config.yaml). "
+                    "(or tiler.config.api.cache.backend: none in config.yaml). "
                     "To use caching, start Redis/Valkey on that host/port or set "
                     "CACHE_HOST to a reachable instance. Further connection "
                     "failures will be logged at DEBUG.",
@@ -236,24 +198,18 @@ class RedisMemoizer(CacheBackend):
 
 
 def create_memoizer(*, namespace: str, ttl_seconds: int) -> CacheBackend:
-    """Selects the L1 cache backend via the CACHE_BACKEND setting.
-
-    - "none" (default): bypass caching entirely — every call recomputes.
-    - "redis": share cache + cross-instance dedup through a Redis-protocol
-      store, connected via ``tiler.redis_host``/``tiler.redis_port`` in
-      config.yaml.
-    """
-    tiler_config = Config.get_config().get_tiler_config()
-    backend = tiler_config.cache_backend
+    """The backend set by ``tiler.config.api.cache.backend``: "none" or "redis"."""
+    cache = Config.get_config().get_tiler_api_config().cache
+    backend = cache.backend
     if backend == "none":
         return NullMemoizer()
     if backend == "redis":
         client = redis.Redis(
-            host=tiler_config.redis_host,
-            port=tiler_config.redis_port,
+            host=cache.host,
+            port=cache.port,
             socket_connect_timeout=1,
             socket_timeout=1,
-            ssl=tiler_config.is_tls,
+            ssl=cache.is_tls,
         )
         return RedisMemoizer(
             namespace=namespace, ttl_seconds=ttl_seconds, client=client

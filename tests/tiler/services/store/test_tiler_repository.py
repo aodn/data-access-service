@@ -6,7 +6,6 @@ don't cover, and a missing file.
 """
 
 import os
-from unittest.mock import MagicMock
 
 import duckdb
 import numpy as np
@@ -26,8 +25,8 @@ TS = "2024-01-15T13:00:00.000000000Z"
 def output_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(
         repo_module.Config.get_config(),
-        "get_tiler_parquet_config",
-        lambda: MagicMock(output_dir=str(tmp_path)),
+        "get_tiler_output_dir",
+        lambda: str(tmp_path),
     )
     return tmp_path
 

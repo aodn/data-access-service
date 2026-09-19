@@ -13,52 +13,32 @@ ColormapMode = Literal["ramp", "categorical"]
 _config_path = Path(COLORMAPS_CONFIG_PATH)
 _custom_colormaps: dict[str, list[tuple[int, int, int, int]]] = {}
 _custom_colormap_modes: dict[str, ColormapMode] = {}
-# Category values (sorted) for categorical colormaps. The 256-LUT alone can't
-# recover them — transparent categories look identical to unmapped slots — so we
-# store them explicitly to validate a colormap against a product's flag_values at
-# request time (see [[colormap.categorical]] callers).
+# Category values of categorical colormaps; the LUT alone can't tell a
+# transparent category from an unused slot.
 _custom_colormap_values: dict[str, list[int]] = {}
 
 
 def get_colormap(name: str) -> list[tuple[int, int, int, int]] | None:
-    """Return the 256-entry LUT for a custom colormap, or None if not registered."""
+    """A custom colormap's 256-entry LUT, or None."""
     return _custom_colormaps.get(name)
 
 
 def is_categorical(name: str) -> bool:
-    """Return True if the colormap was registered in categorical mode."""
+    """True for a categorical custom colormap."""
     return _custom_colormap_modes.get(name) == "categorical"
 
 
 def get_category_values(name: str) -> list[int] | None:
-    """Return the sorted category values of a categorical colormap, or None.
-
-    None means the name is unknown or was not registered as categorical.
-    """
+    """A categorical colormap's category values, or None."""
     return _custom_colormap_values.get(name)
 
 
 def load_colormaps() -> None:
-    """Read colormaps.json from disk into the in-memory registry. Called once on startup.
+    """Load colormaps.json at startup.
 
-    ``"ramp"`` entries store an ``entries`` array: a dense 256-slot RGBA gradient,
-    since rio-tiler's ``apply_cmap`` only takes its fast ``make_lut`` path over a
-    full 256-entry table and a continuous ramp genuinely needs every slot.
-
-    ``"categorical"`` entries instead store ``values`` and ``colors`` as parallel
-    arrays — one colour per real category code, self-explanatory on disk. At load
-    time each is expanded into the same 256-entry shape via ``categorical_lut``
-    (see [[utils.colors]]), which places each colour at the slot equal to its own
-    value (no rescaling), so distinct codes can never collide onto the same slot.
-    ``values`` is also kept alongside, unexpanded, since the 256-LUT alone can't
-    distinguish a transparent category from an unmapped slot.
-
-    A malformed file (bad JSON, or a colormap failing the checks in ``_reload``)
-    is logged as an error and otherwise swallowed — the tiler starts up with no
-    custom colormaps rather than refusing to start, since rio-tiler/matplotlib's
-    built-in colormaps still work without this file. ``_reload`` only commits
-    its result once the whole file has parsed and validated cleanly, so a bad
-    entry can't leave the registry half-loaded from a previous, partial attempt.
+    Ramp colormaps have 256 ``entries``; categorical ones have ``values`` and
+    ``colors``, expanded to a 256-entry LUT. A bad file is logged and skipped;
+    the built-in colormaps still work.
     """
     if not _config_path.exists():
         logger.warning(
@@ -79,11 +59,7 @@ def load_colormaps() -> None:
 
 
 def list_colormaps() -> dict[str, list]:
-    """Return all supported colormap names grouped by source.
-
-    Priority mirrors _colormap(): custom → rio-tiler → matplotlib.
-    Custom entries include their mode; rio-tiler and matplotlib entries are plain strings.
-    """
+    """All colormap names by source: custom (with mode), rio-tiler, matplotlib."""
     import matplotlib
     from rio_tiler.colormap import cmap as _rio_cmap
 
@@ -104,16 +80,8 @@ def list_colormaps() -> dict[str, list]:
 
 
 def _reload(data: dict[str, list | dict]) -> None:
-    """Validate and load every colormap, raising ``ValueError`` on the first bad one.
-
-    Deliberately strict rather than best-effort: a malformed entry here would
-    otherwise surface later as a wrong colour on a tile or a confusing crash at
-    request time, far from the config line that caused it. Builds into local
-    dicts and only commits them to the module-level registry at the end, so a
-    bad entry partway through the file can't leave the registry half-loaded —
-    callers (``load_colormaps``) see either the fully-loaded old-or-new state,
-    or (on error) whatever was there before this call.
-    """
+    """Validate every colormap, then replace the registry. Raises ValueError
+    on the first bad one, leaving the registry unchanged."""
     colormaps: dict[str, list[tuple[int, int, int, int]]] = {}
     modes: dict[str, ColormapMode] = {}
     category_values: dict[str, list[int]] = {}

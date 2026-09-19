@@ -1,20 +1,9 @@
-"""Run the zarr -> parquet conversion for one or every gridded tiler product.
+"""The tiler batch job: convert every product's zarr store to parquet and
+publish ``root_metadata.json``.
 
-This is now the only place that discovers products from live metadata
-(``discovery.discover_products``) or opens real zarr stores
-(``zarr_registry.open_store``) - the live tiler API reads what this job
-publishes instead (``root_metadata.json`` + each store's ``metadata.json``
-sidecar), never live metadata or zarr directly.
-
-Stores are processed strictly one at a time, each in its own forked worker
-that opens the zarr, converts, and exits - so only one store is ever in
-memory, and its DuckDB/xarray memory goes back to the OS before the next.
-With ``use_fork_process`` off (local macOS runs) each store runs in-process
-instead, and its zarr handle is dropped before the next one opens.
-Each run is incremental (see ``parquet_generator.sync_store``), so it is safe
-to schedule repeatedly.
-
-Writes to ``TilerParquetConfig.output_dir``, an S3 URI (see ``batch.tiler.storage``).
+Stores run one at a time, each in a forked worker (or in-process when
+``use_fork_process`` is off), so only one is in memory. Runs are
+incremental and safe to repeat.
 """
 
 import os
@@ -32,7 +21,7 @@ from data_access_service.models.tiler_parquet_types import (
     RootMetadata,
     root_metadata_path,
 )
-from data_access_service.models.tiler_types import TilerParquetConfig
+from data_access_service.models.tiler_types import TilerBatchConfig
 from data_access_service.utils.memory_utils import log_memory_usage
 
 config = Config.get_config()
@@ -42,11 +31,8 @@ logger = init_log(config)
 def _group_by_store(
     products: dict[str, ProductIdentity],
 ) -> dict[str, tuple[str, list[str]]]:
-    """``store -> (uuid, sorted variable names)``, merged across every
-    product discovered for that store - discovery fans one store out into
-    several ``Product``s, one per ``gridded_variables`` spec, but the
-    conversion only needs to touch each store once.
-    """
+    """``store -> (uuid, sorted variables)`` across all its products, so each
+    store is converted once."""
     grouped: dict[str, tuple[str, set[str]]] = {}
     for product in products.values():
         store_uuid, variables = grouped.get(
@@ -58,12 +44,8 @@ def _group_by_store(
 
 
 def generate_tiler_parquet_for_all_products(api: API, uuid: str | None = None) -> None:
-    """Convert every discovered gridded product's backing store to parquet.
-
-    Args:
-        api: Initialized API with metadata loaded.
-        uuid: Optional metadata UUID filter (local/debug or a Batch parameter).
-    """
+    """Convert every product's store, then update ``root_metadata.json``.
+    ``uuid`` limits the run to one metadata record."""
     products = discover_products(api)
 
     if uuid is not None:
@@ -82,18 +64,18 @@ def generate_tiler_parquet_for_all_products(api: API, uuid: str | None = None) -
         len(products),
     )
 
-    tp_config = config.get_tiler_parquet_config()
+    batch_config = config.get_tiler_batch_config()
 
-    use_fork = tp_config.use_fork_process
+    use_fork = batch_config.use_fork_process
     logger.info("Tiler parquet batch process isolation: use_fork_process=%s", use_fork)
 
     succeeded: set[str] = set()
     for store, (store_uuid, variables) in sorted(by_store.items()):
         if use_fork:
-            ok = _build_in_subprocess(store, store_uuid, variables, tp_config)
+            ok = _build_in_subprocess(store, store_uuid, variables, batch_config)
             after_label = f"after child for {store}"
         else:
-            ok = build_tiler_parquet(store, store_uuid, variables, tp_config)
+            ok = build_tiler_parquet(store, store_uuid, variables, batch_config)
             after_label = f"after in-process run for {store}"
         if ok:
             succeeded.add(store)
@@ -101,10 +83,11 @@ def generate_tiler_parquet_for_all_products(api: API, uuid: str | None = None) -
             logger.error("Tiler parquet worker failed for store=%s", store)
         log_memory_usage(logger, after_label)
 
-    # A store can sync fine yet have no timestamps (every one in its window
-    # all-NaN); its products would show in the tiler with no dates at all.
+    # Don't publish stores with no data yet (e.g. every timestamp all-NaN).
     empty = {
-        store for store in succeeded if not _has_timestamps(tp_config.output_dir, store)
+        store
+        for store in succeeded
+        if not _has_timestamps(batch_config.output_dir, store)
     }
     if empty:
         logger.warning(
@@ -116,7 +99,7 @@ def generate_tiler_parquet_for_all_products(api: API, uuid: str | None = None) -
         p for p in products.values() if p.store in succeeded and p.store not in empty
     ]
     unpublished = [p.id for p in products.values() if p.store in empty]
-    write_root_metadata(published, tp_config.output_dir, remove=unpublished)
+    write_root_metadata(published, batch_config.output_dir, remove=unpublished)
 
 
 def _has_timestamps(output_dir: str, store: str) -> bool:
@@ -127,14 +110,9 @@ def _has_timestamps(output_dir: str, store: str) -> bool:
 def write_root_metadata(
     products: list[ProductIdentity], output_dir: str, remove: list[str] = ()
 ) -> str:
-    """Upsert ``products`` (by id) into ``root_metadata.json``, so the tiler
-    API can rebuild its whole product catalogue from this one file - no live
-    metadata call, no zarr open.
-
-    Upserts rather than overwrites: a ``uuid``-scoped run only touches that
-    uuid's products, and a store that failed this run keeps its earlier
-    entry. ``remove`` drops ids whose store now has no data. Skips the write
-    when nothing changed.
+    """Upsert ``products`` into ``root_metadata.json`` and drop the ids in
+    ``remove``. Products not in this run (other uuids, failed stores) keep
+    their entries. Skips the write when nothing changed.
     """
     path = root_metadata_path(output_dir)
 
@@ -151,7 +129,7 @@ def write_root_metadata(
     for pid in remove:
         merged.pop(pid, None)
     if not merged:
-        # The tiler refuses an empty catalogue, so writing one only breaks it.
+        # The tiler refuses an empty catalogue.
         logger.warning("No products to publish; not writing %s", path)
         return path
 
@@ -179,17 +157,17 @@ def write_root_metadata(
 
 
 def _build_in_subprocess(
-    store: str, uuid: str, variables: list[str], tp_config: TilerParquetConfig
+    store: str, uuid: str, variables: list[str], batch_config: TilerBatchConfig
 ) -> bool:
-    """Fork a worker for one store; wait until it exits."""
+    """Run one store in a forked worker and wait for it."""
     logger.info(
         "Forking tiler parquet worker parent_pid=%s store=%s", os.getpid(), store
     )
     pid = os.fork()
     if pid == 0:
-        # Child: never return into the parent loop.
+        # Child: always exit here.
         try:
-            ok = build_tiler_parquet(store, uuid, variables, tp_config)
+            ok = build_tiler_parquet(store, uuid, variables, batch_config)
             log_memory_usage(logger, f"worker exit ({store})")
             os._exit(0 if ok else 1)
         except BaseException:
@@ -218,21 +196,17 @@ def _build_in_subprocess(
 
 
 def build_tiler_parquet(
-    store: str, uuid: str, variables: list[str], tp_config: TilerParquetConfig
+    store: str, uuid: str, variables: list[str], batch_config: TilerBatchConfig
 ) -> bool:
-    """Open one store and bring its parquet + sidecar in
-    ``tp_config.output_dir`` up to date.
-
-    Never raises: a failed store must not fail the whole batch.
-    """
+    """Convert one store. Returns False on failure instead of raising."""
     try:
-        return _sync_one(store, uuid, variables, tp_config)
+        return _sync_one(store, uuid, variables, batch_config)
     finally:
         close_store(store)
 
 
 def _sync_one(
-    store: str, uuid: str, variables: list[str], tp_config: TilerParquetConfig
+    store: str, uuid: str, variables: list[str], batch_config: TilerBatchConfig
 ) -> bool:
     if open_store(store) is not None:
         return False
@@ -242,10 +216,9 @@ def _sync_one(
             store,
             uuid,
             variables,
-            tp_config.output_dir,
-            batch_days=tp_config.batch_days,
-            window_days=tp_config.window_days,
-            duckdb_config=tp_config.duckdb,
+            batch_config.output_dir,
+            max_chunks_per_run=batch_config.max_chunks_per_run,
+            duckdb_config=batch_config.duckdb,
         )
         logger.info(
             "Tiler parquet for store=%s synced: %d new timestamp(s), sidecar=%s",

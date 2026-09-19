@@ -10,12 +10,8 @@ _lod_grids_lock = threading.Lock()
 
 @dataclass(frozen=True)
 class CoastalFill:
-    """Opt-in coastal-fill config for sparse products (see services/rendering/masks.py).
-
-    ``max_dist_px`` caps how far (in LOD-grid pixels) the nearest-valid inpaint
-    reaches past the data edge before the coastline cut. Kept small so we never
-    fabricate values far from a real measurement.
-    """
+    """Fill gaps near the coast from the nearest valid value, up to
+    ``max_dist_px`` pixels away."""
 
     max_dist_px: int
 
@@ -37,19 +33,12 @@ def _coastal_fill_from_dict(data: "dict | None") -> "CoastalFill | None":
 
 @dataclass(frozen=True)
 class DataTileConfig:
-    """Fields used only by the /data_tiles pipeline (rendering + manifest):
-    raw-array chunking/padding, coastal inpainting, and the lazily-computed LOD
-    grid. Never read by /visual_tiles — kept off Product's top level so that's
-    obvious from the type rather than something you have to already know.
-    """
+    """Data-tile settings: chunking, padding, coastal fill, LOD grids."""
 
     chunk_px: tuple[int, int] = TILE.chunk_px
     padding: int = TILE.padding
     coastal_fill: CoastalFill | None = None
-    # Computed, not settable in the products_customisation config — populated
-    # lazily from the store's native dimensions on first request (see
-    # get_lod_grids below). This is the one field mutated after construction
-    # despite frozen=True; guarded by _lod_grids_lock.
+    # Computed on first use (get_lod_grids); filled in place despite frozen.
     lod_grids: dict[int, tuple[int, int]] = field(default_factory=dict)
 
     @staticmethod
@@ -85,7 +74,7 @@ class DataTileConfig:
         return {i + 1: lvl for i, lvl in enumerate(levels[-max_lods:])}
 
     def apply_computed_lod_grids(self, data_width: int, data_height: int) -> None:
-        """Compute and cache lod_grids from native data dimensions. No-op if already set."""
+        """Fill lod_grids from the grid size, if not already set."""
         if self.lod_grids:
             return
         self.lod_grids.update(
@@ -93,9 +82,7 @@ class DataTileConfig:
         )
 
     def to_dict(self) -> dict:
-        # lod_grids is excluded: it's a request-time cache computed from the
-        # store's native dimensions (see apply_computed_lod_grids), not
-        # product identity - a serialized Product must not carry a stale copy.
+        # lod_grids is computed, so not serialized.
         return {
             "chunk_px": list(self.chunk_px),
             "padding": self.padding,
@@ -114,12 +101,7 @@ class DataTileConfig:
 
 @dataclass(frozen=True)
 class VisualTileConfig:
-    """Fields used only by the /visual_tiles pipeline. Independent of
-    DataTileConfig's own coastal_fill — a product can opt into coastal
-    inpainting for one tile type without the other, or tune the fill distance
-    differently per pipeline (data tiles fill on the LOD-resampled grid;
-    visual tiles fill on the native-resolution array before reprojection).
-    """
+    """Visual-tile settings, separate from the data-tile ones."""
 
     coastal_fill: CoastalFill | None = None
 
@@ -138,8 +120,7 @@ class Product:
     variable: str | list[str]
     metadata_uuid: str | None = None
     ocean_masked: bool = False
-    # Defaulted True (unlike the wire model's required field) since tests
-    # construct Product directly; a pair is always False in practice.
+    # A variable pair is never visual.
     visual: bool = True
     data_tile: DataTileConfig = field(default_factory=DataTileConfig)
     visual_tile: VisualTileConfig = field(default_factory=VisualTileConfig)
@@ -179,12 +160,7 @@ class Product:
 
 
 def get_lod_grids(product: Product) -> dict[int, tuple[int, int]]:
-    """
-    Ensure product.data_tile.lod_grids is populated from actual store dimensions,
-    then return it. Writes back to product on first call so subsequent callers
-    find it already set. Double-checked locking: fast path avoids lock overhead
-    on every warm call.
-    """
+    """The product's LOD grids, computed from the store's grid on first use."""
     data_tile = product.data_tile
     if data_tile.lod_grids:
         return data_tile.lod_grids

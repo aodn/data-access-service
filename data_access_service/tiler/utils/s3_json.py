@@ -1,6 +1,4 @@
-"""S3 reads for the tiler's batch-published JSON (root_metadata.json +
-each store's metadata.json sidecar).
-"""
+"""Read the batch's JSON files from S3."""
 
 import json
 from typing import Any
@@ -14,11 +12,7 @@ def _split_s3(s3_url: str) -> tuple[str, str]:
 
 
 def read_json(path: str) -> dict[str, Any]:
-    """The parsed JSON object at ``path`` (an ``s3://`` URI).
-
-    Raises FileNotFoundError if it doesn't exist, matching what ``open()``
-    would raise for a missing local file.
-    """
+    """The JSON at ``path``. Raises FileNotFoundError if missing."""
     bucket, key = _split_s3(path)
     body = AWSHelper().get_s3_object(bucket, key)
     if body is None:

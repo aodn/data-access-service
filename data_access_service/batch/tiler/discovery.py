@@ -1,11 +1,6 @@
-"""Derive candidate tiler products from the metadata schema index.
-
-Dataset names and UUIDs come from live metadata, not config, so a rename changes
-the derived id instead of leaving a stale one. Batch only ever produces
-``ProductIdentity`` — which store, which variable(s), which metadata
-collection. Rendering config (``visual``/``ocean_masked``/tile configs, from
-products_customisation) is resolved on the live tiler side, not here — see
-``tiler.services.product.catalog``.
+"""Find the tiler products: config variable specs matched against the zarr
+datasets in live metadata. Identity only; rendering config is applied by the
+tiler.
 """
 
 import logging
@@ -25,19 +20,21 @@ GriddedVariableSpec = str | list[str]
 
 
 def _load_gridded_variable_specs() -> list[GriddedVariableSpec]:
-    raw = Config.get_tiler_gridded_variables()
+    raw = Config.get_config().get_tiler_gridded_variables()
     if not isinstance(raw, list) or not raw:
         raise ValueError(
-            "config.yaml's tiler.gridded_variables must be a non-empty list of "
+            "config.yaml's tiler.catalog.gridded_variables must be a non-empty list of "
             "variable specs"
         )
     return raw
 
 
 def _load_store_blacklist() -> frozenset[str]:
-    raw = Config.get_tiler_blacklist() or []
+    raw = Config.get_config().get_tiler_blacklist() or []
     if not isinstance(raw, list):
-        raise ValueError("config.yaml's tiler.blacklist must be a list of store names")
+        raise ValueError(
+            "config.yaml's tiler.catalog.blacklist must be a list of store names"
+        )
     return frozenset(raw)
 
 
@@ -45,11 +42,7 @@ def _exclude_blacklisted_stores(
     dataset_variables: ZarrDatasetVariables,
     blacklist: frozenset[str],
 ) -> ZarrDatasetVariables:
-    """Drop every (uuid, dataset_name, fields) triple whose store is
-    blacklisted, before candidates get fanned out. Matched against the same
-    suffix-stripped name product_id uses, so blacklist entries read the same
-    as the dataset_name half of a products_customisation id.
-    """
+    """Skip datasets whose store name is blacklisted."""
     for uuid, dataset_name, fields in dataset_variables:
         if store_name(dataset_name) in blacklist:
             logger.info("Skipping blacklisted store %r (uuid %s)", dataset_name, uuid)
@@ -58,14 +51,12 @@ def _exclude_blacklisted_stores(
 
 
 def store_name(dataset_name: str) -> str:
-    """``foo.zarr`` -> ``foo``. Names the store everywhere downstream: its
-    output directory, the tiler's registry and cache keys.
-    """
+    """``foo.zarr`` -> ``foo``."""
     return dataset_name.removesuffix(".zarr")
 
 
 def product_id(dataset_name: str, variables: list[str]) -> str:
-    # Frontend-cached and opaque to ogcapi-java: a compatibility surface.
+    # The frontend caches these ids, so keep the format stable.
     return f"{store_name(dataset_name)}:{'+'.join(v.lower() for v in variables)}"
 
 
@@ -73,16 +64,13 @@ def build_candidate_products(
     dataset_variables: ZarrDatasetVariables,
     specs: list[GriddedVariableSpec],
 ) -> dict[str, ProductIdentity]:
-    """Fan each specification out across the catalogue. Matching is
-    case-sensitive. Carries identity only — no rendering config; that's
-    layered on the live tiler side (see ``tiler.services.product.catalog``).
-    """
+    """One product per (dataset, spec) where the dataset has every variable
+    of the spec. Case-sensitive."""
     candidates: dict[str, ProductIdentity] = {}
     origin: dict[str, str] = {}
     matched_specs: set[int] = set()
 
-    # Sorted iteration keeps logs and tests deterministic. Filtering to zarr
-    # is API's job now — see iter_zarr_dataset_variables.
+    # Sorted so logs and tests are deterministic.
     for uuid, dataset_name, fields in sorted(
         dataset_variables, key=lambda t: (t[0], t[1])
     ):
@@ -104,8 +92,7 @@ def build_candidate_products(
             candidates[pid] = ProductIdentity(
                 id=pid,
                 store=store_name(dataset_name),
-                # Not `variables`: that would turn a scalar into a
-                # one-element vector product.
+                # Keep a scalar spec a string, not a one-item list.
                 variable=list(spec) if is_pair else spec,
                 metadata_uuid=uuid,
             )
@@ -135,12 +122,7 @@ def build_candidate_products(
 
 
 def discover_products(api: API) -> dict[str, ProductIdentity]:
-    """Single entry point: load the gridded_variables and blacklist sections
-    of config.yaml, and fan out across the metadata catalogue (minus
-    blacklisted stores). No rendering config here — the live tiler layers
-    products_customisation on top of what this returns (see
-    ``tiler.services.product.catalog``).
-    """
+    """All products from the config catalog and live metadata."""
     specs = _load_gridded_variable_specs()
     blacklist = _load_store_blacklist()
     dataset_variables = _exclude_blacklisted_stores(

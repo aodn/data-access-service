@@ -40,6 +40,6 @@ def test_no_duplicate_override_ids():
     """Checks the raw committed list directly, rather than hardcoding the
     current override count, so this doesn't need updating every time a
     new override is legitimately added."""
-    raw = Config.get_tiler_products_customisation()
+    raw = Config.get_config().get_tiler_products_customisation()
     ids = [entry["id"] for entry in raw]
     assert len(ids) == len(set(ids))

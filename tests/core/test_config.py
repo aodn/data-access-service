@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 from types import SimpleNamespace
 
@@ -5,7 +6,6 @@ import pytest
 
 from data_access_service.config.config import Config, EnvType
 from data_access_service.models.co_datasource.csiro.csiro_types import CsiroConfig
-from data_access_service.models.tiler_types import TilerConfig
 
 
 def test_config_trim():
@@ -15,22 +15,34 @@ def test_config_trim():
     assert config.get_datavis_data_bucket_name() == "test-site-snapshot-bucket"
 
 
-def test_tiler_parquet_output_dir_requires_s3_prefix(monkeypatch):
-    config = Config.get_config(EnvType.TESTING)
-    monkeypatch.setitem(config.config, "tiler_parquet", {"config": {}})
-    with pytest.raises(ValueError, match="s3_prefix"):
-        config.get_tiler_parquet_config()
+def _with_tiler(monkeypatch, config, edit):
+    """Run ``edit`` on a deep copy of the tiler section and install it."""
+    tiler = copy.deepcopy(config.config["tiler"])
+    edit(tiler)
+    monkeypatch.setitem(config.config, "tiler", tiler)
 
 
-def test_tiler_parquet_output_dir_composes_s3_uri_from_prefix(monkeypatch):
+def test_tiler_output_dir_is_the_datavis_bucket():
     config = Config.get_config(EnvType.TESTING)
-    monkeypatch.setitem(
-        config.config, "tiler_parquet", {"config": {"s3_prefix": "tiler"}}
+    assert config.get_tiler_output_dir() == "s3://test-site-snapshot-bucket/tiler"
+    assert config.get_tiler_batch_config().output_dir == config.get_tiler_output_dir()
+
+
+def test_tiler_batch_max_chunks_null_means_no_limit(monkeypatch):
+    config = Config.get_config(EnvType.TESTING)
+    _with_tiler(
+        monkeypatch,
+        config,
+        lambda t: t["config"]["batch"].update(max_chunks_per_run=None),
     )
-    assert (
-        config.get_tiler_parquet_config().output_dir
-        == "s3://test-site-snapshot-bucket/tiler"
-    )
+    assert config.get_tiler_batch_config().max_chunks_per_run is None
+
+
+def test_tiler_cache_host_env_overrides_yaml(monkeypatch):
+    monkeypatch.setenv("CACHE_HOST", "cache.internal")
+    cache = Config.get_config(EnvType.TESTING).get_tiler_api_config().cache
+    assert cache.host == "cache.internal"
+    assert cache.is_tls is True
 
 
 def test_pmtiles_use_fork_process_default():
@@ -51,42 +63,49 @@ def test_zarr_chunking_config_from_yaml():
     assert cfg.min_chunk_bytes == int(yaml_cfg["min_chunk_mb"] * 1024**2)
 
 
-# is_tls is derived (True iff CACHE_HOST env var is set) rather than a direct
-# yaml passthrough, so it is not expected in yaml at all.
-_DERIVED_TILER_FIELDS = {"is_tls"}
-_YAML_TILER_FIELDS = {
-    f.name
-    for f in dataclasses.fields(TilerConfig)
-    if f.name not in _DERIVED_TILER_FIELDS
-}
-
-# redis_host is read with .get() (env var CACHE_HOST can override/fill it in),
-# so unlike the rest it does not raise KeyError when absent from yaml.
-_REQUIRED_TILER_FIELDS = _YAML_TILER_FIELDS - {"redis_host"}
+def _leaf_paths(tree: dict, prefix: tuple = ()) -> list[tuple]:
+    paths = []
+    for key, value in tree.items():
+        if isinstance(value, dict):
+            paths += _leaf_paths(value, prefix + (key,))
+        else:
+            paths.append(prefix + (key,))
+    return paths
 
 
-def test_tiler_config_fields_all_come_from_yaml():
-    """get_tiler_config constructs TilerConfig field by field — it does not read
-    the YAML generically — so a new field has to be declared in three places.
-    This is the check that a missed one fails here rather than at first use.
-    """
-    yaml_keys = set(Config.get_config(EnvType.TESTING).config["tiler"]["config"])
-    assert _YAML_TILER_FIELDS == yaml_keys
+_TILER_SECTION = Config.get_config(EnvType.TESTING).config["tiler"]["config"]
 
 
-@pytest.mark.parametrize("missing", sorted(_REQUIRED_TILER_FIELDS))
-def test_get_tiler_config_raises_on_missing_yaml_key(missing):
-    tiler_section = dict(Config.get_config(EnvType.TESTING).config["tiler"]["config"])
-    del tiler_section[missing]
-    stub = SimpleNamespace(config={"tiler": {"config": tiler_section}})
+@pytest.mark.parametrize(
+    "section, path",
+    [("api", p) for p in _leaf_paths(_TILER_SECTION["api"])]
+    + [("batch", p) for p in _leaf_paths(_TILER_SECTION["batch"])],
+    ids=lambda v: ".".join(v) if isinstance(v, tuple) else v,
+)
+def test_tiler_config_raises_on_missing_yaml_key(monkeypatch, section, path):
+    """Every tiler key is required: the yaml is the only source of values, so
+    a missing one fails at load rather than falling back to a code default."""
+    config = Config.get_config(EnvType.TESTING)
 
+    def drop(tiler):
+        node = tiler["config"][section]
+        for key in path[:-1]:
+            node = node[key]
+        del node[path[-1]]
+
+    _with_tiler(monkeypatch, config, drop)
+    getter = (
+        config.get_tiler_api_config
+        if section == "api"
+        else config.get_tiler_batch_config
+    )
     with pytest.raises(KeyError):
-        Config.get_tiler_config(stub)
+        getter()
 
 
 def test_csiro_config_fields_all_come_from_yaml():
-    """Same field-by-field construction as the tiler config, same check: a new
-    CsiroConfig field must reach the YAML, not just the dataclass."""
+    """CsiroConfig is built field by field, so a new field must reach the YAML,
+    not just the dataclass."""
     yaml_keys = set(Config.get_config(EnvType.TESTING).config["csiro"])
     assert {f.name for f in dataclasses.fields(CsiroConfig)} == yaml_keys
 

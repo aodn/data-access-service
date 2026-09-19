@@ -14,11 +14,11 @@ store since they're all on the same grid.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-# Output layout under ``TilerParquetConfig.output_dir``, shared by batch
-# (writer) and tiler (reader):
+# Output layout, shared by batch (writer) and tiler (reader). ``output_dir``
+# is ``s3://{datavis_data bucket}/tiler`` (Config.get_tiler_output_dir):
 #
 #   {output_dir}/root_metadata.json
 #   {output_dir}/{store}/metadata.json
@@ -72,6 +72,8 @@ class TilerParquetMetadata:
     ``dataset`` is the source zarr dataset name (``{store}.zarr``).
     ``timestamps`` lists only the instants whose parquet files are written -
     batch updates it after the files, so a reader never sees one without them.
+    ``empty_timestamps`` lists instants batch read but found no data in; they
+    have no files and are never read again.
     """
 
     uuid: str
@@ -84,6 +86,7 @@ class TilerParquetMetadata:
     variables: dict[str, TilerVariableMetadata]
     schema_fingerprint: str
     generated_at: str
+    empty_timestamps: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -94,6 +97,7 @@ class TilerParquetMetadata:
             "lat": self.lat,
             "lon": self.lon,
             "timestamps": self.timestamps,
+            "empty_timestamps": self.empty_timestamps,
             "variables": {k: v.to_dict() for k, v in self.variables.items()},
             "schema_fingerprint": self.schema_fingerprint,
             "generated_at": self.generated_at,
@@ -109,6 +113,7 @@ class TilerParquetMetadata:
             lat=[float(x) for x in data["lat"]],
             lon=[float(x) for x in data["lon"]],
             timestamps=list(data["timestamps"]),
+            empty_timestamps=list(data.get("empty_timestamps", [])),
             variables={
                 k: TilerVariableMetadata.from_dict(v)
                 for k, v in data.get("variables", {}).items()
