@@ -1,14 +1,15 @@
 """Types for the tiler's zarr -> parquet conversion.
 
-The value data is sparse ``(timestamp, dataset, uuid, variable, i, j, value)``
-rows, carrying pixel indices, not lat/lon degrees or CF metadata. Each store
-gets one parquet file per variable. Everything a reader needs to turn that
-back into the dense ``xr.Dataset`` the tiler rendering pipeline expects - the
-lat/lon coordinate arrays, native grid shape, per-variable dtype/CF attrs
+The value data is sparse ``(i, j, value)`` rows, carrying pixel indices, not
+lat/lon degrees or CF metadata. Each store gets one parquet file per variable
+per timestamp, so a batch run only ever adds files for new timestamps and
+never rewrites old ones. Everything a reader needs to turn that back into the
+dense ``xr.Dataset`` the tiler rendering pipeline expects - the lat/lon
+coordinate arrays, native grid shape, per-variable dtype/CF attrs
 (``flag_values``/``flag_meanings``/``units``, read by the categorical and
-point-query code paths), and the available timestamp list - lives in one JSON
-sidecar per store (``metadata.json``), shared by every variable of that store
-since they're all on the same grid.
+point-query code paths), and the list of converted timestamps - lives in one
+JSON sidecar per store (``metadata.json``), shared by every variable of that
+store since they're all on the same grid.
 """
 
 from __future__ import annotations
@@ -16,58 +17,65 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+# Output layout under ``TilerParquetConfig.output_dir``, shared by batch
+# (writer) and tiler (reader):
+#
+#   {output_dir}/root_metadata.json
+#   {output_dir}/{store}/metadata.json
+#   {output_dir}/{store}/{variable}/{timestamp}.parquet
+#
+# ``store`` is ``ProductIdentity.store``: the zarr dataset name minus ``.zarr``.
+# ``timestamp`` is the sidecar's own timestamp string with ":" dropped.
 
-def dataset_stem(store_url: str) -> str:
-    """``s3://.../foo.zarr`` -> ``foo``. Shared by batch (writes each store's
-    parquet + sidecar under this name) and the live tiler (reads them back),
-    so both sides always agree on the directory name.
-    """
-    return store_url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".zarr")
+
+def _join(base: str, *parts: str) -> str:
+    return "/".join([base.rstrip("/"), *parts])
+
+
+def root_metadata_path(output_dir: str) -> str:
+    return _join(output_dir, "root_metadata.json")
+
+
+def store_metadata_path(output_dir: str, store: str) -> str:
+    return _join(output_dir, store, "metadata.json")
+
+
+def variable_parquet_path(
+    output_dir: str, store: str, variable: str, timestamp: str
+) -> str:
+    # "2024-01-15T13:00:00.000000000Z" -> "2024-01-15T130000.000000000Z"
+    return _join(output_dir, store, variable, f"{timestamp.replace(':', '')}.parquet")
 
 
 @dataclass(frozen=True)
 class TilerVariableMetadata:
-    """Per-variable facts the sparse value parquet does not carry.
-
-    ``parquet_path`` is this variable's parquet file, relative to
-    ``TilerParquetConfig.output_dir`` (e.g. ``satellite_sst_1day_snpp/sst.parquet``)
-    - set once by batch at generation time. ``output_dir`` is local disk today
-    and will become an S3 bucket/prefix once upload lands; either way, a
-    reader just joins the two, never re-derives the relative part.
-    """
+    """Per-variable facts the sparse value parquet does not carry."""
 
     dtype: str
     attrs: dict[str, Any]
-    parquet_path: str
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "dtype": self.dtype,
-            "attrs": self.attrs,
-            "parquet_path": self.parquet_path,
-        }
+        return {"dtype": self.dtype, "attrs": self.attrs}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TilerVariableMetadata":
         return cls(
             dtype=str(data["dtype"]),
             attrs=dict(data.get("attrs") or {}),
-            parquet_path=str(data["parquet_path"]),
         )
 
 
 @dataclass(frozen=True)
 class TilerParquetMetadata:
-    """JSON sidecar written beside a store's value parquet(s) (``{uuid}.metadata.json``).
+    """JSON sidecar written beside a store's value parquet(s) (``metadata.json``).
 
-    ``source_path`` is the original zarr URL - provenance only, not read by
-    the tiler. Each variable's own ``parquet_path`` (see
-    ``TilerVariableMetadata``) is what locates its data.
+    ``dataset`` is the source zarr dataset name (``{store}.zarr``).
+    ``timestamps`` lists only the instants whose parquet files are written -
+    batch updates it after the files, so a reader never sees one without them.
     """
 
     uuid: str
     dataset: str
-    source_path: str
     n_i: int
     n_j: int
     lat: list[float]
@@ -81,7 +89,6 @@ class TilerParquetMetadata:
         return {
             "uuid": self.uuid,
             "dataset": self.dataset,
-            "source_path": self.source_path,
             "n_i": self.n_i,
             "n_j": self.n_j,
             "lat": self.lat,
@@ -97,7 +104,6 @@ class TilerParquetMetadata:
         return cls(
             uuid=str(data["uuid"]),
             dataset=str(data["dataset"]),
-            source_path=str(data["source_path"]),
             n_i=int(data["n_i"]),
             n_j=int(data["n_j"]),
             lat=[float(x) for x in data["lat"]],
@@ -123,7 +129,8 @@ class ProductIdentity:
     """
 
     id: str
-    source_path: str
+    # Store name under output_dir (see the layout above), e.g. "foo" for foo.zarr.
+    store: str
     variable: str | list[str]
     metadata_uuid: str | None = None
 
@@ -134,7 +141,7 @@ class ProductIdentity:
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
-            "source_path": self.source_path,
+            "store": self.store,
             "variable": self.variable,
             "metadata_uuid": self.metadata_uuid,
         }
@@ -143,7 +150,7 @@ class ProductIdentity:
     def from_dict(cls, data: dict[str, Any]) -> "ProductIdentity":
         return cls(
             id=data["id"],
-            source_path=data["source_path"],
+            store=data["store"],
             variable=data["variable"],
             metadata_uuid=data.get("metadata_uuid"),
         )

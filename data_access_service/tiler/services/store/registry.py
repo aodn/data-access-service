@@ -1,11 +1,11 @@
-"""Per-URL registry of tiler parquet metadata sidecars.
+"""Per-store registry of tiler parquet metadata sidecars.
 
 No zarr access here — all zarr-touching work lives in ``batch.tiler``. This
 registry only reads what that job publishes: each store's ``metadata.json``
 sidecar, from S3 at ``TilerParquetConfig.output_dir``.
 
-``get_store`` returns a coords-only ``xr.Dataset`` (time/lat/lon, no data)
-built from the sidecar. Actual pixel values come from ``slice_loader``,
+``get_store_metadata`` returns the sidecar itself (grid, timestamps,
+per-variable dtype/attrs). Actual pixel values come from ``slice_loader``,
 which reads the parquet files directly via duckdb.
 """
 
@@ -15,12 +15,11 @@ import logging
 import threading
 
 import pandas as pd
-import xarray as xr
 
 from data_access_service.config.config import Config
 from data_access_service.models.tiler_parquet_types import (
     TilerParquetMetadata,
-    dataset_stem,
+    store_metadata_path,
 )
 from data_access_service.tiler.utils.dates import ts_to_utc_iso
 from data_access_service.tiler.utils.s3_json import read_json
@@ -28,13 +27,13 @@ from data_access_service.tiler.utils.s3_json import read_json
 logger = logging.getLogger(__name__)
 
 
-def _metadata_path(store_url: str) -> str:
+def _metadata_path(store: str) -> str:
     output_dir = Config.get_config().get_tiler_parquet_config().output_dir
-    return f"{output_dir.rstrip('/')}/{dataset_stem(store_url)}/metadata.json"
+    return store_metadata_path(output_dir, store)
 
 
-def _load_metadata(store_url: str) -> TilerParquetMetadata:
-    return TilerParquetMetadata.from_dict(read_json(_metadata_path(store_url)))
+def _load_metadata(store: str) -> TilerParquetMetadata:
+    return TilerParquetMetadata.from_dict(read_json(_metadata_path(store)))
 
 
 def _build_time_index(meta: TilerParquetMetadata) -> dict[pd.Timestamp, str]:
@@ -45,11 +44,6 @@ def _build_time_index(meta: TilerParquetMetadata) -> dict[pd.Timestamp, str]:
     return {pd.Timestamp(raw.rstrip("Z")): raw for raw in meta.timestamps}
 
 
-def _to_dataset(meta: TilerParquetMetadata, times: list[pd.Timestamp]) -> xr.Dataset:
-    """A coords-only Dataset (time/lat/lon, no data) built from the sidecar."""
-    return xr.Dataset(coords={"time": times, "lat": meta.lat, "lon": meta.lon})
-
-
 class StoreRegistry:
     """See module docstring. Loads each store's sidecar once, on first
     request, and caches it in-process; ``refresh`` re-reads it.
@@ -57,71 +51,62 @@ class StoreRegistry:
 
     def __init__(self) -> None:
         self._metadata: dict[str, TilerParquetMetadata] = {}
-        self._datasets: dict[str, xr.Dataset] = {}
         self._time_index: dict[str, dict[pd.Timestamp, str]] = {}
         self._failed_stores: dict[str, BaseException] = {}
         self._lock = threading.Lock()
 
-    def _publish(self, store_url: str, meta: TilerParquetMetadata) -> None:
+    def _publish(self, store: str, meta: TilerParquetMetadata) -> None:
         index = _build_time_index(meta)
-        ds = _to_dataset(meta, list(index))
         with self._lock:
-            self._metadata[store_url] = meta
-            self._datasets[store_url] = ds
-            self._time_index[store_url] = index
-            self._failed_stores.pop(store_url, None)
+            self._metadata[store] = meta
+            self._time_index[store] = index
+            self._failed_stores.pop(store, None)
 
-    def _ensure_loaded(self, store_url: str) -> TilerParquetMetadata:
+    def _ensure_loaded(self, store: str) -> TilerParquetMetadata:
         with self._lock:
-            meta = self._metadata.get(store_url)
+            meta = self._metadata.get(store)
         if meta is not None:
             return meta
         try:
-            meta = _load_metadata(store_url)
+            meta = _load_metadata(store)
         except Exception as e:
             with self._lock:
-                self._failed_stores[store_url] = e
+                self._failed_stores[store] = e
             raise
-        self._publish(store_url, meta)
+        self._publish(store, meta)
         return meta
 
-    def get_metadata(self, store_url: str) -> TilerParquetMetadata:
-        return self._ensure_loaded(store_url)
+    def get_metadata(self, store: str) -> TilerParquetMetadata:
+        return self._ensure_loaded(store)
 
-    def get(self, store_url: str) -> xr.Dataset:
-        """Return the coords-only (time/lat/lon) view, loading the sidecar if needed."""
-        self._ensure_loaded(store_url)
+    def time_index(self, store: str) -> dict[pd.Timestamp, str]:
         with self._lock:
-            return self._datasets[store_url]
+            return self._time_index.get(store, {})
 
-    def time_index(self, store_url: str) -> dict[pd.Timestamp, str]:
-        with self._lock:
-            return self._time_index.get(store_url, {})
-
-    def resolve_timestamp(self, store_url: str, ts: pd.Timestamp) -> str | None:
+    def resolve_timestamp(self, store: str, ts: pd.Timestamp) -> str | None:
         """Resolve an already-parsed UTC timestamp to the store's native
         timestamp string (the parquet's own ``timestamp`` column value), or
         None if no such instant exists.
         """
-        return self.time_index(store_url).get(ts)
+        return self.time_index(store).get(ts)
 
-    def is_available(self, store_url: str) -> bool:
-        """True unless the last prewarm of ``store_url`` recorded a failure."""
+    def is_available(self, store: str) -> bool:
+        """True unless the last prewarm of ``store`` recorded a failure."""
         with self._lock:
-            return store_url not in self._failed_stores
+            return store not in self._failed_stores
 
-    def prewarm(self, store_urls: list[str]) -> dict[str, BaseException | None]:
-        """Load every URL's sidecar. Returns ``{url: None on success, else
+    def prewarm(self, stores: list[str]) -> dict[str, BaseException | None]:
+        """Load every store's sidecar. Returns ``{store: None on success, else
         the exception}``.
         """
         outcomes: dict[str, BaseException | None] = {}
-        for url in store_urls:
+        for store in stores:
             try:
-                self._ensure_loaded(url)
-                outcomes[url] = None
+                self._ensure_loaded(store)
+                outcomes[store] = None
             except Exception as e:
-                logger.warning("Metadata sidecar unavailable for %s: %s", url, e)
-                outcomes[url] = e
+                logger.warning("Metadata sidecar unavailable for %s: %s", store, e)
+                outcomes[store] = e
         opened = sum(1 for outcome in outcomes.values() if outcome is None)
         logger.info(
             "Store prewarm complete: %d opened, %d failed (of %d)",
@@ -136,20 +121,19 @@ class StoreRegistry:
         time. One store's failure is logged and does not stop the sweep.
         """
         with self._lock:
-            urls = list(self._metadata.keys())
-        for store_url in urls:
+            stores = list(self._metadata.keys())
+        for store in stores:
             try:
-                meta = _load_metadata(store_url)
-                self._publish(store_url, meta)
-                logger.info(f"Store metadata refreshed: {store_url}")
+                meta = _load_metadata(store)
+                self._publish(store, meta)
+                logger.info(f"Store metadata refreshed: {store}")
             except Exception:
-                logger.exception(f"Store metadata refresh failed: {store_url}")
+                logger.exception(f"Store metadata refresh failed: {store}")
 
     def clear(self) -> None:
         """Drop all cached state. Intended for tests."""
         with self._lock:
             self._metadata.clear()
-            self._datasets.clear()
             self._time_index.clear()
             self._failed_stores.clear()
 
@@ -157,33 +141,29 @@ class StoreRegistry:
 store_registry = StoreRegistry()
 
 
-def get_store(store_url: str) -> xr.Dataset:
-    return store_registry.get(store_url)
+def get_store_metadata(store: str) -> TilerParquetMetadata:
+    return store_registry.get_metadata(store)
 
 
-def get_store_metadata(store_url: str) -> TilerParquetMetadata:
-    return store_registry.get_metadata(store_url)
+def is_store_available(store: str) -> bool:
+    return store_registry.is_available(store)
 
 
-def is_store_available(store_url: str) -> bool:
-    return store_registry.is_available(store_url)
-
-
-def get_available_dates(store_url: str) -> list[tuple[str, pd.Timestamp]]:
-    """Return [(iso_string, timestamp)] sorted by timestamp, for `store_url`."""
-    get_store_metadata(store_url)  # ensures the time index for this URL is populated
-    index = store_registry.time_index(store_url)
+def get_available_dates(store: str) -> list[tuple[str, pd.Timestamp]]:
+    """Return [(iso_string, timestamp)] sorted by timestamp, for `store`."""
+    get_store_metadata(store)  # ensures the time index for this store is populated
+    index = store_registry.time_index(store)
     return [(ts_to_utc_iso(ts), ts) for ts in index]
 
 
-def resolve_timestamp(store_url: str, ts: pd.Timestamp) -> str | None:
-    get_store_metadata(store_url)  # ensures the time index for this URL is populated
-    return store_registry.resolve_timestamp(store_url, ts)
+def resolve_timestamp(store: str, ts: pd.Timestamp) -> str | None:
+    get_store_metadata(store)  # ensures the time index for this store is populated
+    return store_registry.resolve_timestamp(store, ts)
 
 
-def unavailable_date_message(store_url: str, ts: pd.Timestamp) -> str:
+def unavailable_date_message(store: str, ts: pd.Timestamp) -> str:
     """ "No data for date ..." message, with a latest-available-date hint."""
-    index = store_registry.time_index(store_url)
+    index = store_registry.time_index(store)
     latest = ts_to_utc_iso(max(index)) if index else None
     hint = (
         f" Latest available date is {latest!r}."
@@ -193,13 +173,13 @@ def unavailable_date_message(store_url: str, ts: pd.Timestamp) -> str:
     return f"No data for date {ts_to_utc_iso(ts)!r}.{hint}"
 
 
-async def prewarm_stores(store_urls: list[str]) -> dict[str, BaseException | None]:
-    """Prewarm every URL and return the per-URL outcome map.
+async def prewarm_stores(stores: list[str]) -> dict[str, BaseException | None]:
+    """Prewarm every store and return the per-store outcome map.
 
     Async only so the FastAPI startup path can ``await`` it — the actual
     work is a fast synchronous JSON read.
     """
-    return store_registry.prewarm(store_urls)
+    return store_registry.prewarm(stores)
 
 
 def refresh_stores() -> None:

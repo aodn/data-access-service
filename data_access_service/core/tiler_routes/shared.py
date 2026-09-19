@@ -112,7 +112,7 @@ def is_store_available_or_404(product: Product) -> None:
     bad store (not gridded, absent, no time dimension) from reaching
     load_slice at all.
     """
-    if not is_store_available(product.source_path):
+    if not is_store_available(product.store):
         raise HTTPException(
             status_code=404,
             detail=f"Product {product.id!r} is temporarily unavailable: its store failed to open",
@@ -158,18 +158,18 @@ def resolve_timestamp_or_404(product: Product, ts: pd.Timestamp) -> None:
     a bad date 404 before any further per-request work, e.g. LOD grids, tile
     bounds).
     """
-    if resolve_timestamp(product.source_path, ts) is None:
+    if resolve_timestamp(product.store, ts) is None:
         raise HTTPException(
             status_code=404,
-            detail=unavailable_date_message(product.source_path, ts),
+            detail=unavailable_date_message(product.store, ts),
         )
 
 
 def load_slice_or_404(
-    store_url: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
+    store: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
 ):
     try:
-        return load_slice(store_url, ts, variables, ocean_masked)
+        return load_slice(store, ts, variables, ocean_masked)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 

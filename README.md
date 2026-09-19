@@ -204,7 +204,7 @@ This repo also includes an on-demand tile server for gridded IMOS ocean data (Za
 
 All dates in the tiler API (`{date}` path params, `from`/`to` query params, `available_dates` responses) are exact UTC instants passed through verbatim — there is no timezone conversion or calendar-day bucketing anywhere in the pipeline. Always use dates from a manifest response rather than constructing them locally. Products and colormaps are static config in `data_access_service/config/tiler/{products,colormaps}.json`; add, remove, or change one by editing the file and redeploying.
 
-Product `id`s follow `{zarr_name}:{variable}`, e.g. `satellite_austemp_heatwave_8day:sst_mosaic` — the colon separates the Zarr store name (from `source_path`) from the variable it exposes, both of which may themselves contain underscores. For multi-variable products, join the variables with `+` in the same order as the `variable` array, e.g. `model_sea_level_anomaly_gridded_realtime:ucur+vcur`. This is purely a human-readable convention — the `id` is never parsed at runtime, only used as an opaque lookup key — so it isn't enforced in code.
+Product `id`s follow `{zarr_name}:{variable}`, e.g. `satellite_austemp_heatwave_8day:sst_mosaic` — the colon separates the store name (the product's `store`) from the variable it exposes, both of which may themselves contain underscores. For multi-variable products, join the variables with `+` in the same order as the `variable` array, e.g. `model_sea_level_anomaly_gridded_realtime:ucur+vcur`. This is purely a human-readable convention — the `id` is never parsed at runtime, only used as an opaque lookup key — so it isn't enforced in code.
 
 ### Running Tests
 

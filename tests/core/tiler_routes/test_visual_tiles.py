@@ -324,8 +324,8 @@ def test_bbox_webp_ok(client):
 
 
 def test_bbox_missing_store(client):
-    # With no bbox param, default_bbox_from_store opens the store directly
-    # (get_store -> aodn_cloud_optimised) before load_slice_or_404 runs, so a missing
+    # With no bbox param, default_bbox_from_store reads the store's sidecar
+    # (get_store_metadata) before load_slice_or_404 runs, so a missing
     # store must still 404 via the app-level FileNotFoundError handler.
     with patch(
         "data_access_service.core.tiler_routes.visual_tiles.default_bbox_from_store",
@@ -337,7 +337,7 @@ def test_bbox_missing_store(client):
             "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/bbox.png?date=2024-01-01T00:00:00Z"
         )
     assert response.status_code == 404
-    assert "s3://bucket/missing.zarr" in response.json()["detail"]
+    assert "missing" in response.json()["detail"]
 
 
 def test_bbox_epsg4326_latitude_out_of_range_rejected(client):
@@ -436,7 +436,7 @@ def mcs_product():
 
     PRODUCTS["mcs"] = Product(
         id="mcs",
-        source_path="s3://test/mcs.zarr",
+        store="mcs",
         variable="MCS_category",
     )
     yield
@@ -694,7 +694,7 @@ def test_animation_missing_store(client):
             "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/animation.gif?from_date=2024-01-01T00:00:00Z&to_date=2024-01-31T00:00:00Z"
         )
     assert response.status_code == 404
-    assert "s3://bucket/missing.zarr" in response.json()["detail"]
+    assert "missing" in response.json()["detail"]
 
 
 def test_animation_frame_cap_rejected(client):

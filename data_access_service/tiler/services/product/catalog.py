@@ -29,7 +29,7 @@ def _default_product(identity: ProductIdentity) -> Product:
     is_pair = isinstance(identity.variable, list)
     return Product(
         id=identity.id,
-        source_path=identity.source_path,
+        store=identity.store,
         variable=identity.variable,
         metadata_uuid=identity.metadata_uuid,
         visual=not is_pair,

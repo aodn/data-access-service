@@ -24,7 +24,11 @@ from data_access_service.core.tiler_routes.shared import (
     TILE_THREAD_LIMITER,
     mark_tiler_ready,
 )
-from data_access_service.models.tiler_parquet_types import ProductIdentity, RootMetadata
+from data_access_service.models.tiler_parquet_types import (
+    ProductIdentity,
+    RootMetadata,
+    root_metadata_path,
+)
 from data_access_service.tiler.services.colormap.registry import load_colormaps
 from data_access_service.tiler.services.product.catalog import build_catalog
 from data_access_service.tiler.services.product.product import Product
@@ -39,8 +43,7 @@ logger = logging.getLogger(__name__)
 
 def _load_root_metadata() -> dict[str, Product]:
     output_dir = Config.get_config().get_tiler_parquet_config().output_dir
-    path = f"{output_dir.rstrip('/')}/root_metadata.json"
-    root = RootMetadata.from_dict(read_json(path))
+    root = RootMetadata.from_dict(read_json(root_metadata_path(output_dir)))
     identities = {
         entry["id"]: ProductIdentity.from_dict(entry) for entry in root.products
     }
@@ -57,7 +60,7 @@ async def run_tiler_warmup() -> None:
         await anyio.to_thread.run_sync(warmup_visual, limiter=TILE_THREAD_LIMITER)
 
         outcomes = await prewarm_stores(
-            sorted({product.source_path for product in products.values()})
+            sorted({product.store for product in products.values()})
         )
         if all(outcome is not None for outcome in outcomes.values()):
             raise RuntimeError(

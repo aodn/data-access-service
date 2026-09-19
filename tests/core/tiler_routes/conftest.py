@@ -14,12 +14,10 @@ from data_access_service.core.routes.auth import api_key_auth
 def seed_products():
     """Populate PRODUCTS with test fixtures before each test and clean up after."""
     test_products = [
-        Product(
-            id="sea_level_anomaly", source_path="s3://test/sla.zarr", variable="GSLA"
-        ),
+        Product(id="sea_level_anomaly", store="sla", variable="GSLA"),
         Product(
             id="ocean_current",
-            source_path="s3://test/sla.zarr",
+            store="sla",
             variable=["UCUR", "VCUR"],
         ),
     ]

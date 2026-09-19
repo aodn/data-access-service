@@ -193,7 +193,7 @@ async def get_tile(
     rescale_range = parse_rescale(rescale)
 
     key = (
-        product.source_path,
+        product.store,
         date,
         variable,
         z,
@@ -206,7 +206,7 @@ async def get_tile(
 
     def _do_render() -> bytes:
         ds = load_slice_or_404(
-            product.source_path, ts, [variable], ocean_masked=product.ocean_masked
+            product.store, ts, [variable], ocean_masked=product.ocean_masked
         )
         return render_tile(
             ds,
@@ -218,7 +218,7 @@ async def get_tile(
             rescale_range,
             fmt=ext,
             coastal_fill=product.visual_tile.coastal_fill,
-            source_path=product.source_path,
+            store=product.store,
             date=date,
         )
 
@@ -237,7 +237,7 @@ async def get_tile(
 
 
 def _resolve_resolution(
-    product_source_path: str,
+    store: str,
     bbox_tuple: tuple[float, float, float, float],
     crs: str,
     width: int | None,
@@ -255,7 +255,7 @@ def _resolve_resolution(
 
     if width is None and height is None:
         bbox_wgs84 = bbox_to_wgs84(bbox_tuple, crs)
-        return native_resolution_in_bbox(product_source_path, bbox_wgs84, max_dim)
+        return native_resolution_in_bbox(store, bbox_wgs84, max_dim)
 
     minx, miny, maxx, maxy = bbox_tuple
     span_x = (maxx - minx) or 1.0
@@ -350,7 +350,7 @@ def _validate_bbox_for_crs(bbox: tuple[float, float, float, float], crs: str) ->
 
 
 def _parse_bbox_and_crs(
-    bbox: str | None, crs: str, source_path: str
+    bbox: str | None, crs: str, store: str
 ) -> tuple[tuple[float, float, float, float], str, str]:
     """Validate the crs param and parse the bbox string.
 
@@ -369,7 +369,7 @@ def _parse_bbox_and_crs(
             status_code=400, detail="crs must be 'EPSG:4326' or 'EPSG:3857'"
         )
     if bbox is None:
-        return default_bbox_from_store(source_path), "EPSG:4326", crs
+        return default_bbox_from_store(store), "EPSG:4326", crs
     try:
         minx, miny, maxx, maxy = (float(v) for v in bbox.split(","))
     except ValueError as e:
@@ -449,14 +449,12 @@ async def get_bbox(
     resolve_timestamp_or_404(product, ts)
     variable = single_variable_or_400(product, context="visual tiles")
 
-    bbox_tuple, bounds_crs, dst_crs = _parse_bbox_and_crs(
-        bbox, crs, product.source_path
-    )
+    bbox_tuple, bounds_crs, dst_crs = _parse_bbox_and_crs(bbox, crs, product.store)
 
     rescale_range = parse_rescale(rescale)
 
     key = (
-        product.source_path,
+        product.store,
         date,
         variable,
         bbox_tuple,
@@ -471,7 +469,7 @@ async def get_bbox(
 
     def _do_render() -> bytes:
         ds = load_slice_or_404(
-            product.source_path, ts, [variable], ocean_masked=product.ocean_masked
+            product.store, ts, [variable], ocean_masked=product.ocean_masked
         )
         return render_bbox(
             ds,
@@ -485,7 +483,7 @@ async def get_bbox(
             dst_crs=dst_crs,
             fmt=ext,
             coastal_fill=product.visual_tile.coastal_fill,
-            source_path=product.source_path,
+            store=product.store,
             date=date,
         )
 
@@ -607,13 +605,13 @@ async def get_animation(
     is_store_available_or_404(product)
     variable = single_variable_or_400(product, context="animation")
 
-    # Offloaded: each may call get_store, which can block on lib open on
-    # cold path or while a TTL refresh is racing the cached entry.
+    # Offloaded: each may call get_store_metadata, which reads the store's
+    # sidecar from S3 on a cold path.
     bbox_tuple, bounds_crs, dst_crs = await anyio.to_thread.run_sync(
         _parse_bbox_and_crs,
         bbox,
         crs,
-        product.source_path,
+        product.store,
         limiter=TILE_THREAD_LIMITER,
     )
 
@@ -623,7 +621,7 @@ async def get_animation(
     # ValueError there is mapped to 400 below.
 
     available = await anyio.to_thread.run_sync(
-        get_available_dates, product.source_path, limiter=TILE_THREAD_LIMITER
+        get_available_dates, product.store, limiter=TILE_THREAD_LIMITER
     )
     if not available:
         raise HTTPException(
@@ -661,7 +659,7 @@ async def get_animation(
 
     resolved_w, resolved_h = await anyio.to_thread.run_sync(
         _resolve_resolution,
-        product.source_path,
+        product.store,
         bbox_tuple,
         bounds_crs,
         width,
@@ -679,7 +677,7 @@ async def get_animation(
         *(
             anyio.to_thread.run_sync(
                 load_slice_uncached,
-                product.source_path,
+                product.store,
                 ts,
                 [variable],
                 product.ocean_masked,
@@ -705,7 +703,7 @@ async def get_animation(
                 fmt=ext,
                 duration_ms=duration,
                 coastal_fill=product.visual_tile.coastal_fill,
-                source_path=product.source_path,
+                store=product.store,
                 dates=dates,
             ),
             limiter=TILE_THREAD_LIMITER,

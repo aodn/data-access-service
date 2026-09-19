@@ -130,10 +130,10 @@ async def get_products_availability(
 
     products = {}
     for product_id, product in items:
-        if not is_store_available(product.source_path):
+        if not is_store_available(product.store):
             continue
 
-        all_dates = get_available_dates(product.source_path)
+        all_dates = get_available_dates(product.store)
         if not all_dates:
             continue
         # full_date_range is the product's full dataset bounds, independent of from/to;
@@ -190,7 +190,7 @@ def _load_point(
 ) -> PointResponse:
     variables = product.variables
     ds = load_slice_or_404(
-        product.source_path, ts, variables, ocean_masked=product.ocean_masked
+        product.store, ts, variables, ocean_masked=product.ocean_masked
     )
 
     _require_point_in_bounds(ds, lat, lon)

@@ -36,7 +36,7 @@ def non_visual_product(monkeypatch):
         NON_VISUAL_ID,
         Product(
             id=NON_VISUAL_ID,
-            source_path="s3://test/sla.zarr",
+            store="sla",
             variable="WDIR",
             visual=False,
         ),

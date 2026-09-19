@@ -1,6 +1,6 @@
 """loader.load_slice + exact-instant resolution.
 
-Existing tests in test_registry.py cover get_store + get_lod_grids. These cover
+Existing tests in test_registry.py cover get_store_metadata + get_lod_grids. These cover
 the L1 cache interaction, the duckdb parquet read, and multi-timestamp
 resolution.
 
@@ -15,6 +15,7 @@ value parquet straight off disk via duckdb, so there is no monkeypatch seam
 for that half).
 """
 
+import os
 import threading
 import time
 from unittest.mock import MagicMock
@@ -29,10 +30,11 @@ import data_access_service.tiler.services.store.tiler_repository as repo_module
 from data_access_service.models.tiler_parquet_types import (
     TilerParquetMetadata,
     TilerVariableMetadata,
+    variable_parquet_path,
 )
 from data_access_service.tiler.services.store.registry import store_registry
 
-STORE_URL = "s3://b/x.zarr"
+STORE = "x"
 
 
 @pytest.fixture(autouse=True)
@@ -64,32 +66,35 @@ def _seed_metadata(
     meta = TilerParquetMetadata(
         uuid="u",
         dataset="x.zarr",
-        source_path=STORE_URL,
         n_i=len(lat),
         n_j=len(lon),
         lat=lat,
         lon=lon,
         timestamps=[f"{t}.000000000Z" for t in times],
         variables={
-            k: TilerVariableMetadata(
-                dtype=v["dtype"], attrs=v["attrs"], parquet_path=f"x/{k}.parquet"
-            )
+            k: TilerVariableMetadata(dtype=v["dtype"], attrs=v["attrs"])
             for k, v in variables.items()
         },
         schema_fingerprint="",
         generated_at="",
     )
-    store_registry._publish(STORE_URL, meta)
+    store_registry._publish(STORE, meta)
 
 
 def _write_variable_parquet(output_dir, variable: str, rows: list[tuple]) -> None:
-    path = output_dir / "x" / f"{variable}.parquet"
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Write ``(timestamp, i, j, value)`` rows as batch does: one file per
+    timestamp under ``x/{variable}/``."""
+    by_ts: dict[str, list[tuple]] = {}
+    for ts, i, j, value in rows:
+        by_ts.setdefault(ts, []).append((i, j, value))
     con = duckdb.connect(":memory:")
-    con.execute("CREATE TABLE t (timestamp VARCHAR, i INTEGER, j INTEGER, value FLOAT)")
-    for row in rows:
-        con.execute("INSERT INTO t VALUES (?, ?, ?, ?)", row)
-    con.execute(f"COPY t TO '{path}' (FORMAT PARQUET)")
+    for ts, ts_rows in by_ts.items():
+        path = variable_parquet_path(str(output_dir), STORE, variable, ts)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        con.execute("CREATE OR REPLACE TABLE t (i INTEGER, j INTEGER, value FLOAT)")
+        for row in ts_rows:
+            con.execute("INSERT INTO t VALUES (?, ?, ?)", row)
+        con.execute(f"COPY t TO '{path}' (FORMAT PARQUET)")
     con.close()
 
 
@@ -101,7 +106,7 @@ def test_load_slice_returns_dataset_for_known_date(output_dir):
     _seed_metadata(["2024-01-15T13:00:00"], [0.0, 1.0], [0.0, 1.0])
     _write_variable_parquet(output_dir, "v", [(_ts("2024-01-15T13:00:00"), 0, 0, 1.0)])
 
-    result = loader.load_slice(STORE_URL, pd.Timestamp("2024-01-15T13:00:00"), ["v"])
+    result = loader.load_slice(STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"])
     assert "v" in result.data_vars
     assert result["v"].shape == (2, 2)
     assert float(result["v"].isel(lat=0, lon=0)) == 1.0
@@ -115,7 +120,7 @@ def test_load_slice_unknown_date_raises_file_not_found(output_dir):
     with pytest.raises(
         FileNotFoundError, match="Latest available date is '2024-01-15T13:00:00Z'"
     ):
-        loader.load_slice(STORE_URL, pd.Timestamp("1999-01-01"), ["v"])
+        loader.load_slice(STORE, pd.Timestamp("1999-01-01"), ["v"])
 
 
 def test_load_slice_unknown_variable_names_the_variable_not_the_date(output_dir):
@@ -123,20 +128,19 @@ def test_load_slice_unknown_variable_names_the_variable_not_the_date(output_dir)
 
     with pytest.raises(FileNotFoundError, match=r"NOT_A_REAL_VAR"):
         loader.load_slice(
-            STORE_URL, pd.Timestamp("2024-01-15T13:00:00"), ["NOT_A_REAL_VAR"]
+            STORE, pd.Timestamp("2024-01-15T13:00:00"), ["NOT_A_REAL_VAR"]
         )
 
 
 def test_load_slice_raises_when_resolved_timestamp_was_never_converted(output_dir):
-    """A partial/sampled batch backfill's metadata.json still lists the
-    store's full time index, but only some of those timestamps actually made
-    it into the parquet. Requesting one that didn't must 404 (via
-    FileNotFoundError), not silently return an all-NaN slice."""
+    """The sidecar lists a timestamp whose file is missing (removed out from
+    under it). Must 404 (via FileNotFoundError), not return an all-NaN
+    slice."""
     _seed_metadata(["2024-01-15T13:00:00", "2024-01-16T13:00:00"], [0.0], [0.0])
     _write_variable_parquet(output_dir, "v", [(_ts("2024-01-15T13:00:00"), 0, 0, 1.0)])
 
-    with pytest.raises(FileNotFoundError, match="2024-01-16T13:00:00"):
-        loader.load_slice(STORE_URL, pd.Timestamp("2024-01-16T13:00:00"), ["v"])
+    with pytest.raises(FileNotFoundError, match="2024-01-16T130000"):
+        loader.load_slice(STORE, pd.Timestamp("2024-01-16T13:00:00"), ["v"])
 
 
 def test_load_slice_resolves_exact_timestamp_among_several(output_dir):
@@ -154,7 +158,7 @@ def test_load_slice_resolves_exact_timestamp_among_several(output_dir):
         ],
     )
 
-    result = loader.load_slice(STORE_URL, pd.Timestamp("2024-01-15T14:00:00"), ["v"])
+    result = loader.load_slice(STORE, pd.Timestamp("2024-01-15T14:00:00"), ["v"])
 
     assert float(result["v"].isel(lat=0, lon=0)) == 2.0
 
@@ -173,7 +177,7 @@ def test_load_slice_reads_only_the_requested_timestamp(output_dir):
     )
 
     result = loader.load_slice_uncached(
-        STORE_URL, pd.Timestamp("2024-01-15T13:00:00"), ["v"]
+        STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"]
     )
     assert float(result["v"].isel(lat=0, lon=0)) == 1.0
 
@@ -200,7 +204,7 @@ def test_load_slice_ocean_masked_nulls_invalid_cells(output_dir):
     _write_variable_parquet(output_dir, "v", rows)
 
     result = loader.load_slice(
-        STORE_URL, pd.Timestamp("2024-01-15T13:00:00"), ["v"], ocean_masked=True
+        STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"], ocean_masked=True
     )
     # Open-ocean cell survives; the New Guinea land cell is nulled.
     assert float(result["v"].sel(lat=-40.0, lon=150.0)) == 1.0
@@ -212,7 +216,7 @@ def test_load_slice_without_ocean_masked_keeps_all_cells(output_dir):
     _write_variable_parquet(output_dir, "v", rows)
 
     result = loader.load_slice(
-        STORE_URL, pd.Timestamp("2024-01-15T13:00:00"), ["v"]
+        STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"]
     )  # flag defaults off
     assert not np.isnan(result["v"]).any()
 
@@ -244,7 +248,7 @@ def test_concurrent_identical_loads_share_one_compute(output_dir, monkeypatch):
 
     def worker():
         results.append(
-            loader.load_slice(STORE_URL, pd.Timestamp("2024-01-15T13:00:00"), ["v"])
+            loader.load_slice(STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"])
         )
 
     threads = [threading.Thread(target=worker) for _ in range(4)]

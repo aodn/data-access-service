@@ -26,6 +26,7 @@ from data_access_service.models.pmtiles_types import (
 from data_access_service.models.sites_types import SitesConfig
 from data_access_service.models.tiler_types import (
     TilerConfig,
+    TilerBatchDuckDBConfig,
     TilerDuckDBConfig,
     TilerParquetConfig,
 )
@@ -460,8 +461,6 @@ class Config:
         redis_env = os.getenv("CACHE_HOST")
         tconfig = self.config.get("tiler", {}).get("config", {})
         return TilerConfig(
-            co_bucket=f"s3://{tconfig.get('co_bucket', 'aodn-cloud-optimised')}",
-            store_prewarm_workers=tconfig["store_prewarm_workers"],
             store_refresh_interval_hours=tconfig["store_refresh_interval_hours"],
             thread_pool_size=tconfig["thread_pool_size"],
             animation_workers=tconfig["animation_workers"],
@@ -494,21 +493,19 @@ class Config:
             )
         output_dir = f"s3://{self.get_datavis_data_bucket_name()}/{s3_prefix}"
 
-        max_timestamps = tpconfig.get("max_timestamps")
+        window_days = tpconfig.get("window_days")
         dconfig = tpconfig.get("duckdb", {})
-        temp_dir = tempfile.mkdtemp(
-            prefix=dconfig.get("duckdb_temp_dir", "tiler_parquet_duckdb_tmp")
-        )
         return TilerParquetConfig(
             output_dir=output_dir,
             batch_days=int(tpconfig.get("batch_days", 30)),
-            max_timestamps=(
-                int(max_timestamps) if max_timestamps is not None else None
-            ),
-            duckdb=TilerDuckDBConfig(
+            window_days=int(window_days) if window_days is not None else None,
+            use_fork_process=bool(tpconfig.get("use_fork_process", True)),
+            duckdb=TilerBatchDuckDBConfig(
                 memory_limit=dconfig.get("memory_limit", "3G"),
                 threads=int(dconfig.get("threads", 3)),
-                temp_directory=temp_dir,
+                temp_dir_prefix=dconfig.get(
+                    "duckdb_temp_dir", "tiler_parquet_duckdb_tmp"
+                ),
             ),
         )
 

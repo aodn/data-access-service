@@ -70,7 +70,7 @@ class ProductConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    source_path: str
+    store: str
     variable: str | list[str]
     # Links this product to its GeoNetwork/STAC collection UUID. Null when absent.
     metadata_uuid: str | None = None
@@ -85,7 +85,7 @@ class ProductConfig(BaseModel):
     def from_product(cls, product: "Product") -> "ProductConfig":
         return cls(
             id=product.id,
-            source_path=product.source_path,
+            store=product.store,
             variable=product.variable,
             metadata_uuid=product.metadata_uuid,
             ocean_masked=product.ocean_masked,

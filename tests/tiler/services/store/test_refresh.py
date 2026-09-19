@@ -12,12 +12,12 @@ from data_access_service.models.tiler_parquet_types import (
     TilerVariableMetadata,
 )
 from data_access_service.tiler.services.store.registry import (
-    get_store,
+    get_store_metadata,
     refresh_stores,
     store_registry,
 )
 
-STORE_URL = "s3://aodn-cloud-optimised/foo.zarr"
+STORE = "foo"
 OUTPUT_DIR = "s3://my-bucket/tiler"
 
 
@@ -52,78 +52,73 @@ def _meta(n_i: int) -> TilerParquetMetadata:
     return TilerParquetMetadata(
         uuid="u",
         dataset="foo.zarr",
-        source_path=STORE_URL,
         n_i=n_i,
         n_j=1,
         lat=[float(x) for x in range(n_i)],
         lon=[0.0],
         timestamps=["2024-01-15T13:00:00.000000000Z"],
-        variables={
-            "v": TilerVariableMetadata(
-                dtype="float32", attrs={}, parquet_path="v.parquet"
-            )
-        },
+        variables={"v": TilerVariableMetadata(dtype="float32", attrs={})},
         schema_fingerprint="",
         generated_at="",
     )
 
 
-def _write_metadata(s3_store: dict, dataset_stem: str, n_i: int) -> None:
-    s3_store[f"{OUTPUT_DIR}/{dataset_stem}/metadata.json"] = _meta(n_i).to_dict()
+def _write_metadata(s3_store: dict, store: str, n_i: int) -> None:
+    s3_store[f"{OUTPUT_DIR}/{store}/metadata.json"] = _meta(n_i).to_dict()
 
 
 def test_request_path_never_refreshes_an_already_loaded_store(output_dir):
     _write_metadata(output_dir, "foo", n_i=2)
-    first = get_store(STORE_URL)
+    first = get_store_metadata(STORE)
     for _ in range(10):
-        assert get_store(STORE_URL) is first
+        assert get_store_metadata(STORE) is first
 
 
 def test_refresh_stores_rereads_every_loaded_store(output_dir):
     _write_metadata(output_dir, "foo", n_i=2)
-    get_store(STORE_URL)
+    get_store_metadata(STORE)
 
     _write_metadata(output_dir, "foo", n_i=5)  # sidecar changed on S3
     refresh_stores()
 
-    assert get_store(STORE_URL).sizes["lat"] == 5
+    assert get_store_metadata(STORE).n_i == 5
 
 
-def test_refresh_publishes_a_new_dataset_object(output_dir):
+def test_refresh_publishes_a_new_metadata_object(output_dir):
     _write_metadata(output_dir, "foo", n_i=2)
-    first = get_store(STORE_URL)
+    first = get_store_metadata(STORE)
 
     _write_metadata(output_dir, "foo", n_i=2)
     refresh_stores()
 
-    assert get_store(STORE_URL) is not first
+    assert get_store_metadata(STORE) is not first
 
 
 def test_one_store_failure_does_not_stop_the_sweep(output_dir):
     _write_metadata(output_dir, "foo", n_i=2)
     _write_metadata(output_dir, "bar", n_i=3)
-    get_store(STORE_URL)
-    get_store("s3://aodn-cloud-optimised/bar.zarr")
+    get_store_metadata(STORE)
+    get_store_metadata("bar")
 
     # "foo"'s sidecar becomes unreadable before the sweep runs.
     del output_dir[f"{OUTPUT_DIR}/foo/metadata.json"]
 
     refresh_stores()  # must not raise
 
-    # "foo" keeps serving its last-known-good dataset...
-    assert get_store(STORE_URL).sizes["lat"] == 2
+    # "foo" keeps serving its last-known-good sidecar...
+    assert get_store_metadata(STORE).n_i == 2
     # ...while "bar"'s refresh still went through.
-    assert store_registry.get("s3://aodn-cloud-optimised/bar.zarr").sizes["lat"] == 3
+    assert get_store_metadata("bar").n_i == 3
 
 
 def test_refresh_stores_skips_stores_never_loaded():
     refresh_stores()  # nothing published yet; must not raise
-    assert store_registry.time_index(STORE_URL) == {}
+    assert store_registry.time_index(STORE) == {}
 
 
 def test_clear_drops_loaded_stores(output_dir):
     _write_metadata(output_dir, "foo", n_i=2)
-    get_store(STORE_URL)
+    get_store_metadata(STORE)
 
     store_registry.clear()
 

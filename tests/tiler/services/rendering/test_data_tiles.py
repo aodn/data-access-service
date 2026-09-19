@@ -30,14 +30,14 @@ def _make_ds(variables: list[str]) -> xr.Dataset:
 
 SCALAR_PRODUCT = Product(
     id="test_scalar",
-    source_path="",
+    store="",
     variable="sst",
     data_tile=DataTileConfig(lod_grids={1: (1, 1)}, chunk_px=(8, 8), padding=0),
 )
 
 UV_PRODUCT = Product(
     id="test_uv",
-    source_path="",
+    store="",
     variable=["u", "v"],
     data_tile=DataTileConfig(lod_grids={1: (1, 1)}, chunk_px=(8, 8), padding=0),
 )
@@ -47,7 +47,7 @@ UV_PRODUCT = Product(
 # tiles at the same (product, date, lod) share one _compute_processed call.
 MULTI_TILE_PRODUCT = Product(
     id="test_multi_tile",
-    source_path="",
+    store="",
     variable="sst",
     data_tile=DataTileConfig(lod_grids={1: (2, 2)}, chunk_px=(8, 8), padding=0),
 )
@@ -92,7 +92,7 @@ def _make_categorical_ds(
 
 CATEGORICAL_PRODUCT = Product(
     id="test_cat",
-    source_path="",
+    store="",
     variable="cat",
     data_tile=DataTileConfig(lod_grids={1: (1, 1)}, chunk_px=(8, 8), padding=0),
 )

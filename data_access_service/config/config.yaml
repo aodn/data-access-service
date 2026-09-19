@@ -160,9 +160,6 @@ pmtiles:
       maxzoom: 12
 tiler:
   config:
-    # Capped at the shared S3 connection pool's real ceiling (botocore
-    # default max_pool_connections=10) — going higher just queues.
-    store_prewarm_workers: 10
     store_refresh_interval_hours: 4
     thread_pool_size: 20
     animation_workers: 2
@@ -236,13 +233,16 @@ tiler_parquet:
     s3_prefix: "tiler"
     # Timestamps fetched per get_data call in the batch conversion.
     batch_days: 30
-    # Caps each store to its most recent N timestamps. Null converts full
-    # history; set for a local/dev "latest N" sample run.
-    max_timestamps: null
-    # DuckDB tuning for the batch job's own TilerDuckDBClient (one forked per
-    # store - see batch.tiler.generator). Distinct from tiler_duckdb: below,
-    # which tunes the live API's much smaller read-side connection - see
-    # TilerDuckDBConfig for how the two profiles differ.
+    # Only convert timestamps within this many days of each store's latest
+    # one. Null converts the full history. Each run only adds timestamps not
+    # yet converted, so widening this later backfills the older ones.
+    window_days: 5
+    # One forked worker per store, so its memory goes back to the OS before
+    # the next. Turned off for local macOS runs (see config-dev.yaml).
+    use_fork_process: True
+    # DuckDB tuning for the batch job's own TilerBatchDuckDBClient (one per
+    # forked store - see batch.tiler.generator). Distinct from tiler_duckdb:
+    # below, which tunes the live API's much smaller read-side connection.
     duckdb:
       duckdb_temp_dir: "tiler_parquet_duckdb_tmp"
       memory_limit: "3G"
@@ -250,8 +250,8 @@ tiler_parquet:
 tiler_duckdb:
   config:
     # DuckDB settings for TilerDuckDBClient, which reads the batch-generated
-    # parquet slices inside the live tiler API - local disk only, no S3, so
-    # no temp/spill dir here.
+    # parquet slices from S3 inside the live tiler API - small point queries,
+    # so no temp/spill dir here.
     memory_limit: "256MB"
     threads: 4
 csiro:

@@ -50,7 +50,7 @@ def _warm_coord_indexes(ds: xr.Dataset) -> xr.Dataset:
 
 
 def _compute_slice_from_store(
-    store_url: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
+    store: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
 ) -> xr.Dataset:
     """Fetch a 2-D slice from the store's parquet files. Both `load_slice` and
     `load_slice_uncached` delegate here; they differ only in whether the
@@ -60,34 +60,34 @@ def _compute_slice_from_store(
     domain are nulled here (masks.apply_ocean_mask) so every downstream consumer
     inherits the cut.
     """
-    result = _fetch_slice_from_store(store_url, ts, variables)
+    result = _fetch_slice_from_store(store, ts, variables)
     if ocean_masked:
         result = apply_ocean_mask(result, variables)
     return result
 
 
 def _fetch_slice_from_store(
-    store_url: str, ts: pd.Timestamp, variables: list[str]
+    store: str, ts: pd.Timestamp, variables: list[str]
 ) -> xr.Dataset:
-    meta = get_store_metadata(store_url)
+    meta = get_store_metadata(store)
 
     missing = [v for v in variables if v not in meta.variables]
     if missing:
         raise FileNotFoundError(
-            f"Variable(s) {missing} not found in store {store_url!r} "
+            f"Variable(s) {missing} not found in store {store!r} "
             f"(available: {sorted(meta.variables)})"
         )
 
-    raw_ts = resolve_timestamp(store_url, ts)
+    raw_ts = resolve_timestamp(store, ts)
     if raw_ts is None:
-        raise FileNotFoundError(unavailable_date_message(store_url, ts))
+        raise FileNotFoundError(unavailable_date_message(store, ts))
 
     repo = TilerParquetRepository(_get_client())
     data_vars = {}
     for v in variables:
         var_meta = meta.variables[v]
         arr = repo.fetch_variable_slice(
-            var_meta.parquet_path, raw_ts, meta.n_i, meta.n_j, var_meta.dtype
+            store, v, raw_ts, meta.n_i, meta.n_j, var_meta.dtype
         )
         data_vars[v] = xr.DataArray(
             arr, dims=("lat", "lon"), attrs=dict(var_meta.attrs)
@@ -97,7 +97,7 @@ def _fetch_slice_from_store(
 
 
 def load_slice(
-    store_url: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
+    store: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
 ) -> xr.Dataset:
     """
     Return a fully-computed 2D (lat × lon) slice for the given store, timestamp,
@@ -110,12 +110,12 @@ def load_slice(
     + variable set maps to one product), so it stays out of the key; the masked
     slice is what L1 caches.
     """
-    cache_key = (store_url, ts, tuple(sorted(variables)))
+    cache_key = (store, ts, tuple(sorted(variables)))
 
     def compute() -> xr.Dataset:
         result = slice_memo.get_or_compute(
             cache_key,
-            lambda: _compute_slice_from_store(store_url, ts, variables, ocean_masked),
+            lambda: _compute_slice_from_store(store, ts, variables, ocean_masked),
         )
 
         return _warm_coord_indexes(result)
@@ -124,11 +124,11 @@ def load_slice(
 
 
 def load_slice_uncached(
-    store_url: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
+    store: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
 ) -> xr.Dataset:
     """Return a 2-D slice without touching L1.
 
     Used by the animation endpoint so a rare multi-date request doesn't evict
     another product's hot slices from the shared L1 cache (CACHE_BACKEND=redis).
     """
-    return _compute_slice_from_store(store_url, ts, variables, ocean_masked)
+    return _compute_slice_from_store(store, ts, variables, ocean_masked)

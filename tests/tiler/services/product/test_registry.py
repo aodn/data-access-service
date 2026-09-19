@@ -28,8 +28,8 @@ def isolated_products():
     PRODUCTS.update(saved)
 
 
-def _product(product_id="p1", source="s3://bucket/x.zarr", variable="V", **kwargs):
-    return Product(id=product_id, source_path=source, variable=variable, **kwargs)
+def _product(product_id="p1", source="x", variable="V", **kwargs):
+    return Product(id=product_id, store=source, variable=variable, **kwargs)
 
 
 # --- publication ------------------------------------------------------------
@@ -37,12 +37,12 @@ def _product(product_id="p1", source="s3://bucket/x.zarr", variable="V", **kwarg
 
 def test_publish_populates_products(isolated_products):
     load_products({"p1": _product("p1")})
-    assert PRODUCTS["p1"].source_path == "s3://bucket/x.zarr"
+    assert PRODUCTS["p1"].store == "x"
 
 
 def test_publish_replaces_the_previous_set(isolated_products):
     load_products({"old": _product("old")})
-    load_products({"new": _product("new", source="s3://bucket/y.zarr")})
+    load_products({"new": _product("new", source="y")})
     assert set(PRODUCTS) == {"new"}
 
 
@@ -77,10 +77,10 @@ def test_publish_never_exposes_empty_state(isolated_products, monkeypatch):
 
     spy = SpyDict()
     spy["a"] = _product("a")
-    spy["b"] = _product("b", source="s3://bucket/y.zarr")
+    spy["b"] = _product("b", source="y")
     monkeypatch.setattr(registry, "PRODUCTS", spy)
 
-    load_products({"c": _product("c", source="s3://bucket/z.zarr")})
+    load_products({"c": _product("c", source="z")})
 
     assert observed_snapshots, "expected at least one removal during publish"
     for snapshot in observed_snapshots:

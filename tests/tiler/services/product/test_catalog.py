@@ -19,7 +19,7 @@ from data_access_service.tiler.services.product.catalog import (
 
 def _identity(pid, variable="V", uuid="uuid-a") -> ProductIdentity:
     return ProductIdentity(
-        id=pid, source_path=f"s3://b/{pid}.zarr", variable=variable, metadata_uuid=uuid
+        id=pid, store=f"{pid}", variable=variable, metadata_uuid=uuid
     )
 
 
@@ -147,7 +147,7 @@ def test_build_catalog_loads_config_and_layers_overrides(monkeypatch):
     products = build_catalog(identities)
 
     assert products["a:gsla"].ocean_masked is True
-    assert products["a:gsla"].source_path == "s3://b/a:gsla.zarr"
+    assert products["a:gsla"].store == "a:gsla"
 
 
 def test_build_catalog_logs_a_stale_override(monkeypatch, caplog):

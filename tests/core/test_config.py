@@ -51,20 +51,9 @@ def test_zarr_chunking_config_from_yaml():
     assert cfg.min_chunk_bytes == int(yaml_cfg["min_chunk_mb"] * 1024**2)
 
 
-def test_tiler_co_bucket_defaults_when_absent_from_yaml():
-    """Not in config.yaml's tiler section yet (unify with parquet/pmtiles'
-    co_bucket later); falls back to the same bucket name they default to,
-    with the s3:// scheme this field's consumers need.
-    """
-    co_bucket = Config.get_config(EnvType.TESTING).get_tiler_config().co_bucket
-    assert co_bucket == "s3://aodn-cloud-optimised"
-    assert not co_bucket.endswith("/")
-
-
-# co_bucket is derived (yaml co_bucket + "s3://" prefix) and is_tls is derived
-# (True iff CACHE_HOST env var is set) rather than a direct yaml passthrough,
-# so neither is expected in yaml at all.
-_DERIVED_TILER_FIELDS = {"co_bucket", "is_tls"}
+# is_tls is derived (True iff CACHE_HOST env var is set) rather than a direct
+# yaml passthrough, so it is not expected in yaml at all.
+_DERIVED_TILER_FIELDS = {"is_tls"}
 _YAML_TILER_FIELDS = {
     f.name
     for f in dataclasses.fields(TilerConfig)

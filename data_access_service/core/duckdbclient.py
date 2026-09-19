@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 from threading import Lock
-from typing import Any, Iterator, Optional
+from typing import TYPE_CHECKING, Any, Iterator, Optional
 
 import boto3
 import duckdb
@@ -25,7 +25,13 @@ from data_access_service.config.config import IntTestConfig
 from data_access_service.models.duckdb_types import DuckDBTuningConfig
 from data_access_service.models.estimation_types import EstimationReadDuckDBConfig
 from data_access_service.models.sites_types import SitesConfig
-from data_access_service.models.tiler_types import TilerDuckDBConfig
+from data_access_service.models.tiler_types import (
+    TilerBatchDuckDBConfig,
+    TilerDuckDBConfig,
+)
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 # How often to emit a progress log line while a long query is running.
 _PROGRESS_LOG_INTERVAL_SECONDS = 60
@@ -928,13 +934,10 @@ class EstimationDuckDBClient(DuckDBClient):
 
 
 class TilerDuckDBClient(DuckDBClient):
-    """Reads batch-generated parquet slices for the live tiler API, and also
-    (one fresh instance per forked store, via a batch-tuned ``config``) does
-    the batch zarr -> parquet conversion's own writing - see
-    :class:`TilerDuckDBConfig` for how the two profiles differ.
+    """Reads batch-generated parquet slices for the live tiler API.
 
     Every store's parquet files are written to S3 by the batch job (see
-    ``batch.tiler.parquet_generator``); live reads are a small point query
+    :class:`TilerBatchDuckDBClient`); live reads are a small point query
     against one file. Owns one ``:memory:`` connection; like
     :class:`SitesDuckDBClient`/:class:`EstimationDuckDBClient`, each
     :meth:`execute` runs on its own cursor so the tiler's request threadpool
@@ -962,10 +965,6 @@ class TilerDuckDBClient(DuckDBClient):
                         "memory_limit": self._config.memory_limit,
                         "threads": str(int(self._config.threads)),
                     }
-                    # Unset for the live read side: small point queries never
-                    # spill, so there is nothing to bound a directory for.
-                    if self._config.temp_directory:
-                        db_config["temp_directory"] = self._config.temp_directory
                     db = duckdb.connect(database=":memory:", config=db_config)
                     db.execute("INSTALL httpfs; LOAD httpfs;")
                     db.execute("SET GLOBAL s3_region = 'ap-southeast-2';")
@@ -1000,6 +999,70 @@ class TilerDuckDBClient(DuckDBClient):
         self._duckdb_client = None
 
     def __enter__(self) -> TilerDuckDBClient:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+
+class TilerBatchDuckDBClient(DuckDBClient):
+    """Batch-only writer for the zarr -> parquet conversion (see
+    ``batch.tiler.parquet_generator``). One per forked store, used from a
+    single thread, so SQL runs on the connection directly rather than on
+    per-call cursors like the read-side :class:`TilerDuckDBClient`.
+
+    Owns a spill directory for its lifetime and removes it on close. The S3
+    secret is created up front; :meth:`refresh_s3_secret` re-creates it, since
+    a long conversion can outlive the temporary credentials it started with.
+    """
+
+    def __init__(self, config: TilerBatchDuckDBConfig) -> None:
+        self._bucket = Config.get_config().get_datavis_data_bucket_name()
+        self._temp_dir = TemporaryDirectory(prefix=config.temp_dir_prefix)
+        self._con: Optional[duckdb.DuckDBPyConnection] = duckdb.connect(
+            database=":memory:",
+            config={
+                "memory_limit": config.memory_limit,
+                "threads": str(int(config.threads)),
+                "temp_directory": self._temp_dir.name,
+            },
+        )
+        self._con.execute("INSTALL httpfs; LOAD httpfs;")
+        self._con.execute("SET GLOBAL s3_region = 'ap-southeast-2';")
+        self.create_s3_secret(self._bucket)
+
+    def get_instance(self) -> duckdb.DuckDBPyConnection:
+        if self._con is None:
+            raise RuntimeError("TilerBatchDuckDBClient is closed")
+        return self._con
+
+    def execute(self, sql: str, params: Sequence[Any] | None = None):
+        con = self.get_instance()
+        if params is None:
+            return con.execute(sql)
+        return con.execute(sql, params)
+
+    def write_parquet(self, frame: pd.DataFrame, path: str) -> None:
+        """Write ``frame`` to one parquet file at ``path`` (local or S3)."""
+        con = self.get_instance()
+        con.register("_frame", frame)
+        try:
+            # COPY ... TO takes no bound parameter for the path.
+            target = "'" + path.replace("'", "''") + "'"
+            con.execute(f"COPY (SELECT * FROM _frame) TO {target} (FORMAT PARQUET)")
+        finally:
+            con.unregister("_frame")
+
+    def refresh_s3_secret(self) -> None:
+        self.create_s3_secret(self._bucket)
+
+    def close(self) -> None:
+        if self._con is not None:
+            self._con.close()
+            self._con = None
+        self._temp_dir.cleanup()
+
+    def __enter__(self) -> TilerBatchDuckDBClient:
         return self
 
     def __exit__(self, *_: object) -> None:

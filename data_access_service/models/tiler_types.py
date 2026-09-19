@@ -8,8 +8,6 @@ class TilerConfig:
     the ``tiler:`` section of config.yaml (see Config.get_tiler_config()).
     """
 
-    co_bucket: str
-    store_prewarm_workers: int
     store_refresh_interval_hours: int
     thread_pool_size: int
     animation_workers: int
@@ -22,22 +20,26 @@ class TilerConfig:
 
 @dataclass(frozen=True)
 class TilerDuckDBConfig:
-    """DuckDB settings for :class:`TilerDuckDBClient`, which serves two very
-    different callers on very different tuning:
-
-    * The live tiler API's read side (``tiler_duckdb:`` section, see
-      Config.get_tiler_duckdb_config()) - small, already-batched point
-      queries against parquet files the batch job wrote to S3. No spill
-      directory needed, so ``temp_directory`` stays None.
-    * The batch zarr -> parquet conversion job's write side
-      (``tiler_parquet.config.duckdb:``, see Config.get_tiler_parquet_config()),
-      one instance per forked store - a much bigger memory/thread budget and
-      an explicit ``temp_directory`` for spill.
+    """DuckDB settings for the live tiler's read-side :class:`TilerDuckDBClient`
+    (``tiler_duckdb:`` section, see Config.get_tiler_duckdb_config()): small
+    point queries against the batch-written parquet, so no spill directory.
     """
 
     memory_limit: str
     threads: int
-    temp_directory: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class TilerBatchDuckDBConfig:
+    """DuckDB settings for the batch conversion's :class:`TilerBatchDuckDBClient`
+    (``tiler_parquet.config.duckdb:``, see Config.get_tiler_parquet_config()),
+    one per forked store: a much bigger budget, plus a spill directory.
+    """
+
+    memory_limit: str
+    threads: int
+    # Prefix of the spill directory each client creates and removes itself.
+    temp_dir_prefix: str
 
 
 @dataclass(frozen=True)
@@ -54,8 +56,12 @@ class TilerParquetConfig:
 
     output_dir: str
     batch_days: int
-    # None converts full history; set for a "latest N" sample run.
-    max_timestamps: Optional[int]
-    # Tuning for the batch job's own TilerDuckDBClient (one per forked
+    # Days back from each store's latest timestamp to convert; None converts
+    # the full history.
+    window_days: Optional[int]
+    # Tuning for the batch job's own TilerBatchDuckDBClient (one per
     # store), read from ``tiler_parquet.config.duckdb:``.
-    duckdb: TilerDuckDBConfig
+    duckdb: TilerBatchDuckDBConfig
+    # Fork one worker per store. Off for local macOS runs, where a child
+    # forked after the parent touched the network stack segfaults.
+    use_fork_process: bool = True

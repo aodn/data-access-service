@@ -118,7 +118,7 @@ def _get_processed(
     """load_ds only called once per (product, date, lod); concurrent identical
     requests always share one compute in-process via ``_processed_dedup``.
     """
-    key = (product.source_path, date, tuple(product.variables), lod)
+    key = (product.store, date, tuple(product.variables), lod)
 
     def compute() -> tuple[list[np.ndarray], np.ndarray]:
         return _compute_processed(product, load_ds(), lod)

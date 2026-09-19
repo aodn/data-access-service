@@ -1,10 +1,10 @@
 """Reads batch-generated parquet slices.
 
 ``TilerParquetRepository`` wraps a :class:`TilerDuckDBClient` session and owns
-the read SQL. Each variable's ``TilerVariableMetadata.parquet_path`` already
-names its exact file (relative to ``TilerParquetConfig.output_dir``), so a
-read is a direct ``read_parquet`` point query — nothing to materialize into a
-table, no per-store binding needed.
+the read SQL. Batch writes one parquet file per variable per timestamp
+(``tiler_parquet_types.variable_parquet_path``), so a slice read is one
+small ``read_parquet`` of exactly that file — no filtering, nothing to
+materialize into a table.
 
 This module also owns the shared :class:`TilerDuckDBClient` every repository
 instance reads through — one connection built on first use (or eagerly by the
@@ -14,10 +14,12 @@ server lifespan via ``init_client``), mirroring
 
 import threading
 
+import duckdb
 import numpy as np
 
 from data_access_service.config.config import Config
 from data_access_service.core.duckdbclient import TilerDuckDBClient
+from data_access_service.models.tiler_parquet_types import variable_parquet_path
 
 _client: TilerDuckDBClient | None = None
 _client_lock = threading.Lock()
@@ -54,11 +56,6 @@ def _sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def _resolve_path(parquet_path: str) -> str:
-    output_dir = Config.get_config().get_tiler_parquet_config().output_dir
-    return f"{output_dir.rstrip('/')}/{parquet_path}"
-
-
 class TilerParquetRepository:
     """Reads parquet variables through a shared DuckDB session."""
 
@@ -66,30 +63,29 @@ class TilerParquetRepository:
         self.session = session
 
     def fetch_variable_slice(
-        self, parquet_path: str, raw_ts: str, n_i: int, n_j: int, dtype: str
+        self, store: str, variable: str, raw_ts: str, n_i: int, n_j: int, dtype: str
     ) -> np.ndarray:
         """One variable's dense (lat, lon) slice at ``raw_ts``, NaN outside the
-        sparse rows the parquet actually holds for that timestamp.
+        sparse rows its parquet file holds.
 
-        Raises ``FileNotFoundError`` if the parquet has zero rows for
-        ``raw_ts`` — a real timestamp always has at least some valid (ocean)
-        cells, so zero rows means this instant was never converted (e.g. a
-        partial/sampled batch backfill whose ``metadata.json`` still lists the
-        store's full history — see ``batch.tiler.parquet_generator``), not
-        that every cell happens to be masked.
+        Raises ``FileNotFoundError`` if the file does not exist. The sidecar
+        only lists timestamps whose files batch has written, so this means
+        the files were removed out from under it.
         """
-        path = _resolve_path(parquet_path)
-        rows = self.session.execute(
-            f"SELECT i, j, value FROM read_parquet({_sql_literal(path)}) "
-            "WHERE timestamp = ?",
-            [raw_ts],
-        ).fetchall()
-        if not rows:
-            raise FileNotFoundError(
-                f"No data for {parquet_path!r} at {raw_ts!r} — this timestamp "
-                "was not converted to parquet"
-            )
+        output_dir = Config.get_config().get_tiler_parquet_config().output_dir
+        path = variable_parquet_path(output_dir, store, variable, raw_ts)
+        try:
+            cols = self.session.execute(
+                f"SELECT i, j, value FROM read_parquet({_sql_literal(path)})"
+            ).fetchnumpy()
+        except duckdb.HTTPException as e:
+            if getattr(e, "status_code", None) == 404:
+                raise FileNotFoundError(f"No parquet at {path!r}") from e
+            raise
+        except duckdb.IOException as e:
+            if "No files found" in str(e):
+                raise FileNotFoundError(f"No parquet at {path!r}") from e
+            raise
         arr = np.full((n_i, n_j), np.nan, dtype=np.dtype(dtype))
-        for i, j, value in rows:
-            arr[i, j] = value
+        arr[cols["i"], cols["j"]] = cols["value"]
         return arr

@@ -22,10 +22,8 @@ def warmup_env(monkeypatch):
     """Stub every step around root-metadata loading so ordering can be observed directly."""
     calls: list[str] = []
     state = {
-        "candidates": {
-            "a:v": Product(id="a:v", source_path="s3://b/a.zarr", variable="v")
-        },
-        "outcomes": {"s3://b/a.zarr": None},
+        "candidates": {"a:v": Product(id="a:v", store="a", variable="v")},
+        "outcomes": {"a": None},
         "published": None,
         "ready": False,
     }
@@ -98,19 +96,19 @@ async def test_missing_root_metadata_leaves_the_tiler_unready(
 
 
 @pytest.mark.asyncio
-async def test_prewarm_receives_every_unique_candidate_source_path(warmup_env):
+async def test_prewarm_receives_every_unique_candidate_store(warmup_env):
     calls, state = warmup_env
     state["candidates"] = {
-        "a:v": Product(id="a:v", source_path="s3://b/a.zarr", variable="v"),
-        "a:w": Product(id="a:w", source_path="s3://b/a.zarr", variable="w"),
-        "b:v": Product(id="b:v", source_path="s3://b/b.zarr", variable="v"),
+        "a:v": Product(id="a:v", store="a", variable="v"),
+        "a:w": Product(id="a:w", store="a", variable="w"),
+        "b:v": Product(id="b:v", store="b", variable="v"),
     }
-    state["outcomes"] = {"s3://b/a.zarr": None, "s3://b/b.zarr": None}
+    state["outcomes"] = {"a": None, "b": None}
 
     await run_tiler_warmup()
 
     # Deduplicated and sorted — 3 products but only 2 opens.
-    assert state["prewarm_urls"] == ["s3://b/a.zarr", "s3://b/b.zarr"]
+    assert state["prewarm_urls"] == ["a", "b"]
 
 
 @pytest.mark.asyncio
@@ -118,7 +116,7 @@ async def test_all_candidates_are_published_even_with_a_failed_store(warmup_env)
     """A store failing prewarm no longer withholds its products from the
     registry — that is now enforced per-request, not by publication."""
     calls, state = warmup_env
-    state["outcomes"] = {"s3://b/a.zarr": RuntimeError("s3 down")}
+    state["outcomes"] = {"a": RuntimeError("s3 down")}
 
     await run_tiler_warmup()
 
@@ -129,7 +127,7 @@ async def test_all_candidates_are_published_even_with_a_failed_store(warmup_env)
 @pytest.mark.asyncio
 async def test_every_store_failing_leaves_the_tiler_unready(warmup_env, caplog):
     calls, state = warmup_env
-    state["outcomes"] = {"s3://b/a.zarr": RuntimeError("s3 down")}
+    state["outcomes"] = {"a": RuntimeError("s3 down")}
 
     with caplog.at_level("CRITICAL"):
         await run_tiler_warmup()
@@ -145,10 +143,10 @@ async def test_every_store_failing_leaves_the_tiler_unready(warmup_env, caplog):
 async def test_a_partial_store_failure_still_reaches_ready(warmup_env):
     calls, state = warmup_env
     state["candidates"] = {
-        "a:v": Product(id="a:v", source_path="s3://b/a.zarr", variable="v"),
-        "b:v": Product(id="b:v", source_path="s3://b/b.zarr", variable="v"),
+        "a:v": Product(id="a:v", store="a", variable="v"),
+        "b:v": Product(id="b:v", store="b", variable="v"),
     }
-    state["outcomes"] = {"s3://b/a.zarr": None, "s3://b/b.zarr": RuntimeError("down")}
+    state["outcomes"] = {"a": None, "b": RuntimeError("down")}
 
     await run_tiler_warmup()
 

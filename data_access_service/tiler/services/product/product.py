@@ -3,7 +3,7 @@ import threading
 from dataclasses import dataclass, field
 
 from data_access_service.config.tiler.constants import LOD, TILE
-from data_access_service.tiler.services.store.registry import get_store
+from data_access_service.tiler.services.store.registry import get_store_metadata
 
 _lod_grids_lock = threading.Lock()
 
@@ -134,10 +134,8 @@ class VisualTileConfig:
 @dataclass(frozen=True)
 class Product:
     id: str
-    source_path: str
+    store: str
     variable: str | list[str]
-    # Links this product to the GeoNetwork/STAC collection it belongs to, so ogcapi-java can
-    # group products by collection UUID. Optional and generic for both visual and data tiles.
     metadata_uuid: str | None = None
     ocean_masked: bool = False
     # Defaulted True (unlike the wire model's required field) since tests
@@ -157,7 +155,7 @@ class Product:
     def to_dict(self) -> dict:
         return {
             "id": self.id,
-            "source_path": self.source_path,
+            "store": self.store,
             "variable": self.variable,
             "metadata_uuid": self.metadata_uuid,
             "ocean_masked": self.ocean_masked,
@@ -170,7 +168,7 @@ class Product:
     def from_dict(cls, data: dict) -> "Product":
         return cls(
             id=data["id"],
-            source_path=data["source_path"],
+            store=data["store"],
             variable=data["variable"],
             metadata_uuid=data.get("metadata_uuid"),
             ocean_masked=bool(data.get("ocean_masked", False)),
@@ -195,9 +193,7 @@ def get_lod_grids(product: Product) -> dict[int, tuple[int, int]]:
         if data_tile.lod_grids:
             return data_tile.lod_grids
 
-        store = get_store(product.source_path)
-        data_height = store.sizes["lat"]
-        data_width = store.sizes["lon"]
-        data_tile.apply_computed_lod_grids(data_width, data_height)
+        meta = get_store_metadata(product.store)
+        data_tile.apply_computed_lod_grids(meta.n_j, meta.n_i)
 
     return data_tile.lod_grids

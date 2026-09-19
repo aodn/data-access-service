@@ -1,6 +1,6 @@
 """Prewarm outcome reporting for the metadata.json-backed registry.
 
-Prewarm reports what happened per URL and decides nothing; only the caller
+Prewarm reports what happened per store and decides nothing; only the caller
 can tell "one sidecar missing" from "the tiler is down".
 """
 
@@ -48,101 +48,92 @@ def output_dir(monkeypatch):
     return s3_store
 
 
-def _meta(source_path: str, dataset: str) -> TilerParquetMetadata:
+def _meta(store: str) -> TilerParquetMetadata:
     return TilerParquetMetadata(
         uuid="u",
-        dataset=dataset,
-        source_path=source_path,
+        dataset=f"{store}.zarr",
         n_i=1,
         n_j=1,
         lat=[0.0],
         lon=[0.0],
         timestamps=["2024-01-15T13:00:00.000000000Z"],
-        variables={
-            "v": TilerVariableMetadata(
-                dtype="float32", attrs={}, parquet_path="v.parquet"
-            )
-        },
+        variables={"v": TilerVariableMetadata(dtype="float32", attrs={})},
         schema_fingerprint="",
         generated_at="",
     )
 
 
-def _write_metadata(s3_store: dict, dataset_stem: str, source_path: str) -> None:
-    s3_store[f"{OUTPUT_DIR}/{dataset_stem}/metadata.json"] = _meta(
-        source_path, f"{dataset_stem}.zarr"
-    ).to_dict()
+def _write_metadata(s3_store: dict, store: str) -> None:
+    s3_store[f"{OUTPUT_DIR}/{store}/metadata.json"] = _meta(store).to_dict()
 
 
 @pytest.mark.asyncio
-async def test_successful_prewarm_reports_none_per_url(output_dir):
-    _write_metadata(output_dir, "a", "s3://b/a.zarr")
-    _write_metadata(output_dir, "b", "s3://b/b.zarr")
+async def test_successful_prewarm_reports_none_per_store(output_dir):
+    _write_metadata(output_dir, "a")
+    _write_metadata(output_dir, "b")
 
-    outcomes = await prewarm_stores(["s3://b/a.zarr", "s3://b/b.zarr"])
+    outcomes = await prewarm_stores(["a", "b"])
 
-    assert outcomes == {"s3://b/a.zarr": None, "s3://b/b.zarr": None}
+    assert outcomes == {"a": None, "b": None}
 
 
 @pytest.mark.asyncio
 async def test_missing_sidecar_yields_file_not_found(output_dir):
-    _write_metadata(output_dir, "ok", "s3://b/ok.zarr")
+    _write_metadata(output_dir, "ok")
 
-    outcomes = await prewarm_stores(["s3://b/ok.zarr", "s3://b/missing.zarr"])
+    outcomes = await prewarm_stores(["ok", "missing"])
 
-    assert outcomes["s3://b/ok.zarr"] is None
-    assert isinstance(outcomes["s3://b/missing.zarr"], FileNotFoundError)
+    assert outcomes["ok"] is None
+    assert isinstance(outcomes["missing"], FileNotFoundError)
 
 
 @pytest.mark.asyncio
-async def test_one_bad_url_does_not_block_the_others(output_dir):
-    _write_metadata(output_dir, "ok1", "s3://b/ok1.zarr")
-    _write_metadata(output_dir, "ok2", "s3://b/ok2.zarr")
+async def test_one_bad_store_does_not_block_the_others(output_dir):
+    _write_metadata(output_dir, "ok1")
+    _write_metadata(output_dir, "ok2")
 
-    outcomes = await prewarm_stores(
-        ["s3://b/bad.zarr", "s3://b/ok1.zarr", "s3://b/ok2.zarr"]
-    )
+    outcomes = await prewarm_stores(["bad", "ok1", "ok2"])
 
-    assert outcomes["s3://b/ok1.zarr"] is None
-    assert outcomes["s3://b/ok2.zarr"] is None
-    assert isinstance(outcomes["s3://b/bad.zarr"], FileNotFoundError)
+    assert outcomes["ok1"] is None
+    assert outcomes["ok2"] is None
+    assert isinstance(outcomes["bad"], FileNotFoundError)
 
 
 def test_never_prewarmed_store_is_available_by_default():
-    """Optimistic default: nothing has classified this URL as failed, so a
+    """Optimistic default: nothing has classified this store as failed, so a
     caller that bypasses prewarm entirely (tests, a request racing startup)
     is not blocked by it."""
-    assert is_store_available("s3://b/never-touched.zarr") is True
+    assert is_store_available("never-touched") is True
 
 
 @pytest.mark.asyncio
 async def test_successfully_loaded_store_is_available(output_dir):
-    _write_metadata(output_dir, "ok", "s3://b/ok.zarr")
+    _write_metadata(output_dir, "ok")
 
-    await prewarm_stores(["s3://b/ok.zarr"])
+    await prewarm_stores(["ok"])
 
-    assert is_store_available("s3://b/ok.zarr") is True
+    assert is_store_available("ok") is True
 
 
 @pytest.mark.asyncio
 async def test_failed_store_is_unavailable(output_dir):
-    await prewarm_stores(["s3://b/gone.zarr"])
+    await prewarm_stores(["gone"])
 
-    assert is_store_available("s3://b/gone.zarr") is False
+    assert is_store_available("gone") is False
 
 
 @pytest.mark.asyncio
 async def test_a_store_that_recovers_on_a_later_prewarm_becomes_available(output_dir):
-    await prewarm_stores(["s3://b/flaky.zarr"])
-    assert is_store_available("s3://b/flaky.zarr") is False
+    await prewarm_stores(["flaky"])
+    assert is_store_available("flaky") is False
 
     # Sidecar appears (e.g. the batch job publishes it, then a later cron re-prewarm).
-    _write_metadata(output_dir, "flaky", "s3://b/flaky.zarr")
-    await prewarm_stores(["s3://b/flaky.zarr"])
+    _write_metadata(output_dir, "flaky")
+    await prewarm_stores(["flaky"])
 
-    assert is_store_available("s3://b/flaky.zarr") is True
+    assert is_store_available("flaky") is True
 
 
 @pytest.mark.asyncio
-async def test_prewarm_of_an_empty_url_list_is_a_no_op():
+async def test_prewarm_of_an_empty_store_list_is_a_no_op():
     assert await prewarm_stores([]) == {}

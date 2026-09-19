@@ -47,17 +47,13 @@ def test_from_product_carries_visual_capability():
     from_product actually maps it. ogcapi-java keys tile_types on it, so a
     dropped mapping would silently downgrade every product to the arity rule.
     """
-    scalar = Product(id="s", source_path="s3://b/x.zarr", variable="V")
+    scalar = Product(id="s", store="x", variable="V")
     assert ProductConfig.from_product(scalar).visual is True
 
-    non_visual = Product(
-        id="n", source_path="s3://b/x.zarr", variable="WDIR", visual=False
-    )
+    non_visual = Product(id="n", store="x", variable="WDIR", visual=False)
     assert ProductConfig.from_product(non_visual).visual is False
 
-    pair = Product(
-        id="p", source_path="s3://b/x.zarr", variable=["U", "V"], visual=False
-    )
+    pair = Product(id="p", store="x", variable=["U", "V"], visual=False)
     assert ProductConfig.from_product(pair).visual is False
 
 

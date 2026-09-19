@@ -18,7 +18,7 @@ _BIG_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 4000
 def seed_products():
     """test_gzip_skips_image_tiles hits a real product route; seed the one it needs."""
     PRODUCTS["sea_level_anomaly"] = Product(
-        id="sea_level_anomaly", source_path="s3://test/sla.zarr", variable="GSLA"
+        id="sea_level_anomaly", store="sla", variable="GSLA"
     )
     yield
     PRODUCTS.pop("sea_level_anomaly", None)

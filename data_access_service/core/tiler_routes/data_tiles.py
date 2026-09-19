@@ -70,7 +70,7 @@ async def get_tile(
                 render_tile,
                 product,
                 lambda: load_slice_or_404(
-                    product.source_path,
+                    product.store,
                     ts,
                     variables,
                     ocean_masked=product.ocean_masked,
@@ -116,7 +116,7 @@ async def get_manifest(
             request,
             functools.partial(
                 load_slice_or_404,
-                product.source_path,
+                product.store,
                 ts,
                 variables,
                 ocean_masked=product.ocean_masked,

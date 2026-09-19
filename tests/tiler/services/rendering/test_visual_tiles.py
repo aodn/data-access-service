@@ -331,7 +331,7 @@ def test_render_bbox_animation_all_nan_does_not_error():
 
 
 def test_concurrent_tiles_at_same_date_share_one_fill_compute(monkeypatch):
-    """Two different tiles (z/x/y) for the same (source_path, date, variable,
+    """Two different tiles (z/x/y) for the same (store, date, variable,
     coastal_fill) must share one inpaint+land-cut compute when requested
     concurrently, not each redo it independently. This is what `_fill_dedup`
     (services.caching.deduper) protects — see its docstring for why this
@@ -360,7 +360,7 @@ def test_concurrent_tiles_at_same_date_share_one_fill_compute(monkeypatch):
                 y,
                 5,
                 coastal_fill=CoastalFill(max_dist_px=4),
-                source_path="s3://test/gap.zarr",
+                store="gap",
                 date="2024-01-01",
             )
         )
@@ -389,7 +389,7 @@ def test_get_filled_values_returns_read_only_array():
     ds = _ocean_ds_with_gap()
     da = ds["GSLA"].astype(np.float32)
     filled = visual_renderer._get_filled_values(
-        "s3://test/gap.zarr",
+        "gap",
         "2024-01-01",
         "GSLA",
         CoastalFill(max_dist_px=4),

@@ -169,7 +169,7 @@ def _ds_over(lon_min, lon_max, lat_max, lat_min, n=20, fill=0.5):
 def _product(coastal_fill, product_id="t"):
     return Product(
         id=product_id,
-        source_path="",
+        store="",
         variable="GSLA",
         data_tile=DataTileConfig(
             lod_grids={1: (2, 2)},

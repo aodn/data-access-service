@@ -38,14 +38,14 @@ def test_compute_lod_grids_small_data_one_axis():
 
 
 def test_products_have_no_lod_grids_by_default():
-    p = Product(id="test", source_path="s3://test", variable="VAR")
+    p = Product(id="test", store="s3://test", variable="VAR")
     assert p.data_tile.lod_grids == {}
 
 
 def test_apply_computed_lod_grids_is_noop_when_already_set():
     p = Product(
         id="test",
-        source_path="s3://test",
+        store="s3://test",
         variable="x",
         data_tile=DataTileConfig(lod_grids={1: (2, 2)}),
     )

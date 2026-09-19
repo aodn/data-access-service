@@ -9,7 +9,6 @@ import pytest
 from data_access_service.models.tiler_parquet_types import (
     TilerParquetMetadata,
     TilerVariableMetadata,
-    dataset_stem,
 )
 from data_access_service.tiler.services.product.product import (
     DataTileConfig,
@@ -18,7 +17,6 @@ from data_access_service.tiler.services.product.product import (
 )
 from data_access_service.tiler.services.store.registry import (
     get_available_dates,
-    get_store,
     get_store_metadata,
     is_store_available,
     resolve_timestamp,
@@ -26,7 +24,7 @@ from data_access_service.tiler.services.store.registry import (
     unavailable_date_message,
 )
 
-STORE_URL = "s3://aodn-cloud-optimised/foo.zarr"
+STORE = "foo"
 OUTPUT_DIR = "s3://my-bucket/tiler"
 
 
@@ -51,18 +49,12 @@ def _meta(
     return TilerParquetMetadata(
         uuid="u",
         dataset="foo.zarr",
-        source_path=STORE_URL,
         n_i=n_i,
         n_j=n_j,
         lat=[float(x) for x in lat],
         lon=[float(x) for x in lon],
         timestamps=[f"{t}.000000000Z" for t in times],
-        variables=variables
-        or {
-            "v": TilerVariableMetadata(
-                dtype="float32", attrs={}, parquet_path="v.parquet"
-            )
-        },
+        variables=variables or {"v": TilerVariableMetadata(dtype="float32", attrs={})},
         schema_fingerprint="",
         generated_at="",
     )
@@ -90,59 +82,50 @@ def output_dir(monkeypatch):
     return s3_store
 
 
-def _write_metadata(
-    s3_store: dict, dataset_stem: str, meta: TilerParquetMetadata
-) -> None:
-    s3_store[f"{OUTPUT_DIR}/{dataset_stem}/metadata.json"] = meta.to_dict()
+def _write_metadata(s3_store: dict, store: str, meta: TilerParquetMetadata) -> None:
+    s3_store[f"{OUTPUT_DIR}/{store}/metadata.json"] = meta.to_dict()
 
 
-def test_dataset_stem_strips_zarr_suffix():
-    assert dataset_stem("s3://aodn-cloud-optimised/foo.zarr/") == "foo"
-    assert dataset_stem("s3://bucket/prefix/bar.zarr") == "bar"
-
-
-def test_get_store_raises_when_metadata_json_missing(output_dir):
+def test_get_store_metadata_raises_when_metadata_json_missing(output_dir):
     with pytest.raises(FileNotFoundError):
-        get_store("s3://x/never-written.zarr")
+        get_store_metadata("never-written")
 
 
-def test_get_store_returns_coords_only_dataset(output_dir):
+def test_get_store_metadata_returns_the_grid(output_dir):
     _write_metadata(output_dir, "foo", _meta(n_i=3, n_j=4))
-    result = get_store(STORE_URL)
-    assert result.sizes["lat"] == 3
-    assert result.sizes["lon"] == 4
-    assert "time" in result.dims
+    meta = get_store_metadata(STORE)
+    assert (meta.n_i, meta.n_j) == (3, 4)
+    assert len(meta.lat) == 3
+    assert len(meta.lon) == 4
 
 
 def test_get_store_metadata_round_trips_variable_attrs(output_dir):
     variables = {
-        "v": TilerVariableMetadata(
-            dtype="float32", attrs={"units": "degree_C"}, parquet_path="v.parquet"
-        )
+        "v": TilerVariableMetadata(dtype="float32", attrs={"units": "degree_C"})
     }
     _write_metadata(output_dir, "foo", _meta(variables=variables))
-    meta = get_store_metadata(STORE_URL)
+    meta = get_store_metadata(STORE)
     assert meta.variables["v"].attrs["units"] == "degree_C"
 
 
 def test_is_store_available_true_after_successful_load(output_dir):
     _write_metadata(output_dir, "foo", _meta())
-    get_store(STORE_URL)
-    assert is_store_available(STORE_URL) is True
+    get_store_metadata(STORE)
+    assert is_store_available(STORE) is True
 
 
 def test_is_store_available_false_when_metadata_json_missing(output_dir):
-    assert is_store_available("s3://x/never-written.zarr") is True  # optimistic default
+    assert is_store_available("never-written") is True  # optimistic default
     with pytest.raises(FileNotFoundError):
-        get_store("s3://x/never-written.zarr")
-    assert is_store_available("s3://x/never-written.zarr") is False
+        get_store_metadata("never-written")
+    assert is_store_available("never-written") is False
 
 
 def test_resolve_timestamp_returns_native_string_for_known_date(output_dir):
     _write_metadata(output_dir, "foo", _meta(times=["2024-01-15T13:00:00"]))
     import pandas as pd
 
-    raw = resolve_timestamp(STORE_URL, pd.Timestamp("2024-01-15T13:00:00"))
+    raw = resolve_timestamp(STORE, pd.Timestamp("2024-01-15T13:00:00"))
     assert raw == "2024-01-15T13:00:00.000000000Z"
 
 
@@ -150,7 +133,7 @@ def test_resolve_timestamp_returns_none_for_unknown_date(output_dir):
     _write_metadata(output_dir, "foo", _meta(times=["2024-01-15T13:00:00"]))
     import pandas as pd
 
-    assert resolve_timestamp(STORE_URL, pd.Timestamp("1999-01-01")) is None
+    assert resolve_timestamp(STORE, pd.Timestamp("1999-01-01")) is None
 
 
 def test_get_available_dates_reflects_every_timestamp(output_dir):
@@ -159,7 +142,7 @@ def test_get_available_dates_reflects_every_timestamp(output_dir):
         "foo",
         _meta(times=["2024-01-15T13:00:00", "2024-01-16T13:00:00"]),
     )
-    dates = get_available_dates(STORE_URL)
+    dates = get_available_dates(STORE)
     assert len(dates) == 2
     assert dates[0][0] == "2024-01-15T13:00:00Z"
 
@@ -170,14 +153,14 @@ def test_unavailable_date_message_hints_latest_date(output_dir):
 
     # Real callers always resolve_timestamp (which loads the sidecar) first,
     # and only reach for the message when that returns None.
-    resolve_timestamp(STORE_URL, pd.Timestamp("1999-01-01"))
-    msg = unavailable_date_message(STORE_URL, pd.Timestamp("1999-01-01"))
+    resolve_timestamp(STORE, pd.Timestamp("1999-01-01"))
+    msg = unavailable_date_message(STORE, pd.Timestamp("1999-01-01"))
     assert "Latest available date is '2024-01-15T13:00:00Z'" in msg
 
 
 def test_get_lod_grids_populates_product(output_dir):
     _write_metadata(output_dir, "foo", _meta(n_i=74, n_j=102))
-    product = Product(id="t1", source_path=STORE_URL, variable="v")
+    product = Product(id="t1", store=STORE, variable="v")
     assert product.data_tile.lod_grids == {}
     grids = get_lod_grids(product)
     assert grids
@@ -187,11 +170,11 @@ def test_get_lod_grids_populates_product(output_dir):
 def test_get_lod_grids_fast_path_skips_metadata_load(output_dir):
     product = Product(
         id="t2",
-        source_path="s3://never/read.zarr",
+        store="read",
         variable="v",
         data_tile=DataTileConfig(lod_grids={1: (2, 2)}),
     )
     grids = get_lod_grids(product)
     assert grids == {1: (2, 2)}
     # No metadata.json exists for this store at all; reaching for it would raise.
-    assert is_store_available("s3://never/read.zarr") is True
+    assert is_store_available("read") is True

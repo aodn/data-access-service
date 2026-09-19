@@ -92,13 +92,13 @@ flowchart TD
     storeReg["Store registry<br/>open zarr handles · refreshed by cron sweep"]
     registry --> storeReg
 
-    sliceCache["L1 · Slice cache + dedup<br/>ns l1 · slice_memo / _slice_dedup<br/>key: store_url, date, variables"]
+    sliceCache["L1 · Slice cache + dedup<br/>ns l1 · slice_memo / _slice_dedup<br/>key: store, date, variables"]
     storeReg --> sliceCache
     oceanMask["apply_ocean_mask<br/>opt-in per product (Product.ocean_masked)"]
     sliceCache --> oceanMask
 
     subgraph DT["Data-tile pipeline  ·  rendering/data_tiles.py"]
-        dtDedup["Processed-grid dedup (no persistent cache)<br/>_processed_dedup · key: source_path, date, variables, lod"]
+        dtDedup["Processed-grid dedup (no persistent cache)<br/>_processed_dedup · key: store, date, variables, lod"]
         dtCompute["resample (numba) → inpaint → land-cut → normalise"]
         dtPng["pack RGBA → PNG (24-bit or U/V channels)"]
         dtDedup --> dtCompute --> dtPng
@@ -107,7 +107,7 @@ flowchart TD
 
     subgraph VT["Visual-tile pipeline  ·  rendering/visual_tiles.py"]
         vtReqDedup["Request dedup (no cache)<br/>_tile_dedup / _bbox_dedup · key: full request"]
-        vtFillDedup["Fill dedup (no persistent cache)<br/>_fill_dedup · key: source_path, date, variable, max_dist_px"]
+        vtFillDedup["Fill dedup (no persistent cache)<br/>_fill_dedup · key: store, date, variable, max_dist_px"]
         vtCompute["inpaint → land-cut → reproject (rio-tiler XarrayReader)"]
         vtColor["apply colormap<br/>resolve_colormap"]
         vtEncode["composite → PNG / WebP / GIF / APNG"]
@@ -399,7 +399,7 @@ GET /{prefix}/{product_id}/point?date=...&lat=&lon=              → variable va
 
 `available_dates` is the `from`/`to`-filtered list of **exact UTC instants**, not calendar days — matching the store's native `time` coordinate values verbatim (see [§9](#9-date-timezone-and-coordinate-normalisation)). `full_date_range` is the product's full dataset bounds (earliest/latest available instant) **independent of the filter**, so a client can show the full extent of a product while only listing the slice it asked for. Both `start` and `end` are `null` when the product has no dates at all.
 
-**Performance**: dates are read from the `time` coordinate of each Zarr store — a 1-D array held in the store singleton, in the per-URL `{timestamp: (raw_timestamp, iso_string)}` index (`_build_time_index`). `iso_string` is formatted once per store open/refresh, not recomputed per request — reformatting every timestamp on every `/manifest` call was measurably slow once addressing moved from bucketed calendar days to exact instants (more, smaller entries). `get_available_dates` just reshapes the already-sorted index into a list, no formatting or sorting at request time. No spatial data chunks are touched. Availability is a property of the **store**, not the product, so it is resolved once per unique `source_path` and reused by every product sharing it — 85 products, 60 lookups.
+**Performance**: dates are read from the `time` coordinate of each Zarr store — a 1-D array held in the store singleton, in the per-URL `{timestamp: (raw_timestamp, iso_string)}` index (`_build_time_index`). `iso_string` is formatted once per store open/refresh, not recomputed per request — reformatting every timestamp on every `/manifest` call was measurably slow once addressing moved from bucketed calendar days to exact instants (more, smaller entries). `get_available_dates` just reshapes the already-sorted index into a list, no formatting or sorting at request time. No spatial data chunks are touched. Availability is a property of the **store**, not the product, so it is resolved once per unique `store` and reused by every product sharing it — 85 products, 60 lookups.
 
 **Fault isolation**: each unique store's lookup is wrapped individually. A store that cannot be opened yields `available_dates: []` and a null `full_date_range` **for its own products only**, logged once, while every other product answers normally; the route returns 200 whenever at least one store resolved, and 503 only when none did. This is not an optimisation — ogcapi-java fetches this global manifest on _every_ collection-products call, so an unisolated failure would break the product listing for every collection, a global outage wearing the costume of a local degradation. It is also what makes the graded prewarm policy in [§11.2](#112-run_tiler_warmup-coretiler_routesstartuppy) safe: keeping an unresolved store's products registered is only reasonable when one bad store cannot fail `/manifest`.
 
@@ -793,7 +793,7 @@ Alongside the dataset, the registry builds a per-URL `{timestamp: (raw_timestamp
 
 ### 10.2 L1 — Slice cache (`services/caching/slice_cache.py` wiring, `services/store/slice_loader.py` fetch logic)
 
-`slice_memo` (ns `l1`). Keyed `(store_url, date, variables_tuple)`. Stores a fully-computed (`.compute()`) 2-D lat×lon `xr.Dataset` slice. `slice_cache.py` owns only the `CacheBackend` wiring; `slice_loader.py` owns the actual Zarr-fetch logic, the public `load_slice`/`load_slice_uncached` API, and its own `_slice_dedup` (`Deduper`).
+`slice_memo` (ns `l1`). Keyed `(store, date, variables_tuple)`. Stores a fully-computed (`.compute()`) 2-D lat×lon `xr.Dataset` slice. `slice_cache.py` owns only the `CacheBackend` wiring; `slice_loader.py` owns the actual Zarr-fetch logic, the public `load_slice`/`load_slice_uncached` API, and its own `_slice_dedup` (`Deduper`).
 
 Primary consumers are **visual_tiles** (every tile request calls `load_slice`) and **data_tiles** (every tile request calls `load_slice` unless `_processed_dedup` already has a concurrent compute in flight for the same grid) and **data_tiles manifest/point** (always need `ds` directly).
 
@@ -837,7 +837,7 @@ async def run_tiler_warmup(api: API) -> None:
         await anyio.to_thread.run_sync(warmup_visual, limiter=TILE_THREAD_LIMITER)    # rio-tiler warmup
 
         outcomes = await prewarm_stores(                  # per-URL outcome map
-            sorted({p.source_path for p in candidates.values()}))
+            sorted({p.store for p in candidates.values()}))
         result = verify_candidate_products(candidates, outcomes)
         result.log_rejections()
         if not result.products:                           # never publish nothing
@@ -1040,7 +1040,7 @@ The abstract formula in [§12.8](#128-capacity-in-outline) — `min(thread_pool_
 
 **Concrete product.** `satellite_austemp_heatwave_14day` / `sst_mosaic` is chunked `[5 time, 1000 lat, 1300 lon]` — one on-disk chunk spans 5 dates and is ≈300MB; a single date's share of that is ≈60MB. This is the same store shape flagged in [§12.7](#127-a-real-cold-path-finding-chunk-over-read): Zarr's chunk is the atomic decompression unit, so resolving one date's slice out of a 5-date chunk still decompresses the **whole ≈300MB chunk** transiently — `_fetch_slice_from_store`'s `get_data(...)` + `.compute()` pulls it in, `.isel(time=0)` then keeps only the ≈60MB requested date; the other four dates' worth of decompressed array become garbage the moment that local variable goes out of scope (CPython's refcounting frees it immediately, not at some later GC pause), so this is a sharp, brief spike rather than a sustained cost.
 
-**Redis changes what "cold" means.** `config.yaml` has `cache_backend: "redis"` with `slice_cache_ttl_seconds: 600` configured today (`RedisMemoizer` in `services/caching/memoizer.py` — see [§10](#10-caching-strategy)). Because `_slice_dedup` checks `slice_memo.get_or_compute` before touching S3, a combo's first touch within a 10-minute window is a true cold miss (pays the ≈300MB decompression spike, settles to ≈60MB, then pickles that ≈60MB back to Redis); every other request for that same `(store_url, date, variables)` key — from this instance or any other, concurrent or minutes later — is a Redis `GET` + `pickle.loads`, which costs only the ≈60MB deserialisation and never touches the chunk at all. In map-viewer usage (panning/zooming one product+date, or a second user landing on a recently-viewed date), most of a burst's combos are warm; only combos genuinely new within the TTL window pay the chunk-sized spike.
+**Redis changes what "cold" means.** `config.yaml` has `cache_backend: "redis"` with `slice_cache_ttl_seconds: 600` configured today (`RedisMemoizer` in `services/caching/memoizer.py` — see [§10](#10-caching-strategy)). Because `_slice_dedup` checks `slice_memo.get_or_compute` before touching S3, a combo's first touch within a 10-minute window is a true cold miss (pays the ≈300MB decompression spike, settles to ≈60MB, then pickles that ≈60MB back to Redis); every other request for that same `(store, date, variables)` key — from this instance or any other, concurrent or minutes later — is a Redis `GET` + `pickle.loads`, which costs only the ≈60MB deserialisation and never touches the chunk at all. In map-viewer usage (panning/zooming one product+date, or a second user landing on a recently-viewed date), most of a burst's combos are warm; only combos genuinely new within the TTL window pay the chunk-sized spike.
 
 **Putting numbers on the worst and typical case**, for 3–4 concurrent distinct combos on this product:
 
@@ -1058,7 +1058,7 @@ The abstract formula in [§12.8](#128-capacity-in-outline) — `min(thread_pool_
 
 Products are **derived**, not listed. The `tiler.gridded_variables` section of `data_access_service/config/config.yaml` is the single source of truth for which _variables_ the tiler serves; which _datasets_ those variables live on comes from the DAS metadata catalogue at startup. The `tiler.products_customisation` section of the same file then layers optional per-product tuning on top, matched by the id discovery derives. Adding a product means adding a variable specification and redeploying — and it may add several products at once, since one specification fans out to every matching `.zarr` dataset.
 
-That indirection is the point. A `products_customisation` section that hard-codes a dataset name and metadata UUID per product lets an upstream rename leave a stale product id pointing at nothing, with nobody finding out until a tile 404's. Deriving identity (`id`/`source_path`/`metadata_uuid`) from live metadata makes a rename change the derived id instead — `products_customisation` here only ever _tunes_ an id that discovery already produced, it never establishes one.
+That indirection is the point. A `products_customisation` section that hard-codes a dataset name and metadata UUID per product lets an upstream rename leave a stale product id pointing at nothing, with nobody finding out until a tile 404's. Deriving identity (`id`/`store`/`metadata_uuid`) from live metadata makes a rename change the derived id instead — `products_customisation` here only ever _tunes_ an id that discovery already produced, it never establishes one.
 
 ### 13.1 Editing the `tiler.gridded_variables` section
 
@@ -1107,7 +1107,7 @@ The live example of why per-id tuning exists: `["UCUR", "VCUR"]` matches 19 data
 `run_tiler_warmup` calls one function, `discovery.discover_products(api, base_url)`, which internally:
 
 1. Loads the config sections — `discovery._load_gridded_variable_specs()`, `load_product_overrides()`.
-2. Matches each specification against `API.iter_zarr_dataset_variables()` — already filtered to zarr and with `"global_attributes"` stripped from each field set, so discovery never has to know the catalogue holds Parquet too. Matching is **case-sensitive**; a pair requires both names. Builds a `Product` per match at plain defaults: id `f"{dataset.removesuffix('.zarr')}:{'+'.join(v.lower() for v in variables)}"`, `source_path` as `f"{tiler.co_bucket}/{dataset}"` (no trailing slash, ever — that string keys the store registry, date index, and both cache layers), `metadata_uuid` from the index key. This step never looks at the `products_customisation` section — see `discovery.build_candidate_products`.
+2. Matches each specification against `API.iter_zarr_dataset_variables()` — already filtered to zarr and with `"global_attributes"` stripped from each field set, so discovery never has to know the catalogue holds Parquet too. Matching is **case-sensitive**; a pair requires both names. Builds a `Product` per match at plain defaults: id `f"{dataset.removesuffix('.zarr')}:{'+'.join(v.lower() for v in variables)}"`, `store` as `store_name(dataset)` (the dataset name minus `.zarr` — it keys the store registry, date index, and both cache layers, and names the store's output directory; batch opens the zarr as `f"{store}.zarr"` via `aodn_cloud_optimised`, no URL involved), `metadata_uuid` from the index key. This step never looks at the `products_customisation` section — see `discovery.build_candidate_products`.
 3. Logs any `products_customisation` id that matched no candidate (`discovery.log_unmatched_overrides`) — loud, not fatal.
 4. Layers the `products_customisation` section on top by id (`discovery.apply_product_overrides`), via `dataclasses.replace` — a separate pass over the already-built candidates, kept apart from step 2 so identity-derivation and config-resolution never mix.
 
@@ -1145,7 +1145,7 @@ All of the following live in the `products_customisation` section, keyed by prod
 | `ocean_masked`             | `false`                     | Force on the ocean-validity mask. Grid-specific, so it belongs to one product id, not the variable generally.                                      |
 | `visual`                   | scalar `true`, pair `false` | A scalar the current renderer cannot colour meaningfully.                                                                                          |
 
-`id`, `source_path`, and `metadata_uuid` are **not** configurable — they are derived. `lod_grids` is not a config field either; it is computed at runtime and deliberately excluded from `ProductConfig` (see [§7.3](#73-lazy-population-servicesproductproductpy--get_lod_grids)).
+`id`, `store`, and `metadata_uuid` are **not** configurable — they are derived. `lod_grids` is not a config field either; it is computed at runtime and deliberately excluded from `ProductConfig` (see [§7.3](#73-lazy-population-servicesproductproductpy--get_lod_grids)).
 
 ---
 

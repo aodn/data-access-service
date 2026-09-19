@@ -4,12 +4,9 @@ Always ``:memory:`` — unlike SitesDuckDBClient/EstimationDuckDBClient there is
 no S3/httpfs setup to skip, so no config fixture is needed.
 """
 
-import tempfile
-
 import pytest
 
 from data_access_service.core.duckdbclient import TilerDuckDBClient
-from data_access_service.models.tiler_types import TilerDuckDBConfig
 
 
 def test_execute_returns_relation():
@@ -46,16 +43,3 @@ def test_close_is_safe_to_call():
     client.close()
     with pytest.raises(Exception):
         client.execute("SELECT 1")
-
-
-def test_temp_directory_is_applied_when_configured():
-    """The batch tiler-parquet job's profile sets temp_directory for spill;
-    the live read side's default config leaves it unset (see
-    TilerDuckDBConfig)."""
-    with tempfile.TemporaryDirectory() as tmp:
-        config = TilerDuckDBConfig(memory_limit="128MB", threads=1, temp_directory=tmp)
-        with TilerDuckDBClient(config=config) as client:
-            (value,) = client.execute(
-                "SELECT current_setting('temp_directory')"
-            ).fetchone()
-            assert value == tmp

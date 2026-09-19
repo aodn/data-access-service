@@ -22,28 +22,23 @@ from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.store.registry import store_registry
 
 
-def _seed_metadata(store_url: str, times: list[str]) -> None:
+def _seed_metadata(store: str, times: list[str]) -> None:
     """Publish a fake sidecar directly into the registry, bypassing the
     metadata.json file read — the seam this test suite uses in place of the
     old fake-ZarrDataSource monkeypatch."""
     meta = TilerParquetMetadata(
         uuid="u",
-        dataset=store_url.rsplit("/", 1)[-1],
-        source_path=store_url,
+        dataset=f"{store}.zarr",
         n_i=1,
         n_j=1,
         lat=[0.0],
         lon=[0.0],
         timestamps=[f"{t}.000000000Z" for t in times],
-        variables={
-            "v": TilerVariableMetadata(
-                dtype="float32", attrs={}, parquet_path="v.parquet"
-            )
-        },
+        variables={"v": TilerVariableMetadata(dtype="float32", attrs={})},
         schema_fingerprint="",
         generated_at="",
     )
-    store_registry._publish(store_url, meta)
+    store_registry._publish(store, meta)
 
 
 @pytest.fixture(autouse=True)
@@ -60,7 +55,7 @@ def resolve_timestamp_mock():
     yield None
 
 
-_PRODUCT = Product(id="p", source_path="s3://b/x.zarr", variable="v")
+_PRODUCT = Product(id="p", store="x", variable="v")
 
 
 def test_parse_date_or_422_rejects_bare_date():
@@ -90,12 +85,12 @@ def test_parse_date_or_422_normalizes_offset_to_utc():
 
 
 def test_resolve_timestamp_or_404_passes_for_a_known_date():
-    _seed_metadata("s3://b/x.zarr", ["2024-01-15T13:00:00"])
+    _seed_metadata("x", ["2024-01-15T13:00:00"])
     resolve_timestamp_or_404(_PRODUCT, pd.Timestamp("2024-01-15T13:00:00"))  # no raise
 
 
 def test_resolve_timestamp_or_404_404s_for_an_unknown_date():
-    _seed_metadata("s3://b/x.zarr", ["2024-01-15T13:00:00"])
+    _seed_metadata("x", ["2024-01-15T13:00:00"])
 
     with pytest.raises(HTTPException) as exc_info:
         resolve_timestamp_or_404(_PRODUCT, pd.Timestamp("1999-01-01"))

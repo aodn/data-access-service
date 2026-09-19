@@ -17,10 +17,8 @@ from data_access_service.batch.tiler.discovery import (
     build_candidate_products,
     discover_products,
     product_id,
-    source_path,
+    store_name,
 )
-
-BASE_URL = "s3://aodn-cloud-optimised"
 
 
 def _flatten(index):
@@ -34,8 +32,8 @@ def _flatten(index):
     ]
 
 
-def _build(index, specs, base_url=BASE_URL):
-    return build_candidate_products(_flatten(index), specs, base_url)
+def _build(index, specs):
+    return build_candidate_products(_flatten(index), specs)
 
 
 # --- ID and path formulas ---------------------------------------------------
@@ -52,10 +50,8 @@ def test_product_id_joins_pair_in_configured_order():
     assert product_id("x.zarr", ["VCUR", "UCUR"]) == "x:vcur+ucur"
 
 
-def test_source_path_is_canonical_without_trailing_slash():
-    assert source_path("x.zarr", "s3://bucket") == "s3://bucket/x.zarr"
-    # A base URL that carries one is normalised rather than doubled up.
-    assert source_path("x.zarr", "s3://bucket/") == "s3://bucket/x.zarr"
+def test_store_name_strips_zarr_suffix():
+    assert store_name("x.zarr") == "x"
 
 
 # --- matching ---------------------------------------------------------------
@@ -106,7 +102,7 @@ def test_two_specifications_on_one_dataset_yield_two_products():
     index = {"u1": {"sla.zarr": frozenset({"GSLA", "GSL"})}}
     candidates = _build(index, ["GSLA", "GSL"])
     assert set(candidates) == {"sla:gsla", "sla:gsl"}
-    assert {p.source_path for p in candidates.values()} == {f"{BASE_URL}/sla.zarr"}
+    assert {p.store for p in candidates.values()} == {"sla"}
 
 
 # --- representation ---------------------------------------------------------
@@ -125,11 +121,9 @@ def test_pair_variable_stays_an_ordered_list():
     assert candidates["a:vcur+ucur"].variable == ["VCUR", "UCUR"]
 
 
-def test_source_path_built_from_the_configured_base_url():
-    candidates = _build(
-        {"u1": {"a.zarr": frozenset({"GSLA"})}}, ["GSLA"], base_url="s3://other/"
-    )
-    assert candidates["a:gsla"].source_path == "s3://other/a.zarr"
+def test_store_is_the_dataset_name_without_zarr_suffix():
+    candidates = _build({"u1": {"a.zarr": frozenset({"GSLA"})}}, ["GSLA"])
+    assert candidates["a:gsla"].store == "a"
 
 
 # --- failure modes ----------------------------------------------------------
@@ -164,7 +158,7 @@ def test_empty_dataset_variables_raises():
     """Whether because the catalogue is empty or API.iter_zarr_dataset_variables
     filtered everything out (all-parquet), the effect from here is the same."""
     with pytest.raises(ValueError, match="No candidate products"):
-        build_candidate_products([], ["GSLA"], BASE_URL)
+        build_candidate_products([], ["GSLA"])
 
 
 # --- discover_products (the batch entry point) -------------------------------
@@ -183,9 +177,9 @@ def test_discover_products_loads_config(monkeypatch):
     monkeypatch.setattr(discovery, "_load_store_blacklist", lambda: frozenset())
 
     api = FakeAPI({"u1": {"a.zarr": frozenset({"GSLA"})}})
-    products = discover_products(api, BASE_URL)
+    products = discover_products(api)
 
-    assert products["a:gsla"].source_path == f"{BASE_URL}/a.zarr"
+    assert products["a:gsla"].store == "a"
     assert products["a:gsla"].metadata_uuid == "u1"
 
 
@@ -239,7 +233,7 @@ def test_discover_products_drops_blacklisted_store(monkeypatch):
             }
         }
     )
-    products = discover_products(api, BASE_URL)
+    products = discover_products(api)
 
     assert set(products) == {"keep:gsla"}
 
@@ -304,15 +298,13 @@ def test_original_products_keep_their_metadata_uuids():
     )
 
 
-def test_original_source_paths_are_canonicalised():
-    """Intended change: today's two SLA entries carry a trailing slash. The IDs
-    are what clients key on and those are unchanged."""
+def test_original_products_map_to_their_stores():
     candidates = _build_original()
     assert (
-        candidates["model_sea_level_anomaly_gridded_realtime:gsla"].source_path
-        == f"{BASE_URL}/model_sea_level_anomaly_gridded_realtime.zarr"
+        candidates["model_sea_level_anomaly_gridded_realtime:gsla"].store
+        == "model_sea_level_anomaly_gridded_realtime"
     )
     assert (
-        candidates["satellite_austemp_heatwave_14day:sst_mosaic"].source_path
-        == f"{BASE_URL}/satellite_austemp_heatwave_14day.zarr"
+        candidates["satellite_austemp_heatwave_14day:sst_mosaic"].store
+        == "satellite_austemp_heatwave_14day"
     )

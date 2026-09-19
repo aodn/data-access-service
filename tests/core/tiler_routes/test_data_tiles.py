@@ -19,7 +19,7 @@ def test_get_products_coastal_fill_null_when_absent(client, monkeypatch):
         "sparse",
         Product(
             id="sparse",
-            source_path="s3://b/x.zarr",
+            store="x",
             variable="GSLA",
             data_tile=DataTileConfig(coastal_fill=CoastalFill(max_dist_px=4)),
         ),
@@ -27,7 +27,7 @@ def test_get_products_coastal_fill_null_when_absent(client, monkeypatch):
     monkeypatch.setitem(
         registry.PRODUCTS,
         "plain",
-        Product(id="plain", source_path="s3://b/y.zarr", variable="V"),
+        Product(id="plain", store="y", variable="V"),
     )
 
     r = client.get("/api/v1/das/tiler/data_tiles/products")
@@ -46,7 +46,7 @@ def test_get_products_reflects_effective_state(client, monkeypatch):
         "currents",
         Product(
             id="model_sea_level_anomaly_gridded_realtime:ucur+vcur",
-            source_path="s3://b/z.zarr",
+            store="z",
             variable=["UCUR", "VCUR"],
         ),
     )
@@ -72,7 +72,7 @@ def test_list_products_metadata_uuid_null_when_absent(client, monkeypatch):
         "linked",
         Product(
             id="linked",
-            source_path="s3://b/x.zarr",
+            store="x",
             variable="GSLA",
             metadata_uuid="uuid-123",
         ),
@@ -80,7 +80,7 @@ def test_list_products_metadata_uuid_null_when_absent(client, monkeypatch):
     monkeypatch.setitem(
         registry.PRODUCTS,
         "plain",
-        Product(id="plain", source_path="s3://b/y.zarr", variable="V"),
+        Product(id="plain", store="y", variable="V"),
     )
 
     r = client.get("/api/v1/das/tiler/data_tiles/products")
@@ -91,9 +91,7 @@ def test_list_products_metadata_uuid_null_when_absent(client, monkeypatch):
 
 
 _FAKE_PRODUCTS = {
-    "product_a": Product(
-        id="product_a", source_path="s3://bucket/a.zarr", variable="VAR"
-    ),
+    "product_a": Product(id="product_a", store="a", variable="VAR"),
 }
 
 _LOD_GRIDS = {1: (1, 1)}
@@ -179,7 +177,7 @@ def test_tile_missing_date(client):
 
 
 def test_tile_missing_store(client):
-    # get_lod_grids opens the store directly (get_store -> aodn_cloud_optimised) before
+    # get_lod_grids reads the store's sidecar directly (get_store_metadata) before
     # load_slice_or_404 ever runs, so a missing store must still surface as a
     # 404 via the app-level FileNotFoundError handler, not an unhandled 500.
     with patch(
@@ -192,7 +190,7 @@ def test_tile_missing_store(client):
             "/api/v1/das/tiler/data_tiles/sea_level_anomaly/1/0/0.png?date=2024-01-01T00:00:00Z"
         )
     assert response.status_code == 404
-    assert "s3://bucket/missing.zarr" in response.json()["detail"]
+    assert "missing" in response.json()["detail"]
 
 
 def test_tile_store_failed_prewarm_is_404(client):
@@ -313,7 +311,7 @@ def test_manifest_missing_store(client):
             "/api/v1/das/tiler/data_tiles/sea_level_anomaly/manifest.json?date=2024-01-01T00:00:00Z"
         )
     assert response.status_code == 404
-    assert "s3://bucket/missing.zarr" in response.json()["detail"]
+    assert "missing" in response.json()["detail"]
 
 
 def test_manifest_cancelled_client_disconnect_short_circuits_to_499(client):
@@ -537,13 +535,13 @@ def test_availability_metadata_uuid_filters_to_matching_products(client):
     products = {
         "product_a": Product(
             id="product_a",
-            source_path="s3://bucket/a.zarr",
+            store="a",
             variable="VAR",
             metadata_uuid="uuid-1",
         ),
         "product_b": Product(
             id="product_b",
-            source_path="s3://bucket/b.zarr",
+            store="b",
             variable="VAR",
             metadata_uuid="uuid-2",
         ),

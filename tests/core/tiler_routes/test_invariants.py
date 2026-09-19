@@ -74,9 +74,7 @@ def test_tile_geometry_matches_frontend_shader_contract(client):
 
 _LOD_GRIDS = {1: (1, 1)}
 _FAKE_PRODUCTS = {
-    "sea_level_anomaly": Product(
-        id="sea_level_anomaly", source_path="s3://bucket/a.zarr", variable="GSLA"
-    ),
+    "sea_level_anomaly": Product(id="sea_level_anomaly", store="a", variable="GSLA"),
 }
 
 

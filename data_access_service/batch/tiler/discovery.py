@@ -51,29 +51,27 @@ def _exclude_blacklisted_stores(
     as the dataset_name half of a products_customisation id.
     """
     for uuid, dataset_name, fields in dataset_variables:
-        if dataset_name.removesuffix(".zarr") in blacklist:
+        if store_name(dataset_name) in blacklist:
             logger.info("Skipping blacklisted store %r (uuid %s)", dataset_name, uuid)
             continue
         yield uuid, dataset_name, fields
 
 
+def store_name(dataset_name: str) -> str:
+    """``foo.zarr`` -> ``foo``. Names the store everywhere downstream: its
+    output directory, the tiler's registry and cache keys.
+    """
+    return dataset_name.removesuffix(".zarr")
+
+
 def product_id(dataset_name: str, variables: list[str]) -> str:
     # Frontend-cached and opaque to ogcapi-java: a compatibility surface.
-    return (
-        f"{dataset_name.removesuffix('.zarr')}:{'+'.join(v.lower() for v in variables)}"
-    )
-
-
-def source_path(dataset_name: str, base_url: str) -> str:
-    # No trailing slash: this string keys the store registry, date index and
-    # both cache layers, so a second spelling doubles all of them.
-    return f"{base_url.rstrip('/')}/{dataset_name}"
+    return f"{store_name(dataset_name)}:{'+'.join(v.lower() for v in variables)}"
 
 
 def build_candidate_products(
     dataset_variables: ZarrDatasetVariables,
     specs: list[GriddedVariableSpec],
-    base_url: str,
 ) -> dict[str, ProductIdentity]:
     """Fan each specification out across the catalogue. Matching is
     case-sensitive. Carries identity only — no rendering config; that's
@@ -105,7 +103,7 @@ def build_candidate_products(
 
             candidates[pid] = ProductIdentity(
                 id=pid,
-                source_path=source_path(dataset_name, base_url),
+                store=store_name(dataset_name),
                 # Not `variables`: that would turn a scalar into a
                 # one-element vector product.
                 variable=list(spec) if is_pair else spec,
@@ -129,14 +127,14 @@ def build_candidate_products(
         "Discovered %d candidate products across %d stores and %d uuids "
         "from %d variable specifications",
         len(candidates),
-        len({p.source_path for p in candidates.values()}),
+        len({p.store for p in candidates.values()}),
         len({p.metadata_uuid for p in candidates.values()}),
         len(specs),
     )
     return candidates
 
 
-def discover_products(api: API, base_url: str) -> dict[str, ProductIdentity]:
+def discover_products(api: API) -> dict[str, ProductIdentity]:
     """Single entry point: load the gridded_variables and blacklist sections
     of config.yaml, and fan out across the metadata catalogue (minus
     blacklisted stores). No rendering config here — the live tiler layers
@@ -148,4 +146,4 @@ def discover_products(api: API, base_url: str) -> dict[str, ProductIdentity]:
     dataset_variables = _exclude_blacklisted_stores(
         api.iter_zarr_dataset_variables(), blacklist
     )
-    return build_candidate_products(dataset_variables, specs, base_url)
+    return build_candidate_products(dataset_variables, specs)
