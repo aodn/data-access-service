@@ -119,3 +119,25 @@ class TestRejectedRequests:
 
         assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
         submit_a_job.assert_not_called()
+
+    def test_profile_without_a_batch_queue_is_not_submitted(
+        self, api_instance, submit_a_job, monkeypatch
+    ):
+        # What the dev profile looks like: no batch section in its config
+        monkeypatch.setattr(config, "get_job_queue_name", lambda: None)
+
+        response = _put()
+
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        assert "entry_point.py" in response.json()["detail"]
+        submit_a_job.assert_not_called()
+
+    def test_profile_without_a_job_definition_is_not_submitted(
+        self, api_instance, submit_a_job, monkeypatch
+    ):
+        monkeypatch.setattr(config, "get_job_definition_name", lambda: None)
+
+        response = _put()
+
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        submit_a_job.assert_not_called()

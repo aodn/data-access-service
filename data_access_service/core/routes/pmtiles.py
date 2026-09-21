@@ -67,11 +67,18 @@ def create_pmtiles(uuid: str, api_instance: API = Depends(require_api_ready)):
         )
 
     job_queue = config.get_job_queue_name()
+    job_definition = config.get_job_definition_name()
+    if not job_queue or not job_definition:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+            detail=("AWS Batch is not configured for this profile."),
+        )
+
     job_name = _job_name(uuid)
     job_id = aws.submit_a_job(
         job_name=job_name,
         job_queue=job_queue,
-        job_definition=config.get_job_definition_name(),
+        job_definition=job_definition,
         parameters={
             Parameters.TYPE.value: PMTILES_JOB_TYPE,
             Parameters.UUID.value: uuid,
