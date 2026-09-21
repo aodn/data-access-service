@@ -87,7 +87,7 @@ def generate_tiler_parquet_for_all_products(api: API, uuid: str | None = None) -
     empty = {
         store
         for store in succeeded
-        if not _has_timestamps(batch_config.output_dir, store)
+        if not _has_timestamps(batch_config.tiler_root_dir, store)
     }
     if empty:
         logger.warning(
@@ -99,22 +99,22 @@ def generate_tiler_parquet_for_all_products(api: API, uuid: str | None = None) -
         p for p in products.values() if p.store in succeeded and p.store not in empty
     ]
     unpublished = [p.id for p in products.values() if p.store in empty]
-    write_root_metadata(published, batch_config.output_dir, remove=unpublished)
+    write_root_metadata(published, batch_config.tiler_root_dir, remove=unpublished)
 
 
-def _has_timestamps(output_dir: str, store: str) -> bool:
-    meta = read_metadata(output_dir, store)
+def _has_timestamps(tiler_root_dir: str, store: str) -> bool:
+    meta = read_metadata(tiler_root_dir, store)
     return meta is not None and bool(meta.timestamps)
 
 
 def write_root_metadata(
-    products: list[ProductIdentity], output_dir: str, remove: list[str] = ()
+    products: list[ProductIdentity], tiler_root_dir: str, remove: list[str] = ()
 ) -> str:
     """Upsert ``products`` into ``root_metadata.json`` and drop the ids in
     ``remove``. Products not in this run (other uuids, failed stores) keep
     their entries. Skips the write when nothing changed.
     """
-    path = root_metadata_path(output_dir)
+    path = root_metadata_path(tiler_root_dir)
 
     existing: RootMetadata | None = None
     existing_by_id: dict[str, dict] = {}
@@ -216,7 +216,7 @@ def _sync_one(
             store,
             uuid,
             variables,
-            batch_config.output_dir,
+            batch_config.tiler_root_dir,
             max_chunks_per_run=batch_config.max_chunks_per_run,
             duckdb_config=batch_config.duckdb,
         )

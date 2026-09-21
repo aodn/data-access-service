@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 def _metadata_path(store: str) -> str:
-    output_dir = Config.get_config().get_tiler_output_dir()
-    return store_metadata_path(output_dir, store)
+    tiler_root_dir = Config.get_config().get_tiler_root_dir()
+    return store_metadata_path(tiler_root_dir, store)
 
 
 def _load_metadata(store: str) -> TilerParquetMetadata:
@@ -39,6 +39,7 @@ class StoreRegistry:
     def __init__(self) -> None:
         self._metadata: dict[str, TilerParquetMetadata] = {}
         self._time_index: dict[str, dict[pd.Timestamp, str]] = {}
+        # We might could remove _failed_stores, as now it only reads the metadata of each store. self._metadata has all the stores knowledge.
         self._failed_stores: dict[str, BaseException] = {}
         self._lock = threading.Lock()
 
@@ -162,6 +163,7 @@ def unavailable_date_message(store: str, ts: pd.Timestamp) -> str:
     return f"No data for date {ts_to_utc_iso(ts)!r}.{hint}"
 
 
+# rename this, it is not really prewarming any more like before, it was reading metadata of zarr and keeping the handle open, now it is just reading the metadata and caching it, so it is more like loading the metadata of stores
 def prewarm_stores(stores: list[str]) -> dict[str, BaseException | None]:
     """Load the metadata of each store not loaded yet (failed ones are retried)."""
     return store_registry.prewarm(stores)

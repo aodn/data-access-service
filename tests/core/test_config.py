@@ -22,10 +22,10 @@ def _with_tiler(monkeypatch, config, edit):
     monkeypatch.setitem(config.config, "tiler", tiler)
 
 
-def test_tiler_output_dir_is_the_datavis_bucket():
+def test_tiler_root_dir_is_the_datavis_bucket():
     config = Config.get_config(EnvType.TESTING)
-    assert config.get_tiler_output_dir() == "s3://test-site-snapshot-bucket/tiler"
-    assert config.get_tiler_batch_config().output_dir == config.get_tiler_output_dir()
+    assert config.get_tiler_root_dir() == "s3://test-site-snapshot-bucket/tiler"
+    assert config.get_tiler_batch_config().tiler_root_dir == config.get_tiler_root_dir()
 
 
 def test_tiler_batch_max_chunks_null_means_no_limit(monkeypatch):

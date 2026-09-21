@@ -27,12 +27,12 @@ def clear_stores():
 
 
 @pytest.fixture(autouse=True)
-def output_dir(monkeypatch):
+def tiler_root_dir(monkeypatch):
     import data_access_service.tiler.services.store.registry as registry_module
 
     monkeypatch.setattr(
         registry_module.Config.get_config(),
-        "get_tiler_output_dir",
+        "get_tiler_root_dir",
         lambda: OUTPUT_DIR,
     )
     s3_store: dict[str, dict] = {}
@@ -65,41 +65,41 @@ def _write_metadata(s3_store: dict, store: str, n_i: int) -> None:
     s3_store[f"{OUTPUT_DIR}/{store}/metadata.json"] = _meta(n_i).to_dict()
 
 
-def test_request_path_never_refreshes_an_already_loaded_store(output_dir):
-    _write_metadata(output_dir, "foo", n_i=2)
+def test_request_path_never_refreshes_an_already_loaded_store(tiler_root_dir):
+    _write_metadata(tiler_root_dir, "foo", n_i=2)
     first = get_store_metadata(STORE)
     for _ in range(10):
         assert get_store_metadata(STORE) is first
 
 
-def test_refresh_stores_rereads_every_loaded_store(output_dir):
-    _write_metadata(output_dir, "foo", n_i=2)
+def test_refresh_stores_rereads_every_loaded_store(tiler_root_dir):
+    _write_metadata(tiler_root_dir, "foo", n_i=2)
     get_store_metadata(STORE)
 
-    _write_metadata(output_dir, "foo", n_i=5)  # sidecar changed on S3
+    _write_metadata(tiler_root_dir, "foo", n_i=5)  # sidecar changed on S3
     refresh_stores()
 
     assert get_store_metadata(STORE).n_i == 5
 
 
-def test_refresh_publishes_a_new_metadata_object(output_dir):
-    _write_metadata(output_dir, "foo", n_i=2)
+def test_refresh_publishes_a_new_metadata_object(tiler_root_dir):
+    _write_metadata(tiler_root_dir, "foo", n_i=2)
     first = get_store_metadata(STORE)
 
-    _write_metadata(output_dir, "foo", n_i=2)
+    _write_metadata(tiler_root_dir, "foo", n_i=2)
     refresh_stores()
 
     assert get_store_metadata(STORE) is not first
 
 
-def test_one_store_failure_does_not_stop_the_sweep(output_dir):
-    _write_metadata(output_dir, "foo", n_i=2)
-    _write_metadata(output_dir, "bar", n_i=3)
+def test_one_store_failure_does_not_stop_the_sweep(tiler_root_dir):
+    _write_metadata(tiler_root_dir, "foo", n_i=2)
+    _write_metadata(tiler_root_dir, "bar", n_i=3)
     get_store_metadata(STORE)
     get_store_metadata("bar")
 
     # "foo"'s sidecar becomes unreadable before the sweep runs.
-    del output_dir[f"{OUTPUT_DIR}/foo/metadata.json"]
+    del tiler_root_dir[f"{OUTPUT_DIR}/foo/metadata.json"]
 
     refresh_stores()  # must not raise
 
@@ -114,8 +114,8 @@ def test_refresh_stores_skips_stores_never_loaded():
     assert store_registry.time_index(STORE) == {}
 
 
-def test_clear_drops_loaded_stores(output_dir):
-    _write_metadata(output_dir, "foo", n_i=2)
+def test_clear_drops_loaded_stores(tiler_root_dir):
+    _write_metadata(tiler_root_dir, "foo", n_i=2)
     get_store_metadata(STORE)
 
     store_registry.clear()

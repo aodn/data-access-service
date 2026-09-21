@@ -20,10 +20,10 @@ def _product(pid: str, store: str, variable, uuid: str = "uuid-a") -> ProductIde
 
 
 def _batch_config(
-    output_dir: str = "s3://my-bucket/tiler", **overrides
+    tiler_root_dir: str = "s3://my-bucket/tiler", **overrides
 ) -> TilerBatchConfig:
     base = dict(
-        output_dir=output_dir,
+        tiler_root_dir=tiler_root_dir,
         max_chunks_per_run=2,
         use_fork_process=True,
         duckdb=TilerBatchDuckDBConfig(
@@ -145,7 +145,7 @@ def every_store_has_data(monkeypatch):
     monkeypatch.setattr(
         generator,
         "read_metadata",
-        lambda output_dir, store: MagicMock(timestamps=["t"]),
+        lambda tiler_root_dir, store: MagicMock(timestamps=["t"]),
     )
 
 
@@ -269,7 +269,7 @@ class TestPublishing:
         monkeypatch.setattr(
             generator,
             "read_metadata",
-            lambda output_dir, store: (
+            lambda tiler_root_dir, store: (
                 MagicMock(timestamps=sidecars[store]) if store in sidecars else None
             ),
         )
@@ -352,7 +352,7 @@ class TestBuildTilerParquet:
         monkeypatch.setattr(generator, "open_store", lambda store: None)
         seen = {}
 
-        def fake_sync(store, uuid, variables, output_dir, **kwargs):
+        def fake_sync(store, uuid, variables, tiler_root_dir, **kwargs):
             seen.update(kwargs)
             return [], "path"
 

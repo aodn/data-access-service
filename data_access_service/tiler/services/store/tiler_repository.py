@@ -63,8 +63,8 @@ class TilerParquetRepository:
     ) -> SparseGrid:
         """One variable's (lat, lon) grid at ``raw_ts``, as CSR. Raises
         FileNotFoundError if the file is missing."""
-        output_dir = Config.get_config().get_tiler_output_dir()
-        path = variable_parquet_path(output_dir, store, variable, raw_ts)
+        tiler_root_dir = Config.get_config().get_tiler_root_dir()
+        path = variable_parquet_path(tiler_root_dir, store, variable, raw_ts)
         source = f"read_parquet({_sql_literal(path)})"
         try:
             # The row count comes from the file footer; it sizes the arrays.

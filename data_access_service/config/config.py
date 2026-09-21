@@ -422,8 +422,8 @@ class Config:
     def _tiler(self) -> dict:
         return self.config["tiler"]
 
-    def get_tiler_output_dir(self) -> str:
-        """Where batch writes and the tiler reads."""
+    def get_tiler_root_dir(self) -> str:
+        """The S3 prefix batch writes and the tiler reads."""
         return f"s3://{self.get_datavis_data_bucket_name()}/tiler"
 
     def get_tiler_api_config(self) -> TilerApiConfig:
@@ -454,7 +454,7 @@ class Config:
         duckdb = batch["duckdb"]
         max_chunks = batch["max_chunks_per_run"]
         return TilerBatchConfig(
-            output_dir=self.get_tiler_output_dir(),
+            tiler_root_dir=self.get_tiler_root_dir(),
             max_chunks_per_run=int(max_chunks) if max_chunks is not None else None,
             use_fork_process=bool(batch["use_fork_process"]),
             duckdb=TilerBatchDuckDBConfig(

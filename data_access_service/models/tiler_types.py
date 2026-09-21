@@ -52,9 +52,8 @@ class TilerBatchDuckDBConfig:
 class TilerBatchConfig:
     """The batch zarr -> parquet job (``tiler.config.batch``)."""
 
-    # Where batch writes; the same value the API reads from
-    # (Config.get_tiler_output_dir).
-    output_dir: str
+    # Where batch writes; the same prefix the API reads from.
+    tiler_root_dir: str
     # Cap on zarr time chunks read per store per run, for quick dev runs;
     # None converts everything missing.
     max_chunks_per_run: int | None

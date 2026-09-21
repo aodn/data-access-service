@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 _OPEN_MAX_ATTEMPTS = 3
 _OPEN_BACKOFF_SECONDS = 1.0
 
+# TODO: Simplify the StoreRegistry, what we need for this is to have all the zarrs, and open each one when needed, also validate each store.
+
 
 class NotGriddedStoreError(ValueError):
     """Not a lat/lon grid."""
@@ -71,6 +73,7 @@ class StoreRegistry:
         self._stores: dict[str, ZarrDataSource] = {}
         self._lock = threading.Lock()
 
+    # TODO: DO we really need _ensure_open? can we juse use open_store?
     def _ensure_open(self, store: str) -> ZarrDataSource:
         """The handle for ``store``, opened on first use."""
         with self._lock:
@@ -125,6 +128,9 @@ def close_store(store: str) -> None:
     store_registry.close(store)
 
 
+# TODO: We validate each store and check errors, for the failed stores, in root_metadata.json,
+# we could have a good stores lise including its products, and a failed stores list, including the error message, its products. Every time the batch runs, it will try to open the failed ones again,
+# and if it succeeds, remove it from the failed list, and add it the good stores list. Also for the failed ones, rewrite its erros message.
 def open_store(store: str) -> BaseException | None:
     """Open ``store``. Returns None on success, else the error. Retries
     only errors that might be transient."""

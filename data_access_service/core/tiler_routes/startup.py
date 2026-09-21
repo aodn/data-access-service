@@ -36,8 +36,8 @@ logger = logging.getLogger(__name__)
 
 
 def _load_catalog() -> dict[str, Product]:
-    output_dir = Config.get_config().get_tiler_output_dir()
-    root = RootMetadata.from_dict(read_json(root_metadata_path(output_dir)))
+    tiler_root_dir = Config.get_config().get_tiler_root_dir()
+    root = RootMetadata.from_dict(read_json(root_metadata_path(tiler_root_dir)))
     identities = {
         entry["id"]: ProductIdentity.from_dict(entry) for entry in root.products
     }
@@ -67,6 +67,7 @@ async def run_tiler_warmup() -> None:
         await anyio.to_thread.run_sync(warmup_kernels, limiter=TILE_THREAD_LIMITER)
         await anyio.to_thread.run_sync(warmup_visual, limiter=TILE_THREAD_LIMITER)
 
+        # We might not need the failed logs, as it only reads the metadata of each store. Becase now the real store validation is done in batch tiler.
         failed = sum(1 for outcome in outcomes.values() if outcome is not None)
         if failed == len(outcomes):
             raise RuntimeError(

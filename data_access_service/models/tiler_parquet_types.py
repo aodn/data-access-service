@@ -16,12 +16,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-# Output layout, shared by batch (writer) and tiler (reader). ``output_dir``
-# is ``s3://{datavis_data bucket}/tiler`` (Config.get_tiler_output_dir):
+# Output layout, shared by batch (writer) and tiler (reader). ``tiler_root_dir``
+# is ``s3://{datavis_data bucket}/tiler`` (Config.get_tiler_root_dir):
 #
-#   {output_dir}/root_metadata.json
-#   {output_dir}/{store}/metadata.json
-#   {output_dir}/{store}/{variable}/{timestamp}.parquet
+#   {tiler_root_dir}/root_metadata.json
+#   {tiler_root_dir}/{store}/metadata.json
+#   {tiler_root_dir}/{store}/{variable}/{timestamp}.parquet
 #
 # ``store`` is ``ProductIdentity.store``: the zarr dataset name minus ``.zarr``.
 # ``timestamp`` is the sidecar's own timestamp string with ":" dropped.
@@ -31,19 +31,21 @@ def _join(base: str, *parts: str) -> str:
     return "/".join([base.rstrip("/"), *parts])
 
 
-def root_metadata_path(output_dir: str) -> str:
-    return _join(output_dir, "root_metadata.json")
+def root_metadata_path(tiler_root_dir: str) -> str:
+    return _join(tiler_root_dir, "root_metadata.json")
 
 
-def store_metadata_path(output_dir: str, store: str) -> str:
-    return _join(output_dir, store, "metadata.json")
+def store_metadata_path(tiler_root_dir: str, store: str) -> str:
+    return _join(tiler_root_dir, store, "metadata.json")
 
 
 def variable_parquet_path(
-    output_dir: str, store: str, variable: str, timestamp: str
+    tiler_root_dir: str, store: str, variable: str, timestamp: str
 ) -> str:
     # "2024-01-15T13:00:00.000000000Z" -> "2024-01-15T130000.000000000Z"
-    return _join(output_dir, store, variable, f"{timestamp.replace(':', '')}.parquet")
+    return _join(
+        tiler_root_dir, store, variable, f"{timestamp.replace(':', '')}.parquet"
+    )
 
 
 @dataclass(frozen=True)
@@ -133,7 +135,7 @@ class ProductIdentity:
     """
 
     id: str
-    # Store name under output_dir (see the layout above), e.g. "foo" for foo.zarr.
+    # Store name under tiler_root_dir (see the layout above), e.g. "foo" for foo.zarr.
     store: str
     variable: str | list[str]
     metadata_uuid: str | None = None

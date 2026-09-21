@@ -88,13 +88,13 @@ def build_metadata(
     )
 
 
-def read_metadata(output_dir: str, store: str) -> TilerParquetMetadata | None:
-    data = storage.read_json(store_metadata_path(output_dir, store))
+def read_metadata(tiler_root_dir: str, store: str) -> TilerParquetMetadata | None:
+    data = storage.read_json(store_metadata_path(tiler_root_dir, store))
     return TilerParquetMetadata.from_dict(data) if data is not None else None
 
 
-def write_metadata(meta: TilerParquetMetadata, output_dir: str, store: str) -> str:
-    path = store_metadata_path(output_dir, store)
+def write_metadata(meta: TilerParquetMetadata, tiler_root_dir: str, store: str) -> str:
+    path = store_metadata_path(tiler_root_dir, store)
     storage.write_json(path, meta.to_dict())
     return path
 
@@ -164,7 +164,7 @@ def sync_store(
     store: str,
     uuid: str,
     variables: list[str],
-    output_dir: str,
+    tiler_root_dir: str,
     max_chunks_per_run: int | None = None,
     duckdb_config: TilerBatchDuckDBConfig | None = None,
 ) -> tuple[list[str], str]:
@@ -183,7 +183,7 @@ def sync_store(
         raise ValueError("duckdb_config is required")
 
     fresh = build_metadata(store, uuid, variables, timestamps=[])
-    existing = read_metadata(output_dir, store)
+    existing = read_metadata(tiler_root_dir, store)
     converted: set[str] = set()
     empty: set[str] = set()
     if existing is not None:
@@ -219,7 +219,7 @@ def sync_store(
 
     written: list[str] = []
     sidecar_written = False
-    metadata_path = store_metadata_path(output_dir, store)
+    metadata_path = store_metadata_path(tiler_root_dir, store)
 
     with TilerBatchDuckDBClient(duckdb_config) as client:
         for n, batch_raw_ts in enumerate(batches, start=1):
@@ -244,13 +244,13 @@ def sync_store(
                     continue
                 for v, frame in frames.items():
                     client.write_parquet(
-                        frame, variable_parquet_path(output_dir, store, v, ts)
+                        frame, variable_parquet_path(tiler_root_dir, store, v, ts)
                     )
                 converted.add(ts)
                 written.append(ts)
 
             if changed:
-                write_metadata(current(), output_dir, store)
+                write_metadata(current(), tiler_root_dir, store)
                 sidecar_written = True
             logger.info(
                 "Tiler parquet sync for %s: %d/%d chunk(s) processed",
@@ -262,6 +262,6 @@ def sync_store(
     if not sidecar_written and (
         existing is None or not _same_content(existing, current())
     ):
-        write_metadata(current(), output_dir, store)
+        write_metadata(current(), tiler_root_dir, store)
 
     return written, metadata_path
