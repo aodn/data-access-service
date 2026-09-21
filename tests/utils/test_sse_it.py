@@ -153,7 +153,8 @@ async def test_sse_it_asks_fastapi_for_the_request_it_watches():
 
 @pytest.mark.asyncio
 async def test_sse_it_passes_the_request_on_when_the_function_declares_one():
-    # /pmtiles takes a request of its own; it must get that one, not a second.
+    # /estimation-index takes a request of its own; it must get that one,
+    # not a second.
     seen = {}
 
     @sse_it
