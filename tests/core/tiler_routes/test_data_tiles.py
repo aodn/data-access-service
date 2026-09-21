@@ -11,6 +11,8 @@ from data_access_service.tiler.services.product.product import (
     DataTileConfig,
     Product,
 )
+from data_access_service.tiler.services.store.sparse_grid import SparseSlice
+from tests.tiler.sparse_helpers import sparse_of
 
 
 def test_get_products_coastal_fill_null_when_absent(client, monkeypatch):
@@ -111,6 +113,11 @@ def _make_ds() -> xr.Dataset:
     )
 
 
+def _make_sparse(ds: xr.Dataset | None = None) -> SparseSlice:
+    """``ds`` (default ``_make_ds()``) as the CSR slice point/manifest read."""
+    return sparse_of(_make_ds() if ds is None else ds)
+
+
 # --- /{product}/{z}/{x}/{y}.png?date=... ---
 
 
@@ -129,7 +136,7 @@ def test_tile_bad_lod(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
     ):
         response = client.get(
@@ -146,7 +153,7 @@ def test_tile_out_of_bounds(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
     ):
         response = client.get(
@@ -231,7 +238,7 @@ def test_tile_ok(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.data_tiles.render_tile",
@@ -256,7 +263,7 @@ def test_tile_cancelled_client_disconnect_short_circuits_to_499(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.data_tiles.render_tile"
@@ -316,7 +323,7 @@ def test_manifest_missing_store(client):
 
 def test_manifest_cancelled_client_disconnect_short_circuits_to_499(client):
     """Same short-circuit as the tile endpoint: a gone client must not pay
-    for load_slice to run."""
+    for the slice load to run."""
     with (
         patch(
             "data_access_service.core.tiler_routes.data_tiles.get_lod_grids",
@@ -355,7 +362,7 @@ def test_manifest_ok(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=_make_sparse(),
         ),
         patch(
             "data_access_service.core.tiler_routes.data_tiles.render_manifest",
@@ -393,7 +400,7 @@ def test_manifest_categorical_flag_fields_pass_through(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=_make_sparse(),
         ),
         patch(
             "data_access_service.core.tiler_routes.data_tiles.render_manifest",
@@ -433,7 +440,7 @@ def test_point_missing_date(client):
 def test_point_ok(client):
     with patch(
         "data_access_service.core.tiler_routes.shared.load_slice",
-        return_value=_make_ds(),
+        return_value=_make_sparse(),
     ):
         response = client.get(
             "/api/v1/das/tiler/data_tiles/sea_level_anomaly/point?date=2024-01-01T00:00:00Z&lat=-35&lon=145"
@@ -444,12 +451,37 @@ def test_point_ok(client):
     assert "GSLA" in body["variables"]
 
 
+def test_point_returns_the_nearest_cell(client):
+    ds = _make_ds()
+    ds["GSLA"].values[2, 5] = np.nan
+    with patch(
+        "data_access_service.core.tiler_routes.shared.load_slice",
+        return_value=_make_sparse(ds),
+    ):
+        ok = client.get(
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/point"
+            f"?date=2024-01-01T00:00:00Z&lat={ds.lat.values[3] + 0.1}"
+            f"&lon={ds.lon.values[4] - 0.1}"
+        )
+        empty = client.get(
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/point"
+            f"?date=2024-01-01T00:00:00Z&lat={ds.lat.values[2]}&lon={ds.lon.values[5]}"
+        )
+    assert ok.status_code == 200
+    body = ok.json()
+    assert body["lat"] == float(ds.lat.values[3])
+    assert body["lon"] == float(ds.lon.values[4])
+    assert body["variables"]["GSLA"]["value"] == float(ds["GSLA"].values[3, 4])
+    # A cell with no value comes back as null.
+    assert empty.json()["variables"]["GSLA"]["value"] is None
+
+
 def test_point_out_of_bounds(client):
     # Fixture grid covers lat -40..-30, lon 140..150. A point well south of that
     # must 404 rather than silently snapping to the edge cell (method="nearest").
     with patch(
         "data_access_service.core.tiler_routes.shared.load_slice",
-        return_value=_make_ds(),
+        return_value=_make_sparse(),
     ):
         response = client.get(
             "/api/v1/das/tiler/data_tiles/sea_level_anomaly/point?date=2024-01-01T00:00:00Z&lat=-55.46&lon=145"

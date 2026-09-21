@@ -33,6 +33,8 @@ from data_access_service.models.tiler_parquet_types import (
     variable_parquet_path,
 )
 from data_access_service.tiler.services.store.registry import store_registry
+from data_access_service.tiler.services.store.sparse_grid import SparseGrid
+from tests.tiler.sparse_helpers import dense_of
 
 STORE = "x"
 
@@ -102,15 +104,16 @@ def _ts(t: str) -> str:
     return f"{t}.000000000Z"
 
 
-def test_load_slice_returns_dataset_for_known_date(output_dir):
+def test_load_slice_returns_the_slice_for_known_date(output_dir):
     _seed_metadata(["2024-01-15T13:00:00"], [0.0, 1.0], [0.0, 1.0])
     _write_variable_parquet(output_dir, "v", [(_ts("2024-01-15T13:00:00"), 0, 0, 1.0)])
 
     result = loader.load_slice(STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"])
-    assert "v" in result.data_vars
-    assert result["v"].shape == (2, 2)
-    assert float(result["v"].isel(lat=0, lon=0)) == 1.0
-    assert np.isnan(float(result["v"].isel(lat=0, lon=1)))
+    assert list(result.grids) == ["v"]
+    values = dense_of(result.grids["v"])
+    assert values.shape == (2, 2)
+    assert values[0, 0] == 1.0
+    assert np.isnan(values[0, 1])
 
 
 def test_load_slice_unknown_date_raises_file_not_found(output_dir):
@@ -160,7 +163,7 @@ def test_load_slice_resolves_exact_timestamp_among_several(output_dir):
 
     result = loader.load_slice(STORE, pd.Timestamp("2024-01-15T14:00:00"), ["v"])
 
-    assert float(result["v"].isel(lat=0, lon=0)) == 2.0
+    assert result.grids["v"].value_at(0, 0) == 2.0
 
 
 def test_load_slice_reads_only_the_requested_timestamp(output_dir):
@@ -179,7 +182,7 @@ def test_load_slice_reads_only_the_requested_timestamp(output_dir):
     result = loader.load_slice_uncached(
         STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"]
     )
-    assert float(result["v"].isel(lat=0, lon=0)) == 1.0
+    assert result.grids["v"].value_at(0, 0) == 1.0
 
 
 # --- ocean_masked flag ---
@@ -207,8 +210,9 @@ def test_load_slice_ocean_masked_nulls_invalid_cells(output_dir):
         STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"], ocean_masked=True
     )
     # Open-ocean cell survives; the New Guinea land cell is nulled.
-    assert float(result["v"].sel(lat=-40.0, lon=150.0)) == 1.0
-    assert np.isnan(float(result["v"].sel(lat=-6.4, lon=137.0)))
+    # lat [-40, -6.4] x lon [150, 137]: (0, 0) is ocean, (1, 1) New Guinea.
+    assert result.grids["v"].value_at(0, 0) == 1.0
+    assert np.isnan(result.grids["v"].value_at(1, 1))
 
 
 def test_load_slice_without_ocean_masked_keeps_all_cells(output_dir):
@@ -218,7 +222,7 @@ def test_load_slice_without_ocean_masked_keeps_all_cells(output_dir):
     result = loader.load_slice(
         STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"]
     )  # flag defaults off
-    assert not np.isnan(result["v"]).any()
+    assert not np.isnan(dense_of(result.grids["v"])).any()
 
 
 # --- concurrent stampede protection (always in-process, independent of CACHE_BACKEND) ---
@@ -265,8 +269,8 @@ def test_concurrent_identical_loads_share_one_compute(output_dir, monkeypatch):
     assert len(results) == 4
 
 
-def test_cold_reads_are_limited_to_four_at_a_time(output_dir, monkeypatch):
-    days = [f"2024-01-0{n}T00:00:00" for n in range(1, 9)]
+def test_cold_reads_are_limited_to_the_configured_concurrency(output_dir, monkeypatch):
+    days = [f"2024-01-{n:02d}T00:00:00" for n in range(1, 9)]
     _seed_metadata(days, [0.0], [0.0])
 
     lock = threading.Lock()
@@ -281,7 +285,9 @@ def test_cold_reads_are_limited_to_four_at_a_time(output_dir, monkeypatch):
         time.sleep(0.05)
         with lock:
             active -= 1
-        return np.zeros((1, 1), dtype=np.float32)
+        return SparseGrid.from_rows(
+            np.array([0]), np.array([0]), np.zeros(1, np.float32), 1, 1
+        )
 
     monkeypatch.setattr(
         repo_module.TilerParquetRepository, "fetch_variable_slice", slow_fetch
@@ -298,12 +304,16 @@ def test_cold_reads_are_limited_to_four_at_a_time(output_dir, monkeypatch):
     for t in threads:
         t.join(timeout=5)
 
-    assert peak == 4
+    assert peak == loader.COLD_READ_CONCURRENCY
 
 
 def test_cache_hit_skips_the_cold_read_limit(output_dir, monkeypatch):
     _seed_metadata(["2024-01-15T13:00:00"], [0.0], [0.0])
-    cached = loader.xr.Dataset({"v": (("lat", "lon"), [[1.0]])})
+    cached = {
+        "v": SparseGrid.from_rows(
+            np.array([0]), np.array([0]), np.ones(1, np.float32), 1, 1
+        )
+    }
     monkeypatch.setattr(
         loader.slice_memo, "get_or_compute", lambda key, factory: cached
     )
@@ -313,3 +323,38 @@ def test_cache_hit_skips_the_cold_read_limit(output_dir, monkeypatch):
     loader.load_slice(STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"])
 
     limit.__enter__.assert_not_called()
+
+
+def test_the_cache_holds_the_sparse_grids(output_dir, monkeypatch):
+    _seed_metadata(["2024-01-15T13:00:00"], [0.0, 1.0], [0.0, 1.0])
+    _write_variable_parquet(output_dir, "v", [(_ts("2024-01-15T13:00:00"), 1, 0, 5.0)])
+    stored = []
+
+    def memo(key, factory):
+        stored.append(factory())
+        return stored[-1]
+
+    monkeypatch.setattr(loader.slice_memo, "get_or_compute", memo)
+
+    result = loader.load_slice(STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"])
+
+    assert isinstance(stored[0]["v"], SparseGrid)
+    assert result.grids["v"] is stored[0]["v"]
+    assert result.grids["v"].value_at(1, 0) == 5.0
+
+
+def test_load_slice_carries_the_store_coords_and_attrs(output_dir):
+    _seed_metadata(
+        ["2024-01-15T13:00:00"],
+        [0.0, 1.0],
+        [10.0, 11.0],
+        variables={"v": {"dtype": "float32", "attrs": {"units": "m"}}},
+    )
+    _write_variable_parquet(output_dir, "v", [(_ts("2024-01-15T13:00:00"), 1, 0, 5.0)])
+
+    sparse = loader.load_slice(STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"])
+
+    assert list(sparse.lat) == [0.0, 1.0]
+    assert list(sparse.lon) == [10.0, 11.0]
+    assert sparse.attrs == {"v": {"units": "m"}}
+    assert sparse.bounds() == (10.0, 11.0, 0.0, 1.0)

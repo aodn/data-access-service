@@ -20,6 +20,7 @@ from data_access_service.tiler.services.store.registry import (
 )
 from data_access_service.tiler.services.store.slice_loader import load_slice
 from data_access_service.tiler.utils.dates import str_to_utc_timestamp
+from data_access_service.tiler.utils.memory import trim_if_over_threshold
 
 PRODUCT_EX: dict[str, Example] = {"default": Example(value="sea_level_anomaly")}
 DATE_EX: dict[str, Example] = {"default": Example(value="2024-02-24T00:00:00Z")}
@@ -43,10 +44,16 @@ async def run_cancellable(request: Request, fn: Callable[[], T]) -> T:
     finishes in the background and its result is dropped."""
     outcome: list[T] = []
 
+    def _trim_then_run() -> T:
+        # In the worker thread, so a queued request never trims and the
+        # event loop never waits on it.
+        trim_if_over_threshold()
+        return fn()
+
     async def _runner(tg: anyio.abc.TaskGroup) -> None:
         outcome.append(
             await anyio.to_thread.run_sync(
-                fn, abandon_on_cancel=True, limiter=TILE_THREAD_LIMITER
+                _trim_then_run, abandon_on_cancel=True, limiter=TILE_THREAD_LIMITER
             )
         )
         tg.cancel_scope.cancel()

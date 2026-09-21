@@ -3,27 +3,27 @@ needs to decode raw tiles."""
 
 from typing import Any
 
-import xarray as xr
-
 from data_access_service.tiler.services.colormap.categorical import (
     is_categorical_variable,
     parse_flag_values_and_meanings,
 )
 from data_access_service.tiler.services.product.product import Product
+from data_access_service.tiler.services.store.sparse_grid import SparseSlice
 from data_access_service.tiler.utils.geo import json_safe_float
 
 
-def render_manifest(product: Product, ds: xr.Dataset) -> dict[str, Any]:
-    lon_min_g = float(ds.lon.min())
-    lon_max_g = float(ds.lon.max())
-    lat_min_g = float(ds.lat.min())
-    lat_max_g = float(ds.lat.max())
+def _range(sparse: SparseSlice, var: str) -> list[float | None]:
+    grid = sparse.grids[var]
+    return [json_safe_float(grid.vmin), json_safe_float(grid.vmax)]
 
+
+def render_manifest(product: Product, sparse: SparseSlice) -> dict[str, Any]:
+    lon_min, lon_max, lat_min, lat_max = sparse.bounds()
     bounds = {
-        "lonMin": lon_min_g,
-        "lonMax": lon_max_g,
-        "latMin": lat_min_g,
-        "latMax": lat_max_g,
+        "lonMin": lon_min,
+        "lonMax": lon_max,
+        "latMin": lat_min,
+        "latMax": lat_max,
     }
     data_tile = product.data_tile
     lod_meta = {
@@ -43,26 +43,17 @@ def render_manifest(product: Product, ds: xr.Dataset) -> dict[str, Any]:
         u_var, v_var = product.variable
         return {
             "bounds": bounds,
-            "uRange": [
-                json_safe_float(ds[u_var].min(skipna=True).values),
-                json_safe_float(ds[u_var].max(skipna=True).values),
-            ],
-            "vRange": [
-                json_safe_float(ds[v_var].min(skipna=True).values),
-                json_safe_float(ds[v_var].max(skipna=True).values),
-            ],
+            "uRange": _range(sparse, u_var),
+            "vRange": _range(sparse, v_var),
             "lods": lod_meta,
         }
     manifest: dict[str, Any] = {
         "bounds": bounds,
-        "valueRange": [
-            json_safe_float(ds[product.variable].min(skipna=True).values),
-            json_safe_float(ds[product.variable].max(skipna=True).values),
-        ],
+        "valueRange": _range(sparse, product.variable),
         "lods": lod_meta,
     }
     # Categorical variables also get their codes, and labels when available.
-    attrs = ds[product.variable].attrs
+    attrs = sparse.attrs[product.variable]
     if is_categorical_variable(attrs):
         values, labels = parse_flag_values_and_meanings(attrs)
         manifest["flagValues"] = list(values)

@@ -6,7 +6,7 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Hashable
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import redis
 
@@ -52,11 +52,22 @@ class RedisMemoizer(CacheBackend):
     _LOCK_TTL_SECONDS = 30
     _MAX_WAIT_SECONDS = 20
     _POLL_INTERVAL_SECONDS = 0.1
+    _CHUNK_BYTES = 1024 * 1024
 
-    def __init__(self, *, namespace: str, ttl_seconds: int, client: redis.Redis):
+    def __init__(
+        self,
+        *,
+        namespace: str,
+        ttl_seconds: int,
+        client: redis.Redis,
+        dumps: Callable[[Any], bytes] = pickle.dumps,
+        loads: Callable[[Any], Any] = pickle.loads,
+    ):
         self._namespace = namespace
         self._ttl_seconds = ttl_seconds
         self._client = client
+        self._dumps = dumps
+        self._loads = loads
         self._unlock_script = client.register_script(_UNLOCK_SCRIPT)
         conn_kwargs = client.connection_pool.connection_kwargs
         self._endpoint = (
@@ -115,10 +126,34 @@ class RedisMemoizer(CacheBackend):
             exc_info=True,
         )
 
+    def _read_value(self, redis_key: str) -> memoryview | None:
+        """The value, read a chunk at a time, or None if the key isn't there.
+
+        A plain GET costs twice the value: hiredis holds the whole reply and
+        then copies it into a bytes. Asking for one chunk per reply keeps that
+        second copy down to ``_CHUNK_BYTES``.
+        """
+        size = self._client.strlen(redis_key)
+        if not size:
+            return None
+        buf = bytearray(size)
+        view = memoryview(buf)
+        at = 0
+        while at < size:
+            end = min(at + self._CHUNK_BYTES, size) - 1
+            chunk = self._client.getrange(redis_key, at, end)
+            if not chunk:
+                # The key expired part-way through; treat it as a miss.
+                return None
+            view[at : at + len(chunk)] = chunk
+            at += len(chunk)
+        # Read-only so a decoder handing back views can't be written through.
+        return view.toreadonly()
+
     def get_or_compute(self, key: Hashable, factory: Callable[[], T]) -> T:
         redis_key = self._key(key)
         try:
-            cached = self._client.get(redis_key)
+            cached = self._read_value(redis_key)
         except redis.exceptions.RedisError as exc:
             self._log_redis_error(
                 "GET",
@@ -129,7 +164,7 @@ class RedisMemoizer(CacheBackend):
             return factory()
 
         if cached is not None:
-            return pickle.loads(cached)
+            return self._loads(cached)
 
         lock_key = f"{redis_key}:lock"
         token = uuid.uuid4().hex
@@ -151,7 +186,7 @@ class RedisMemoizer(CacheBackend):
                 result = factory()
                 try:
                     self._client.set(
-                        redis_key, pickle.dumps(result), ex=self._ttl_seconds
+                        redis_key, self._dumps(result), ex=self._ttl_seconds
                     )
                 except redis.exceptions.RedisError as exc:
                     self._log_redis_error(
@@ -179,7 +214,7 @@ class RedisMemoizer(CacheBackend):
         while time.monotonic() < deadline:
             time.sleep(self._POLL_INTERVAL_SECONDS)
             try:
-                cached = self._client.get(redis_key)
+                cached = self._read_value(redis_key)
             except redis.exceptions.RedisError as exc:
                 self._log_redis_error(
                     "poll",
@@ -189,7 +224,7 @@ class RedisMemoizer(CacheBackend):
                 )
                 return factory()
             if cached is not None:
-                return pickle.loads(cached)
+                return self._loads(cached)
         log.warning(
             "Timed out waiting for in-flight compute of %s; recomputing locally",
             redis_key,
@@ -197,8 +232,18 @@ class RedisMemoizer(CacheBackend):
         return factory()
 
 
-def create_memoizer(*, namespace: str, ttl_seconds: int) -> CacheBackend:
-    """The backend set by ``tiler.config.api.cache.backend``: "none" or "redis"."""
+def create_memoizer(
+    *,
+    namespace: str,
+    ttl_seconds: int,
+    dumps: Callable[[Any], bytes] = pickle.dumps,
+    loads: Callable[[Any], Any] = pickle.loads,
+) -> CacheBackend:
+    """The backend set by ``tiler.config.api.cache.backend``: "none" or "redis".
+
+    ``dumps``/``loads`` default to pickle; pass a codec whose ``loads`` avoids
+    copying (see ``slice_codec``) for values big enough that the copy matters.
+    """
     cache = Config.get_config().get_tiler_api_config().cache
     backend = cache.backend
     if backend == "none":
@@ -212,6 +257,10 @@ def create_memoizer(*, namespace: str, ttl_seconds: int) -> CacheBackend:
             ssl=cache.is_tls,
         )
         return RedisMemoizer(
-            namespace=namespace, ttl_seconds=ttl_seconds, client=client
+            namespace=namespace,
+            ttl_seconds=ttl_seconds,
+            client=client,
+            dumps=dumps,
+            loads=loads,
         )
     raise ValueError(f"Unknown CACHE_BACKEND: {backend!r} (expected none or redis)")

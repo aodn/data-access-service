@@ -24,7 +24,7 @@ from data_access_service.tiler.services.colormap.registry import load_colormaps
 from data_access_service.tiler.services.product.catalog import build_catalog
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.product.registry import load_products
-from data_access_service.tiler.services.rendering.kernels import warmup_resample
+from data_access_service.tiler.services.rendering.kernels import warmup_kernels
 from data_access_service.tiler.services.rendering.visual_tiles import warmup_visual
 from data_access_service.tiler.services.store.registry import (
     prewarm_stores,
@@ -64,7 +64,7 @@ async def run_tiler_warmup() -> None:
             refresh_catalog, limiter=TILE_THREAD_LIMITER
         )
         load_colormaps()
-        await anyio.to_thread.run_sync(warmup_resample, limiter=TILE_THREAD_LIMITER)
+        await anyio.to_thread.run_sync(warmup_kernels, limiter=TILE_THREAD_LIMITER)
         await anyio.to_thread.run_sync(warmup_visual, limiter=TILE_THREAD_LIMITER)
 
         failed = sum(1 for outcome in outcomes.values() if outcome is not None)

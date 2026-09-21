@@ -78,7 +78,6 @@ async def get_tile(
                 z,
                 x,
                 y,
-                date,
             ),
         )
     except ClientDisconnected as e:
@@ -112,7 +111,7 @@ async def get_manifest(
     get_lod_grids(product)
     variables = product.variables
     try:
-        ds = await run_cancellable(
+        sparse = await run_cancellable(
             request,
             functools.partial(
                 load_slice_or_404,
@@ -125,4 +124,4 @@ async def get_manifest(
     except ClientDisconnected as e:
         raise HTTPException(status_code=499, detail="Client disconnected") from e
     response.headers.update(IMMUTABLE_CACHE_HEADERS)
-    return DataTileManifestResponse(**render_manifest(product, ds))
+    return DataTileManifestResponse(**render_manifest(product, sparse))

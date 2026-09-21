@@ -17,6 +17,7 @@ from data_access_service.config.tiler.constants import LOD, TILE
 from data_access_service.core.tiler_routes import data_tiles, products, visual_tiles
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.utils.dates import str_to_utc_timestamp
+from tests.tiler.sparse_helpers import sparse_of
 
 # --- Tiler-exclusive thread pool --------------------------------------------
 #
@@ -25,7 +26,6 @@ from data_access_service.tiler.utils.dates import str_to_utc_timestamp
 # a plain sync `def`, which FastAPI would instead auto-dispatch onto anyio's
 # process-wide default thread limiter. That would silently let tiler traffic
 # draw on (and be throttled by) the same budget as the main, non-tiler API.
-# See tiler/technical.md §12.
 
 
 def test_every_tiler_endpoint_is_async():
@@ -121,7 +121,7 @@ def test_date_from_manifest_is_accepted_by_tile_endpoint(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.data_tiles.render_tile",
@@ -158,7 +158,7 @@ def test_data_and_visual_tiles_route_to_different_renderers(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.data_tiles.render_tile",

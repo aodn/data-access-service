@@ -30,6 +30,9 @@ class TilerApiConfig:
     store_refresh_interval_hours: int
     thread_pool_size: int
     animation_workers: int
+    # RSS above which a tile trims glibc's arenas before it starts; set it
+    # out of reach to turn trimming off.
+    trim_threshold_mb: int
     cache: TilerCacheConfig
     duckdb: TilerDuckDBConfig
 

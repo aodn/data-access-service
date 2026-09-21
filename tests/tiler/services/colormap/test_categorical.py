@@ -21,6 +21,7 @@ from data_access_service.tiler.services.rendering.visual_tiles import (
     render_tile,
 )
 from data_access_service.tiler.utils.colors import categorical_lut
+from tests.tiler.sparse_helpers import sparse_of
 
 _MCS_COLORS = DEFAULT_CATEGORICAL_PALETTE
 
@@ -139,7 +140,7 @@ def test_categorical_tile_uses_only_palette_colors():
     A bilinear path would blend adjacent category codes and emit colours that are
     not in the palette; this asserts every opaque pixel is an exact palette colour.
     """
-    ds = _make_categorical_ds()
+    ds = sparse_of(_make_categorical_ds())
     png = render_tile(
         ds, "MCS_category", 0, 0, 0, fmt="png"
     )  # no colormap → default palette
@@ -149,7 +150,7 @@ def test_categorical_tile_uses_only_palette_colors():
 
 
 def test_categorical_tile_rejects_webp():
-    ds = _make_categorical_ds()
+    ds = sparse_of(_make_categorical_ds())
     try:
         render_tile(ds, "MCS_category", 0, 0, 0, fmt="webp")
         raise AssertionError("expected ValueError for categorical WebP")
@@ -158,7 +159,7 @@ def test_categorical_tile_rejects_webp():
 
 
 def test_categorical_tile_rejects_continuous_colormap():
-    ds = _make_categorical_ds()
+    ds = sparse_of(_make_categorical_ds())
     try:
         render_tile(ds, "MCS_category", 0, 0, 0, colormap_name="plasma", fmt="png")
         raise AssertionError(
@@ -172,7 +173,7 @@ def test_categorical_tile_rejects_rescale():
     """rescale is a continuous-scale concept; the discrete path ignores it, so a
     client that sets it has a misconception — surface it rather than silently drop it.
     """
-    ds = _make_categorical_ds()
+    ds = sparse_of(_make_categorical_ds())
     try:
         render_tile(ds, "MCS_category", 0, 0, 0, rescale=(0.0, 4.0), fmt="png")
         raise AssertionError("expected ValueError for rescale on categorical tile")
@@ -181,7 +182,7 @@ def test_categorical_tile_rejects_rescale():
 
 
 def test_categorical_bbox_rejects_rescale():
-    ds = _make_categorical_ds()
+    ds = sparse_of(_make_categorical_ds())
     try:
         render_bbox(
             ds,

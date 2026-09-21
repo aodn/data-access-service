@@ -3,9 +3,8 @@
 The value data is sparse ``(i, j, value)`` rows, carrying pixel indices, not
 lat/lon degrees or CF metadata. Each store gets one parquet file per variable
 per timestamp, so a batch run only ever adds files for new timestamps and
-never rewrites old ones. Everything a reader needs to turn that back into the
-dense ``xr.Dataset`` the tiler rendering pipeline expects - the lat/lon
-coordinate arrays, native grid shape, per-variable dtype/CF attrs
+never rewrites old ones. Everything else the tiler needs to render them - the
+lat/lon coordinate arrays, native grid shape, per-variable dtype/CF attrs
 (``flag_values``/``flag_meanings``/``units``, read by the categorical and
 point-query code paths), and the list of converted timestamps - lives in one
 JSON sidecar per store (``metadata.json``), shared by every variable of that

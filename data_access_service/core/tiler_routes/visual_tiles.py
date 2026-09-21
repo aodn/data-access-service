@@ -2,6 +2,7 @@ import asyncio
 import functools
 
 import anyio
+import pandas as pd
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from fastapi.openapi.models import Example
 from fastapi.responses import Response
@@ -15,7 +16,10 @@ from data_access_service.tiler.schemas.visual_tiles import ColormapListResponse
 from data_access_service.tiler.services.caching.deduper import Deduper
 from data_access_service.tiler.services.colormap.legend import render_legend
 from data_access_service.tiler.services.colormap.registry import list_colormaps
+from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.rendering.visual_tiles import (
+    BboxFrame,
+    cut_frame,
     render_bbox,
     render_bbox_animation,
     render_tile,
@@ -200,11 +204,11 @@ async def get_tile(
     )
 
     def _do_render() -> bytes:
-        ds = load_slice_or_404(
+        sparse = load_slice_or_404(
             product.store, ts, [variable], ocean_masked=product.ocean_masked
         )
         return render_tile(
-            ds,
+            sparse,
             variable,
             x,
             y,
@@ -213,8 +217,6 @@ async def get_tile(
             rescale_range,
             fmt=ext,
             coastal_fill=product.visual_tile.coastal_fill,
-            store=product.store,
-            date=date,
         )
 
     try:
@@ -432,11 +434,11 @@ async def get_bbox(
     )
 
     def _do_render() -> bytes:
-        ds = load_slice_or_404(
+        sparse = load_slice_or_404(
             product.store, ts, [variable], ocean_masked=product.ocean_masked
         )
         return render_bbox(
-            ds,
+            sparse,
             variable,
             bbox_tuple,
             width,
@@ -447,8 +449,6 @@ async def get_bbox(
             dst_crs=dst_crs,
             fmt=ext,
             coastal_fill=product.visual_tile.coastal_fill,
-            store=product.store,
-            date=date,
         )
 
     try:
@@ -462,6 +462,29 @@ async def get_bbox(
 
     return Response(
         content=body, media_type=media_type(ext), headers=IMMUTABLE_CACHE_HEADERS
+    )
+
+
+def _load_frame(
+    product: Product,
+    ts: pd.Timestamp,
+    variable: str,
+    bbox: tuple[float, float, float, float],
+    crs: str,
+    width: int,
+    height: int,
+) -> BboxFrame:
+    """Read one frame and keep only its bbox, so the whole slice is freed
+    before the next one is read."""
+    sparse = load_slice_uncached(product.store, ts, [variable], product.ocean_masked)
+    return cut_frame(
+        sparse,
+        variable,
+        bbox,
+        crs,
+        product.visual_tile.coastal_fill,
+        width,
+        height,
     )
 
 
@@ -616,7 +639,6 @@ async def get_animation(
                 "Narrow the range and retry."
             ),
         )
-    dates = [d for d, _ts in frames]
 
     resolved_w, resolved_h = await anyio.to_thread.run_sync(
         _resolve_resolution,
@@ -629,14 +651,17 @@ async def get_animation(
     )
 
     # Load frames in parallel; gather keeps them in date order.
-    datasets = await asyncio.gather(
+    cut_frames = await asyncio.gather(
         *(
             anyio.to_thread.run_sync(
-                load_slice_uncached,
-                product.store,
+                _load_frame,
+                product,
                 ts,
-                [variable],
-                product.ocean_masked,
+                variable,
+                bbox_tuple,
+                bounds_crs,
+                resolved_w,
+                resolved_h,
                 limiter=_ANIMATION_LIMITER,
             )
             for _d, ts in frames
@@ -647,7 +672,7 @@ async def get_animation(
         body = await anyio.to_thread.run_sync(
             functools.partial(
                 render_bbox_animation,
-                datasets,
+                cut_frames,
                 variable,
                 bbox_tuple,
                 resolved_w,
@@ -658,9 +683,6 @@ async def get_animation(
                 dst_crs=dst_crs,
                 fmt=ext,
                 duration_ms=duration,
-                coastal_fill=product.visual_tile.coastal_fill,
-                store=product.store,
-                dates=dates,
             ),
             limiter=TILE_THREAD_LIMITER,
         )

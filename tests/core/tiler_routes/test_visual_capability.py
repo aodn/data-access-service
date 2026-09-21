@@ -80,6 +80,8 @@ def test_point_endpoint_stays_open_to_data_capable_products(client, monkeypatch)
     import numpy as np
     import xarray as xr
 
+    from .test_data_tiles import _make_sparse
+
     ds = xr.Dataset(
         {
             "WDIR": xr.DataArray(
@@ -91,7 +93,7 @@ def test_point_endpoint_stays_open_to_data_capable_products(client, monkeypatch)
     )
     monkeypatch.setattr(
         "data_access_service.core.tiler_routes.shared.load_slice",
-        lambda *args, **kwargs: ds,
+        lambda *args, **kwargs: _make_sparse(ds),
     )
 
     response = client.get(

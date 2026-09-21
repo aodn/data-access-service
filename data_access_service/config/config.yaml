@@ -51,11 +51,6 @@ sites:
     threads: 4
     region: "ap-southeast-2"
     reload_interval_hours: 2
-memory_watchdog:
-  config:
-    enabled: true
-    interval_seconds: 30
-    threshold_mb: 2800
 subsetting:
   config:
     # 8GB Fargate task: leave ~2GB so peak stays around 6GB (zlib/dask copies
@@ -164,8 +159,11 @@ tiler:
     api:
       # Hours between re-reads of every store's metadata.json.
       store_refresh_interval_hours: 4
-      thread_pool_size: 20
+      thread_pool_size: 10
       animation_workers: 2
+      # RSS above which a tile hands glibc's freed arenas back to the OS
+      # before it starts. Out of reach turns trimming off.
+      trim_threshold_mb: 2800
       # L1 slice cache. "none" disables it; "redis" shares it across
       # instances - see memoizer.create_memoizer.
       cache:

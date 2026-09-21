@@ -55,7 +55,7 @@ def warmup_env(monkeypatch):
         lambda: (calls.append("load_catalog"), state["candidates"])[1],
     )
     monkeypatch.setattr(startup, "load_colormaps", record("colormaps"))
-    monkeypatch.setattr(startup, "warmup_resample", record("resample"))
+    monkeypatch.setattr(startup, "warmup_kernels", record("kernels"))
     monkeypatch.setattr(startup, "warmup_visual", record("visual"))
     monkeypatch.setattr(startup, "prewarm_stores", fake_prewarm)
     monkeypatch.setattr(startup, "load_products", fake_publish)

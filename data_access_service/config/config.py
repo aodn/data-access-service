@@ -17,7 +17,6 @@ from data_access_service.models.estimation_types import (
     EstimationIndexConfig,
     EstimationReadDuckDBConfig,
 )
-from data_access_service.models.memory_watchdog_types import MemoryWatchdogConfig
 from data_access_service.models.pmtiles_types import (
     HexLayerSpec,
     PmtilesGenerationConfig,
@@ -411,14 +410,6 @@ class Config:
         sconfig = self.config.get("sites", {}).get("config", {})
         return sconfig["reload_interval_hours"]
 
-    def get_memory_watchdog_config(self) -> MemoryWatchdogConfig:
-        mconfig = self.config.get("memory_watchdog", {}).get("config", {})
-        return MemoryWatchdogConfig(
-            enabled=mconfig["enabled"],
-            interval_seconds=mconfig["interval_seconds"],
-            threshold_mb=mconfig["threshold_mb"],
-        )
-
     def get_zarr_chunking_config(self) -> ZarrChunkingConfig:
         sconfig = self.config.get("subsetting", {}).get("config", {})
         return ZarrChunkingConfig(
@@ -444,6 +435,7 @@ class Config:
             store_refresh_interval_hours=int(api["store_refresh_interval_hours"]),
             thread_pool_size=int(api["thread_pool_size"]),
             animation_workers=int(api["animation_workers"]),
+            trim_threshold_mb=int(api["trim_threshold_mb"]),
             cache=TilerCacheConfig(
                 backend=cache["backend"],
                 ttl_seconds=int(cache["ttl_seconds"]),

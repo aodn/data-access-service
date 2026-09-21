@@ -18,7 +18,6 @@ from data_access_service.core.estimation_index import (
 from data_access_service.core.estimation_index import (
     init_client as init_estimation_client,
 )
-from data_access_service.core.memory_watchdog import run_memory_watchdog
 from data_access_service.core.middleware import configure_gzip_middleware
 from data_access_service.core.routes import router as api_router
 from data_access_service.core.scheduler import TaskScheduler
@@ -102,13 +101,9 @@ async def lifespan(application: FastAPI):
             tiler_warmup_task = asyncio.create_task(
                 run_tiler_warmup(), name="tiler_warmup"
             )
-            memory_watchdog_task = asyncio.create_task(
-                run_memory_watchdog(), name="memory_watchdog"
-            )
             background_tasks = (
                 scheduler_startup_task,
                 tiler_warmup_task,
-                memory_watchdog_task,
             )
 
             yield

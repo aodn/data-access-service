@@ -7,6 +7,7 @@ import pytest
 import xarray as xr
 
 from data_access_service.tiler.utils.colors import categorical_lut
+from tests.tiler.sparse_helpers import sparse_of
 
 _PNG = b"\x89PNG\r\n\x1a\n"
 
@@ -102,7 +103,7 @@ def test_tile_missing_date(client):
 def test_tile_bad_rescale(client):
     with patch(
         "data_access_service.core.tiler_routes.shared.load_slice",
-        return_value=_make_ds(),
+        return_value=sparse_of(_make_ds()),
     ):
         response = client.get(
             "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/5/0/0.png?date=2024-01-01T00:00:00Z&rescale=bad"
@@ -113,7 +114,7 @@ def test_tile_bad_rescale(client):
 def test_tile_unknown_colormap(client):
     with patch(
         "data_access_service.core.tiler_routes.shared.load_slice",
-        return_value=_make_ds(),
+        return_value=sparse_of(_make_ds()),
     ):
         response = client.get(
             "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/5/0/0.png?date=2024-01-01T00:00:00Z&colormap=not_a_real_colormap"
@@ -125,7 +126,7 @@ def test_tile_ok(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.render_tile",
@@ -146,7 +147,7 @@ def test_tile_cancelled_client_disconnect_short_circuits_to_499(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.render_tile"
@@ -167,7 +168,7 @@ def test_tile_ok_with_rescale(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.render_tile",
@@ -185,7 +186,7 @@ def test_tile_ok_with_custom_colormap(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.render_tile",
@@ -209,7 +210,7 @@ def test_tile_webp_ok(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.render_tile",
@@ -235,7 +236,7 @@ def test_tile_webp_rejected_for_categorical_colormap(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch(
             "data_access_service.tiler.services.colormap.registry._custom_colormaps",
@@ -257,7 +258,7 @@ def test_bbox_png_ok(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.render_bbox",
@@ -280,7 +281,7 @@ def test_bbox_cancelled_client_disconnect_short_circuits_to_499(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.render_bbox"
@@ -305,7 +306,7 @@ def test_bbox_webp_ok(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.render_bbox",
@@ -390,7 +391,7 @@ def test_bbox_degree_scale_bbox_with_explicit_crs_ok(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.render_bbox",
@@ -447,7 +448,7 @@ def test_categorical_tile_ok(client, mcs_product):
     # render_tile is NOT mocked here — exercise the real discrete-lookup path.
     with patch(
         "data_access_service.core.tiler_routes.shared.load_slice",
-        return_value=_make_categorical_ds(),
+        return_value=sparse_of(_make_categorical_ds()),
     ):
         response = client.get(
             "/api/v1/das/tiler/visual_tiles/mcs/0/0/0.png?date=2024-01-01T00:00:00Z"
@@ -459,7 +460,7 @@ def test_categorical_tile_ok(client, mcs_product):
 def test_categorical_tile_rejects_webp(client, mcs_product):
     with patch(
         "data_access_service.core.tiler_routes.shared.load_slice",
-        return_value=_make_categorical_ds(),
+        return_value=sparse_of(_make_categorical_ds()),
     ):
         response = client.get(
             "/api/v1/das/tiler/visual_tiles/mcs/0/0/0.webp?date=2024-01-01T00:00:00Z"
@@ -471,7 +472,7 @@ def test_categorical_tile_rejects_webp(client, mcs_product):
 def test_categorical_tile_rejects_continuous_colormap(client, mcs_product):
     with patch(
         "data_access_service.core.tiler_routes.shared.load_slice",
-        return_value=_make_categorical_ds(),
+        return_value=sparse_of(_make_categorical_ds()),
     ):
         response = client.get(
             "/api/v1/das/tiler/visual_tiles/mcs/0/0/0.png?date=2024-01-01T00:00:00Z&colormap=plasma"
@@ -488,7 +489,7 @@ def test_categorical_tile_matching_colormap_ok(client, mcs_product):
         _registered_categorical("mcs_match", [0, 1, 2, 3, 4]),
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_categorical_ds(),
+            return_value=sparse_of(_make_categorical_ds()),
         ),
     ):
         response = client.get(
@@ -503,7 +504,7 @@ def test_categorical_tile_mismatched_colormap_rejected(client, mcs_product):
         _registered_categorical("mcs_tile_bad", [1, 2, 3]),
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_categorical_ds(),
+            return_value=sparse_of(_make_categorical_ds()),
         ),
     ):
         response = client.get(
@@ -518,7 +519,7 @@ def test_categorical_tile_rejects_rescale(client, mcs_product):
     # error, so reject with 400 rather than silently ignoring it.
     with patch(
         "data_access_service.core.tiler_routes.shared.load_slice",
-        return_value=_make_categorical_ds(),
+        return_value=sparse_of(_make_categorical_ds()),
     ):
         response = client.get(
             "/api/v1/das/tiler/visual_tiles/mcs/0/0/0.png?date=2024-01-01T00:00:00Z&rescale=0,4"
@@ -531,7 +532,7 @@ def test_categorical_bbox_rejects_rescale(client, mcs_product):
     with (
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_categorical_ds(),
+            return_value=sparse_of(_make_categorical_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.default_bbox_from_store",
@@ -563,7 +564,7 @@ def test_categorical_colormap_on_continuous_variable_rejected(client):
         _registered_categorical("cont_bad", [1, 2, 3, 4]),
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
     ):
         response = client.get(
@@ -578,7 +579,7 @@ def test_categorical_bbox_mismatched_colormap_rejected(client, mcs_product):
         _registered_categorical("mcs_bbox_bad", [1, 2, 3]),
         patch(
             "data_access_service.core.tiler_routes.shared.load_slice",
-            return_value=_make_categorical_ds(),
+            return_value=sparse_of(_make_categorical_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.default_bbox_from_store",
@@ -604,7 +605,7 @@ def test_categorical_animation_mismatched_colormap_rejected(client, mcs_product)
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
-            return_value=_make_categorical_ds(),
+            return_value=sparse_of(_make_categorical_ds()),
         ),
     ):
         response = client.get(
@@ -623,7 +624,7 @@ def test_animation_ok_with_default_bbox(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.render_bbox_animation",
@@ -748,7 +749,7 @@ def test_animation_explicit_bbox_passed_through(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.render_bbox_animation",
@@ -795,7 +796,7 @@ def test_animation_native_resolution_used_when_both_dims_omitted(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.native_resolution_in_bbox",
@@ -821,7 +822,7 @@ def test_animation_height_derived_from_bbox_aspect_when_only_width_given(client)
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch_render,
     ):
@@ -843,7 +844,7 @@ def test_animation_width_derived_from_bbox_aspect_when_only_height_given(client)
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch_render,
     ):
@@ -867,7 +868,7 @@ def test_animation_derived_dimension_clamped_to_max(client):
         ),
         patch(
             "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
-            return_value=_make_ds(),
+            return_value=sparse_of(_make_ds()),
         ),
         patch_render,
     ):

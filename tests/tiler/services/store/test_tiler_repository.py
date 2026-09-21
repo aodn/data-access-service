@@ -17,6 +17,7 @@ from data_access_service.models.tiler_parquet_types import variable_parquet_path
 from data_access_service.tiler.services.store.tiler_repository import (
     TilerParquetRepository,
 )
+from tests.tiler.sparse_helpers import dense_of
 
 TS = "2024-01-15T13:00:00.000000000Z"
 
@@ -52,7 +53,9 @@ def test_fetch_variable_slice_fills_only_the_rows_present(output_dir, session):
     _write_variable_parquet(output_dir, "x", "v", TS, [(0, 0, 1.5)])
     repo = TilerParquetRepository(session)
 
-    arr = repo.fetch_variable_slice("x", "v", TS, n_i=2, n_j=2, dtype="float32")
+    arr = dense_of(
+        repo.fetch_variable_slice("x", "v", TS, n_i=2, n_j=2, dtype="float32")
+    )
 
     assert arr.shape == (2, 2)
     assert arr.dtype == np.dtype("float32")
@@ -66,7 +69,9 @@ def test_fetch_variable_slice_reads_the_file_for_that_timestamp(output_dir, sess
     _write_variable_parquet(output_dir, "x", "v", other, [(0, 0, 2.0)])
     repo = TilerParquetRepository(session)
 
-    arr = repo.fetch_variable_slice("x", "v", other, n_i=1, n_j=1, dtype="float32")
+    arr = dense_of(
+        repo.fetch_variable_slice("x", "v", other, n_i=1, n_j=1, dtype="float32")
+    )
 
     assert arr[0, 0] == 2.0
 
@@ -75,7 +80,9 @@ def test_fetch_variable_slice_resolves_relative_to_output_dir(output_dir, sessio
     _write_variable_parquet(output_dir, "foo", "v", TS, [(0, 0, 9.0)])
     repo = TilerParquetRepository(session)
 
-    arr = repo.fetch_variable_slice("foo", "v", TS, n_i=1, n_j=1, dtype="float32")
+    arr = dense_of(
+        repo.fetch_variable_slice("foo", "v", TS, n_i=1, n_j=1, dtype="float32")
+    )
 
     assert arr[0, 0] == 9.0
 
@@ -86,9 +93,34 @@ def test_fetch_variable_slice_of_an_empty_file_is_all_nan(output_dir, session):
     _write_variable_parquet(output_dir, "x", "v", TS, [])
     repo = TilerParquetRepository(session)
 
-    arr = repo.fetch_variable_slice("x", "v", TS, n_i=1, n_j=2, dtype="float32")
+    arr = dense_of(
+        repo.fetch_variable_slice("x", "v", TS, n_i=1, n_j=2, dtype="float32")
+    )
 
     assert np.isnan(arr).all()
+
+
+def test_fetch_variable_slice_uses_int16_indexes_when_they_fit(output_dir, session):
+    _write_variable_parquet(output_dir, "x", "v", TS, [(1, 2, 3.0), (0, 1, 4.0)])
+    repo = TilerParquetRepository(session)
+
+    grid = repo.fetch_variable_slice("x", "v", TS, n_i=2, n_j=3, dtype="float32")
+
+    assert grid.j.dtype == np.int16
+    assert grid.value.dtype == np.float32
+    # Rows written out of order still land in the right cells.
+    assert dense_of(grid)[1, 2] == 3.0
+    assert dense_of(grid)[0, 1] == 4.0
+
+
+def test_fetch_variable_slice_keeps_int32_indexes_for_a_wide_grid(output_dir, session):
+    _write_variable_parquet(output_dir, "x", "v", TS, [(0, 40000, 1.0)])
+    repo = TilerParquetRepository(session)
+
+    grid = repo.fetch_variable_slice("x", "v", TS, n_i=1, n_j=40001, dtype="float32")
+
+    assert grid.j.dtype == np.int32
+    assert dense_of(grid)[0, 40000] == 1.0
 
 
 def test_fetch_variable_slice_raises_when_the_file_is_missing(output_dir, session):

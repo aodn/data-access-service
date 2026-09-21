@@ -2,14 +2,13 @@
 
 - ``inpaint_nearest``: fill gaps near the coast from the nearest value.
 - ``land_mask_for_*``: a land mask, to cut filled values off land.
-- ``apply_ocean_mask``: null values outside the sea-level model's valid ocean,
-  on the raw slice. Only for products on that model's grid.
+- ``ocean_valid_for_coords``: the sea-level model's valid ocean, used to
+  null the raw slice. Only for products on that model's grid.
 """
 
 from pathlib import Path
 
 import numpy as np
-import xarray as xr
 from scipy.ndimage import distance_transform_edt
 
 from data_access_service.config.tiler.paths import LAND_MASK_PATH, OCEAN_MASK_PATH
@@ -69,10 +68,13 @@ def land_mask_for_grid(
     lat_max: float,
     total_w: int,
     total_h: int,
+    rows: slice = slice(None),
+    cols: slice = slice(None),
 ) -> np.ndarray:
-    """A land mask on the (total_h, total_w) render grid."""
-    lons = np.linspace(lon_min, lon_max, total_w)
-    lats = np.linspace(lat_max, lat_min, total_h)  # north to south
+    """A land mask on the (total_h, total_w) render grid, or just ``rows``,
+    ``cols`` of it."""
+    lons = np.linspace(lon_min, lon_max, total_w)[cols]
+    lats = np.linspace(lat_max, lat_min, total_h)[rows]  # north to south
     return land_mask_for_coords(lons, lats)
 
 
@@ -118,18 +120,6 @@ def ocean_valid_for_coords(lons: np.ndarray, lats: np.ndarray) -> np.ndarray:
     valid = mask[np.ix_(rows, cols)]
     valid &= in_bounds_r[:, None] & in_bounds_c[None, :]
     return valid
-
-
-def apply_ocean_mask(ds: xr.Dataset, variables: list[str]) -> xr.Dataset:
-    """``ds`` with ``variables`` set to NaN outside the valid ocean."""
-    valid = ocean_valid_for_coords(ds.lon.values, ds.lat.values)  # (lat, lon)
-    valid_da = xr.DataArray(
-        valid, dims=("lat", "lon"), coords={"lat": ds.lat, "lon": ds.lon}
-    )
-    out = ds.copy()
-    for v in variables:
-        out[v] = ds[v].where(valid_da)
-    return out
 
 
 def inpaint_nearest(arr: np.ndarray, max_dist_px: int) -> np.ndarray:
