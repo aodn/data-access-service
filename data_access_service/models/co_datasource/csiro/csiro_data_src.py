@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 import requests
 from aodn_cloud_optimised.lib.DataQuery import Metadata, DataSource, GetAodn
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from data_access_service.config.config import Config
 from data_access_service.models.co_datasource.abstract_data_src import (
@@ -71,6 +72,34 @@ def get_csiro_fedora_pid(dataset_name: str) -> Optional[str]:
     return None
 
 
+# CSIRO answers a failed call with a catch-all 417 and no explanation, so retry
+# every failure rather than guess.
+_CSIRO_RETRY_ATTEMPTS = 3
+_CSIRO_RETRY_MIN_WAIT_SECONDS = 2
+_CSIRO_RETRY_MAX_WAIT_SECONDS = 10
+
+_CSIRO_ERROR_BODY_CHARS = 500
+
+
+def _log_csiro_retry(retry_state) -> None:
+    log.warning(
+        "CSIRO call failed on attempt #%d (%s); retrying in %.0fs...",
+        retry_state.attempt_number,
+        retry_state.outcome.exception(),
+        retry_state.next_action.sleep,
+    )
+
+
+@retry(
+    stop=stop_after_attempt(_CSIRO_RETRY_ATTEMPTS),
+    wait=wait_exponential(
+        multiplier=1,
+        min=_CSIRO_RETRY_MIN_WAIT_SECONDS,
+        max=_CSIRO_RETRY_MAX_WAIT_SECONDS,
+    ),
+    before_sleep=_log_csiro_retry,
+    reraise=True,
+)
 def _call_csiro_api(
     url: str, dataset_name: str, asking_for: str, timeout_seconds: int
 ) -> dict:
@@ -85,7 +114,8 @@ def _call_csiro_api(
     if response.status_code != 200:
         raise Exception(
             f"Failed to get {asking_for} from CSIRO for dataset '{dataset_name}', "
-            f"status code: {response.status_code}"
+            f"status code: {response.status_code}, "
+            f"body: {response.text[:_CSIRO_ERROR_BODY_CHARS]}"
         )
     return response.json()
 
