@@ -157,33 +157,27 @@ tiler:
   config:
     # The live tiler API.
     api:
-      # Hours between re-reads of every store's metadata.json.
       store_refresh_interval_hours: 4
       thread_pool_size: 10
       animation_workers: 2
-      # RSS above which a tile hands glibc's freed arenas back to the OS
-      # before it starts. Out of reach turns trimming off.
       trim_threshold_mb: 2800
       # L1 slice cache. "none" disables it; "redis" shares it across
       # instances - see memoizer.create_memoizer.
       cache:
         backend: "redis"
-        ttl_seconds: 600
+        ttl_seconds: 3600
         host: "localhost"
         port: 6379
-      # TilerDuckDBClient: one small parquet read per slice.
       duckdb:
         memory_limit: "256MB"
         threads: 4
     # The batch zarr -> parquet job (batch.tiler.generator).
     batch:
       max_chunks_per_run: null
-      # One forked worker per store, so its memory goes back to the OS before
-      # the next. Turned off for local macOS runs (see config-dev.yaml).
       use_fork_process: True
-      # TilerBatchDuckDBClient, one per store.
       duckdb:
         temp_dir_prefix: "tiler_batch_duckdb_tmp"
+        # TODO: investigate if 3G enough, as a large ZARR store can be larger than 3G.
         memory_limit: "3G"
         threads: 3
   # Which zarr stores/variables batch turns into products

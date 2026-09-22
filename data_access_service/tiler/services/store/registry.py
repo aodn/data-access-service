@@ -32,7 +32,7 @@ def _build_time_index(meta: TilerParquetMetadata) -> dict[pd.Timestamp, str]:
     """``{naive-UTC timestamp: raw timestamp string}``."""
     return {pd.Timestamp(raw.rstrip("Z")): raw for raw in meta.timestamps}
 
-
+# TODO: simplify it.
 class StoreRegistry:
     """Store metadata, loaded on first use; ``refresh`` re-reads it."""
 

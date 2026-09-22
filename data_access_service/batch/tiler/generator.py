@@ -95,11 +95,12 @@ def generate_tiler_parquet_for_all_products(api: API, uuid: str | None = None) -
             len(empty),
             sorted(empty),
         )
-    published = [
-        p for p in products.values() if p.store in succeeded and p.store not in empty
-    ]
-    unpublished = [p.id for p in products.values() if p.store in empty]
-    write_root_metadata(published, batch_config.tiler_root_dir, remove=unpublished)
+    # Empty stores stay keyed with no products, so their entry is dropped.
+    by_store: dict[str, list[ProductIdentity]] = {store: [] for store in succeeded}
+    for product in products.values():
+        if product.store in succeeded and product.store not in empty:
+            by_store[product.store].append(product)
+    write_root_metadata(by_store, batch_config.tiler_root_dir)
 
 
 def _has_timestamps(tiler_root_dir: str, store: str) -> bool:
@@ -108,26 +109,35 @@ def _has_timestamps(tiler_root_dir: str, store: str) -> bool:
 
 
 def write_root_metadata(
-    products: list[ProductIdentity], tiler_root_dir: str, remove: list[str] = ()
+    stores: dict[str, list[ProductIdentity]], tiler_root_dir: str
 ) -> str:
-    """Upsert ``products`` into ``root_metadata.json`` and drop the ids in
-    ``remove``. Products not in this run (other uuids, failed stores) keep
-    their entries. Skips the write when nothing changed.
+    """Upsert each store of ``stores`` into ``root_metadata.json``, replacing
+    that store's products outright. A store mapped to no products is dropped
+    from the file; stores not in this run (other uuids, failed ones) keep their
+    entries. Skips the write when nothing changed.
     """
     path = root_metadata_path(tiler_root_dir)
 
     existing: RootMetadata | None = None
-    existing_by_id: dict[str, dict] = {}
     existing_data = storage.read_json(path)
     if existing_data is not None:
-        existing = RootMetadata.from_dict(existing_data)
-        existing_by_id = {p["id"]: p for p in existing.products}
+        candidate = RootMetadata.from_dict(existing_data)
+        if candidate.version == ROOT_METADATA_VERSION:
+            existing = candidate
+        else:
+            logger.warning(
+                "Root metadata is version %s, not %s; rewriting it from scratch: %s",
+                candidate.version,
+                ROOT_METADATA_VERSION,
+                path,
+            )
 
-    merged = dict(existing_by_id)
-    for product in products:
-        merged[product.id] = product.to_dict()
-    for pid in remove:
-        merged.pop(pid, None)
+    merged = dict(existing.stores) if existing is not None else {}
+    for store, products in stores.items():
+        if products:
+            merged[store] = sorted(products, key=lambda p: p.id)
+        else:
+            merged.pop(store, None)
     if not merged:
         # The tiler refuses an empty catalogue.
         logger.warning("No products to publish; not writing %s", path)
@@ -136,22 +146,20 @@ def write_root_metadata(
     meta = RootMetadata(
         version=ROOT_METADATA_VERSION,
         generated_at=datetime.now(timezone.utc).isoformat(),
-        products=[merged[pid] for pid in sorted(merged)],
+        stores={store: merged[store] for store in sorted(merged)},
     )
-    if (
-        existing is not None
-        and existing.version == meta.version
-        and existing.products == meta.products
-    ):
+    if existing is not None and existing.stores == meta.stores:
         logger.info("Root metadata unchanged: %s", path)
         return path
 
     storage.write_json(path, meta.to_dict())
     logger.info(
-        "Wrote root metadata: %s (%d product(s) total, %d updated this run)",
+        "Wrote root metadata: %s (%d store(s), %d product(s) total, "
+        "%d store(s) updated this run)",
         path,
+        len(meta.stores),
         len(meta.products),
-        len(products),
+        len(stores),
     )
     return path
 

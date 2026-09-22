@@ -16,7 +16,7 @@ import pytest
 import xarray as xr
 
 from data_access_service.batch.tiler import parquet_generator as gen
-from data_access_service.batch.tiler.zarr_registry import store_registry
+from data_access_service.batch.tiler.zarr_registry import close_all_stores
 
 
 class _FakeZarrSource:
@@ -41,9 +41,9 @@ def _patch_source(monkeypatch, ds: xr.Dataset):
 
 @pytest.fixture(autouse=True)
 def isolate_caches():
-    store_registry.clear()
+    close_all_stores()
     yield
-    store_registry.clear()
+    close_all_stores()
 
 
 def _fake_dataset(times: list[str]) -> xr.Dataset:
@@ -176,7 +176,7 @@ class _Env:
 
 
 def _sync(monkeypatch, ds, variables=("v",), **kwargs):
-    store_registry.clear()
+    close_all_stores()
     _patch_source(monkeypatch, ds)
     return gen.sync_store(
         "foo",

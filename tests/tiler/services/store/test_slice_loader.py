@@ -77,7 +77,6 @@ def _seed_metadata(
             k: TilerVariableMetadata(dtype=v["dtype"], attrs=v["attrs"])
             for k, v in variables.items()
         },
-        schema_fingerprint="",
         generated_at="",
     )
     store_registry._publish(STORE, meta)

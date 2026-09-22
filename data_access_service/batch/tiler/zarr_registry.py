@@ -1,10 +1,10 @@
 """Open zarr stores for the batch job, one at a time, and check each is a
-time/lat/lon grid."""
+time/lat/lon grid.
+"""
 
 from __future__ import annotations
 
 import logging
-import threading
 import time
 from typing import TYPE_CHECKING
 
@@ -20,8 +20,6 @@ logger = logging.getLogger(__name__)
 
 _OPEN_MAX_ATTEMPTS = 3
 _OPEN_BACKOFF_SECONDS = 1.0
-
-# TODO: Simplify the StoreRegistry, what we need for this is to have all the zarrs, and open each one when needed, also validate each store.
 
 
 class NotGriddedStoreError(ValueError):
@@ -59,85 +57,56 @@ def _resolve_zarr_source(store: str) -> ZarrDataSource:
     return source
 
 
-def _open_store(store: str) -> ZarrDataSource:
+def _open_normalised(store: str) -> ZarrDataSource:
     """Open ``store`` with normalised coords."""
     source = _resolve_zarr_source(store)
     source.zarr_store = _normalise_coords(source.zarr_store, store)
     return source
 
 
-class StoreRegistry:
-    """Open zarr handles, by store."""
+# The one store this process currently has open, if any.
+_open: tuple[str, ZarrDataSource] | None = None
 
-    def __init__(self) -> None:
-        self._stores: dict[str, ZarrDataSource] = {}
-        self._lock = threading.Lock()
 
-    # TODO: DO we really need _ensure_open? can we juse use open_store?
-    def _ensure_open(self, store: str) -> ZarrDataSource:
-        """The handle for ``store``, opened on first use."""
-        with self._lock:
-            source = self._stores.get(store)
-        if source is not None:
-            return source
-
-        source = _open_store(store)
+def get_datasource(store: str) -> ZarrDataSource:
+    """The store's ``ZarrDataSource``, opened on first use."""
+    global _open
+    if _open is None or _open[0] != store:
+        source = _open_normalised(store)
         logger.info(
             "Store opened: %s (timestamp_count=%d)",
             store,
             source.zarr_store.sizes["time"],
         )
-        self._publish(store, source)
-        return source
-
-    def get(self, store: str) -> xr.Dataset:
-        """The store's dataset (time/lat/lon)."""
-        return self._ensure_open(store).zarr_store
-
-    def get_datasource(self, store: str) -> ZarrDataSource:
-        """The store's ``ZarrDataSource``."""
-        return self._ensure_open(store)
-
-    def close(self, store: str) -> None:
-        """Drop ``store``'s handle."""
-        with self._lock:
-            self._stores.pop(store, None)
-
-    def clear(self) -> None:
-        """Drop all handles (tests)."""
-        with self._lock:
-            self._stores.clear()
-
-    def _publish(self, store: str, source: ZarrDataSource) -> None:
-        with self._lock:
-            self._stores[store] = source
-
-
-store_registry = StoreRegistry()
+        _open = (store, source)
+    return _open[1]
 
 
 def get_store(store: str) -> xr.Dataset:
-    return store_registry.get(store)
-
-
-def get_datasource(store: str) -> ZarrDataSource:
-    return store_registry.get_datasource(store)
+    """The store's dataset (time/lat/lon)."""
+    return get_datasource(store).zarr_store
 
 
 def close_store(store: str) -> None:
-    store_registry.close(store)
+    """Drop ``store``'s handle."""
+    global _open
+    if _open is not None and _open[0] == store:
+        _open = None
 
 
-# TODO: We validate each store and check errors, for the failed stores, in root_metadata.json,
-# we could have a good stores lise including its products, and a failed stores list, including the error message, its products. Every time the batch runs, it will try to open the failed ones again,
-# and if it succeeds, remove it from the failed list, and add it the good stores list. Also for the failed ones, rewrite its erros message.
+def close_all_stores() -> None:
+    """Drop the open handle, whichever store it is (tests)."""
+    global _open
+    _open = None
+
+
 def open_store(store: str) -> BaseException | None:
     """Open ``store``. Returns None on success, else the error. Retries
     only errors that might be transient."""
     last_error: BaseException | None = None
     for attempt in range(1, _OPEN_MAX_ATTEMPTS + 1):
         try:
-            store_registry.get(store)
+            get_datasource(store)
             return None
         except NotGriddedStoreError as e:
             logger.info(f"Store is not a lat/lon grid, skipping: {store} ({e})")

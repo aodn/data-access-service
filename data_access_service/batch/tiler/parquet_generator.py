@@ -11,7 +11,6 @@ import xarray as xr
 from data_access_service.batch.tiler import storage
 from data_access_service.batch.tiler.zarr_registry import get_datasource, get_store
 from data_access_service.core.duckdbclient import TilerBatchDuckDBClient
-from data_access_service.models.estimation_types import schema_fingerprint
 from data_access_service.models.tiler_parquet_types import (
     TilerParquetMetadata,
     TilerVariableMetadata,
@@ -83,7 +82,6 @@ def build_metadata(
         lon=[float(x) for x in lon],
         timestamps=timestamps,
         variables=variable_meta,
-        schema_fingerprint=schema_fingerprint(variables),
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
 

@@ -35,7 +35,6 @@ def _seed_metadata(store: str, times: list[str]) -> None:
         lon=[0.0],
         timestamps=[f"{t}.000000000Z" for t in times],
         variables={"v": TilerVariableMetadata(dtype="float32", attrs={})},
-        schema_fingerprint="",
         generated_at="",
     )
     store_registry._publish(store, meta)

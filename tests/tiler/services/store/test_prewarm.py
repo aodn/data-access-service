@@ -57,7 +57,6 @@ def _meta(store: str) -> TilerParquetMetadata:
         lon=[0.0],
         timestamps=["2024-01-15T13:00:00.000000000Z"],
         variables={"v": TilerVariableMetadata(dtype="float32", attrs={})},
-        schema_fingerprint="",
         generated_at="",
     )
 

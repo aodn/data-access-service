@@ -8,7 +8,11 @@ from data_access_service.batch.tiler.generator import (
     generate_tiler_parquet_for_all_products,
     write_root_metadata,
 )
-from data_access_service.models.tiler_parquet_types import ProductIdentity
+from data_access_service.models.tiler_parquet_types import (
+    ROOT_METADATA_VERSION,
+    ProductIdentity,
+    RootMetadata,
+)
 from data_access_service.models.tiler_types import (
     TilerBatchDuckDBConfig,
     TilerBatchConfig,
@@ -17,6 +21,19 @@ from data_access_service.models.tiler_types import (
 
 def _product(pid: str, store: str, variable, uuid: str = "uuid-a") -> ProductIdentity:
     return ProductIdentity(id=pid, store=store, variable=variable, metadata_uuid=uuid)
+
+
+def _root_metadata(stores: dict[str, list[ProductIdentity]]) -> dict:
+    """root_metadata.json content, as the fake S3 below holds it."""
+    return RootMetadata(
+        version=ROOT_METADATA_VERSION,
+        generated_at="2020-01-01T00:00:00+00:00",
+        stores=stores,
+    ).to_dict()
+
+
+def _published_ids(root: dict) -> list[str]:
+    return sorted(p.id for p in RootMetadata.from_dict(root).products)
 
 
 def _batch_config(
@@ -70,11 +87,7 @@ class TestWriteRootMetadataToS3:
     storage.read_json returns."""
 
     def test_upserts_onto_existing_s3_content(self, monkeypatch):
-        existing = {
-            "version": 1,
-            "generated_at": "2020-01-01T00:00:00+00:00",
-            "products": [_product("old", "old", "v", uuid="uuid-old").to_dict()],
-        }
+        existing = _root_metadata({"old": [_product("old", "old", "v", uuid="old")]})
         monkeypatch.setattr(generator.storage, "read_json", lambda path: existing)
         written = {}
         monkeypatch.setattr(
@@ -83,29 +96,58 @@ class TestWriteRootMetadataToS3:
             lambda path, data: written.update(path=path, data=data),
         )
 
-        products = [_product("new", "new", "v", uuid="uuid-new")]
-        path = write_root_metadata(products, "s3://my-bucket/tiler")
+        stores = {"new": [_product("new", "new", "v", uuid="uuid-new")]}
+        path = write_root_metadata(stores, "s3://my-bucket/tiler")
 
         assert path == "s3://my-bucket/tiler/root_metadata.json"
         assert written["path"] == path
-        assert sorted(p["id"] for p in written["data"]["products"]) == ["new", "old"]
+        assert _published_ids(written["data"]) == ["new", "old"]
+
+    def test_replaces_a_stores_products_rather_than_merging_them(self, monkeypatch):
+        """A variable spec dropped from config must disappear from the store."""
+        existing = _root_metadata(
+            {"x": [_product("p1", "x", "v"), _product("p2", "x", "w")]}
+        )
+        monkeypatch.setattr(generator.storage, "read_json", lambda path: existing)
+        written = {}
+        monkeypatch.setattr(
+            generator.storage,
+            "write_json",
+            lambda path, data: written.update(data=data),
+        )
+
+        write_root_metadata({"x": [_product("p1", "x", "v")]}, "s3://my-bucket/tiler")
+
+        assert _published_ids(written["data"]) == ["p1"]
 
     def test_skips_the_write_when_nothing_changed(self, monkeypatch):
-        products = [_product("p1", "x", "v")]
-        existing = {
-            "version": 1,
-            "generated_at": "2020-01-01T00:00:00+00:00",
-            "products": [p.to_dict() for p in products],
-        }
+        stores = {"x": [_product("p1", "x", "v")]}
+        existing = _root_metadata(stores)
         monkeypatch.setattr(generator.storage, "read_json", lambda path: existing)
         writes = []
         monkeypatch.setattr(
             generator.storage, "write_json", lambda path, data: writes.append(path)
         )
 
-        write_root_metadata(products, "s3://my-bucket/tiler")
+        write_root_metadata(stores, "s3://my-bucket/tiler")
 
         assert writes == []
+
+    def test_a_file_at_another_version_is_rewritten_from_scratch(self, monkeypatch):
+        existing = _root_metadata({"old": [_product("old", "old", "v")]})
+        existing["version"] = ROOT_METADATA_VERSION + 1
+        monkeypatch.setattr(generator.storage, "read_json", lambda path: existing)
+        written = {}
+        monkeypatch.setattr(
+            generator.storage,
+            "write_json",
+            lambda path, data: written.update(data=data),
+        )
+
+        write_root_metadata({"x": [_product("p1", "x", "v")]}, "s3://my-bucket/tiler")
+
+        assert written["data"]["version"] == ROOT_METADATA_VERSION
+        assert _published_ids(written["data"]) == ["p1"]
 
     def test_does_not_write_an_empty_catalogue(self, monkeypatch):
         monkeypatch.setattr(generator.storage, "read_json", lambda path: None)
@@ -114,7 +156,7 @@ class TestWriteRootMetadataToS3:
             generator.storage, "write_json", lambda path, data: writes.append(path)
         )
 
-        write_root_metadata([], "s3://my-bucket/tiler")
+        write_root_metadata({}, "s3://my-bucket/tiler")
 
         assert writes == []
 
@@ -127,10 +169,12 @@ class TestWriteRootMetadataToS3:
             lambda path, data: written.update(data=data),
         )
 
-        products = [_product("p1", "x", "v")]
-        write_root_metadata(products, "s3://my-bucket/tiler")
+        write_root_metadata({"x": [_product("p1", "x", "v")]}, "s3://my-bucket/tiler")
 
-        assert [p["id"] for p in written["data"]["products"]] == ["p1"]
+        assert _published_ids(written["data"]) == ["p1"]
+        assert written["data"]["stores"]["x"]["products"] == [
+            {"id": "p1", "variable": "v", "metadata_uuid": "uuid-a"}
+        ]
 
 
 @pytest.fixture(autouse=True)
@@ -180,7 +224,34 @@ class TestGenerateForAllProducts:
         assert calls == ["bad", "good"]
         # Only the successfully-converted store's product is published.
         root = s3_store["s3://my-bucket/tiler/root_metadata.json"]
-        assert [p["id"] for p in root["products"]] == ["p1"]
+        assert _published_ids(root) == ["p1"]
+
+    def test_a_store_that_failed_this_run_keeps_its_previous_entry(self, monkeypatch):
+        """Its parquet from an earlier run is still on S3 and still serveable."""
+        s3_store = _fake_s3_json_store(monkeypatch)
+        s3_store["s3://my-bucket/tiler/root_metadata.json"] = _root_metadata(
+            {"good": [_product("p1", "good", "v")], "bad": [_product("p2", "bad", "v")]}
+        )
+        products = {
+            "p1": _product("p1", "good", "v"),
+            "p2": _product("p2", "bad", "v", uuid="uuid-b"),
+        }
+        monkeypatch.setattr(generator, "discover_products", lambda api: products)
+        monkeypatch.setattr(
+            generator,
+            "config",
+            MagicMock(get_tiler_batch_config=lambda: _batch_config()),
+        )
+        monkeypatch.setattr(
+            generator,
+            "_build_in_subprocess",
+            lambda store, uuid, variables, batch_config: store == "good",
+        )
+
+        generate_tiler_parquet_for_all_products(api=MagicMock())
+
+        root = s3_store["s3://my-bucket/tiler/root_metadata.json"]
+        assert _published_ids(root) == ["p1", "p2"]
 
     def test_filters_by_uuid(self, monkeypatch):
         _fake_s3_json_store(monkeypatch)
@@ -212,11 +283,9 @@ class TestGenerateForAllProducts:
     def test_root_metadata_upserts_without_dropping_other_uuids(self, monkeypatch):
         """A uuid-scoped run must not wipe out other uuids already published."""
         s3_store = _fake_s3_json_store(monkeypatch)
-        s3_store["s3://my-bucket/tiler/root_metadata.json"] = {
-            "version": 1,
-            "generated_at": "2020-01-01T00:00:00+00:00",
-            "products": [_product("old", "old", "v", uuid="uuid-old").to_dict()],
-        }
+        s3_store["s3://my-bucket/tiler/root_metadata.json"] = _root_metadata(
+            {"old": [_product("old", "old", "v", uuid="uuid-old")]}
+        )
         products = {"p1": _product("p1", "new", "v", uuid="uuid-new")}
         monkeypatch.setattr(generator, "discover_products", lambda api: products)
 
@@ -232,7 +301,7 @@ class TestGenerateForAllProducts:
         generate_tiler_parquet_for_all_products(api=MagicMock(), uuid="uuid-new")
 
         root = s3_store["s3://my-bucket/tiler/root_metadata.json"]
-        assert sorted(p["id"] for p in root["products"]) == ["old", "p1"]
+        assert _published_ids(root) == ["old", "p1"]
 
     def test_forks_one_child_per_store(self, monkeypatch):
         _fake_s3_json_store(monkeypatch)
@@ -289,23 +358,18 @@ class TestPublishing:
 
         root = self._run(monkeypatch, s3_store, products, {"x": ["t1"], "y": []})
 
-        assert [p["id"] for p in root["products"]] == ["p1"]
+        assert _published_ids(root) == ["p1"]
 
     def test_store_that_lost_its_data_is_removed(self, monkeypatch):
         s3_store = _fake_s3_json_store(monkeypatch)
-        s3_store["s3://my-bucket/tiler/root_metadata.json"] = {
-            "version": 1,
-            "generated_at": "2020-01-01T00:00:00+00:00",
-            "products": [
-                _product("p1", "x", "v").to_dict(),
-                _product("p2", "y", "v").to_dict(),
-            ],
-        }
+        s3_store["s3://my-bucket/tiler/root_metadata.json"] = _root_metadata(
+            {"x": [_product("p1", "x", "v")], "y": [_product("p2", "y", "v")]}
+        )
         products = {"p1": _product("p1", "x", "v"), "p2": _product("p2", "y", "v")}
 
         root = self._run(monkeypatch, s3_store, products, {"x": ["t1"], "y": []})
 
-        assert [p["id"] for p in root["products"]] == ["p1"]
+        assert _published_ids(root) == ["p1"]
 
 
 class TestInProcessMode:
@@ -336,7 +400,7 @@ class TestInProcessMode:
 
         assert calls == ["x", "y"]
         root = s3_store["s3://my-bucket/tiler/root_metadata.json"]
-        assert sorted(p["id"] for p in root["products"]) == ["p1", "p2"]
+        assert _published_ids(root) == ["p1", "p2"]
 
 
 class TestBuildTilerParquet:

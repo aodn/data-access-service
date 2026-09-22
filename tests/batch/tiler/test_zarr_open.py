@@ -12,8 +12,8 @@ from data_access_service.batch.tiler import zarr_registry as registry
 from data_access_service.batch.tiler.zarr_registry import (
     NoTimeDimensionError,
     NotGriddedStoreError,
+    close_all_stores,
     open_store,
-    store_registry,
 )
 
 
@@ -32,9 +32,9 @@ class _FakeZarrSource:
 
 @pytest.fixture(autouse=True)
 def clear_stores():
-    store_registry.clear()
+    close_all_stores()
     yield
-    store_registry.clear()
+    close_all_stores()
 
 
 @pytest.fixture(autouse=True)
@@ -213,7 +213,7 @@ def test_failed_open_is_not_cached_so_a_later_request_retries(monkeypatch):
 
     assert isinstance(open_store("recovers"), RuntimeError)
     # S3 comes back; the next request opens it without any intervention.
-    assert store_registry.get("recovers") is not None
+    assert registry.get_store("recovers") is not None
 
 
 def test_close_store_drops_the_cached_handle(monkeypatch):

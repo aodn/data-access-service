@@ -4,9 +4,9 @@ import xarray as xr
 
 from data_access_service.batch.tiler.zarr_registry import (
     _resolve_zarr_source,
+    close_all_stores,
     get_datasource,
     get_store,
-    store_registry,
 )
 
 
@@ -45,9 +45,9 @@ def _patch_source(monkeypatch, ds: xr.Dataset):
 
 @pytest.fixture(autouse=True)
 def clear_stores():
-    store_registry.clear()
+    close_all_stores()
     yield
-    store_registry.clear()
+    close_all_stores()
 
 
 def test_resolve_zarr_source_passes_chunks_none(monkeypatch):

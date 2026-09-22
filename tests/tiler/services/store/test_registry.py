@@ -53,7 +53,6 @@ def _meta(
         lon=[float(x) for x in lon],
         timestamps=[f"{t}.000000000Z" for t in times],
         variables=variables or {"v": TilerVariableMetadata(dtype="float32", attrs={})},
-        schema_fingerprint="",
         generated_at="",
     )
 

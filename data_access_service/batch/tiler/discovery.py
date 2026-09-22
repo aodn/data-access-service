@@ -56,7 +56,6 @@ def store_name(dataset_name: str) -> str:
 
 
 def product_id(dataset_name: str, variables: list[str]) -> str:
-    # The frontend caches these ids, so keep the format stable.
     return f"{store_name(dataset_name)}:{'+'.join(v.lower() for v in variables)}"
 
 
