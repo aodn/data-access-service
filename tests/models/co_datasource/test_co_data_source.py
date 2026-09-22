@@ -195,7 +195,7 @@ def _patch_csiro_requests(*responses):
 
 
 def _failing_responses(status_code):
-    """One failing response per retry attempt, since every failure is retried."""
+    """One failing response per retry attempt, for the codes that get retried."""
     return [
         _mock_response({}, status_code=status_code)
         for _ in range(csiro_data_src._CSIRO_RETRY_ATTEMPTS)
@@ -262,22 +262,37 @@ class TestCsiroDataSrc:
     def test_init_raises_when_key_request_returns_non_200(self):
         with _patch_csiro_requests(
             _mock_response(_CSIRO_COLLECTION_RESPONSE),
-            *_failing_responses(403),
-        ):
+            _mock_response({}, status_code=403),
+        ) as mock_get:
             with pytest.raises(
                 Exception, match="Failed to get temporary access keys from CSIRO"
             ):
                 CsiroDataSrc()
 
-    def test_init_raises_when_collection_lookup_returns_non_200(self):
-        with _patch_csiro_requests(*_failing_responses(503)):
+        # A 403 says the same thing however many times we ask, so it is not
+        # retried: the collection lookup plus one key attempt.
+        assert mock_get.call_count == 2
+
+    def test_init_does_not_retry_a_collection_that_does_not_exist(self):
+        with _patch_csiro_requests(_mock_response({}, status_code=404)) as mock_get:
             with pytest.raises(
                 Exception, match="Failed to get collection id from CSIRO"
             ):
                 CsiroDataSrc()
 
-    def test_init_retries_transient_failure_then_succeeds(self):
-        # CSIRO's catch-all 417 is often transient: the same call works next time.
+        assert mock_get.call_count == 1
+
+    def test_init_retries_a_server_error_then_gives_up(self):
+        with _patch_csiro_requests(*_failing_responses(503)) as mock_get:
+            with pytest.raises(
+                Exception, match="Failed to get collection id from CSIRO"
+            ):
+                CsiroDataSrc()
+
+        assert mock_get.call_count == csiro_data_src._CSIRO_RETRY_ATTEMPTS
+
+    def test_init_retries_a_417_then_succeeds(self):
+        # 417 means CSIRO could not mint the keys; it clears on its own.
         mock_dataset = MagicMock()
         mock_dataset.get_metadata.return_value = dict(_CSIRO_DATASET_METADATA)
         mock_aodn = MagicMock()
