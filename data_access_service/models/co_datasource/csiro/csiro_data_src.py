@@ -11,11 +11,13 @@ Two very different readers need that access, so both live here:
 
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Optional
 from urllib.parse import urlparse
 
 import requests
 from aodn_cloud_optimised.lib.DataQuery import Metadata, DataSource, GetAodn
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from data_access_service.config.config import Config
 from data_access_service.models.co_datasource.abstract_data_src import (
@@ -23,6 +25,7 @@ from data_access_service.models.co_datasource.abstract_data_src import (
     CSIRO,
 )
 from data_access_service.models.co_datasource.dataset_location import DatasetLocation
+from data_access_service.utils.retry_utils import log_retry_attempt
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +74,51 @@ def get_csiro_fedora_pid(dataset_name: str) -> Optional[str]:
     return None
 
 
+_CSIRO_RETRY_MIN_WAIT = timedelta(seconds=2)
+_CSIRO_RETRY_MAX_WAIT = timedelta(seconds=10)
+_CSIRO_RETRY_MAX_ATTEMPTS = 3
+
+_CSIRO_ERROR_BODY_CHARS = 500
+
+# 417 is what CSIRO answers when it cannot mint the S3 credentials for us
+_CSIRO_RETRYABLE_STATUS_CODES = frozenset({417})
+
+
+def _is_retryable_status(status_code: int) -> bool:
+    return status_code in _CSIRO_RETRYABLE_STATUS_CODES or status_code >= 500
+
+
+class CsiroApiError(Exception):
+    """A CSIRO API call came back with a non-200."""
+
+    def __init__(self, message: str, status_code: int):
+        super().__init__(message)
+        self.status_code = status_code
+
+    @property
+    def retryable(self) -> bool:
+        return _is_retryable_status(self.status_code)
+
+
+def _is_retryable(exception: BaseException) -> bool:
+    # A call that never got an answer (timeout, connection reset) is always
+    # worth another go.
+    if isinstance(exception, requests.RequestException):
+        return True
+    return isinstance(exception, CsiroApiError) and exception.retryable
+
+
+# Bug in tenacity, the type check always fail but function ok
+# noinspection PyCallingNonCallable
+@retry(
+    stop=stop_after_attempt(_CSIRO_RETRY_MAX_ATTEMPTS),
+    wait=wait_exponential(
+        multiplier=1, min=_CSIRO_RETRY_MIN_WAIT, max=_CSIRO_RETRY_MAX_WAIT
+    ),
+    retry=retry_if_exception(_is_retryable),
+    before_sleep=log_retry_attempt("CSIRO API call", log),
+    reraise=True,
+)
 def _call_csiro_api(
     url: str, dataset_name: str, asking_for: str, timeout_seconds: int
 ) -> dict:
@@ -83,9 +131,11 @@ def _call_csiro_api(
         response.status_code,
     )
     if response.status_code != 200:
-        raise Exception(
+        raise CsiroApiError(
             f"Failed to get {asking_for} from CSIRO for dataset '{dataset_name}', "
-            f"status code: {response.status_code}"
+            f"status code: {response.status_code}, "
+            f"body: {response.text[:_CSIRO_ERROR_BODY_CHARS]}",
+            status_code=response.status_code,
         )
     return response.json()
 

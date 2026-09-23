@@ -7,6 +7,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from contextlib import contextmanager
+from datetime import timedelta
 from tempfile import TemporaryDirectory
 from threading import Lock
 from typing import Any, Iterator, Optional
@@ -25,6 +26,7 @@ from data_access_service.config.config import IntTestConfig
 from data_access_service.models.duckdb_types import DuckDBTuningConfig
 from data_access_service.models.estimation_types import EstimationReadDuckDBConfig
 from data_access_service.models.sites_types import SitesConfig
+from data_access_service.utils.retry_utils import log_retry_attempt
 
 # How often to emit a progress log line while a long query is running.
 _PROGRESS_LOG_INTERVAL_SECONDS = 60
@@ -170,22 +172,9 @@ class PmTileDuckDBClient(DuckDBClient):
     # parent is still using.
     _inherited_temp_dirs: list = []
 
-    MAX_READ_ATTEMPTS = 3
-    MIN_WAIT_SECONDS = 120  # 2 minutes
-    MAX_WAIT_SECONDS = 300  # 5 minutes
-
-    def log_retry_attempt(self, retry_state):
-        # Extract metadata from tenacity's internal state
-        attempt_num = retry_state.attempt_number
-        exception_thrown = retry_state.outcome.exception()
-        next_wait_seconds = retry_state.next_action.sleep
-        next_wait_minutes = round(next_wait_seconds / 60, 1)
-
-        self._logger.warning(
-            f"[Retry Alert] DuckDB S3 read failed on attempt #{attempt_num}.\n"
-            f"Error details: {exception_thrown}\n"
-            f"Waiting {next_wait_minutes} minute(s) before attempt #{attempt_num + 1}..."
-        )
+    READ_MIN_WAIT = timedelta(minutes=2)
+    READ_MAX_WAIT = timedelta(minutes=5)
+    READ_MAX_ATTEMPTS = 3
 
     def __init__(self, tuning: Optional[DuckDBTuningConfig] = None):
         """Open a session with ``tuning``, defaulting to the pmtiles job's settings.
@@ -412,14 +401,10 @@ class PmTileDuckDBClient(DuckDBClient):
     # Bug in tenacity, the type check always fail but function ok
     # noinspection PyCallingNonCallable
     @retry(
-        stop=stop_after_attempt(MAX_READ_ATTEMPTS),
-        wait=wait_exponential(multiplier=1, min=MIN_WAIT_SECONDS, max=MAX_WAIT_SECONDS),
+        stop=stop_after_attempt(READ_MAX_ATTEMPTS),
+        wait=wait_exponential(multiplier=1, min=READ_MIN_WAIT, max=READ_MAX_WAIT),
         retry=retry_if_exception_type(duckdb.IOException),
-        # args[0] is self: tenacity stores the undecorated function in
-        # retry_state.fn, so it has no __self__ to read the instance from.
-        before_sleep=lambda retry_state: retry_state.args[0].log_retry_attempt(
-            retry_state
-        ),
+        before_sleep=log_retry_attempt("DuckDB S3 read", log),
         reraise=True,
     )
     def execute(
