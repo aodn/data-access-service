@@ -167,11 +167,9 @@ class Config:
         if name_env:
             return name_env
 
-        return (
-            self.config["aws"]["batch"]["job_queue"]
-            if self.config is not None
-            else None
-        )
+        if self.config is None:
+            return None
+        return self.config.get("aws", {}).get("batch", {}).get("job_queue")
 
     def get_job_definition_name(self):
         """
@@ -181,11 +179,9 @@ class Config:
         name_env = os.getenv("DAS_AWS_BATCH_JOB_DEFINITION")
         if name_env:
             return name_env
-        return (
-            self.config["aws"]["batch"]["job_definition"]
-            if self.config is not None
-            else None
-        )
+        if self.config is None:
+            return None
+        return self.config.get("aws", {}).get("batch", {}).get("job_definition")
 
     @staticmethod
     def get_s3_temp_folder_name(master_job_id: str):

@@ -1,10 +1,18 @@
 import logging
 import threading
+from abc import ABC
+from datetime import timedelta
 
 from aodn_cloud_optimised.lib.DataQuery import (
     BUCKET_OPTIMISED_DEFAULT,
     Metadata,
     DataSource,
+)
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
 )
 
 from data_access_service.exceptions.dataset_not_found_error import DatasetNotFoundError
@@ -16,6 +24,7 @@ from data_access_service.models.co_datasource.aodn_data_src import AodnDataSrc
 from data_access_service.models.co_datasource.csiro.csiro_data_src import CsiroDataSrc
 from data_access_service.models.co_datasource.dataset_location import DatasetLocation
 from data_access_service.utils.common_utils import compare_dict_keys
+from data_access_service.utils.retry_utils import log_retry_attempt
 
 log = logging.getLogger(__name__)
 
@@ -44,7 +53,13 @@ def resolve_dataset_location(dataset_name: str) -> DatasetLocation:
     return DatasetLocation(bucket=BUCKET_OPTIMISED_DEFAULT)
 
 
-class CODataRegistry:
+class CODataRegistry(ABC):
+
+    # The wait grows in minutes -> 5, 5, ... 5, 10, 20, 30
+    GET_DATASET_MIN_WAIT = timedelta(minutes=5)
+    GET_DATASET_MAX_WAIT = timedelta(minutes=30)
+    GET_DATASET_MAX_ATTEMPTS = 11
+
     def __init__(self):
         log.info("Initializing all Cloud Optimized data sources...")
         self.data_source_list: list[AbstractDataSrc] = [AodnDataSrc(), CsiroDataSrc()]
@@ -83,7 +98,18 @@ class CODataRegistry:
         log.info("Metadata retrieved from all data source")
         return metadata
 
-    def get_dataset(self, dataset_name_with_ext: str) -> DataSource:
+    # Bug in tenacity, the type check always fail but function ok
+    # noinspection PyCallingNonCallable
+    @retry(
+        stop=stop_after_attempt(GET_DATASET_MAX_ATTEMPTS),
+        wait=wait_exponential(
+            multiplier=1, min=GET_DATASET_MIN_WAIT, max=GET_DATASET_MAX_WAIT
+        ),
+        retry=retry_if_exception_type(ValueError),
+        before_sleep=log_retry_attempt("get_dataset", log),
+        reraise=True,
+    )
+    def get_dataset(self, dataset_name_with_ext: str) -> DataSource | None:
         with self._datasets_lock:
             cached = self._datasets.get(dataset_name_with_ext)
             if cached is not None:

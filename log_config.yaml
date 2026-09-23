@@ -1,11 +1,13 @@
 version: 1
 disable_existing_loggers: False
 formatters:
+  # build_formatter picks JSON on edge/staging/prod and keeps the text format
+  # below on dev/testing. See data_access_service/utils/log_formatter.py
   default:
-    # "()": uvicorn.logging.DefaultFormatter
+    "()": data_access_service.utils.log_formatter.build_formatter
     format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
   access:
-    # "()": uvicorn.logging.AccessFormatter
+    "()": data_access_service.utils.log_formatter.build_formatter
     format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 handlers:
   default:

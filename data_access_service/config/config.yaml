@@ -178,8 +178,6 @@ tiler:
         temp_dir_prefix: "tiler_batch_duckdb_tmp"
         memory_limit: "3G"
         threads: 3
-  # Which zarr stores/variables batch turns into products
-  # (batch/tiler/discovery.py).
   catalog:
     # Stores to skip, by store name (the dataset name minus ".zarr").
     blacklist:

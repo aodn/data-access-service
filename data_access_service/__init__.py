@@ -31,14 +31,29 @@ set_matplotlib_backend_agg()
 
 from data_access_service.config.config import Config
 from data_access_service.core.api import API
+from data_access_service.utils.log_formatter import (
+    TEXT_LOG_DATE_FORMAT,
+    TEXT_LOG_FORMAT,
+    build_formatter,
+    use_json_logs,
+)
 
 
 def init_log(config: Config):
     logging.basicConfig(
         level=config.LOGLEVEL,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+        format=TEXT_LOG_FORMAT,
+        datefmt=TEXT_LOG_DATE_FORMAT,
     )
+
+    # Edge, staging and production log JSON. basicConfig only formats handlers
+    # it created itself (and no-ops once root has any), so swap the formatter on
+    # whatever is attached to root. Under uvicorn that handler already comes
+    # from log_config.yaml with the same profile-aware formatter.
+    if use_json_logs():
+        json_formatter = build_formatter()
+        for handler in logging.getLogger().handlers:
+            handler.setFormatter(json_formatter)
 
     # If add new logger setting, please put in alphabetical order
     logging.getLogger("aiobotocore").setLevel(logging.WARNING)

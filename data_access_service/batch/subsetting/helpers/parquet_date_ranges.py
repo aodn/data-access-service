@@ -2,6 +2,8 @@
 
 import heapq
 import logging
+from datetime import timedelta
+
 import numpy as np
 import pandas as pd
 import pytz
@@ -19,6 +21,7 @@ from aodn_cloud_optimised.lib.DataQuery import (
     query_unique_value,
 )
 
+from data_access_service.utils.retry_utils import log_retry_attempt
 from data_access_service.utils.time_column_utils import (
     TimeColumn,
     build_time_filter,
@@ -43,24 +46,19 @@ log = logging.getLogger(__name__)
 # transient S3 errors in CI more likely and finally exposing it.
 # Fix: retry transient failures, and raise if still failing after retries instead
 # of silently dropping data.
+COUNT_ROWS_MIN_WAIT = timedelta(seconds=2)
+COUNT_ROWS_MAX_WAIT = timedelta(seconds=10)
 COUNT_ROWS_MAX_ATTEMPTS = 3
-COUNT_ROWS_MIN_WAIT_SECONDS = 2
-COUNT_ROWS_MAX_WAIT_SECONDS = 10
 
 
-def _log_count_rows_retry(retry_state):
-    log.warning(
-        f"[Retry] dataset.count_rows() failed on attempt "
-        f"#{retry_state.attempt_number}: {retry_state.outcome.exception()}. Retrying..."
-    )
-
-
+# Bug in tenacity, the type check always fail but function ok
+# noinspection PyCallingNonCallable
 @retry(
     stop=stop_after_attempt(COUNT_ROWS_MAX_ATTEMPTS),
     wait=wait_exponential(
-        multiplier=1, min=COUNT_ROWS_MIN_WAIT_SECONDS, max=COUNT_ROWS_MAX_WAIT_SECONDS
+        multiplier=1, min=COUNT_ROWS_MIN_WAIT, max=COUNT_ROWS_MAX_WAIT
     ),
-    before_sleep=_log_count_rows_retry,
+    before_sleep=log_retry_attempt("dataset.count_rows()", log),
     reraise=True,
 )
 def _count_rows_with_retry(dataset, time_filter) -> int:
