@@ -16,6 +16,9 @@ class ZarrChunkingConfig:
     min_chunk_mb: int
     # Fraction of the remaining peak budget used for one chunk.
     memory_fraction: float
+    # Hard ceiling on process RSS. A time block is sized from the room left
+    # under this, so it is not added on top of memory already in use.
+    max_chunk_gb: float
 
     @property
     def headroom_bytes(self) -> int:
@@ -24,3 +27,7 @@ class ZarrChunkingConfig:
     @property
     def min_chunk_bytes(self) -> int:
         return int(self.min_chunk_mb * 1024**2)
+
+    @property
+    def max_chunk_bytes(self) -> int:
+        return int(self.max_chunk_gb * 1024**3)

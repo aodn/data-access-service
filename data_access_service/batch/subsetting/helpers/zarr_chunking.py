@@ -30,32 +30,31 @@ def get_time_steps_per_chunk(
     time_dim: str,
     log,
 ) -> int:
-    """
-    Calculate the number of time steps per chunk based on available memory and dataset size.
-    This helps to optimize memory usage during processing.
-    memory_fraction (config) is the fraction of the peak budget to use for one
-    chunk. The value is only for safety (dask/zlib copies).
+    """Time steps that fit in the room left under the RSS ceiling.
+
+    The ceiling is the lower of the host peak and ``max_chunk_gb``. Memory
+    already resident is subtracted first, and the remainder is halved because
+    a block is briefly held twice while it is materialised.
     """
     cfg = _chunking_config()
     vm = psutil.virtual_memory()
     current_rss = psutil.Process(os.getpid()).memory_info().rss
     target_peak = _target_peak_bytes(cfg)
-    # Remaining room under the peak cap, not "whatever the OS says is free",
-    # so an 8GB task with 3GB already used does not pick a chunk that lands
-    # at 6.7GB.
-    budget = max(cfg.min_chunk_bytes, target_peak - current_rss)
+    # max_chunk_gb is a hard ceiling on process RSS, not the size of the
+    # array. Room left under that ceiling is all a new block may use, and the
+    # block is loaded twice for a moment (dask result, then the numpy array).
+    ceiling = min(target_peak, cfg.max_chunk_bytes)
+    room = max(0, ceiling - current_rss)
+    safe_memory_per_thread = max(cfg.min_chunk_bytes, room // 2)
     log.info("total memory in MB: %d", vm.total / (1024 * 1024))
     log.info(
-        "Target peak: %.2f GB, current RSS: %.2f GB, remaining budget: %.2f GB",
-        target_peak / (1024**3),
+        "Peak ceiling: %.2f GB, current RSS: %.2f GB, "
+        "room: %.2f GB, chunk size: %d MB",
+        ceiling / (1024**3),
         current_rss / (1024**3),
-        budget / (1024**3),
+        room / (1024**3),
+        safe_memory_per_thread / (1024**2),
     )
-    safe_memory_per_thread = int(
-        budget * cfg.memory_fraction / get_available_thread_count()
-    )
-    safe_memory_per_thread = max(cfg.min_chunk_bytes, safe_memory_per_thread)
-    log.info("Chunk size: %d MB per thread", safe_memory_per_thread / (1024**2))
 
     # var.nbytes forces computation - use size * itemsize instead
     estimated_size = 0

@@ -40,6 +40,7 @@ from data_access_service.batch.subsetting.helpers.netcdf_compat import (
     convert_object_dtype_variables,
     ignore_invalid_unicode_in_attrs,
 )
+from data_access_service.batch.subsetting.helpers.netcdf_stream import append_variable
 
 
 class ZarrProcessor:
@@ -234,8 +235,7 @@ class ZarrProcessor:
             uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
         )[0]
         time_per_chunk = get_time_steps_per_chunk(dataset, time_dim, self.log)
-        self.log.info("Chunking dataset with %d time steps per chunk", time_per_chunk)
-        dataset = dataset.chunk({time_dim: time_per_chunk})
+        self.log.info("Writing NetCDF in blocks of %d time step(s)", time_per_chunk)
         netcdf_compression = {
             var: {"zlib": True, "complevel": 5}
             for var, da in dataset.data_vars.items()
@@ -294,45 +294,26 @@ class ZarrProcessor:
                 del coords_only_ds
                 gc.collect()
 
-            # Append each data variable one by one since xr.Dataset.to_netcdf() only supports mode "w" and "a"
-            # and "a" mode appends to existing file will overwrite existing variables.
-            # doc: https://docs.xarray.dev/en/stable/generated/xarray.Dataset.to_netcdf.html
-            for idx, var_name in enumerate(data_var_names, start=1):
-                with ProcessLogger(
-                    logger=self.log,
-                    task_name=f"Step {idx + 1}/{len(data_var_names) + 1}: Appending variable '{var_name}'",
-                ):
-
-                    # Create a dataset with only this variable
-                    # CRITICAL: Do NOT include coords when appending - they already exist in the file
-                    single_var_ds = xarray.Dataset({var_name: dataset[var_name]})
-
-                    # Apply compression encoding for this variable if applicable
-                    var_encoding = {}
-                    if var_name in netcdf_compression:
-                        var_encoding[var_name] = netcdf_compression[var_name]
-
-                    # Append this variable to the existing file
-                    single_var_ds.to_netcdf(
-                        temp_netcdf_path,
-                        mode="a",
-                        engine="netcdf4",
-                        format="NETCDF4",
-                        encoding=var_encoding,
-                        compute=True,
-                    )
-
-                    # Clean up after each variable
-                    del single_var_ds
-                    gc.collect()
-
-                    # Log memory usage
-                    current_mem = psutil.Process(os.getpid()).memory_info().rss / (
-                        1024**3
-                    )
-                    self.log.info(
-                        f"  Memory after writing '{var_name}': {current_mem:.2f} GB"
-                    )
+            # Append each data variable. A variable with a time axis is written
+            # in blocks so the Dask graph for the whole series is never built.
+            # Do NOT include coords when appending - they already exist in the file.
+            for var_name in data_var_names:
+                var_encoding = {}
+                if var_name in netcdf_compression:
+                    var_encoding[var_name] = netcdf_compression[var_name]
+                append_variable(
+                    dataset,
+                    temp_netcdf_path,
+                    var_name,
+                    time_dim,
+                    time_per_chunk,
+                    var_encoding,
+                    self.log,
+                )
+                current_mem = psutil.Process(os.getpid()).memory_info().rss / (1024**3)
+                self.log.info(
+                    f"  Memory after writing '{var_name}': {current_mem:.2f} GB"
+                )
 
             self.log.info("All variables written successfully")
 

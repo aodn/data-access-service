@@ -446,6 +446,7 @@ class Config:
             target_peak_fraction=sconfig["target_peak_fraction"],
             min_chunk_mb=sconfig["min_chunk_mb"],
             memory_fraction=sconfig["memory_fraction"],
+            max_chunk_gb=sconfig["max_chunk_gb"],
         )
 
     def get_tiler_config(self) -> TilerConfig:
