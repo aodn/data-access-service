@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from abc import ABC
 from collections.abc import Sequence
+from datetime import timedelta
 from typing import ClassVar
 
 import duckdb
@@ -24,22 +25,14 @@ from tenacity import (
 from data_access_service.config.config import Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.duckdbclient import SitesDuckDBClient
+from data_access_service.utils.retry_utils import log_retry_attempt
 
 logger = logging.getLogger(__name__)
 
 
-_LOAD_RETRY_ATTEMPTS = 3
-_LOAD_RETRY_MIN_WAIT_SECONDS = 30
-_LOAD_RETRY_MAX_WAIT_SECONDS = 60
-
-
-def _log_load_retry(retry_state) -> None:
-    logger.warning(
-        "load() attempt #%d failed (%s); retrying in %.0fs...",
-        retry_state.attempt_number,
-        retry_state.outcome.exception(),
-        retry_state.next_action.sleep,
-    )
+_LOAD_RETRY_MIN_WAIT = timedelta(seconds=30)
+_LOAD_RETRY_MAX_WAIT = timedelta(minutes=1)
+_LOAD_RETRY_MAX_ATTEMPTS = 3
 
 
 def quote_ident(name: str) -> str:
@@ -161,15 +154,17 @@ class ParquetRepository(ABC):
         """Create the S3 secret DuckDB uses to read the snapshot dataset."""
         self.session.create_s3_secret(self.snapshot_bucket)
 
+    # Bug in tenacity, the type check always fail but function ok
+    # noinspection PyCallingNonCallable
     @retry(
-        stop=stop_after_attempt(_LOAD_RETRY_ATTEMPTS),
+        stop=stop_after_attempt(_LOAD_RETRY_MAX_ATTEMPTS),
         wait=wait_exponential(
-            multiplier=_LOAD_RETRY_MIN_WAIT_SECONDS,
-            min=_LOAD_RETRY_MIN_WAIT_SECONDS,
-            max=_LOAD_RETRY_MAX_WAIT_SECONDS,
+            multiplier=_LOAD_RETRY_MIN_WAIT.total_seconds(),
+            min=_LOAD_RETRY_MIN_WAIT,
+            max=_LOAD_RETRY_MAX_WAIT,
         ),
         retry=retry_if_exception_type((duckdb.IOException, UnicodeDecodeError)),
-        before_sleep=_log_load_retry,
+        before_sleep=log_retry_attempt("SitesRepository.load()", logger),
         reraise=True,
     )
     # wait = multiplier * exp_base**(attempt_number - 1), clamped to [min, max].
