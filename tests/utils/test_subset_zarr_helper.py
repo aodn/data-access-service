@@ -286,6 +286,23 @@ def test_polygon_hole_is_blanked():
     assert np.isfinite(t0.sel(LATITUDE=1, LONGITUDE=5))
 
 
+def test_polygon_mask_does_not_broadcast_a_scalar_variable():
+    # crs is a scalar grid-mapping variable. Dataset.where would paint it onto
+    # the lat/lon mask; it must stay scalar so it is not exported as a grid.
+    ds = _regular_grid()
+    ds["crs"] = xr.DataArray(np.int32(4326))
+    ds["filename"] = xr.DataArray(
+        np.array(["a", "b", "c", "d"], dtype=object), dims=("TIME",)
+    )
+
+    subset = _run(ds, [bbox_of(TRIANGLE)], geometry=TRIANGLE)
+
+    assert subset["crs"].dims == ()
+    assert subset["crs"].item() == 4326
+    assert subset["filename"].dims == ("TIME",)
+    assert np.isnan(subset.sst.isel(TIME=0).sel(LATITUDE=4, LONGITUDE=4))
+
+
 def test_rectangular_polygon_is_cropped_not_masked():
     # The common portal case: a drawn rectangle IS its own bbox, so the crop
     # already selects exactly those cells. No .where() means no NaN and no dtype

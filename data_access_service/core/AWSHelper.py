@@ -10,7 +10,7 @@ import dask.dataframe as dd
 import xarray
 from pathlib import Path
 from data_access_service import init_log
-from data_access_service.config.config import Config, IntTestConfig
+from data_access_service.config.config import Config, IntTestConfig, DevConfig
 from io import BytesIO
 from data_access_service.core.constants import PARTITION_KEY, MAX_CSV_ROW
 
@@ -271,33 +271,36 @@ class AWSHelper:
     def send_email(
         self, recipient: str, subject: str, html_body: str = "", text_body: str = ""
     ):
-        body = {}
+        if not isinstance(self.config, DevConfig):
+            # Do not send email on dev env
+            body = {}
 
-        if html_body:
-            body["Html"] = {"Data": html_body, "Charset": "UTF-8"}
+            if html_body:
+                body["Html"] = {"Data": html_body, "Charset": "UTF-8"}
 
-        if text_body:
-            body["Text"] = {"Data": text_body, "Charset": "UTF-8"}
+            if text_body:
+                body["Text"] = {"Data": text_body, "Charset": "UTF-8"}
 
-        if not body:
-            raise ValueError("Either html_body or text_body must be provided")
+            if not body:
+                raise ValueError("Either html_body or text_body must be provided")
 
-        try:
-            response = self.ses.send_email(
-                Source=self.config.get_sender_email(),
-                Destination={"ToAddresses": [recipient]},
-                Message={
-                    "Subject": {"Data": subject, "Charset": "UTF-8"},
-                    "Body": body,
-                },
-            )
-            self.log.info(
-                f"Email sent to {recipient} with message ID: {response['MessageId']}"
-            )
-            return response
-        except Exception as e:
-            self.log.info(f"Error sending email to {recipient}: {e}")
-            raise e
+            try:
+                response = self.ses.send_email(
+                    Source=self.config.get_sender_email(),
+                    Destination={"ToAddresses": [recipient]},
+                    Message={
+                        "Subject": {"Data": subject, "Charset": "UTF-8"},
+                        "Body": body,
+                    },
+                )
+                self.log.info(
+                    f"Email sent to {recipient} with message ID: {response['MessageId']}"
+                )
+                return response
+            except Exception as e:
+                self.log.info(f"Error sending email to {recipient}: {e}")
+                raise e
+        return None
 
     def submit_a_job(
         self,
