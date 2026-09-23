@@ -24,8 +24,16 @@ def _with_tiler(monkeypatch, config, edit):
 
 def test_tiler_root_dir_is_the_datavis_bucket():
     config = Config.get_config(EnvType.TESTING)
-    assert config.get_tiler_root_dir() == "s3://test-site-snapshot-bucket/tiler"
+    assert (
+        config.get_tiler_root_dir() == "s3://test-site-snapshot-bucket/tiler_re_layout"
+    )
     assert config.get_tiler_batch_config().tiler_root_dir == config.get_tiler_root_dir()
+
+
+def test_tiler_root_dir_follows_the_configured_prefix(monkeypatch):
+    config = Config.get_config(EnvType.TESTING)
+    _with_tiler(monkeypatch, config, lambda t: t["config"].update(root_prefix="x/y"))
+    assert config.get_tiler_root_dir() == "s3://test-site-snapshot-bucket/x/y"
 
 
 def test_tiler_batch_max_chunks_null_means_no_limit(monkeypatch):
@@ -36,13 +44,6 @@ def test_tiler_batch_max_chunks_null_means_no_limit(monkeypatch):
         lambda t: t["config"]["batch"].update(max_chunks_per_run=None),
     )
     assert config.get_tiler_batch_config().max_chunks_per_run is None
-
-
-def test_tiler_cache_host_env_overrides_yaml(monkeypatch):
-    monkeypatch.setenv("CACHE_HOST", "cache.internal")
-    cache = Config.get_config(EnvType.TESTING).get_tiler_api_config().cache
-    assert cache.host == "cache.internal"
-    assert cache.is_tls is True
 
 
 def test_pmtiles_use_fork_process_default():

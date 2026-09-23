@@ -13,7 +13,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 # Output layout, shared by batch (writer) and tiler (reader). ``tiler_root_dir``
-# is ``s3://{datavis_data bucket}/tiler`` (Config.get_tiler_root_dir):
+# is ``s3://{datavis_data bucket}/{tiler.config.root_prefix}``
+# (Config.get_tiler_root_dir):
 #
 #   {tiler_root_dir}/root_metadata.json
 #   {tiler_root_dir}/{store}/metadata.json

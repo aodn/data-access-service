@@ -470,6 +470,47 @@ def test_aggregated_window_keeps_its_coordinates_lined_up():
     assert 100.0 <= lon.min() and lon.max() <= 160.0
 
 
+def test_a_tile_window_never_reaches_the_read_cap():
+    """Tiles keep the steps they had before the cap existed."""
+    for n in range(1, 40000, 97):
+        rs, cs = visual_renderer._steps(n, n, TILE_SIZE, TILE_SIZE)
+        old = max(1, n // (TILE_SIZE * visual_renderer._OVERSAMPLE))
+        assert (rs, cs) == (old, old)
+
+
+def test_a_large_output_reads_about_one_cell_per_pixel():
+    rs, cs = visual_renderer._steps(9601, 13601, 2048, 2048)
+    assert (9601 // rs) * (13601 // cs) <= visual_renderer._MAX_READ_CELLS
+    assert 9601 // rs >= 1900 and 13601 // cs >= 1900
+
+
+def test_a_capped_bbox_still_has_a_block_per_output_pixel():
+    n_i, n_j = 9601, 13601  # snpp
+    rs, cs = visual_renderer._steps(n_i, n_j, 2048, 2048)
+    rows = visual_renderer._block_count(n_i, 2048, rs)
+    cols = visual_renderer._block_count(n_j, 2048, cs)
+    assert (rows, cols) == (2048, 2048)
+    assert rows * cols <= visual_renderer._MAX_READ_CELLS
+
+
+def test_a_narrow_axis_never_gets_more_blocks_than_cells():
+    assert visual_renderer._block_count(1000, 2048, 1) == 1000
+
+
+def test_a_tile_keeps_two_blocks_per_pixel():
+    for n in (1024, 5000, 40000):
+        step = visual_renderer._steps(n, n, TILE_SIZE, TILE_SIZE)[0]
+        assert visual_renderer._block_count(n, TILE_SIZE, step) == 2 * TILE_SIZE
+
+
+def test_a_large_bbox_is_averaged_within_the_read_cap():
+    ds = _big_ds()  # 2600 x 2600: over the cap, under 4x a 2048 output
+    part = _window(ds, "GSLA", out_width=2048, out_height=2048)
+    assert part.size <= visual_renderer._MAX_READ_CELLS
+    assert np.nanmin(part.values) >= 0.0
+    assert np.nanmax(part.values) <= 2.0
+
+
 def test_a_categorical_variable_is_sampled_not_averaged():
     ds = _big_ds(var="MCS_category")
     # The ramp runs 0..2, so flooring it gives exactly the three codes.

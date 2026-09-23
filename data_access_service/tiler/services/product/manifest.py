@@ -1,6 +1,7 @@
 """The data-tile manifest: bounds, value ranges and LOD grids the client
 needs to decode raw tiles."""
 
+import math
 from typing import Any
 
 from data_access_service.tiler.services.colormap.categorical import (
@@ -8,12 +9,15 @@ from data_access_service.tiler.services.colormap.categorical import (
     parse_flag_values_and_meanings,
 )
 from data_access_service.tiler.services.product.product import Product
+from data_access_service.tiler.services.rendering.data_tiles import EMPTY_RANGE
 from data_access_service.tiler.services.store.sparse_grid import SparseSlice
 from data_access_service.tiler.utils.geo import json_safe_float
 
 
 def _range(sparse: SparseSlice, var: str) -> list[float | None]:
     grid = sparse.grids[var]
+    if math.isnan(grid.vmin) or math.isnan(grid.vmax):
+        return list(EMPTY_RANGE)
     return [json_safe_float(grid.vmin), json_safe_float(grid.vmax)]
 
 

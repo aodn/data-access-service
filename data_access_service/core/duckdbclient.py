@@ -5,7 +5,7 @@ import os
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 from threading import Lock
@@ -964,8 +964,13 @@ class TilerDuckDBClient(DuckDBClient):
                     db_config = {
                         "memory_limit": self._config.memory_limit,
                         "threads": str(int(self._config.threads)),
-                        # Slices are cached in L1 (slice_cache)
-                        "enable_external_file_cache": False,
+                        # Keep what's read from S3, so a date is fetched once
+                        # and every tile of it reads the same copy. Bounded
+                        # by memory_limit. Batch never rewrites a file.
+                        # TODO: investiate the cache eviction for this duckdb buffer cache, so it will not keep stale cache and compete with cache in tiler.
+                        "enable_external_file_cache": True,
+                        "parquet_metadata_cache": True,
+                        "enable_http_metadata_cache": True,
                     }
                     db = duckdb.connect(database=":memory:", config=db_config)
                     db.execute("INSTALL httpfs; LOAD httpfs;")
@@ -973,12 +978,21 @@ class TilerDuckDBClient(DuckDBClient):
                     self._duckdb_client = db
         return self._duckdb_client
 
-    def execute(self, sql: str, params: Sequence[Any] | None = None):
-        """Run ``sql`` (optionally with bound ``params``) on a fresh cursor."""
+    def execute(
+        self,
+        sql: str,
+        params: Sequence[Any] | None = None,
+        tables: Mapping[str, Any] | None = None,
+    ):
+        """Run ``sql`` (optionally with bound ``params``) on a fresh cursor.
+        ``tables`` (name -> Arrow table or DataFrame) are registered on that
+        cursor only, so concurrent queries can use the same names."""
         cursor = self._con.cursor()
         with self._cursors_lock:
             self._active_cursors.add(cursor)
         try:
+            for name, table in (tables or {}).items():
+                cursor.register(name, table)
             if params is None:
                 return cursor.execute(sql)
             return cursor.execute(sql, params)

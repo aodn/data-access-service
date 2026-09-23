@@ -27,7 +27,6 @@ from data_access_service.models.tiler_types import (
     TilerApiConfig,
     TilerBatchConfig,
     TilerBatchDuckDBConfig,
-    TilerCacheConfig,
     TilerDuckDBConfig,
 )
 from data_access_service.models.zarr_chunking_types import ZarrChunkingConfig
@@ -424,25 +423,17 @@ class Config:
 
     def get_tiler_root_dir(self) -> str:
         """The S3 prefix batch writes and the tiler reads."""
-        return f"s3://{self.get_datavis_data_bucket_name()}/tiler"
+        prefix = self._tiler()["config"]["root_prefix"]
+        return f"s3://{self.get_datavis_data_bucket_name()}/{prefix}"
 
     def get_tiler_api_config(self) -> TilerApiConfig:
         api = self._tiler()["config"]["api"]
-        cache = api["cache"]
         duckdb = api["duckdb"]
-        cache_host = os.getenv("CACHE_HOST")
         return TilerApiConfig(
             store_refresh_interval_hours=int(api["store_refresh_interval_hours"]),
             thread_pool_size=int(api["thread_pool_size"]),
             animation_workers=int(api["animation_workers"]),
             trim_threshold_mb=int(api["trim_threshold_mb"]),
-            cache=TilerCacheConfig(
-                backend=cache["backend"],
-                ttl_seconds=int(cache["ttl_seconds"]),
-                host=cache_host or cache["host"],
-                port=int(cache["port"]),
-                is_tls=cache_host is not None,
-            ),
             duckdb=TilerDuckDBConfig(
                 memory_limit=duckdb["memory_limit"],
                 threads=int(duckdb["threads"]),

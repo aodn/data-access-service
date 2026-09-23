@@ -2,19 +2,6 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class TilerCacheConfig:
-    """L1 slice cache (``tiler.config.api.cache``)."""
-
-    # "none" or "redis" - see memoizer.create_memoizer.
-    backend: str
-    ttl_seconds: int
-    host: str
-    port: int
-    # True when CACHE_HOST is set, i.e. a deployed cache.
-    is_tls: bool
-
-
-@dataclass(frozen=True)
 class TilerDuckDBConfig:
     """The live tiler's read-side :class:`TilerDuckDBClient`
     (``tiler.config.api.duckdb``)."""
@@ -33,7 +20,6 @@ class TilerApiConfig:
     # RSS above which a tile trims glibc's arenas before it starts; set it
     # out of reach to turn trimming off.
     trim_threshold_mb: int
-    cache: TilerCacheConfig
     duckdb: TilerDuckDBConfig
 
 

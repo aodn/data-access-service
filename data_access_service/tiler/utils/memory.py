@@ -30,8 +30,10 @@ _last_trim = 0.0
 
 
 def _malloc_trim() -> bool:
-    """Ask glibc to return freed heap memory to the OS. False (no-op) where
-    malloc_trim isn't available, such as macOS dev machines."""
+    """Ask glibc to return freed arena heap memory to the OS. False (no-op) where
+    malloc_trim isn't available, such as macOS dev machines. But it might not always work.
+    So better limit MALLOC_ARENA_MAX as well, glibc create multiple arenas for mutliple threads
+    """
     if _libc is None:
         return False
     return bool(_libc.malloc_trim(0))

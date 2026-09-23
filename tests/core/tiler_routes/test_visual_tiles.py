@@ -604,7 +604,7 @@ def test_categorical_animation_mismatched_colormap_rejected(client, mcs_product)
             return_value=_avail(["2024-01-01", "2024-01-02", "2024-01-03"]),
         ),
         patch(
-            "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
+            "data_access_service.core.tiler_routes.visual_tiles.load_slice",
             return_value=sparse_of(_make_categorical_ds()),
         ),
     ):
@@ -623,7 +623,7 @@ def test_animation_ok_with_default_bbox(client):
             return_value=_avail(["2024-01-01", "2024-01-02", "2024-01-03"]),
         ),
         patch(
-            "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
+            "data_access_service.core.tiler_routes.visual_tiles.load_slice",
             return_value=sparse_of(_make_ds()),
         ),
         patch(
@@ -748,7 +748,7 @@ def test_animation_explicit_bbox_passed_through(client):
             return_value=_avail(["2024-01-01"]),
         ),
         patch(
-            "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
+            "data_access_service.core.tiler_routes.visual_tiles.load_slice",
             return_value=sparse_of(_make_ds()),
         ),
         patch(
@@ -795,7 +795,7 @@ def test_animation_native_resolution_used_when_both_dims_omitted(client):
             return_value=_avail(["2024-01-01"]),
         ),
         patch(
-            "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
+            "data_access_service.core.tiler_routes.visual_tiles.load_slice",
             return_value=sparse_of(_make_ds()),
         ),
         patch(
@@ -821,7 +821,7 @@ def test_animation_height_derived_from_bbox_aspect_when_only_width_given(client)
             return_value=_avail(["2024-01-01"]),
         ),
         patch(
-            "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
+            "data_access_service.core.tiler_routes.visual_tiles.load_slice",
             return_value=sparse_of(_make_ds()),
         ),
         patch_render,
@@ -843,7 +843,7 @@ def test_animation_width_derived_from_bbox_aspect_when_only_height_given(client)
             return_value=_avail(["2024-01-01"]),
         ),
         patch(
-            "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
+            "data_access_service.core.tiler_routes.visual_tiles.load_slice",
             return_value=sparse_of(_make_ds()),
         ),
         patch_render,
@@ -867,7 +867,7 @@ def test_animation_derived_dimension_clamped_to_max(client):
             return_value=_avail(["2024-01-01"]),
         ),
         patch(
-            "data_access_service.core.tiler_routes.visual_tiles.load_slice_uncached",
+            "data_access_service.core.tiler_routes.visual_tiles.load_slice",
             return_value=sparse_of(_make_ds()),
         ),
         patch_render,

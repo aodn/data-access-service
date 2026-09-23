@@ -12,8 +12,7 @@ class Deduper:
     """If a call for ``key`` is already running, wait for its result instead
     of running ``factory()`` again. Nothing is cached.
 
-    Blocks, so call it from a worker thread, not the event loop. Also saves
-    Redis round trips: only one thread per process asks Redis for a key.
+    Blocks, so call it from a worker thread, not the event loop.
     """
 
     def __init__(self) -> None:

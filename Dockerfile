@@ -12,6 +12,9 @@ ENV GIT_SHA=$GIT_SHA
 # Read by glibc, so it covers Python, DuckDB and the supervisord/nginx logs.
 ENV TZ=UTC
 
+# Limit two malloc arenas shared by all threads, as our ECS only has 2 vCPUs, reduces RSS memory usage.
+ENV MALLOC_ARENA_MAX=2
+
 # Using micromamba (a fast alternative to conda) to build the exact environment
 
 # Temp work around due to deps in cloud optimized lib use xarray lib that is fork by Loz with some fix

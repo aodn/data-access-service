@@ -155,25 +155,19 @@ pmtiles:
       maxzoom: 12
 tiler:
   config:
+    root_prefix: "tiler_re_layout"
     # The live tiler API.
     api:
       store_refresh_interval_hours: 4
-      thread_pool_size: 10
+      thread_pool_size: 20
       animation_workers: 2
       trim_threshold_mb: 2800
-      # L1 slice cache. "none" disables it; "redis" shares it across
-      # instances - see memoizer.create_memoizer.
-      cache:
-        backend: "redis"
-        ttl_seconds: 3600
-        host: "localhost"
-        port: 6379
       duckdb:
-        memory_limit: "256MB"
+        memory_limit: "1GB"
         threads: 4
-    # The batch zarr -> parquet job (batch.tiler.generator).
     batch:
-      max_chunks_per_run: null
+      # Zarr time chunks converted per store per run, newest firs. Null = all.
+      max_chunks_per_run: 2
       use_fork_process: True
       duckdb:
         temp_dir_prefix: "tiler_batch_duckdb_tmp"

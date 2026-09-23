@@ -28,12 +28,13 @@ from data_access_service.tiler.services.store.sparse_grid import (
 )
 from data_access_service.tiler.utils.image import encode_rgba
 
+EMPTY_RANGE = (0.0, 1.0)
+
 
 def _var_range(grid: SparseGrid) -> tuple[float, float]:
     lo, hi = grid.vmin, grid.vmax
-    # All-NaN slice: use any range; every pixel is masked anyway.
     if math.isnan(lo) or math.isnan(hi):
-        return (0.0, 1.0)
+        return EMPTY_RANGE
     return (lo, hi) if hi != lo else (lo, lo + 1.0)
 
 

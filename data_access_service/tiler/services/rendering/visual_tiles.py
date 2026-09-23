@@ -62,6 +62,10 @@ _OVERSAMPLE = 4
 # has neighbours to interpolate between.
 _AVG_OVERSAMPLE = 2
 
+# The most cells one part reads. A 256 tile stays under it; a large bbox or
+# animation frame would otherwise read the whole grid cell for cell.
+_MAX_READ_CELLS = 2048 * 2048
+
 
 def warmup_visual() -> None:
     """Warm up rio-tiler and GDAL at startup, so the first tile isn't slow."""
@@ -251,11 +255,16 @@ def _steps(
     ``(1, 1)`` means the window is already near the output's own resolution,
     so it is read cell for cell and the tile comes out exactly as it always
     did. Anything more means there is something to aggregate.
+
+    Past ``_MAX_READ_CELLS``, the steps grow to about one cell per output
+    pixel.
     """
-    return (
-        max(1, n_rows // max(1, out_height * _OVERSAMPLE)),
-        max(1, n_cols // max(1, out_width * _OVERSAMPLE)),
-    )
+    row_step = max(1, n_rows // max(1, out_height * _OVERSAMPLE))
+    col_step = max(1, n_cols // max(1, out_width * _OVERSAMPLE))
+    if (n_rows // row_step) * (n_cols // col_step) > _MAX_READ_CELLS:
+        row_step = max(row_step, -(-n_rows // max(1, out_height)))
+        col_step = max(col_step, -(-n_cols // max(1, out_width)))
+    return row_step, col_step
 
 
 def _is_run(idx: np.ndarray) -> bool:
@@ -272,6 +281,11 @@ def _centres(coords: np.ndarray, edges: np.ndarray, offset: int) -> np.ndarray:
     return np.add.reduceat(coords, at) / np.diff(edges)
 
 
+def _block_count(n: int, out: int, step: int) -> int:
+    """Blocks along one axis of an aggregated window."""
+    return min(n, out * _AVG_OVERSAMPLE, max(out, n // step))
+
+
 def _aggregate_window(
     grid: SparseGrid,
     lat: np.ndarray,
@@ -281,8 +295,13 @@ def _aggregate_window(
     src_cols: np.ndarray,
     out_height: int,
     out_width: int,
+    row_step: int,
+    col_step: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """The window as block means at ``_AVG_OVERSAMPLE`` blocks per output pixel.
+
+    Where ``_steps`` capped the read, only as many blocks as the steps leave
+    cells, but never fewer than the output has pixels (or the window cells).
 
     Averages every cell rather than sampling one per block, and never builds
     the window at the grid's own resolution.
@@ -291,8 +310,8 @@ def _aggregate_window(
     values, row_edges, col_edges = grid.aggregate(
         rows,
         src,
-        out_height * _AVG_OVERSAMPLE,
-        out_width * _AVG_OVERSAMPLE,
+        _block_count(rows.stop - rows.start, out_height, row_step),
+        _block_count(src.stop - src.start, out_width, col_step),
     )
     lat_coords = _centres(lat[rows], row_edges, rows.start)
     lon_coords = _centres(part_lon[cols], col_edges, src.start)
@@ -357,7 +376,16 @@ def _parts_in_bbox(
         # be sliced, so either one falls back to sampling every n-th cell.
         if (row_step > 1 or col_step > 1) and not categorical and _is_run(src_cols):
             values, lat_coords, lon_coords = _aggregate_window(
-                grid, lat, part.lon, rows, cols, src_cols, out_height, out_width
+                grid,
+                lat,
+                part.lon,
+                rows,
+                cols,
+                src_cols,
+                out_height,
+                out_width,
+                row_step,
+                col_step,
             )
         else:
             lat_coords = lat[rows][::row_step]

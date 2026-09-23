@@ -5,16 +5,60 @@ at the same positions in ``value``.
 """
 
 from dataclasses import dataclass, field
+from typing import Protocol
 
 import numpy as np
 
-# int16 holds any index below this; bigger grids keep int32.
-_INT16_LIMIT = np.iinfo(np.int16).max + 1
+
+class GridSource(Protocol):
+    """What the renderers read from one variable's slice. ``SparseGrid``
+    holds the cells in memory; ``ParquetGridSource`` asks DuckDB for each
+    answer instead."""
+
+    @property
+    def n_i(self) -> int: ...
+
+    @property
+    def n_j(self) -> int: ...
+
+    @property
+    def vmin(self) -> float: ...
+
+    @property
+    def vmax(self) -> float: ...
+
+    def value_at(self, i: int, j: int) -> float: ...
+
+    def gather(self, rows: np.ndarray, cols: np.ndarray) -> np.ndarray: ...
+
+    def aggregate(
+        self, rows: slice, cols: slice, out_rows: int, out_cols: int
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]: ...
+
+    def aggregate_blocks(
+        self, row_edges: np.ndarray, col_edges: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]: ...
 
 
-def index_dtype(n: int) -> np.dtype:
-    """The smallest dtype for indexes ``0..n-1``."""
-    return np.dtype(np.int16 if n <= _INT16_LIMIT else np.int32)
+def window_edges(
+    rows: slice, cols: slice, out_rows: int, out_cols: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """The block edges ``aggregate`` uses: equal blocks over the window, and
+    no more blocks than cells."""
+    r0, r1 = rows.start, rows.stop
+    c0, c1 = cols.start, cols.stop
+    out_rows = max(1, min(out_rows, r1 - r0))
+    out_cols = max(1, min(out_cols, c1 - c0))
+    row_edges = np.linspace(r0, r1, out_rows + 1).astype(np.intp)
+    col_edges = np.linspace(c0, c1, out_cols + 1).astype(np.intp)
+    return row_edges, col_edges
+
+
+def block_means(total: np.ndarray, count: np.ndarray) -> np.ndarray:
+    """Block sums and counts to float32 means, NaN where a block is empty."""
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean = np.where(count > 0, total / count, np.nan)
+    return mean.astype(np.float32)
 
 
 @dataclass(frozen=True)
@@ -98,13 +142,7 @@ class SparseGrid:
         block holds no values, and the edges are the source indexes each
         block spans, for working out its coordinates.
         """
-        r0, r1 = rows.start, rows.stop
-        c0, c1 = cols.start, cols.stop
-        out_rows = max(1, min(out_rows, r1 - r0))
-        out_cols = max(1, min(out_cols, c1 - c0))
-        row_edges = np.linspace(r0, r1, out_rows + 1).astype(np.intp)
-        col_edges = np.linspace(c0, c1, out_cols + 1).astype(np.intp)
-        return self.aggregate_blocks(row_edges, col_edges)
+        return self.aggregate_blocks(*window_edges(rows, cols, out_rows, out_cols))
 
     def aggregate_blocks(
         self, row_edges: np.ndarray, col_edges: np.ndarray
@@ -141,19 +179,7 @@ class SparseGrid:
             )
             count[k] = np.bincount(hit, minlength=out_cols)
 
-        with np.errstate(invalid="ignore", divide="ignore"):
-            mean = np.where(count > 0, total / count, np.nan)
-        return mean.astype(np.float32), row_edges, col_edges
-
-    def keep(self, valid: np.ndarray) -> "SparseGrid":
-        """Only the cells where the dense (n_i, n_j) mask ``valid`` is True."""
-        keep = np.empty(self.value.size, dtype=bool)
-        row_ptr = np.zeros(self.n_i + 1, dtype=np.int64)
-        for r in range(self.n_i):
-            a, b = self.row_ptr[r], self.row_ptr[r + 1]
-            keep[a:b] = valid[r, self.j[a:b]]
-            row_ptr[r + 1] = row_ptr[r] + np.count_nonzero(keep[a:b])
-        return SparseGrid(self.n_i, self.n_j, row_ptr, self.j[keep], self.value[keep])
+        return block_means(total, count), row_edges, col_edges
 
 
 @dataclass(frozen=True)
@@ -162,7 +188,7 @@ class SparseSlice:
 
     lat: np.ndarray
     lon: np.ndarray
-    grids: dict[str, SparseGrid]
+    grids: dict[str, GridSource]
     attrs: dict[str, dict]
 
     def bounds(self) -> tuple[float, float, float, float]:

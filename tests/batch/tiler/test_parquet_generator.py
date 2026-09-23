@@ -142,6 +142,25 @@ def test_sparse_rows_for_slice_all_nan_is_empty():
     assert gen._sparse_rows_for_slice(np.array([[np.nan, np.nan]])).empty
 
 
+def test_sparse_rows_for_slice_writes_block_by_block(monkeypatch):
+    """Each block's rows come together, blocks in (i, j) order, and (i, j)
+    order within a block - so a row group covers a small area."""
+    monkeypatch.setattr(gen, "BLOCK", 2)
+    arr = np.arange(3 * 5, dtype=np.float64).reshape(3, 5)
+    arr[1, 3] = np.nan
+
+    rows = gen._sparse_rows_for_slice(arr)
+
+    got = list(zip(rows["i"], rows["j"]))
+    block_00 = [(0, 0), (0, 1), (1, 0), (1, 1)]
+    block_01 = [(0, 2), (0, 3), (1, 2)]  # (1, 3) is NaN
+    block_02 = [(0, 4), (1, 4)]
+    blocks_1x = [(2, 0), (2, 1), (2, 2), (2, 3), (2, 4)]
+    assert got == block_00 + block_01 + block_02 + blocks_1x
+    # Values stay with their cells.
+    assert list(rows["value"]) == [arr[i, j] for i, j in got]
+
+
 # --- sync_store (stubbed TilerBatchDuckDBClient + storage) -------------------
 
 OUTPUT_DIR = "s3://my-bucket/tiler"

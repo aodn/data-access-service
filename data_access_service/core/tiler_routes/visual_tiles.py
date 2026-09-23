@@ -25,9 +25,7 @@ from data_access_service.tiler.services.rendering.visual_tiles import (
     render_tile,
 )
 from data_access_service.tiler.services.store.registry import get_available_dates
-from data_access_service.tiler.services.store.slice_loader import (
-    load_slice_uncached,
-)
+from data_access_service.tiler.services.store.slice_loader import load_slice
 from data_access_service.tiler.services.store.spatial import (
     bbox_to_wgs84,
     default_bbox_from_store,
@@ -474,9 +472,8 @@ def _load_frame(
     width: int,
     height: int,
 ) -> BboxFrame:
-    """Read one frame and keep only its bbox, so the whole slice is freed
-    before the next one is read."""
-    sparse = load_slice_uncached(product.store, ts, [variable], product.ocean_masked)
+    """Read one frame, only as much of it as its bbox needs."""
+    sparse = load_slice(product.store, ts, [variable], product.ocean_masked)
     return cut_frame(
         sparse,
         variable,

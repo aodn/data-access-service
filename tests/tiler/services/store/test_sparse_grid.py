@@ -2,10 +2,7 @@
 
 import numpy as np
 
-from data_access_service.tiler.services.store.sparse_grid import (
-    SparseGrid,
-    index_dtype,
-)
+from data_access_service.tiler.services.store.sparse_grid import SparseGrid
 from tests.tiler.sparse_helpers import dense_of
 
 
@@ -54,18 +51,6 @@ def test_an_empty_grid_is_all_nan():
     assert np.isnan(dense_of(grid)).all()
 
 
-def test_keep_drops_cells_outside_the_mask():
-    arr = _dense(10, 12)
-    valid = np.random.default_rng(2).random(arr.shape) < 0.5
-    kept = _from_dense(arr).keep(valid)
-    np.testing.assert_array_equal(dense_of(kept), np.where(valid, arr, np.nan))
-
-
-def test_index_dtype_uses_int16_while_it_fits():
-    assert index_dtype(32768) == np.int16
-    assert index_dtype(32769) == np.int32
-
-
 def test_value_at_returns_the_cell_or_nan():
     arr = _dense(10, 12)
     grid = _from_dense(arr)
@@ -89,12 +74,6 @@ def test_min_and_max_of_an_empty_grid_are_nan():
     empty = np.array([], dtype=np.int16)
     grid = SparseGrid.from_rows(empty, empty, np.array([], np.float32), 1, 1)
     assert np.isnan(grid.vmin) and np.isnan(grid.vmax)
-
-
-def test_keep_updates_min_and_max():
-    arr = np.array([[1.0, 5.0]], dtype=np.float32)
-    kept = _from_dense(arr).keep(np.array([[True, False]]))
-    assert (kept.vmin, kept.vmax) == (1.0, 1.0)
 
 
 def _block_nanmean(arr, rows, cols, out_r, out_c):

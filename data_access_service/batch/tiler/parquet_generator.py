@@ -112,15 +112,27 @@ def _same_content(a: TilerParquetMetadata, b: TilerParquetMetadata) -> bool:
     return replace(a, generated_at="") == replace(b, generated_at="")
 
 
+# Rows are written block by block, BLOCK x BLOCK cells at a time, so each row
+# group covers a small area and a bbox skips row groups in both directions.
+# Nearby j values also compress better than whole rows of them.
+BLOCK = 256
+
+
 def _sparse_rows_for_slice(arr: np.ndarray) -> pd.DataFrame:
-    """A (lat, lon) slice as (i, j, value) rows, NaNs dropped."""
+    """A (lat, lon) slice as (i, j, value) rows, NaNs dropped, in ``BLOCK``
+    order (by (i, j) within a block)."""
     finite = np.isfinite(arr)
     i_idx, j_idx = np.nonzero(finite)
+    value = arr[finite]
+    # nonzero gives (i, j) order; a stable sort by block keeps it within each.
+    blocks_across = -(-arr.shape[1] // BLOCK)
+    block = (i_idx // BLOCK) * blocks_across + j_idx // BLOCK
+    order = np.argsort(block.astype(np.int32), kind="stable")
     return pd.DataFrame(
         {
-            "i": i_idx.astype(np.int32),
-            "j": j_idx.astype(np.int32),
-            "value": arr[finite].astype(np.float32),
+            "i": i_idx[order].astype(np.int32),
+            "j": j_idx[order].astype(np.int32),
+            "value": value[order].astype(np.float32),
         }
     )
 

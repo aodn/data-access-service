@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import numpy as np
 import pandas as pd
+import pytest
 import xarray as xr
 
 import data_access_service.tiler.services.product.registry as registry
@@ -10,6 +11,10 @@ from data_access_service.tiler.services.product.product import (
     CoastalFill,
     DataTileConfig,
     Product,
+)
+from data_access_service.tiler.services.rendering.data_tiles import (
+    EMPTY_RANGE,
+    _var_range,
 )
 from data_access_service.tiler.services.store.sparse_grid import SparseSlice
 from tests.tiler.sparse_helpers import sparse_of
@@ -374,6 +379,55 @@ def test_manifest_ok(client):
         )
     assert response.status_code == 200
     assert response.json() == payload
+
+
+def _all_nan(*variables: str) -> SparseSlice:
+    ds = _make_ds()
+    lat, lon = ds.lat, ds.lon
+    return _make_sparse(
+        xr.Dataset(
+            {
+                v: xr.DataArray(
+                    np.full((8, 8), np.nan),
+                    dims=["lat", "lon"],
+                    coords={"lat": lat, "lon": lon},
+                )
+                for v in variables
+            }
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "product_id, variables, ranges",
+    [
+        ("sea_level_anomaly", ["GSLA"], ["valueRange"]),
+        ("ocean_current", ["UCUR", "VCUR"], ["uRange", "vRange"]),
+    ],
+)
+def test_manifest_of_a_date_with_no_values(client, product_id, variables, ranges):
+    """A variable with no values at a date (it happens: an all-NaN day of one
+    variable of a store) used to 500 - its range came out as nulls. It reports
+    the range its tiles are encoded with instead."""
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.data_tiles.get_lod_grids",
+            return_value=_LOD_GRIDS,
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.shared.load_slice",
+            return_value=_all_nan(*variables),
+        ),
+    ):
+        response = client.get(
+            f"/api/v1/das/tiler/data_tiles/{product_id}/manifest.json"
+            "?date=2024-01-01T00:00:00Z"
+        )
+    assert response.status_code == 200
+    for name in ranges:
+        assert response.json()[name] == list(EMPTY_RANGE)
+    grid = _all_nan(variables[0]).grids[variables[0]]
+    assert list(_var_range(grid)) == list(EMPTY_RANGE)
 
 
 def test_manifest_categorical_flag_fields_pass_through(client):

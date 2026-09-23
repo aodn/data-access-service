@@ -1,8 +1,7 @@
 """loader.load_slice + exact-instant resolution.
 
 Existing tests in test_registry.py cover get_store_metadata + get_lod_grids. These cover
-the L1 cache interaction, the duckdb parquet read, and multi-timestamp
-resolution.
+the duckdb parquet reads behind the slice, and multi-timestamp resolution.
 
 The tiler addresses data by exact UTC instant — callers pass an already-parsed
 pd.Timestamp (as core.tiler_routes.shared.parse_date_or_422 produces), and it
@@ -16,9 +15,6 @@ for that half).
 """
 
 import os
-import threading
-import time
-from unittest.mock import MagicMock
 
 import duckdb
 import numpy as np
@@ -27,13 +23,13 @@ import pytest
 
 import data_access_service.tiler.services.store.slice_loader as loader
 import data_access_service.tiler.services.store.tiler_repository as repo_module
+from data_access_service.tiler.services.store.parquet_grid_source import value_range
 from data_access_service.models.tiler_parquet_types import (
     TilerParquetMetadata,
     TilerVariableMetadata,
     variable_parquet_path,
 )
 from data_access_service.tiler.services.store.registry import store_registry
-from data_access_service.tiler.services.store.sparse_grid import SparseGrid
 from tests.tiler.sparse_helpers import dense_of
 
 STORE = "x"
@@ -41,10 +37,13 @@ STORE = "x"
 
 @pytest.fixture(autouse=True)
 def isolate_caches():
-    """Clear the store registry before/after each test."""
+    """Clear the store registry and the value ranges before/after each test:
+    every test writes different values under the same store and date."""
     store_registry.clear()
+    value_range.cache_clear()
     yield
     store_registry.clear()
+    value_range.cache_clear()
 
 
 @pytest.fixture(autouse=True)
@@ -182,9 +181,7 @@ def test_load_slice_reads_only_the_requested_timestamp(tiler_root_dir):
         ],
     )
 
-    result = loader.load_slice_uncached(
-        STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"]
-    )
+    result = loader.load_slice(STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"])
     assert result.grids["v"].value_at(0, 0) == 1.0
 
 
@@ -228,128 +225,25 @@ def test_load_slice_without_ocean_masked_keeps_all_cells(tiler_root_dir):
     assert not np.isnan(dense_of(result.grids["v"])).any()
 
 
-# --- concurrent stampede protection (always in-process, independent of CACHE_BACKEND) ---
-
-
-def test_concurrent_identical_loads_share_one_compute(tiler_root_dir, monkeypatch):
-    """Even under CACHE_BACKEND=none (no cache backend), concurrent identical
-    load_slice calls must share one _compute_slice_from_store, not each redo the
-    parquet read independently. This is what `_slice_dedup` (services.caching.deduper)
-    protects — see its docstring for why this matters even without a cache."""
-    _seed_metadata(["2024-01-15T13:00:00"], [0.0], [0.0])
+def test_load_slice_ocean_masked_range_ignores_masked_cells(tiler_root_dir):
+    """The footer's min/max covers every cell in the file, so a masked
+    product must work its range out from the kept cells only."""
+    _seed_metadata(["2024-01-15T13:00:00"], [-40.0, -6.4], [150.0, 137.0])
     _write_variable_parquet(
-        tiler_root_dir, "v", [(_ts("2024-01-15T13:00:00"), 0, 0, 1.0)]
+        tiler_root_dir,
+        "v",
+        [
+            (_ts("2024-01-15T13:00:00"), 0, 0, 1.0),  # ocean
+            (_ts("2024-01-15T13:00:00"), 1, 1, 99.0),  # New Guinea, masked
+        ],
     )
+    ts = pd.Timestamp("2024-01-15T13:00:00")
 
-    calls = 0
-    proceed = threading.Event()
-    real_compute = loader._compute_slice_from_store
+    masked = loader.load_slice(STORE, ts, ["v"], ocean_masked=True).grids["v"]
+    unmasked = loader.load_slice(STORE, ts, ["v"]).grids["v"]
 
-    def slow_compute(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        proceed.wait(timeout=2)
-        return real_compute(*args, **kwargs)
-
-    monkeypatch.setattr(loader, "_compute_slice_from_store", slow_compute)
-
-    results: list = []
-
-    def worker():
-        results.append(
-            loader.load_slice(STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"])
-        )
-
-    threads = [threading.Thread(target=worker) for _ in range(4)]
-    for t in threads:
-        t.start()
-    time.sleep(0.1)  # let all threads register on the in-flight key
-    proceed.set()
-    for t in threads:
-        t.join(timeout=2)
-
-    assert (
-        calls == 1
-    ), "expected exactly one compute; the rest should share it via _slice_dedup"
-    assert len(results) == 4
-
-
-def test_cold_reads_are_limited_to_the_configured_concurrency(
-    tiler_root_dir, monkeypatch
-):
-    days = [f"2024-01-{n:02d}T00:00:00" for n in range(1, 9)]
-    _seed_metadata(days, [0.0], [0.0])
-
-    lock = threading.Lock()
-    active = 0
-    peak = 0
-
-    def slow_fetch(self, *args, **kwargs):
-        nonlocal active, peak
-        with lock:
-            active += 1
-            peak = max(peak, active)
-        time.sleep(0.05)
-        with lock:
-            active -= 1
-        return SparseGrid.from_rows(
-            np.array([0]), np.array([0]), np.zeros(1, np.float32), 1, 1
-        )
-
-    monkeypatch.setattr(
-        repo_module.TilerParquetRepository, "fetch_variable_slice", slow_fetch
-    )
-
-    threads = [
-        threading.Thread(
-            target=loader.load_slice_uncached, args=(STORE, pd.Timestamp(d), ["v"])
-        )
-        for d in days
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=5)
-
-    assert peak == loader.COLD_READ_CONCURRENCY
-
-
-def test_cache_hit_skips_the_cold_read_limit(tiler_root_dir, monkeypatch):
-    _seed_metadata(["2024-01-15T13:00:00"], [0.0], [0.0])
-    cached = {
-        "v": SparseGrid.from_rows(
-            np.array([0]), np.array([0]), np.ones(1, np.float32), 1, 1
-        )
-    }
-    monkeypatch.setattr(
-        loader.slice_memo, "get_or_compute", lambda key, factory: cached
-    )
-    limit = MagicMock()
-    monkeypatch.setattr(loader, "_COLD_READ_LIMIT", limit)
-
-    loader.load_slice(STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"])
-
-    limit.__enter__.assert_not_called()
-
-
-def test_the_cache_holds_the_sparse_grids(tiler_root_dir, monkeypatch):
-    _seed_metadata(["2024-01-15T13:00:00"], [0.0, 1.0], [0.0, 1.0])
-    _write_variable_parquet(
-        tiler_root_dir, "v", [(_ts("2024-01-15T13:00:00"), 1, 0, 5.0)]
-    )
-    stored = []
-
-    def memo(key, factory):
-        stored.append(factory())
-        return stored[-1]
-
-    monkeypatch.setattr(loader.slice_memo, "get_or_compute", memo)
-
-    result = loader.load_slice(STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"])
-
-    assert isinstance(stored[0]["v"], SparseGrid)
-    assert result.grids["v"] is stored[0]["v"]
-    assert result.grids["v"].value_at(1, 0) == 5.0
+    assert (masked.vmin, masked.vmax) == (1.0, 1.0)
+    assert (unmasked.vmin, unmasked.vmax) == (1.0, 99.0)
 
 
 def test_load_slice_carries_the_store_coords_and_attrs(tiler_root_dir):
