@@ -1,10 +1,18 @@
 import logging
 import threading
+from abc import ABC
+from datetime import timedelta
 
 from aodn_cloud_optimised.lib.DataQuery import (
     BUCKET_OPTIMISED_DEFAULT,
     Metadata,
     DataSource,
+)
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
 )
 
 from data_access_service.exceptions.dataset_not_found_error import DatasetNotFoundError
@@ -44,7 +52,17 @@ def resolve_dataset_location(dataset_name: str) -> DatasetLocation:
     return DatasetLocation(bucket=BUCKET_OPTIMISED_DEFAULT)
 
 
-class CODataRegistry:
+class CODataRegistry(ABC):
+
+    # 5 minutes in seconds = 300
+    MIN_WAIT_SECONDS = timedelta(minutes=5)
+
+    # 30 minutes in seconds = 1800
+    MAX_WAIT_SECONDS = timedelta(minutes=30)
+
+    # The wait will be in mins -> 5, 5, ... 5, 10, 20 30
+    MAX_READ_ATTEMPTS = 11
+
     def __init__(self):
         log.info("Initializing all Cloud Optimized data sources...")
         self.data_source_list: list[AbstractDataSrc] = [AodnDataSrc(), CsiroDataSrc()]
@@ -54,6 +72,20 @@ class CODataRegistry:
         self._datasets: dict[str, DataSource] = {}
         self._datasets_lock = threading.Lock()
         log.info("All Cloud Optimized data sources initialized")
+
+    def log_retry_attempt(self, retry_state) -> None:
+        attempt_num = retry_state.attempt_number
+        exception_thrown = retry_state.outcome.exception()
+        next_wait_minutes = round(retry_state.next_action.sleep / 60, 1)
+        log.warning(
+            "[Retry Alert] get_dataset failed on attempt #%s.\n"
+            "Error details: %s\n"
+            "Waiting %s minute(s) before attempt #%s...",
+            attempt_num,
+            exception_thrown,
+            next_wait_minutes,
+            attempt_num + 1,
+        )
 
     # since only catalog in DataQuery.Metadata is using by this project now, so only combine the catalogs for now.
     def get_metadata(self) -> Metadata:
@@ -83,7 +115,20 @@ class CODataRegistry:
         log.info("Metadata retrieved from all data source")
         return metadata
 
-    def get_dataset(self, dataset_name_with_ext: str) -> DataSource:
+    # Bug in tenacity, the type check always fail but function ok
+    # noinspection PyCallingNonCallable
+    @retry(
+        stop=stop_after_attempt(MAX_READ_ATTEMPTS),
+        wait=wait_exponential(multiplier=1, min=MIN_WAIT_SECONDS, max=MAX_WAIT_SECONDS),
+        retry=retry_if_exception_type(ValueError),
+        # args[0] is self: tenacity stores the undecorated function in
+        # retry_state.fn, so it has no __self__ to read the instance from.
+        before_sleep=lambda retry_state: retry_state.args[0].log_retry_attempt(
+            retry_state
+        ),
+        reraise=True,
+    )
+    def get_dataset(self, dataset_name_with_ext: str) -> DataSource | None:
         with self._datasets_lock:
             cached = self._datasets.get(dataset_name_with_ext)
             if cached is not None:

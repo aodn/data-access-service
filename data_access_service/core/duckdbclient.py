@@ -409,6 +409,8 @@ class PmTileDuckDBClient(DuckDBClient):
                 except Exception:
                     log.exception("DuckDB temp directory cleanup failed")
 
+    # Bug in tenacity, the type check always fail but function ok
+    # noinspection PyCallingNonCallable
     @retry(
         stop=stop_after_attempt(MAX_READ_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=MIN_WAIT_SECONDS, max=MAX_WAIT_SECONDS),
@@ -869,7 +871,7 @@ class EstimationDuckDBClient(DuckDBClient):
         self._lock = Lock()
         self._con = self.get_instance()
 
-    def get_instance(self) -> duckdb.DuckDBPyConnection:
+    def get_instance(self) -> duckdb.DuckDBPyConnection | None:
         """Initialize this client's owned in-memory connection if it does not exist.
 
         Only httpfs is loaded: the index parquet is read from S3, and the JSON
