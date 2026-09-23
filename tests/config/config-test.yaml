@@ -17,3 +17,8 @@ sites:
   config:
     duckdb_database: ":memory:"
     threads: 8
+subsetting:
+  config:
+    # Fixed ceiling for the chunk-size tests. Base config.yaml may use a
+    # different max_chunk_gb; pytest loads this overlay.
+    max_chunk_gb: 4
