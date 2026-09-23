@@ -91,13 +91,29 @@ def subset_zarr(
     if apply_mask:
         mask = area_mask(subset, lat_name, lon_name, bboxes, geometry)
         if mask is not None:
-            # NOTE: KEEP drop=False
-            # The size estimate SKIPS this .where() and relies on the
-            # invariant that .where(drop=False). Switching to drop=True would
-            # silently making estimate wrong. If you must change it, update
-            # the estimation path to match.
-            subset = subset.where(mask, drop=False)
+            subset = _mask_gridded_vars(subset, mask)
     return subset
+
+
+def _mask_gridded_vars(dataset: xarray.Dataset, mask: DataArray) -> xarray.Dataset:
+    """Blank cells outside the mask, only on variables that already have its dims.
+
+    Dataset.where broadcasts every variable onto the mask. A scalar CF
+    grid-mapping variable such as ``crs`` would become a lat/lon array and
+    then be written out as if it were a measured field. Then we have
+    case where lat/lon and then missing time field where the broadcast
+    the crs field instead
+    """
+    mask_dims = set(mask.dims)
+    names = [
+        name for name, var in dataset.data_vars.items() if mask_dims.issubset(var.dims)
+    ]
+    if not names:
+        return dataset
+    # NOTE: KEEP drop=False — see subset_zarr. The estimate skips this mask
+    # and would be wrong if it changed the shape.
+    masked = dataset[names].where(mask, drop=False)
+    return dataset.assign({name: masked[name] for name in names})
 
 
 def area_mask(

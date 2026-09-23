@@ -12,6 +12,9 @@ Each test maps to a goal from the download-service evaluation doc:
                                                     + Goal 2 (valid GeoTIFF -> QGIS-loadable)
   - test_matches_netcdf_original                  : Goal 3 (data == netCDF)
   - test_matches_cloud_optimised_source           : Goal 4 (data == cloud-optimised zarr)
+  - test_skewed_polygon_does_not_export_scalar_crs : a non-rectangular polygon
+                                                    runs the area mask; scalar crs
+                                                    must not become a fifth raster
 
 Shared mock-patching and temp cleanup live in the `_env` fixture, so each test
 body reads inline. Unit tests of the geotiff_export module (incl. the I/J 2D->1D
@@ -56,6 +59,20 @@ def _bbox_polygon(west, south, east, north):
         '{"type":"MultiPolygon","coordinates":[[['
         f"[{west},{north}],[{west},{south}],[{east},{south}],"
         f"[{east},{north}],[{west},{north}]"
+        "]]]}"
+    )
+
+
+def _skewed_polygon():
+    """A quadrilateral inside the Tasman window that is not its own bounding box.
+
+    The rectangle helper above is cropped and never masked. This shape forces
+    the area mask, which used to broadcast the scalar ``crs`` onto lat/lon and
+    then fail GeoTIFF export by selecting ``time`` on it.
+    """
+    return (
+        '{"type":"MultiPolygon","coordinates":[[['
+        "[150.0,-38.0],[151.8,-38.4],[151.5,-40.0],[150.3,-39.6],[150.0,-38.0]"
         "]]]}"
     )
 
@@ -148,6 +165,59 @@ class TestGeotiffExportWithS3(TestWithS3):
                     # clipped to within the requested bbox (allow one cell of edge).
                     assert bounds.left >= WEST - 0.1 and bounds.right <= EAST + 0.1
                     assert bounds.bottom >= SOUTH - 0.1 and bounds.top <= NORTH + 0.1
+
+    def test_skewed_polygon_does_not_export_scalar_crs(
+        self, aws_clients, upload_samples_to_s3, subset_request_factory
+    ):
+        """A non-rectangular polygon still exports only the gridded fields.
+
+        The canned store's ``crs`` is a scalar. Masking must not turn it into a
+        lat/lon variable, or the GeoTIFF writer raises KeyError selecting time.
+        """
+        config = Config.get_config()
+        helper = AWSHelper()
+        api = API()
+        api.initialize_metadata()
+        base = KEY.replace(".zarr", "")
+
+        ZarrProcessor(
+            api,
+            job_id=JOB_ID,
+            subset_request=subset_request_factory(
+                uuid=UUID,
+                keys=[KEY],
+                start_date=REQUESTED_DATE,
+                end_date=REQUESTED_DATE,
+                output_format="geotiff",
+                multi_polygon=_skewed_polygon(),
+            ),
+        ).process()
+
+        files = helper.list_all_s3_objects(config.get_subsetting_bucket_name(), "")
+        zip_keys = [f for f in files if f.endswith(f"{DOWNLOAD_NAME}.zip")]
+        assert len(zip_keys) == 1, f"expected one geotiff ZIP, got {zip_keys}"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            local_zip = Path(tmp) / "output.zip"
+            helper.download_file_from_s3(
+                config.get_subsetting_bucket_name(), zip_keys[0], str(local_zip)
+            )
+            with zipfile.ZipFile(local_zip) as zf:
+                tif_names = zf.namelist()
+                zf.extractall(tmp)
+
+            assert {n.split("/")[0] for n in tif_names} == {
+                "analysed_sst",
+                "analysis_error",
+                "mask",
+                "sea_ice_fraction",
+            }
+            for name in tif_names:
+                var = name.split("/")[0]
+                assert name == f"{var}/{base}_{var}_{REQUESTED_DATE}.tif"
+                with rasterio.open(Path(tmp) / name) as raster:
+                    assert raster.crs.to_epsg() == 4326
+                    assert raster.count == 1
 
     def test_matches_netcdf_original(
         self, aws_clients, upload_samples_to_s3, subset_request_factory
