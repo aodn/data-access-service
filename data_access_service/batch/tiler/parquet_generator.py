@@ -234,6 +234,8 @@ def sync_store(
     with TilerBatchDuckDBClient(duckdb_config) as client:
         for n, batch_raw_ts in enumerate(batches, start=1):
             changed = False
+            # Drop the last chunk before reading the next, or both are held at once。
+            ds = None
             ds = _fetch_batch(store, variables, batch_raw_ts)
             batch_ts_set = {_ts_native(t) for t in batch_raw_ts}
             # Long runs can outlive the S3 credentials.

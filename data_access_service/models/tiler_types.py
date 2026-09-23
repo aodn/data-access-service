@@ -8,6 +8,9 @@ class TilerDuckDBConfig:
 
     memory_limit: str
     threads: int
+    enable_external_file_cache: bool
+    parquet_metadata_cache: bool
+    enable_http_metadata_cache: bool
 
 
 @dataclass(frozen=True)

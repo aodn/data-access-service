@@ -155,7 +155,7 @@ pmtiles:
       maxzoom: 12
 tiler:
   config:
-    root_prefix: "tiler_re_layout"
+    root_prefix: "tiler"
     # The live tiler API.
     api:
       store_refresh_interval_hours: 4
@@ -165,13 +165,17 @@ tiler:
       duckdb:
         memory_limit: "1GB"
         threads: 4
+        # Same parquet is queried by many tiles, so all three caches
+        # enabled go together, parquet footers, HTTP metadata, file bytes.
+        enable_external_file_cache: True
+        parquet_metadata_cache: True
+        enable_http_metadata_cache: True
     batch:
       # Zarr time chunks converted per store per run, newest firs. Null = all.
       max_chunks_per_run: 2
       use_fork_process: True
       duckdb:
         temp_dir_prefix: "tiler_batch_duckdb_tmp"
-        # TODO: investigate if 3G enough, as a large ZARR store can be larger than 3G.
         memory_limit: "3G"
         threads: 3
   # Which zarr stores/variables batch turns into products

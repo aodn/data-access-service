@@ -964,13 +964,13 @@ class TilerDuckDBClient(DuckDBClient):
                     db_config = {
                         "memory_limit": self._config.memory_limit,
                         "threads": str(int(self._config.threads)),
-                        # Keep what's read from S3, so a date is fetched once
-                        # and every tile of it reads the same copy. Bounded
-                        # by memory_limit. Batch never rewrites a file.
-                        # TODO: investiate the cache eviction for this duckdb buffer cache, so it will not keep stale cache and compete with cache in tiler.
-                        "enable_external_file_cache": True,
-                        "parquet_metadata_cache": True,
-                        "enable_http_metadata_cache": True,
+                        "enable_external_file_cache": (
+                            self._config.enable_external_file_cache
+                        ),
+                        "parquet_metadata_cache": self._config.parquet_metadata_cache,
+                        "enable_http_metadata_cache": (
+                            self._config.enable_http_metadata_cache
+                        ),
                     }
                     db = duckdb.connect(database=":memory:", config=db_config)
                     db.execute("INSTALL httpfs; LOAD httpfs;")
