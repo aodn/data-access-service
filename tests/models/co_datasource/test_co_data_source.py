@@ -463,6 +463,22 @@ class TestCODataRegistry:
         mock_aodn_src.get_dataset.assert_called_once()
         mock_csiro_src.get_dataset.assert_called_once()
 
+    def test_get_dataset_retries_value_error_then_succeeds(self, monkeypatch):
+        # Patch the time, so the test is not really waiting before
+        # next retry
+        monkeypatch.setattr("time.sleep", lambda _seconds: None)
+        registry, mock_aodn_src, _ = _make_registry()
+        expected = MagicMock()
+        mock_aodn_src.get_dataset.side_effect = [
+            ValueError("zarr store unavailable"),
+            expected,
+        ]
+
+        result = registry.get_dataset("aodn_dataset.parquet")
+
+        assert result is expected
+        assert mock_aodn_src.get_dataset.call_count == 2
+
     def test_get_dataset_raises_when_not_found_in_any_source(self):
         registry, mock_aodn_src, mock_csiro_src = _make_registry()
 
