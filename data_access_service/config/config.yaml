@@ -48,7 +48,7 @@ sites:
     duckdb_temp_dir: "parquet_duckdb_tmp"
     co_bucket: "aodn-cloud-optimised"
     memory_limit: "800M"
-    threads: 4
+    threads: 2
     region: "ap-southeast-2"
     reload_interval_hours: 2
 subsetting:
@@ -164,7 +164,7 @@ tiler:
       trim_threshold_mb: 2800
       duckdb:
         memory_limit: "1GB"
-        threads: 4
+        threads: 2
         # Same parquet is queried by many tiles, so all three caches
         # enabled go together, parquet footers, HTTP metadata, file bytes.
         enable_external_file_cache: True
