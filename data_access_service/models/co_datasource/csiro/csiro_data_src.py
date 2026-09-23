@@ -11,6 +11,7 @@ Two very different readers need that access, so both live here:
 
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -24,6 +25,7 @@ from data_access_service.models.co_datasource.abstract_data_src import (
     CSIRO,
 )
 from data_access_service.models.co_datasource.dataset_location import DatasetLocation
+from data_access_service.utils.retry_utils import log_retry_attempt
 
 log = logging.getLogger(__name__)
 
@@ -72,9 +74,9 @@ def get_csiro_fedora_pid(dataset_name: str) -> Optional[str]:
     return None
 
 
-_CSIRO_RETRY_ATTEMPTS = 3
-_CSIRO_RETRY_MIN_WAIT_SECONDS = 2
-_CSIRO_RETRY_MAX_WAIT_SECONDS = 10
+_CSIRO_RETRY_MIN_WAIT = timedelta(seconds=2)
+_CSIRO_RETRY_MAX_WAIT = timedelta(seconds=10)
+_CSIRO_RETRY_MAX_ATTEMPTS = 3
 
 _CSIRO_ERROR_BODY_CHARS = 500
 
@@ -106,24 +108,15 @@ def _is_retryable(exception: BaseException) -> bool:
     return isinstance(exception, CsiroApiError) and exception.retryable
 
 
-def _log_csiro_retry(retry_state) -> None:
-    log.warning(
-        "CSIRO call failed on attempt #%d (%s); retrying in %.0fs...",
-        retry_state.attempt_number,
-        retry_state.outcome.exception(),
-        retry_state.next_action.sleep,
-    )
-
-
+# Bug in tenacity, the type check always fail but function ok
+# noinspection PyCallingNonCallable
 @retry(
-    stop=stop_after_attempt(_CSIRO_RETRY_ATTEMPTS),
+    stop=stop_after_attempt(_CSIRO_RETRY_MAX_ATTEMPTS),
     wait=wait_exponential(
-        multiplier=1,
-        min=_CSIRO_RETRY_MIN_WAIT_SECONDS,
-        max=_CSIRO_RETRY_MAX_WAIT_SECONDS,
+        multiplier=1, min=_CSIRO_RETRY_MIN_WAIT, max=_CSIRO_RETRY_MAX_WAIT
     ),
     retry=retry_if_exception(_is_retryable),
-    before_sleep=_log_csiro_retry,
+    before_sleep=log_retry_attempt("CSIRO API call", log),
     reraise=True,
 )
 def _call_csiro_api(

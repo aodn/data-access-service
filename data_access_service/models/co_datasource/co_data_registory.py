@@ -24,6 +24,7 @@ from data_access_service.models.co_datasource.aodn_data_src import AodnDataSrc
 from data_access_service.models.co_datasource.csiro.csiro_data_src import CsiroDataSrc
 from data_access_service.models.co_datasource.dataset_location import DatasetLocation
 from data_access_service.utils.common_utils import compare_dict_keys
+from data_access_service.utils.retry_utils import log_retry_attempt
 
 log = logging.getLogger(__name__)
 
@@ -54,14 +55,10 @@ def resolve_dataset_location(dataset_name: str) -> DatasetLocation:
 
 class CODataRegistry(ABC):
 
-    # 5 minutes in seconds = 300
-    MIN_WAIT_SECONDS = timedelta(minutes=5)
-
-    # 30 minutes in seconds = 1800
-    MAX_WAIT_SECONDS = timedelta(minutes=30)
-
-    # The wait will be in mins -> 5, 5, ... 5, 10, 20 30
-    MAX_READ_ATTEMPTS = 11
+    # The wait grows in minutes -> 5, 5, ... 5, 10, 20, 30
+    GET_DATASET_MIN_WAIT = timedelta(minutes=5)
+    GET_DATASET_MAX_WAIT = timedelta(minutes=30)
+    GET_DATASET_MAX_ATTEMPTS = 11
 
     def __init__(self):
         log.info("Initializing all Cloud Optimized data sources...")
@@ -72,20 +69,6 @@ class CODataRegistry(ABC):
         self._datasets: dict[str, DataSource] = {}
         self._datasets_lock = threading.Lock()
         log.info("All Cloud Optimized data sources initialized")
-
-    def log_retry_attempt(self, retry_state) -> None:
-        attempt_num = retry_state.attempt_number
-        exception_thrown = retry_state.outcome.exception()
-        next_wait_minutes = round(retry_state.next_action.sleep / 60, 1)
-        log.warning(
-            "[Retry Alert] get_dataset failed on attempt #%s.\n"
-            "Error details: %s\n"
-            "Waiting %s minute(s) before attempt #%s...",
-            attempt_num,
-            exception_thrown,
-            next_wait_minutes,
-            attempt_num + 1,
-        )
 
     # since only catalog in DataQuery.Metadata is using by this project now, so only combine the catalogs for now.
     def get_metadata(self) -> Metadata:
@@ -118,14 +101,12 @@ class CODataRegistry(ABC):
     # Bug in tenacity, the type check always fail but function ok
     # noinspection PyCallingNonCallable
     @retry(
-        stop=stop_after_attempt(MAX_READ_ATTEMPTS),
-        wait=wait_exponential(multiplier=1, min=MIN_WAIT_SECONDS, max=MAX_WAIT_SECONDS),
-        retry=retry_if_exception_type(ValueError),
-        # args[0] is self: tenacity stores the undecorated function in
-        # retry_state.fn, so it has no __self__ to read the instance from.
-        before_sleep=lambda retry_state: retry_state.args[0].log_retry_attempt(
-            retry_state
+        stop=stop_after_attempt(GET_DATASET_MAX_ATTEMPTS),
+        wait=wait_exponential(
+            multiplier=1, min=GET_DATASET_MIN_WAIT, max=GET_DATASET_MAX_WAIT
         ),
+        retry=retry_if_exception_type(ValueError),
+        before_sleep=log_retry_attempt("get_dataset", log),
         reraise=True,
     )
     def get_dataset(self, dataset_name_with_ext: str) -> DataSource | None:

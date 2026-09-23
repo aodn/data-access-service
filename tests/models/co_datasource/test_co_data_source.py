@@ -198,7 +198,7 @@ def _failing_responses(status_code):
     """One failing response per retry attempt, for the codes that get retried."""
     return [
         _mock_response({}, status_code=status_code)
-        for _ in range(csiro_data_src._CSIRO_RETRY_ATTEMPTS)
+        for _ in range(csiro_data_src._CSIRO_RETRY_MAX_ATTEMPTS)
     ]
 
 
@@ -289,7 +289,7 @@ class TestCsiroDataSrc:
             ):
                 CsiroDataSrc()
 
-        assert mock_get.call_count == csiro_data_src._CSIRO_RETRY_ATTEMPTS
+        assert mock_get.call_count == csiro_data_src._CSIRO_RETRY_MAX_ATTEMPTS
 
     def test_init_retries_a_417_then_succeeds(self):
         # 417 means CSIRO could not mint the keys; it clears on its own.
@@ -313,7 +313,9 @@ class TestCsiroDataSrc:
     def test_init_error_reports_the_response_body(self):
         failing = _mock_response({}, status_code=417)
         failing.text = "collection is being updated"
-        with _patch_csiro_requests(*[failing] * csiro_data_src._CSIRO_RETRY_ATTEMPTS):
+        with _patch_csiro_requests(
+            *[failing] * csiro_data_src._CSIRO_RETRY_MAX_ATTEMPTS
+        ):
             with pytest.raises(Exception, match="collection is being updated"):
                 CsiroDataSrc()
 
