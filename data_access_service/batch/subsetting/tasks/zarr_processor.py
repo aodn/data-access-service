@@ -241,7 +241,7 @@ class ZarrProcessor:
             for var, da in dataset.data_vars.items()
             if da.dtype.kind in {"i", "u", "f"}  # integer, unsigned, float
         }
-        thread_count = get_available_thread_count(self.log)
+        thread_count = get_available_thread_count()
 
         # set the thread count for dask, for the to_netcdf operation later
         dask.config.set(num_workers=thread_count)

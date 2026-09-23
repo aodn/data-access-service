@@ -10,16 +10,10 @@ from data_access_service.config.config import Config
 from data_access_service.models.zarr_chunking_types import ZarrChunkingConfig
 
 
-def get_available_thread_count(log) -> int:
-    """Threads to hand dask. Dev/testing stays single-threaded so local runs and
-    CI are reproducible and don't oversubscribe the box."""
-    if os.getenv("PROFILE") in (None, "dev", "testing"):
-        log.info("Running in dev or testing mode, using 1 thread")
-        return 1
-
-    cpu_count = psutil.cpu_count(logical=True)
-    log.info(f"Available thread count: {cpu_count}")
-    return cpu_count
+def get_available_thread_count() -> int:
+    # There is no need to use multiple threads in this context, the running machine has 8G,
+    # more than 1 will blow up memory, plus interlocks make zarr read less effective.
+    return 1
 
 
 def _chunking_config() -> ZarrChunkingConfig:
@@ -58,7 +52,7 @@ def get_time_steps_per_chunk(
         budget / (1024**3),
     )
     safe_memory_per_thread = int(
-        budget * cfg.memory_fraction / get_available_thread_count(log)
+        budget * cfg.memory_fraction / get_available_thread_count()
     )
     safe_memory_per_thread = max(cfg.min_chunk_bytes, safe_memory_per_thread)
     log.info("Chunk size: %d MB per thread", safe_memory_per_thread / (1024**2))
