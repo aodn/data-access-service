@@ -14,7 +14,7 @@ from data_access_service.models.tiler_parquet_types import (
     store_metadata_path,
 )
 from data_access_service.tiler.utils.dates import ts_to_utc_iso
-from data_access_service.tiler.utils.s3_json import read_json
+from data_access_service.utils.s3_json import read_json
 
 logger = logging.getLogger(__name__)
 

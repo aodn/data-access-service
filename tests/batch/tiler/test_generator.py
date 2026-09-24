@@ -55,10 +55,10 @@ def _batch_config(
 
 def _fake_s3_json_store(monkeypatch) -> dict[str, dict]:
     """In-memory stand-in for S3 objects, keyed by path — patches
-    generator.storage.read_json/write_json so write_root_metadata's upsert
+    generator.read_json and storage.write_json so write_root_metadata's upsert
     logic can be tested without real S3."""
     store: dict[str, dict] = {}
-    monkeypatch.setattr(generator.storage, "read_json", lambda path: store.get(path))
+    monkeypatch.setattr(generator, "read_json", lambda path, **_: store.get(path))
     monkeypatch.setattr(
         generator.storage,
         "write_json",
@@ -82,13 +82,13 @@ class TestGroupByStore:
 
 
 class TestWriteRootMetadataToS3:
-    """No real S3 here — storage.read_json/write_json are mocked, so this
+    """No real S3 here — read_json/write_json are mocked, so this
     only checks write_root_metadata's own upsert logic against whatever
-    storage.read_json returns."""
+    read_json returns."""
 
     def test_upserts_onto_existing_s3_content(self, monkeypatch):
         existing = _root_metadata({"old": [_product("old", "old", "v", uuid="old")]})
-        monkeypatch.setattr(generator.storage, "read_json", lambda path: existing)
+        monkeypatch.setattr(generator, "read_json", lambda path, **_: existing)
         written = {}
         monkeypatch.setattr(
             generator.storage,
@@ -108,7 +108,7 @@ class TestWriteRootMetadataToS3:
         existing = _root_metadata(
             {"x": [_product("p1", "x", "v"), _product("p2", "x", "w")]}
         )
-        monkeypatch.setattr(generator.storage, "read_json", lambda path: existing)
+        monkeypatch.setattr(generator, "read_json", lambda path, **_: existing)
         written = {}
         monkeypatch.setattr(
             generator.storage,
@@ -123,7 +123,7 @@ class TestWriteRootMetadataToS3:
     def test_skips_the_write_when_nothing_changed(self, monkeypatch):
         stores = {"x": [_product("p1", "x", "v")]}
         existing = _root_metadata(stores)
-        monkeypatch.setattr(generator.storage, "read_json", lambda path: existing)
+        monkeypatch.setattr(generator, "read_json", lambda path, **_: existing)
         writes = []
         monkeypatch.setattr(
             generator.storage, "write_json", lambda path, data: writes.append(path)
@@ -136,7 +136,7 @@ class TestWriteRootMetadataToS3:
     def test_a_file_at_another_version_is_rewritten_from_scratch(self, monkeypatch):
         existing = _root_metadata({"old": [_product("old", "old", "v")]})
         existing["version"] = ROOT_METADATA_VERSION + 1
-        monkeypatch.setattr(generator.storage, "read_json", lambda path: existing)
+        monkeypatch.setattr(generator, "read_json", lambda path, **_: existing)
         written = {}
         monkeypatch.setattr(
             generator.storage,
@@ -150,7 +150,7 @@ class TestWriteRootMetadataToS3:
         assert _published_ids(written["data"]) == ["p1"]
 
     def test_does_not_write_an_empty_catalogue(self, monkeypatch):
-        monkeypatch.setattr(generator.storage, "read_json", lambda path: None)
+        monkeypatch.setattr(generator, "read_json", lambda path, **_: None)
         writes = []
         monkeypatch.setattr(
             generator.storage, "write_json", lambda path, data: writes.append(path)
@@ -161,7 +161,7 @@ class TestWriteRootMetadataToS3:
         assert writes == []
 
     def test_writes_fresh_manifest_when_nothing_exists_yet(self, monkeypatch):
-        monkeypatch.setattr(generator.storage, "read_json", lambda path: None)
+        monkeypatch.setattr(generator, "read_json", lambda path, **_: None)
         written = {}
         monkeypatch.setattr(
             generator.storage,

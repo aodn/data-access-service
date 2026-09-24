@@ -31,6 +31,7 @@ from data_access_service.models.tiler_parquet_types import (
 )
 from data_access_service.models.tiler_types import TilerBatchConfig
 from data_access_service.utils.memory_utils import log_memory_usage
+from data_access_service.utils.s3_json import read_json
 
 config = Config.get_config()
 logger = init_log(config)
@@ -122,7 +123,7 @@ def write_root_metadata(
     path = root_metadata_path(tiler_root_dir)
 
     existing: RootMetadata | None = None
-    existing_data = storage.read_json(path)
+    existing_data = read_json(path, required=False)
     if existing_data is not None:
         candidate = RootMetadata.from_dict(existing_data)
         if candidate.version == ROOT_METADATA_VERSION:

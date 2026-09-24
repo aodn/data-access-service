@@ -5,7 +5,7 @@ Uses the same fake-ZarrDataSource pattern as
 tests/batch/tiler/test_zarr_registry.py so no real S3 access is needed for
 reading zarr. sync_store's orchestration (which timestamps, which paths,
 sidecar updates) is tested with a stubbed TilerBatchDuckDBClient and an
-in-memory stand-in for the storage module's S3 JSON calls.
+in-memory stand-in for the S3 JSON reads and writes.
 """
 
 from unittest.mock import MagicMock
@@ -179,7 +179,7 @@ class _Env:
         self.client.write_parquet.side_effect = lambda frame, path: (
             self.events.append(("parquet", path))
         )
-        monkeypatch.setattr(gen.storage, "read_json", self.json.get)
+        monkeypatch.setattr(gen, "read_json", lambda path, **_: self.json.get(path))
         monkeypatch.setattr(gen.storage, "write_json", self._write_json)
         monkeypatch.setattr(gen, "TilerBatchDuckDBClient", lambda config: self.client)
 

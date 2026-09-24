@@ -18,6 +18,7 @@ from data_access_service.models.tiler_parquet_types import (
     variable_parquet_path,
 )
 from data_access_service.models.tiler_types import TilerBatchDuckDBConfig
+from data_access_service.utils.s3_json import read_json
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ def build_metadata(
 
 
 def read_metadata(tiler_root_dir: str, store: str) -> TilerParquetMetadata | None:
-    data = storage.read_json(store_metadata_path(tiler_root_dir, store))
+    data = read_json(store_metadata_path(tiler_root_dir, store), required=False)
     return TilerParquetMetadata.from_dict(data) if data is not None else None
 
 

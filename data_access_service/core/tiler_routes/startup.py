@@ -29,7 +29,7 @@ from data_access_service.tiler.services.store.registry import (
     prewarm_stores,
     retain_stores,
 )
-from data_access_service.tiler.utils.s3_json import read_json
+from data_access_service.utils.s3_json import read_json
 
 logger = logging.getLogger(__name__)
 
