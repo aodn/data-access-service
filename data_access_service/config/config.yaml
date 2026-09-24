@@ -155,8 +155,8 @@ pmtiles:
       maxzoom: 12
 tiler:
   config:
+    # Must match tiler_folder_name in appdeploy batch-tiler-parquet (IAM write scope).
     root_prefix: "tiler"
-    # The live tiler API.
     api:
       store_refresh_interval_hours: 4
       thread_pool_size: 20
@@ -171,13 +171,13 @@ tiler:
         parquet_metadata_cache: True
         enable_http_metadata_cache: True
     batch:
-      # Zarr time chunks converted per store per run, newest firs. Null = all.
-      max_chunks_per_run: 2
+      # Zarr time chunks converted per store per run, newest firs. null = all.
+      max_chunks_per_run: null
       use_fork_process: True
       duckdb:
         temp_dir_prefix: "tiler_batch_duckdb_tmp"
-        memory_limit: "3G"
-        threads: 3
+        memory_limit: "4G"
+        threads: 4
   catalog:
     # Stores to skip, by store name (the dataset name minus ".zarr").
     blacklist:
