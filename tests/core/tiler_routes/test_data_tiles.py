@@ -205,7 +205,7 @@ def test_tile_missing_store(client):
     assert "missing" in response.json()["detail"]
 
 
-def test_tile_store_failed_prewarm_is_404(client):
+def test_tile_store_failed_to_load_is_404(client):
     """A product stays registered even when its store failed to open; the
     request-time guard is what turns that into a 404, before get_lod_grids
     or load_slice ever run."""
@@ -679,7 +679,7 @@ def test_availability_no_metadata_uuid_returns_every_product(client):
     assert "product_a" in response.json()["products"]
 
 
-def test_availability_skips_products_whose_store_failed_prewarm(client):
+def test_availability_skips_products_whose_store_failed_to_load(client):
     with (
         patch(
             "data_access_service.core.tiler_routes.products.iter_product_items",

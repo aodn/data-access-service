@@ -33,15 +33,12 @@ def _build_time_index(meta: TilerParquetMetadata) -> dict[pd.Timestamp, str]:
     return {pd.Timestamp(raw.rstrip("Z")): raw for raw in meta.timestamps}
 
 
-# TODO: simplify it.
 class StoreRegistry:
     """Store metadata, loaded on first use; ``refresh`` re-reads it."""
 
     def __init__(self) -> None:
         self._metadata: dict[str, TilerParquetMetadata] = {}
         self._time_index: dict[str, dict[pd.Timestamp, str]] = {}
-        # We might could remove _failed_stores, as now it only reads the metadata of each store. self._metadata has all the stores knowledge.
-        self._failed_stores: dict[str, BaseException] = {}
         self._lock = threading.Lock()
 
     def _publish(self, store: str, meta: TilerParquetMetadata) -> None:
@@ -49,19 +46,13 @@ class StoreRegistry:
         with self._lock:
             self._metadata[store] = meta
             self._time_index[store] = index
-            self._failed_stores.pop(store, None)
 
     def _ensure_loaded(self, store: str) -> TilerParquetMetadata:
         with self._lock:
             meta = self._metadata.get(store)
         if meta is not None:
             return meta
-        try:
-            meta = _load_metadata(store)
-        except Exception as e:
-            with self._lock:
-                self._failed_stores[store] = e
-            raise
+        meta = _load_metadata(store)
         self._publish(store, meta)
         return meta
 
@@ -77,11 +68,12 @@ class StoreRegistry:
         return self.time_index(store).get(ts)
 
     def is_available(self, store: str) -> bool:
-        """False if ``store``'s metadata failed to load."""
+        """Whether ``store``'s metadata is loaded. Every catalogue store is
+        loaded before its products are published, so False means it failed."""
         with self._lock:
-            return store not in self._failed_stores
+            return store in self._metadata
 
-    def prewarm(self, stores: list[str]) -> dict[str, BaseException | None]:
+    def load(self, stores: list[str]) -> dict[str, BaseException | None]:
         """Load every store's metadata. Returns ``{store: None or the error}``."""
         outcomes: dict[str, BaseException | None] = {}
         for store in stores:
@@ -93,7 +85,7 @@ class StoreRegistry:
                 outcomes[store] = e
         opened = sum(1 for outcome in outcomes.values() if outcome is None)
         logger.info(
-            "Store prewarm complete: %d opened, %d failed (of %d)",
+            "Store metadata loaded: %d ok, %d failed (of %d)",
             opened,
             len(outcomes) - opened,
             len(outcomes),
@@ -115,18 +107,15 @@ class StoreRegistry:
     def retain(self, stores: set[str]) -> None:
         """Forget every store not in ``stores``."""
         with self._lock:
-            for store in set(self._metadata) | set(self._failed_stores):
-                if store not in stores:
-                    self._metadata.pop(store, None)
-                    self._time_index.pop(store, None)
-                    self._failed_stores.pop(store, None)
+            for store in set(self._metadata) - stores:
+                self._metadata.pop(store, None)
+                self._time_index.pop(store, None)
 
     def clear(self) -> None:
         """Drop everything (tests)."""
         with self._lock:
             self._metadata.clear()
             self._time_index.clear()
-            self._failed_stores.clear()
 
 
 store_registry = StoreRegistry()
@@ -164,10 +153,9 @@ def unavailable_date_message(store: str, ts: pd.Timestamp) -> str:
     return f"No data for date {ts_to_utc_iso(ts)!r}.{hint}"
 
 
-# rename this, it is not really prewarming any more like before, it was reading metadata of zarr and keeping the handle open, now it is just reading the metadata and caching it, so it is more like loading the metadata of stores
-def prewarm_stores(stores: list[str]) -> dict[str, BaseException | None]:
+def load_stores(stores: list[str]) -> dict[str, BaseException | None]:
     """Load the metadata of each store not loaded yet (failed ones are retried)."""
-    return store_registry.prewarm(stores)
+    return store_registry.load(stores)
 
 
 def retain_stores(stores: set[str]) -> None:
