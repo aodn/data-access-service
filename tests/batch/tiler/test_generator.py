@@ -226,6 +226,34 @@ class TestGenerateForAllProducts:
         root = s3_store["s3://my-bucket/tiler/root_metadata.json"]
         assert _published_ids(root) == ["p1"]
 
+    def test_each_store_is_published_before_the_next_runs(self, monkeypatch):
+        s3_store = _fake_s3_json_store(monkeypatch)
+        products = {
+            "p1": _product("p1", "a", "v"),
+            "p2": _product("p2", "b", "v", uuid="uuid-b"),
+        }
+        monkeypatch.setattr(generator, "discover_products", lambda api: products)
+        monkeypatch.setattr(
+            generator,
+            "config",
+            MagicMock(get_tiler_batch_config=lambda: _batch_config()),
+        )
+
+        published_before = {}
+
+        def build(store, uuid, variables, batch_config):
+            root = s3_store.get("s3://my-bucket/tiler/root_metadata.json")
+            published_before[store] = _published_ids(root) if root else []
+            return True
+
+        monkeypatch.setattr(generator, "_build_in_subprocess", build)
+
+        generate_tiler_parquet_for_all_products(api=MagicMock())
+
+        assert published_before == {"a": [], "b": ["p1"]}
+        root = s3_store["s3://my-bucket/tiler/root_metadata.json"]
+        assert _published_ids(root) == ["p1", "p2"]
+
     def test_a_store_that_failed_this_run_keeps_its_previous_entry(self, monkeypatch):
         """Its parquet from an earlier run is still on S3 and still serveable."""
         s3_store = _fake_s3_json_store(monkeypatch)

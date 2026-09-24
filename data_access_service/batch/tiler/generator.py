@@ -1,9 +1,17 @@
 """The tiler batch job: convert every product's zarr store to parquet and
-publish ``root_metadata.json``.
+publish each one to ``root_metadata.json`` as it finishes.
 
-Stores run one at a time, each in a forked worker (or in-process when
-``use_fork_process`` is off), so only one is in memory. Runs are
-incremental and safe to repeat.
+How a run goes:
+
+1. Stores run one at a time, by name, each in a forked worker (or
+   in-process when ``use_fork_process`` is off), so only one is in memory.
+2. In a store, only timestamps not yet converted are read, one zarr time
+   chunk at a time, newest chunk first.
+3. Each timestamp and variable becomes one parquet file. All-NaN
+   timestamps are recorded as empty.
+4. The store's ``metadata.json`` is saved after each chunk, so a failed
+   run resumes where it stopped.
+5. Once a store is done, it is published to ``root_metadata.json``.
 """
 
 import os
@@ -44,8 +52,8 @@ def _group_by_store(
 
 
 def generate_tiler_parquet_for_all_products(api: API, uuid: str | None = None) -> None:
-    """Convert every product's store, then update ``root_metadata.json``.
-    ``uuid`` limits the run to one metadata record."""
+    """Convert every product's store, updating ``root_metadata.json`` after
+    each one. ``uuid`` limits the run to one metadata record."""
     products = discover_products(api)
 
     if uuid is not None:
@@ -69,7 +77,6 @@ def generate_tiler_parquet_for_all_products(api: API, uuid: str | None = None) -
     use_fork = batch_config.use_fork_process
     logger.info("Tiler parquet batch process isolation: use_fork_process=%s", use_fork)
 
-    succeeded: set[str] = set()
     for store, (store_uuid, variables) in sorted(by_store.items()):
         if use_fork:
             ok = _build_in_subprocess(store, store_uuid, variables, batch_config)
@@ -78,29 +85,25 @@ def generate_tiler_parquet_for_all_products(api: API, uuid: str | None = None) -
             ok = build_tiler_parquet(store, store_uuid, variables, batch_config)
             after_label = f"after in-process run for {store}"
         if ok:
-            succeeded.add(store)
+            _publish_store(store, products, batch_config.tiler_root_dir)
         else:
             logger.error("Tiler parquet worker failed for store=%s", store)
         log_memory_usage(logger, after_label)
 
-    # Don't publish stores with no data yet (e.g. every timestamp all-NaN).
-    empty = {
-        store
-        for store in succeeded
-        if not _has_timestamps(batch_config.tiler_root_dir, store)
-    }
-    if empty:
-        logger.warning(
-            "Not publishing %d store(s) with no converted timestamps: %s",
-            len(empty),
-            sorted(empty),
-        )
-    # Empty stores stay keyed with no products, so their entry is dropped.
-    by_store: dict[str, list[ProductIdentity]] = {store: [] for store in succeeded}
-    for product in products.values():
-        if product.store in succeeded and product.store not in empty:
-            by_store[product.store].append(product)
-    write_root_metadata(by_store, batch_config.tiler_root_dir)
+
+def _publish_store(
+    store: str, products: dict[str, ProductIdentity], tiler_root_dir: str
+) -> None:
+    """Upsert ``store`` into ``root_metadata.json`` right after it converts,
+    so it is live without waiting for the rest of the run."""
+    # Don't publish a store with no data yet (e.g. every timestamp all-NaN);
+    # mapping it to no products drops any old entry.
+    if _has_timestamps(tiler_root_dir, store):
+        store_products = [p for p in products.values() if p.store == store]
+    else:
+        logger.warning("Not publishing store with no converted timestamps: %s", store)
+        store_products = []
+    write_root_metadata({store: store_products}, tiler_root_dir)
 
 
 def _has_timestamps(tiler_root_dir: str, store: str) -> bool:
