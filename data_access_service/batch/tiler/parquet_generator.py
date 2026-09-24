@@ -178,6 +178,7 @@ def sync_store(
     tiler_root_dir: str,
     max_chunks_per_run: int | None = None,
     duckdb_config: TilerBatchDuckDBConfig | None = None,
+    regenerate_all: bool = False,
 ) -> tuple[list[str], str]:
     """Convert every zarr timestamp that has no parquet yet, one zarr time
     chunk at a time.
@@ -187,6 +188,8 @@ def sync_store(
       the store over.
     - All-NaN timestamps are recorded as empty and not read again.
     - The sidecar is saved after each chunk, after its files.
+    - ``regenerate_all`` ignores what is already in the bucket and converts
+      every timestamp, overwriting existing files.
 
     Returns ``(timestamps written, metadata_path)``.
     """
@@ -197,7 +200,7 @@ def sync_store(
     existing = read_metadata(tiler_root_dir, store)
     converted: set[str] = set()
     empty: set[str] = set()
-    if existing is not None:
+    if existing is not None and not regenerate_all:
         if _same_layout(existing, fresh):
             converted = set(existing.timestamps)
             empty = set(existing.empty_timestamps)
@@ -216,9 +219,10 @@ def sync_store(
     )
     batches = missing if max_chunks_per_run is None else missing[:max_chunks_per_run]
     logger.info(
-        "Tiler parquet sync for %s: %d zarr chunk(s) with missing timestamps, "
-        "%d this run",
+        "Tiler parquet sync for %s (regenerate_all=%s): %d zarr chunk(s) to "
+        "convert, %d this run",
         store,
+        regenerate_all,
         len(missing),
         len(batches),
     )

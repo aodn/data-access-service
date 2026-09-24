@@ -42,6 +42,7 @@ def _batch_config(
     base = dict(
         tiler_root_dir=tiler_root_dir,
         max_chunks_per_run=2,
+        regenerate_all=False,
         use_fork_process=True,
         duckdb=TilerBatchDuckDBConfig(
             memory_limit="256MB",
@@ -452,6 +453,7 @@ class TestBuildTilerParquet:
 
         assert generator.build_tiler_parquet("x", "u", ["v"], _batch_config()) is True
         assert seen["max_chunks_per_run"] == 2
+        assert seen["regenerate_all"] is False
 
     def test_store_handle_is_released_afterwards(self, monkeypatch):
         monkeypatch.setattr(generator, "open_store", lambda store: None)

@@ -283,6 +283,18 @@ def test_capped_runs_carry_on_until_nothing_is_missing(monkeypatch):
     assert env.events == []
 
 
+def test_regenerate_all_converts_everything_again(monkeypatch):
+    env = _Env(monkeypatch)
+    _sync(monkeypatch, _fake_dataset(DAYS))
+
+    env.events.clear()
+    written, _ = _sync(monkeypatch, _fake_dataset(DAYS), regenerate_all=True)
+
+    assert sorted(written) == [_ts(1), _ts(2), _ts(3)]
+    assert len(env.parquet_paths()) == 3
+    assert env.sidecar_timestamps() == [_ts(1), _ts(2), _ts(3)]
+
+
 def _chunked(ds: xr.Dataset, time_chunk: int) -> xr.Dataset:
     for v in ds.data_vars:
         ds[v].encoding["chunks"] = (time_chunk, 2, 3)

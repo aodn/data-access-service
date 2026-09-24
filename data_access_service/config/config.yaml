@@ -176,6 +176,8 @@ tiler:
     batch:
       # Zarr time chunks converted per store per run, newest firs. null = all.
       max_chunks_per_run: null
+      # True: convert every timestamp again each run. False: only new ones.
+      regenerate_all: True
       use_fork_process: True
       duckdb:
         temp_dir_prefix: "tiler_batch_duckdb_tmp"
