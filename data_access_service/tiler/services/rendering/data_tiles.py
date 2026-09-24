@@ -1,193 +1,171 @@
-"""Data-tile rendering pipeline.
+"""Data tiles: resample one (x, y) chunk of the LOD grid from the slice and
+encode it as PNG. Only the chunk (plus padding) is computed.
 
-End-to-end path for a single ``/data_tiles/{product}/{date}/{z}/{x}/{y}.png``
-request: compute the processed grid for (product, date, lod) via the kernels
-(deduped in-process across concurrent tiles sharing the same grid — see
-``_processed_dedup``), extract the chunk for (x, y) with edge padding, pack
-into RGBA, encode PNG.
-
-Scalar products use a 24-bit normalised uint spread across R/G/B (alpha carries
-the ocean mask). Multi-variable products (e.g. UV currents) put one variable in
-each of R/G with the mask in B (alpha stays opaque so the shader can use B as
-data).
+Scalars are a 24-bit value in R/G/B with the mask in alpha. Pairs put one
+variable each in R and G, the mask in B, and keep alpha opaque.
 """
 
 import math
-from collections.abc import Callable
 
 import numpy as np
-import xarray as xr
 
-from data_access_service.tiler.services.caching.deduper import Deduper
+from data_access_service.tiler.services.colormap.categorical import (
+    is_categorical_variable,
+)
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.rendering.kernels import (
     normalize,
-    resample_variables_to_grid,
+    resample_window,
 )
 from data_access_service.tiler.services.rendering.masks import (
     inpaint_nearest,
     land_mask_for_grid,
 )
+from data_access_service.tiler.services.store.sparse_grid import (
+    SparseGrid,
+    SparseSlice,
+)
 from data_access_service.tiler.utils.image import encode_rgba
 
-# No persistent cache for the processed grid — every call recomputes it from
-# the L1 slice. This dedup is still worth it on its own: it coalesces a burst
-# of concurrent tile requests for the same (product, date, lod) — the common
-# case when a map viewport loads many tiles at once — onto one compute
-# instead of one per tile. See Deduper's docstring for why this matters
-# regardless of CACHE_BACKEND.
-_processed_dedup = Deduper()
+EMPTY_RANGE = (0.0, 1.0)
 
 
-def _var_range(ds: xr.Dataset, var: str) -> tuple[float, float]:
-    lo = float(ds[var].min(skipna=True).values)
-    hi = float(ds[var].max(skipna=True).values)
-    # All-NaN slice: min/max return NaN. Fall back to a benign range so the
-    # normalize path produces well-defined zeros; the ocean mask will mark every
-    # pixel transparent.
+def _var_range(grid: SparseGrid) -> tuple[float, float]:
+    lo, hi = grid.vmin, grid.vmax
     if math.isnan(lo) or math.isnan(hi):
-        return (0.0, 1.0)
+        return EMPTY_RANGE
     return (lo, hi) if hi != lo else (lo, lo + 1.0)
 
 
-def _compute_processed(
-    product: Product, ds: xr.Dataset, lod: int
-) -> tuple[list[np.ndarray], np.ndarray]:
-    """Resample every product variable to the LOD grid and normalise.
-
-    Returns ``(normalised, ocean)`` where:
-      * ``normalised`` is one array per variable in ``product.variables`` order.
-        Scalar products (1 variable) get one ``uint32`` array normalised across
-        24 bits (R/G/B packed in render_tile). Multi-variable products (e.g. UV
-        currents, 2 variables) get one ``uint8`` array per variable, normalised
-        across 8 bits — each variable lives in its own channel.
-      * ``ocean`` is ``uint8`` (0/1), 1 where *every* variable has a valid value.
-        For multi-variable products this prevents one channel encoding a sentinel
-        zero while the mask claims valid data.
-    """
-    data_tile = product.data_tile
-    grid_cols, grid_rows = data_tile.lod_grids[lod]
-    total_w = grid_cols * data_tile.chunk_px[0]
-    total_h = grid_rows * data_tile.chunk_px[1]
-    variables = product.variables
-
-    raw = resample_variables_to_grid(ds, variables, total_w, total_h)
-    # Sparse products (e.g. GSLA): extend valid data toward the coast before
-    # normalising, so the filled cells register as valid in the per-variable mask.
-    if data_tile.coastal_fill is not None:
-        raw = [inpaint_nearest(r, data_tile.coastal_fill.max_dist_px) for r in raw]
-
-    # Scalar: pack one value across 3 bytes (R/G/B) for sub-percent precision over the
-    # data range. Multi-variable: one byte per channel — precision drops to ~0.4%, but
-    # the frontend shader needs each channel independently addressable.
-    out_max = 16777215 if len(variables) == 1 else 255
-    normalised: list[np.ndarray] = []
-    valid_masks: list[np.ndarray] = []
-    for r, v in zip(raw, variables, strict=True):
-        lo, hi = _var_range(ds, v)
-        norm, valid = normalize(r, lo, hi, out_max)
-        normalised.append(norm)
-        valid_masks.append(valid)
-
-    # ocean = AND of per-variable valid masks (1 where every variable is non-NaN).
-    if len(valid_masks) == 1:
-        ocean = valid_masks[0]
-    else:
-        ocean = valid_masks[0].copy()
-        for vm in valid_masks[1:]:
-            ocean &= vm
-
-    # Anomalous values outside the model's valid ocean domain (Product.ocean_masked)
-    # are already nulled on the raw slice (masks.apply_ocean_mask), so they arrive
-    # here as NaN and fall out of the per-variable valid masks above — nothing to do.
-    if data_tile.coastal_fill is not None:
-        lon_min, lon_max = float(ds.lon.min()), float(ds.lon.max())
-        lat_min, lat_max = float(ds.lat.min()), float(ds.lat.max())
-        # Cut the coastal fill (and any data that bled over land) back off using
-        # the real Natural Earth coastline, so we never paint fabricated values
-        # onto land.
-        land = land_mask_for_grid(lon_min, lon_max, lat_min, lat_max, total_w, total_h)
-        ocean = ocean & ~land
-
-    return normalised, ocean
-
-
-def _get_processed(
-    product: Product, load_ds: Callable[[], xr.Dataset], lod: int, date: str
-) -> tuple[list[np.ndarray], np.ndarray]:
-    """load_ds only called once per (product, date, lod); concurrent identical
-    requests always share one compute in-process via ``_processed_dedup``.
-    """
-    key = (product.source_path, date, tuple(product.variables), lod)
-
-    def compute() -> tuple[list[np.ndarray], np.ndarray]:
-        return _compute_processed(product, load_ds(), lod)
-
-    return _processed_dedup.dedupe(key, compute)
-
-
-def _extract_chunk(
-    arr: np.ndarray,
+def _chunk_window(
     cx: int,
     cy: int,
     total_w: int,
     total_h: int,
     chunk_px: tuple[int, int],
     padding: int,
-) -> np.ndarray:
+) -> tuple[tuple[int, int], tuple[int, int], tuple[tuple[int, int], ...]]:
+    """The chunk's rows and cols on the LOD grid, with padding but clipped
+    to the grid, and the edge padding still to add at the grid border."""
     cw, ch = chunk_px
     row_s = cy * ch
     col_s = cx * cw
-
-    p_row_s = max(row_s - padding, 0)
-    p_row_e = min(row_s + ch + padding, total_h)
-    p_col_s = max(col_s - padding, 0)
-    p_col_e = min(col_s + cw + padding, total_w)
-
-    chunk = arr[p_row_s:p_row_e, p_col_s:p_col_e]
-
-    pad_top = padding if row_s == 0 else 0
-    pad_bottom = padding if row_s + ch == total_h else 0
-    pad_left = padding if col_s == 0 else 0
-    pad_right = padding if col_s + cw == total_w else 0
-
-    if pad_top or pad_bottom or pad_left or pad_right:
-        chunk = np.pad(
-            chunk, ((pad_top, pad_bottom), (pad_left, pad_right)), mode="edge"
-        )
-
-    return chunk
+    rows = (max(row_s - padding, 0), min(row_s + ch + padding, total_h))
+    cols = (max(col_s - padding, 0), min(col_s + cw + padding, total_w))
+    pads = (
+        (padding if row_s == 0 else 0, padding if row_s + ch == total_h else 0),
+        (padding if col_s == 0 else 0, padding if col_s + cw == total_w else 0),
+    )
+    return rows, cols, pads
 
 
-def render_tile(
+def _compute_window(
     product: Product,
-    load_ds: Callable[[], xr.Dataset],
+    sparse: SparseSlice,
     lod: int,
-    cx: int,
-    cy: int,
-    date: str,
-) -> bytes:
-    normalised, ocean = _get_processed(product, load_ds, lod, date)
+    rows: tuple[int, int],
+    cols: tuple[int, int],
+) -> tuple[list[np.ndarray], np.ndarray]:
+    """Resample and normalise each variable on this window of the LOD grid.
 
+    Returns ``(normalised, ocean)``: one array per variable (24-bit for a
+    scalar, 8-bit per variable for a pair), and a 0/1 mask that is 1 where
+    every variable has a value.
+    """
     data_tile = product.data_tile
     grid_cols, grid_rows = data_tile.lod_grids[lod]
     total_w = grid_cols * data_tile.chunk_px[0]
     total_h = grid_rows * data_tile.chunk_px[1]
+    variables = product.variables
+    fill = data_tile.coastal_fill
 
-    def chunk_of(arr: np.ndarray) -> np.ndarray:
-        return _extract_chunk(
-            arr, cx, cy, total_w, total_h, data_tile.chunk_px, data_tile.padding
+    # The coastal fill looks up to max_dist_px away, so resample that much more.
+    halo = fill.max_dist_px if fill is not None else 0
+    ext_rows = (max(rows[0] - halo, 0), min(rows[1] + halo, total_h))
+    ext_cols = (max(cols[0] - halo, 0), min(cols[1] + halo, total_w))
+    crop = (
+        slice(rows[0] - ext_rows[0], rows[1] - ext_rows[0]),
+        slice(cols[0] - ext_cols[0], cols[1] - ext_cols[0]),
+    )
+
+    # Resample north to south.
+    flip = float(sparse.lat[0]) < float(sparse.lat[-1])
+    raw = []
+    for v in variables:
+        r = resample_window(
+            sparse.grids[v],
+            total_h,
+            total_w,
+            ext_rows,
+            ext_cols,
+            flip=flip,
+            nearest=is_categorical_variable(sparse.attrs[v]),
         )
+        # Fill toward the coast first, so filled cells count as valid.
+        if fill is not None:
+            r = inpaint_nearest(r, fill.max_dist_px)
+        raw.append(r[crop])
 
-    chunks = [chunk_of(arr) for arr in normalised]
-    chunk_m = chunk_of(ocean)
+    # 3 bytes for a scalar, 1 byte per variable for a pair.
+    out_max = 16777215 if len(variables) == 1 else 255
+    normalised: list[np.ndarray] = []
+    valid_masks: list[np.ndarray] = []
+    for r, v in zip(raw, variables, strict=True):
+        lo, hi = _var_range(sparse.grids[v])
+        norm, valid = normalize(r, lo, hi, out_max)
+        normalised.append(norm)
+        valid_masks.append(valid)
+
+    ocean = valid_masks[0].copy()
+    for vm in valid_masks[1:]:
+        ocean &= vm
+
+    if fill is not None:
+        lon_min, lon_max, lat_min, lat_max = sparse.bounds()
+        # Don't paint filled values over land.
+        land = land_mask_for_grid(
+            lon_min,
+            lon_max,
+            lat_min,
+            lat_max,
+            total_w,
+            total_h,
+            rows=slice(*rows),
+            cols=slice(*cols),
+        )
+        ocean = ocean & ~land
+
+    return normalised, ocean
+
+
+def render_tile(
+    product: Product,
+    sparse: SparseSlice,
+    lod: int,
+    cx: int,
+    cy: int,
+) -> bytes:
+    data_tile = product.data_tile
+    grid_cols, grid_rows = data_tile.lod_grids[lod]
+    total_w = grid_cols * data_tile.chunk_px[0]
+    total_h = grid_rows * data_tile.chunk_px[1]
+    rows, cols, pads = _chunk_window(
+        cx, cy, total_w, total_h, data_tile.chunk_px, data_tile.padding
+    )
+    normalised, ocean = _compute_window(product, sparse, lod, rows, cols)
+
+    def pad(arr: np.ndarray) -> np.ndarray:
+        if any(p for pair in pads for p in pair):
+            return np.pad(arr, pads, mode="edge")
+        return arr
+
+    chunks = [pad(arr) for arr in normalised]
+    chunk_m = pad(ocean)
     h, w = chunk_m.shape
     img = np.zeros((h, w, 4), dtype=np.uint8)
 
     if len(chunks) == 1:
-        # Scalar: one 24-bit value spread across R/G/B; alpha carries the ocean mask.
-        # Force RGB to 0 for non-ocean pixels so partial PNG decoders still see a clean
-        # transparent boundary even if they ignore alpha.
+        # Scalar: 24-bit value in R/G/B, mask in alpha; RGB zeroed off the mask.
         val = chunks[0]
         img[:, :, 0] = (val >> 16) & 0xFF
         img[:, :, 1] = (val >> 8) & 0xFF
@@ -195,8 +173,7 @@ def render_tile(
         img[:, :, 3] = chunk_m * 255
         img[chunk_m == 0, :3] = 0
     else:
-        # Multi-variable (e.g. UV currents): each variable in its own channel,
-        # mask in the next channel, alpha kept opaque so the shader can use B as data.
+        # Pair: variables in R and G, mask in B, alpha opaque.
         img[:, :, 0] = chunks[0]
         img[:, :, 1] = chunks[1]
         img[:, :, 2] = chunk_m * 255

@@ -2,6 +2,7 @@ import asyncio
 import functools
 
 import anyio
+import pandas as pd
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from fastapi.openapi.models import Example
 from fastapi.responses import Response
@@ -15,15 +16,16 @@ from data_access_service.tiler.schemas.visual_tiles import ColormapListResponse
 from data_access_service.tiler.services.caching.deduper import Deduper
 from data_access_service.tiler.services.colormap.legend import render_legend
 from data_access_service.tiler.services.colormap.registry import list_colormaps
+from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.rendering.visual_tiles import (
+    BboxFrame,
+    cut_frame,
     render_bbox,
     render_bbox_animation,
     render_tile,
 )
 from data_access_service.tiler.services.store.registry import get_available_dates
-from data_access_service.tiler.services.store.slice_loader import (
-    load_slice_uncached,
-)
+from data_access_service.tiler.services.store.slice_loader import load_slice
 from data_access_service.tiler.services.store.spatial import (
     bbox_to_wgs84,
     default_bbox_from_store,
@@ -55,17 +57,12 @@ from .shared import (
 
 _MAX_ANIMATION_FRAMES = 30
 
-# OGC's WebMercatorQuad well-known TileMatrixSet defines levels 0-24. Also bounds z before
-# 1 << z below: negative z raises an uncaught ValueError (negative shift count), and z without
-# an upper bound lets a caller force construction of an arbitrarily large Python int.
+# WebMercatorQuad levels 0-24; also keeps 1 << z sane.
 _MAX_ZOOM = 24
 
-# Capacity gate for /animation per-frame S3 fan-out. Sits on the shared anyio
-# pool as a *separate* concurrency budget from tile handlers — a 30-frame
-# request cannot starve tile-handler slots. Sized to the aiobotocore S3
-# connection-pool ceiling (~10/host) — going higher just queues on the pool.
+# Separate thread budget for animation frames, so they can't starve tiles.
 _ANIMATION_LIMITER = anyio.CapacityLimiter(
-    Config.get_config().get_tiler_config().animation_workers
+    Config.get_config().get_tiler_api_config().animation_workers
 )
 
 router = APIRouter()
@@ -192,24 +189,14 @@ async def get_tile(
 
     rescale_range = parse_rescale(rescale)
 
-    key = (
-        product.source_path,
-        date,
-        variable,
-        z,
-        x,
-        y,
-        colormap_name,
-        rescale_range,
-        ext,
-    )
+    key = (product.id, ts, z, x, y, colormap_name, rescale_range, ext)
 
     def _do_render() -> bytes:
-        ds = load_slice_or_404(
-            product.source_path, ts, [variable], ocean_masked=product.ocean_masked
+        sparse = load_slice_or_404(
+            product.store, ts, [variable], ocean_masked=product.ocean_masked
         )
         return render_tile(
-            ds,
+            sparse,
             variable,
             x,
             y,
@@ -218,8 +205,6 @@ async def get_tile(
             rescale_range,
             fmt=ext,
             coastal_fill=product.visual_tile.coastal_fill,
-            source_path=product.source_path,
-            date=date,
         )
 
     try:
@@ -237,25 +222,21 @@ async def get_tile(
 
 
 def _resolve_resolution(
-    product_source_path: str,
+    store: str,
     bbox_tuple: tuple[float, float, float, float],
     crs: str,
     width: int | None,
     height: int | None,
     max_dim: int = 2048,
 ) -> tuple[int, int]:
-    """Fill in missing width/height per the documented defaulting rules.
-
-    Both omitted → dataset native cell count inside the bbox.
-    One provided → the other is derived from the bbox aspect ratio (in the bbox's
-    own CRS), so the output frame is not stretched relative to the requested view.
-    """
+    """Fill in missing width/height: native resolution if both are missing,
+    else from the bbox aspect ratio."""
     if width is not None and height is not None:
         return width, height
 
     if width is None and height is None:
         bbox_wgs84 = bbox_to_wgs84(bbox_tuple, crs)
-        return native_resolution_in_bbox(product_source_path, bbox_wgs84, max_dim)
+        return native_resolution_in_bbox(store, bbox_wgs84, max_dim)
 
     minx, miny, maxx, maxy = bbox_tuple
     span_x = (maxx - minx) or 1.0
@@ -263,7 +244,6 @@ def _resolve_resolution(
     aspect = span_x / span_y
 
     if height is None:
-        # Exactly one is None at this point — narrow with a runtime check for mypy.
         assert width is not None
         derived_h = max(1, min(max_dim, round(width / aspect)))
         return width, derived_h
@@ -273,27 +253,15 @@ def _resolve_resolution(
     return derived_w, height
 
 
-_WEB_MERCATOR_EXTENT = (
-    20_037_508.342789244  # EPSG:3857 world-square half-extent, meters
-)
+_WEB_MERCATOR_EXTENT = 20_037_508.342789244  # EPSG:3857 half-extent, metres
 
-# Plausible geographic-degree magnitude: lon up to 360 (covers the documented
-# antimeridian workaround, e.g. 57..185), lat strictly -90..90.
+# Plausible degrees; lon up to 360 for grids past 180°E.
 _DEGREE_LON_RANGE = (-180.0, 360.0)
 _DEGREE_LAT_RANGE = (-90.0, 90.0)
 
 
 def _looks_like_degrees(bbox: tuple[float, float, float, float]) -> bool:
-    """True if every coordinate is individually plausible as a lon/lat degree value.
-
-    This checks magnitude, not span — a degree bbox can be anywhere from a few
-    meters to 360 degrees wide, so a span-based "is this too small" check can't
-    catch a wide degree bbox (e.g. -180,-90,180,90, span 360x180) misread as
-    Mercator metres. Checking each coordinate's own plausible range catches it
-    regardless of span: a genuine Web Mercator bbox with every coordinate this
-    small would describe a sub-360-metre crop sitting right at the map's origin
-    (0degN, 0degE) — not a realistic request against this service's IMOS ocean products.
-    """
+    """True if every coordinate looks like a lon/lat in degrees."""
     minx, miny, maxx, maxy = bbox
     lon_lo, lon_hi = _DEGREE_LON_RANGE
     lat_lo, lat_hi = _DEGREE_LAT_RANGE
@@ -306,13 +274,7 @@ def _looks_like_degrees(bbox: tuple[float, float, float, float]) -> bool:
 
 
 def _validate_bbox_for_crs(bbox: tuple[float, float, float, float], crs: str) -> None:
-    """Reject a bbox whose magnitudes don't plausibly match the claimed crs's units.
-
-    Without this, swapping crs (e.g. passing degree-scale numbers with
-    crs=EPSG:3857, or meter-scale numbers with crs=EPSG:4326) silently produces
-    a nonsense crop instead of an error — bbox_to_wgs84 has no way to detect
-    the units are wrong on its own.
-    """
+    """400 if the bbox numbers don't fit ``crs``'s units (degrees vs metres)."""
     minx, miny, maxx, maxy = bbox
     if crs == "EPSG:4326":
         if not (-90.0 <= miny <= 90.0 and -90.0 <= maxy <= 90.0):
@@ -350,26 +312,18 @@ def _validate_bbox_for_crs(bbox: tuple[float, float, float, float], crs: str) ->
 
 
 def _parse_bbox_and_crs(
-    bbox: str | None, crs: str, source_path: str
+    bbox: str | None, crs: str, store: str
 ) -> tuple[tuple[float, float, float, float], str, str]:
-    """Validate the crs param and parse the bbox string.
-
-    Returns (bbox_tuple, bounds_crs, dst_crs):
-    - ``bounds_crs`` is the CRS used to interpret ``bbox_tuple``'s numbers. When
-      bbox is None, this is forced to EPSG:4326 regardless of the requested crs,
-      because the dataset's native bounds (``default_bbox_from_store``) are
-      always reported in WGS84.
-    - ``dst_crs`` is the caller's requested output projection — the validated
-      ``crs`` value, unaffected by whether bbox was given. It decides the CRS
-      of the *rendered* image, not just how the input bbox is read.
-    """
+    """Returns ``(bbox, bounds_crs, dst_crs)``. ``bounds_crs`` is the bbox's
+    CRS (EPSG:4326 for the store's default bbox); ``dst_crs`` is the output
+    projection."""
     crs = crs.upper()
     if crs not in ("EPSG:4326", "EPSG:3857"):
         raise HTTPException(
             status_code=400, detail="crs must be 'EPSG:4326' or 'EPSG:3857'"
         )
     if bbox is None:
-        return default_bbox_from_store(source_path), "EPSG:4326", crs
+        return default_bbox_from_store(store), "EPSG:4326", crs
     try:
         minx, miny, maxx, maxy = (float(v) for v in bbox.split(","))
     except ValueError as e:
@@ -449,14 +403,12 @@ async def get_bbox(
     resolve_timestamp_or_404(product, ts)
     variable = single_variable_or_400(product, context="visual tiles")
 
-    bbox_tuple, bounds_crs, dst_crs = _parse_bbox_and_crs(
-        bbox, crs, product.source_path
-    )
+    bbox_tuple, bounds_crs, dst_crs = _parse_bbox_and_crs(bbox, crs, product.store)
 
     rescale_range = parse_rescale(rescale)
 
     key = (
-        product.source_path,
+        product.store,
         date,
         variable,
         bbox_tuple,
@@ -470,11 +422,11 @@ async def get_bbox(
     )
 
     def _do_render() -> bytes:
-        ds = load_slice_or_404(
-            product.source_path, ts, [variable], ocean_masked=product.ocean_masked
+        sparse = load_slice_or_404(
+            product.store, ts, [variable], ocean_masked=product.ocean_masked
         )
         return render_bbox(
-            ds,
+            sparse,
             variable,
             bbox_tuple,
             width,
@@ -485,8 +437,6 @@ async def get_bbox(
             dst_crs=dst_crs,
             fmt=ext,
             coastal_fill=product.visual_tile.coastal_fill,
-            source_path=product.source_path,
-            date=date,
         )
 
     try:
@@ -500,6 +450,28 @@ async def get_bbox(
 
     return Response(
         content=body, media_type=media_type(ext), headers=IMMUTABLE_CACHE_HEADERS
+    )
+
+
+def _load_frame(
+    product: Product,
+    ts: pd.Timestamp,
+    variable: str,
+    bbox: tuple[float, float, float, float],
+    crs: str,
+    width: int,
+    height: int,
+) -> BboxFrame:
+    """Read one frame, only as much of it as its bbox needs."""
+    sparse = load_slice(product.store, ts, [variable], product.ocean_masked)
+    return cut_frame(
+        sparse,
+        variable,
+        bbox,
+        crs,
+        product.visual_tile.coastal_fill,
+        width,
+        height,
     )
 
 
@@ -607,23 +579,20 @@ async def get_animation(
     is_store_available_or_404(product)
     variable = single_variable_or_400(product, context="animation")
 
-    # Offloaded: each may call get_store, which can block on lib open on
-    # cold path or while a TTL refresh is racing the cached entry.
+    # In a thread: may read store metadata from S3.
     bbox_tuple, bounds_crs, dst_crs = await anyio.to_thread.run_sync(
         _parse_bbox_and_crs,
         bbox,
         crs,
-        product.source_path,
+        product.store,
         limiter=TILE_THREAD_LIMITER,
     )
 
     rescale_range = parse_rescale(rescale)
-    # Categorical validation (format, colormap↔variable fit) runs inside
-    # render_bbox_animation, where the loaded slice's attrs are available; a
-    # ValueError there is mapped to 400 below.
+    # Categorical checks happen in render_bbox_animation (ValueError -> 400).
 
     available = await anyio.to_thread.run_sync(
-        get_available_dates, product.source_path, limiter=TILE_THREAD_LIMITER
+        get_available_dates, product.store, limiter=TILE_THREAD_LIMITER
     )
     if not available:
         raise HTTPException(
@@ -657,11 +626,10 @@ async def get_animation(
                 "Narrow the range and retry."
             ),
         )
-    dates = [d for d, _ts in frames]
 
     resolved_w, resolved_h = await anyio.to_thread.run_sync(
         _resolve_resolution,
-        product.source_path,
+        product.store,
         bbox_tuple,
         bounds_crs,
         width,
@@ -669,20 +637,18 @@ async def get_animation(
         limiter=TILE_THREAD_LIMITER,
     )
 
-    # Fan out the per-frame S3 reads in parallel on the anyio pool, gated by
-    # _ANIMATION_LIMITER so a many-frame request does not consume tile-handler
-    # slots. asyncio.gather preserves input order so frames stay in date order.
-    # Pass the already-parsed ts (not d) — resolve_timestamp needs a
-    # pd.Timestamp, and these came straight from get_available_dates, so
-    # re-parsing the string would just redo work already done.
-    datasets = await asyncio.gather(
+    # Load frames in parallel; gather keeps them in date order.
+    cut_frames = await asyncio.gather(
         *(
             anyio.to_thread.run_sync(
-                load_slice_uncached,
-                product.source_path,
+                _load_frame,
+                product,
                 ts,
-                [variable],
-                product.ocean_masked,
+                variable,
+                bbox_tuple,
+                bounds_crs,
+                resolved_w,
+                resolved_h,
                 limiter=_ANIMATION_LIMITER,
             )
             for _d, ts in frames
@@ -693,7 +659,7 @@ async def get_animation(
         body = await anyio.to_thread.run_sync(
             functools.partial(
                 render_bbox_animation,
-                datasets,
+                cut_frames,
                 variable,
                 bbox_tuple,
                 resolved_w,
@@ -704,9 +670,6 @@ async def get_animation(
                 dst_crs=dst_crs,
                 fmt=ext,
                 duration_ms=duration,
-                coastal_fill=product.visual_tile.coastal_fill,
-                source_path=product.source_path,
-                dates=dates,
             ),
             limiter=TILE_THREAD_LIMITER,
         )

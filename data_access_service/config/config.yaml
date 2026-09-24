@@ -48,14 +48,9 @@ sites:
     duckdb_temp_dir: "parquet_duckdb_tmp"
     co_bucket: "aodn-cloud-optimised"
     memory_limit: "800M"
-    threads: 4
+    threads: 2
     region: "ap-southeast-2"
     reload_interval_hours: 2
-memory_watchdog:
-  config:
-    enabled: true
-    interval_seconds: 30
-    threshold_mb: 2800
 subsetting:
   config:
     # 8GB Fargate task: leave ~2GB so peak stays around 6GB (zlib/dask copies
@@ -163,74 +158,64 @@ pmtiles:
       maxzoom: 12
 tiler:
   config:
-    # Capped at the shared S3 connection pool's real ceiling (botocore
-    # default max_pool_connections=10) — going higher just queues.
-    store_prewarm_workers: 10
-    store_refresh_interval_hours: 4
-    thread_pool_size: 20
-    animation_workers: 2
-    # Cache backend for L1 (slice cache): "none" disables caching entirely.
-    # "redis" shares the cache + cross-instance dedup through the Redis-protocol
-    # store at redis_host/redis_port below — see memoizer.create_memoizer.
-    cache_backend: "redis"
-    # Per-entry TTL in seconds — unused while cache_backend is "none".
-    slice_cache_ttl_seconds: 3600
-    # This is only for loacal, other envs will read from infra settings.
-    redis_host: "localhost"
-    redis_port: 6379
-    # True uses anonymous access for s3:// URLs — correct for IMOS's public AODN
-    # buckets. False lets fsspec discover AWS credentials for private buckets.
-    s3_anon: true
-    s3_connect_timeout: 5
-    s3_read_timeout: 30
-    s3_max_attempts: 2
-  # Static product-catalogue config, deliberately not overridden by any
-  # config-{env}.yaml overlay — it doesn't vary by environment. Read directly
-  # off this base file via Config.load_tiler_catalog_config(), bypassing the
-  # per-environment merge (see services/product/discovery.py and
-  # schemas/products.py for the loaders that read each section below).
-  #
-  # Stores to drop entirely before candidates are fanned out, keyed by the
-  # suffix-stripped dataset name product_id uses (e.g.
-  # "model_sea_level_anomaly_gridded_realtime", not "*.zarr") — see
-  # services/product/discovery.py::discover_products.
-  blacklist:
-    - radar_Newcastle_velocity_hourly_averaged_delayed_qc
-    - radar_Newcastle_velocity_hourly_averaged_realtime_nonqc
-    - radar_TurquoiseCoast_velocity_hourly_averaged_realtime_nonqc
-    - radar_CoralCoast_velocity_hourly_averaged_realtime_nonqc
-    - radar_BonneyCoast_velocity_hourly_averaged_realtime_nonqc
-    - radar_BonneyCoast_velocity_hourly_averaged_delayed_qc
-    - radar_TurquoiseCoast_velocity_hourly_averaged_delayed_qc
-    - radar_CoralCoast_velocity_hourly_averaged_delayed_qc
-  # Variable specifications fanned out across the metadata catalogue at
-  # startup to derive the candidate product set — see
-  # services/product/discovery.py. A plain string matches a single variable;
-  # a list matches an ordered pair (e.g. current vectors), which is always
-  # data-only, never visual.
-  gridded_variables:
-    - GSLA
-    - [UCUR, VCUR]
-    - GSL
-    - sea_surface_temperature
-    - analysed_sst
-    - sea_ice_fraction
-    - sst
-    - sst_mosaic
-    - ssta
-    - ssta_mosaic
-    - sst_anom_mosaic
-    - dhd
-    - dhd_mosaic
-    - dhd_count_mosaic
-    - dhdc_mosaic
-    - mpsa_mosaic
-    - MCS_category
-    - MCS_category_mosaic
-    - MHW_category_mosaic
-  # Per-product tuning, keyed by the derived product id (see
-  # services/product/discovery.py::product_id) and applied on top of the
-  # candidates gridded_variables fans out — see schemas/products.py.
+    # Must match tiler_folder_name in appdeploy batch-tiler-parquet (IAM write scope).
+    root_prefix: "tiler"
+    api:
+      store_refresh_interval_hours: 4
+      thread_pool_size: 20
+      animation_workers: 2
+      trim_threshold_mb: 2800
+      duckdb:
+        memory_limit: "1GB"
+        threads: 2
+        # Same parquet is queried by many tiles, so all three caches
+        # enabled go together, parquet footers, HTTP metadata, file bytes.
+        enable_external_file_cache: True
+        parquet_metadata_cache: True
+        enable_http_metadata_cache: True
+    batch:
+      # Zarr time chunks converted per store per run, newest firs. null = all.
+      max_chunks_per_run: null
+      use_fork_process: True
+      duckdb:
+        temp_dir_prefix: "tiler_batch_duckdb_tmp"
+        memory_limit: "4G"
+        threads: 4
+  catalog:
+    # Stores to skip, by store name (the dataset name minus ".zarr").
+    blacklist:
+      - radar_Newcastle_velocity_hourly_averaged_delayed_qc
+      - radar_Newcastle_velocity_hourly_averaged_realtime_nonqc
+      - radar_TurquoiseCoast_velocity_hourly_averaged_realtime_nonqc
+      - radar_CoralCoast_velocity_hourly_averaged_realtime_nonqc
+      - radar_BonneyCoast_velocity_hourly_averaged_realtime_nonqc
+      - radar_BonneyCoast_velocity_hourly_averaged_delayed_qc
+      - radar_TurquoiseCoast_velocity_hourly_averaged_delayed_qc
+      - radar_CoralCoast_velocity_hourly_averaged_delayed_qc
+    # A plain string matches one variable; a list matches an ordered pair
+    # (e.g. current vectors), which is data-only, never visual.
+    gridded_variables:
+      - GSLA
+      - [UCUR, VCUR]
+      - GSL
+      - sea_surface_temperature
+      - analysed_sst
+      - sea_ice_fraction
+      - sst
+      - sst_mosaic
+      - ssta
+      - ssta_mosaic
+      - sst_anom_mosaic
+      - dhd
+      - dhd_mosaic
+      - dhd_count_mosaic
+      - dhdc_mosaic
+      - mpsa_mosaic
+      - MCS_category
+      - MCS_category_mosaic
+      - MHW_category_mosaic
+  # Per-product tuning, keyed by product id and applied by the API only
+  # (tiler/schemas/products.py).
   products_customisation:
     - id: model_sea_level_anomaly_gridded_realtime:gsla
       data_tile:

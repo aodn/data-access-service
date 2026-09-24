@@ -80,30 +80,40 @@ class TestReloadTask:
 
 
 class TestStoreRefreshTask:
-    def test_refreshes_stores_when_profile_allowed(self, monkeypatch):
+    def test_refreshes_stores_and_catalogue_when_profile_allowed(self, monkeypatch):
         monkeypatch.setattr(Config, "is_profile_in", lambda *a, **k: True)
         refresh = MagicMock()
+        catalog = MagicMock()
         monkeypatch.setattr(
             "data_access_service.core.scheduler.refresh_stores", refresh
+        )
+        monkeypatch.setattr(
+            "data_access_service.core.scheduler.refresh_catalog", catalog
         )
         scheduler = TaskScheduler(api=MagicMock(), sites_repositories={})
 
         scheduler._store_refresh_task()
 
         refresh.assert_called_once()
+        catalog.assert_called_once()
 
     def test_skips_on_disallowed_profile(self, monkeypatch):
         monkeypatch.setattr(Config, "is_profile_in", lambda *a, **k: False)
         monkeypatch.setattr(Config, "resolve_profile", lambda: EnvType.DEV)
         refresh = MagicMock()
+        catalog = MagicMock()
         monkeypatch.setattr(
             "data_access_service.core.scheduler.refresh_stores", refresh
+        )
+        monkeypatch.setattr(
+            "data_access_service.core.scheduler.refresh_catalog", catalog
         )
         scheduler = TaskScheduler(api=MagicMock(), sites_repositories={})
 
         scheduler._store_refresh_task()
 
         refresh.assert_not_called()
+        catalog.assert_not_called()
 
     def test_does_not_raise_when_refresh_fails(self, monkeypatch):
         monkeypatch.setattr(Config, "is_profile_in", lambda *a, **k: True)
@@ -111,9 +121,16 @@ class TestStoreRefreshTask:
             "data_access_service.core.scheduler.refresh_stores",
             MagicMock(side_effect=RuntimeError("boom")),
         )
+        catalog = MagicMock(side_effect=RuntimeError("boom"))
+        monkeypatch.setattr(
+            "data_access_service.core.scheduler.refresh_catalog", catalog
+        )
         scheduler = TaskScheduler(api=MagicMock(), sites_repositories={})
 
         scheduler._store_refresh_task()  # must not raise
+
+        # A store refresh failure doesn't skip the catalogue refresh.
+        catalog.assert_called_once()
 
 
 class TestStartWithInitialRun:
@@ -151,7 +168,7 @@ class TestStart:
     def test_registers_store_refresh_cron_job_from_config(self, monkeypatch):
         stub_config = MagicMock()
         stub_config.get_sites_reload_interval_hours.return_value = 2
-        stub_config.get_tiler_config.return_value = SimpleNamespace(
+        stub_config.get_tiler_api_config.return_value = SimpleNamespace(
             store_refresh_interval_hours=6
         )
         monkeypatch.setattr(Config, "get_config", lambda *a, **k: stub_config)
@@ -170,7 +187,7 @@ class TestStart:
     def test_registers_reload_cron_job_from_configured_interval(self, monkeypatch):
         stub_config = MagicMock()
         stub_config.get_sites_reload_interval_hours.return_value = 3
-        stub_config.get_tiler_config.return_value = SimpleNamespace(
+        stub_config.get_tiler_api_config.return_value = SimpleNamespace(
             store_refresh_interval_hours=4
         )
         monkeypatch.setattr(Config, "get_config", lambda *a, **k: stub_config)

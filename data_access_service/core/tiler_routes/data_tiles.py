@@ -5,6 +5,7 @@ from fastapi.openapi.models import Example
 
 from data_access_service.config.http_cache import IMMUTABLE_CACHE_HEADERS
 from data_access_service.tiler.schemas.data_tiles import DataTileManifestResponse
+from data_access_service.tiler.services.caching.deduper import Deduper
 from data_access_service.tiler.services.product.manifest import render_manifest
 from data_access_service.tiler.services.product.product import get_lod_grids
 from data_access_service.tiler.services.rendering.data_tiles import render_tile
@@ -24,6 +25,9 @@ from .shared import (
 
 router = APIRouter()
 router.include_router(products_router)
+
+_tile_dedup = Deduper()
+_manifest_dedup = Deduper()
 
 
 @router.get(
@@ -63,23 +67,17 @@ async def get_tile(
         )
 
     variables = product.variables
+    key = (product.id, ts, z, x, y)
+
+    def _do_render() -> bytes:
+        sparse = load_slice_or_404(
+            product.store, ts, variables, ocean_masked=product.ocean_masked
+        )
+        return render_tile(product, sparse, z, x, y)
+
     try:
         png_bytes = await run_cancellable(
-            request,
-            functools.partial(
-                render_tile,
-                product,
-                lambda: load_slice_or_404(
-                    product.source_path,
-                    ts,
-                    variables,
-                    ocean_masked=product.ocean_masked,
-                ),
-                z,
-                x,
-                y,
-                date,
-            ),
+            request, functools.partial(_tile_dedup.dedupe, key, _do_render)
         )
     except ClientDisconnected as e:
         raise HTTPException(status_code=499, detail="Client disconnected") from e
@@ -111,18 +109,19 @@ async def get_manifest(
     resolve_timestamp_or_404(product, ts)
     get_lod_grids(product)
     variables = product.variables
+    key = (product.id, ts)
+
+    def _do_render() -> dict:
+        sparse = load_slice_or_404(
+            product.store, ts, variables, ocean_masked=product.ocean_masked
+        )
+        return render_manifest(product, sparse)
+
     try:
-        ds = await run_cancellable(
-            request,
-            functools.partial(
-                load_slice_or_404,
-                product.source_path,
-                ts,
-                variables,
-                ocean_masked=product.ocean_masked,
-            ),
+        manifest = await run_cancellable(
+            request, functools.partial(_manifest_dedup.dedupe, key, _do_render)
         )
     except ClientDisconnected as e:
         raise HTTPException(status_code=499, detail="Client disconnected") from e
     response.headers.update(IMMUTABLE_CACHE_HEADERS)
-    return DataTileManifestResponse(**render_manifest(product, ds))
+    return DataTileManifestResponse(**manifest)

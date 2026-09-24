@@ -1,138 +1,74 @@
-"""Slice loading.
+"""Open a (store, timestamp, variables) slice. No values are read here:
+each grid is a ``ParquetGridSource``, and the renderers ask DuckDB for only
+what they need."""
 
-``load_slice`` returns a fully-computed 2-D slice for a (store, timestamp,
-variables) tuple. Concurrent identical requests always share one compute
-in-process via ``_slice_dedup`` (independent of ``CACHE_BACKEND``); when
-``CACHE_BACKEND=redis``, ``slice_memo`` additionally coalesces across
-instances and caches the result (see ``services.caching.slice_cache``).
-
-Callers pass an already-parsed ``pd.Timestamp`` (from
-``core.tiler_routes.shared.parse_date_or_422``), not a raw date string —
-every route handler parses/validates its ``date`` query param exactly once,
-so this module never re-parses a string it was already handed as a
-``pd.Timestamp``.
-
-Long-lived store handles live in their own module ([[store.registry]]).
-Time selection goes through ``aodn_cloud_optimised`` ``ZarrDataSource.get_data``.
-"""
-
+import numpy as np
 import pandas as pd
-import xarray as xr
 
-from data_access_service.tiler.services.caching.deduper import Deduper
-from data_access_service.tiler.services.caching.slice_cache import slice_memo
-from data_access_service.tiler.services.rendering.masks import apply_ocean_mask
+from data_access_service.tiler.services.rendering.masks import ocean_valid_for_coords
+from data_access_service.tiler.services.store.parquet_grid_source import (
+    ParquetGridSource,
+)
 from data_access_service.tiler.services.store.registry import (
-    get_datasource,
-    get_store,
+    get_store_metadata,
     resolve_timestamp,
     unavailable_date_message,
 )
-from data_access_service.tiler.utils.dates import ts_to_utc_iso
-
-# Always in-process, independent of CACHE_BACKEND — see Deduper's docstring
-# for why this matters even (especially) under CACHE_BACKEND=none.
-_slice_dedup = Deduper()
+from data_access_service.tiler.services.store.sparse_grid import SparseSlice
+from data_access_service.tiler.services.store.tiler_repository import cell_table
 
 
-def _ts_for_get_data(ts) -> str:
-    """Format a timestamp for ``ZarrDataSource.get_data`` date bounds."""
-    return pd.Timestamp(ts).isoformat()
+def _ocean_table(store: str) -> str:
+    """The table of the store's valid-ocean cells, built once per grid."""
+    meta = get_store_metadata(store)
+    # A refresh that changed the grid gets a new table.
+    grid = (meta.n_i, meta.n_j, meta.lat[0], meta.lat[-1], meta.lon[0], meta.lon[-1])
+    key = ("ocean", store, grid)
 
+    def cells() -> tuple[np.ndarray, np.ndarray]:
+        return np.nonzero(ocean_valid_for_coords(meta.lon, meta.lat))
 
-def _warm_coord_indexes(ds: xr.Dataset) -> xr.Dataset:
-    """Force-build the lazy pandas index engine for lat/lon, once, here."""
-    for dim in ("lon", "lat"):
-        if dim in ds.indexes:
-            ds.indexes[dim].is_unique
-    return ds
-
-
-def _compute_slice_from_store(
-    store_url: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
-) -> xr.Dataset:
-    """Fetch a 2-D slice from the Zarr store. Both `load_slice` and
-    `load_slice_uncached` delegate here; they differ only in whether the
-    result lands in L1.
-
-    When ``ocean_masked`` is set, anomalous values outside the model's valid ocean
-    domain are nulled here (masks.apply_ocean_mask) so every downstream consumer
-    inherits the cut.
-    """
-    result = _fetch_slice_from_store(store_url, ts, variables)
-    if ocean_masked:
-        result = apply_ocean_mask(result, variables)
-    return result
-
-
-def _fetch_slice_from_store(
-    store_url: str, ts: pd.Timestamp, variables: list[str]
-) -> xr.Dataset:
-    # Ensure store is open (time index + variable catalogue on normalised view).
-    store = get_store(store_url)
-
-    missing = [v for v in variables if v not in store.data_vars]
-    if missing:
-        raise FileNotFoundError(
-            f"Variable(s) {missing} not found in store {store_url!r} "
-            f"(available: {sorted(store.data_vars)})"
-        )
-
-    t0 = resolve_timestamp(store_url, ts)
-    if t0 is None:
-        raise FileNotFoundError(unavailable_date_message(store_url, ts))
-
-    try:
-        ds = get_datasource(store_url).get_data(
-            date_start=_ts_for_get_data(t0),
-            date_end=_ts_for_get_data(t0),
-        )
-        ds = ds[variables]
-        # get_data returns a time range (often length 1). Match previous
-        # .sel(time=scalar) behaviour: one frame, time dim dropped.
-        if "time" in ds.dims:
-            if ds.sizes["time"] == 0:
-                raise KeyError(ts)
-            ds = ds.isel(time=0)
-        return ds.compute() if hasattr(ds, "compute") else ds
-    except KeyError as e:
-        raise FileNotFoundError(f"No data found for date {ts_to_utc_iso(ts)}") from e
+    return cell_table(key, cells)
 
 
 def load_slice(
-    store_url: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
-) -> xr.Dataset:
-    """
-    Return a fully-computed 2D (lat × lon) slice for the given store, timestamp,
-    and variables. ``ts`` must name an exact instant in the store's time index —
-    no nearest-match fallback. Coordinate names are normalised to
-    ``time``/``lat``/``lon`` before return.
+    store: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
+) -> SparseSlice:
+    """The slice at exact instant ``ts``. Raises FileNotFoundError for an
+    unknown variable or date, or a missing file."""
+    meta = get_store_metadata(store)
 
-    ``ocean_masked`` (from ``Product.ocean_masked``) nulls anomalous values outside
-    the valid model domain. It's a deterministic function of the cache key (a store
-    + variable set maps to one product), so it stays out of the key; the masked
-    slice is what L1 caches.
-    """
-    cache_key = (store_url, ts, tuple(sorted(variables)))
-
-    def compute() -> xr.Dataset:
-        result = slice_memo.get_or_compute(
-            cache_key,
-            lambda: _compute_slice_from_store(store_url, ts, variables, ocean_masked),
+    missing = [v for v in variables if v not in meta.variables]
+    if missing:
+        raise FileNotFoundError(
+            f"Variable(s) {missing} not found in store {store!r} "
+            f"(available: {sorted(meta.variables)})"
         )
 
-        return _warm_coord_indexes(result)
+    raw_ts = resolve_timestamp(store, ts)
+    if raw_ts is None:
+        raise FileNotFoundError(unavailable_date_message(store, ts))
 
-    return _slice_dedup.dedupe(cache_key, compute)
-
-
-def load_slice_uncached(
-    store_url: str, ts: pd.Timestamp, variables: list[str], ocean_masked: bool = False
-) -> xr.Dataset:
-    """Return a 2-D slice without touching L1.
-
-    Pulls via lib ``get_data``. Used by the animation endpoint so a
-    rare multi-date request doesn't evict another product's hot slices from
-    the shared L1 cache (CACHE_BACKEND=redis).
-    """
-    return _compute_slice_from_store(store_url, ts, variables, ocean_masked)
+    keep = _ocean_table(store) if ocean_masked else None
+    grids = {
+        v: ParquetGridSource(
+            store,
+            v,
+            raw_ts,
+            meta.n_i,
+            meta.n_j,
+            np.dtype(meta.variables[v].dtype),
+            keep,
+        )
+        for v in variables
+    }
+    # Reading the range here makes a missing file a 404 now rather than an
+    # error mid-render; nearly every renderer needs it anyway, and it's cached.
+    for grid in grids.values():
+        _ = grid.vmin
+    return SparseSlice(
+        lat=np.asarray(meta.lat),
+        lon=np.asarray(meta.lon),
+        grids=grids,
+        attrs={v: dict(meta.variables[v].attrs) for v in variables},
+    )

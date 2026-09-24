@@ -1,17 +1,17 @@
-"""Web Mercator tile and bbox rendering for the visual_tiles router.
+"""Visual tiles: reproject a slice with rio-tiler, apply a colormap and
+encode PNG or WebP.
 
-Resamples a 2-D scalar field through rio-tiler's XarrayReader, applies a
-colormap LUT from [[colormap.resolver]], and encodes as PNG or WebP. The
-antimeridian split in `_to_scalar_parts` is the one non-obvious bit — regional
-grids that cross 180° E (e.g. GSLA 57–185°E) are split into two segments so
-each fits inside rio_tiler's strict ±180 bound; the parts are composited as
-numpy arrays before the single image encode.
+Only the part of the grid under the tile or bbox (plus a small margin) is
+built. Grids that cross 180°E are split in two, since rio-tiler requires lon
+within ±180; the parts are composited before encoding.
 """
 
 import logging
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
+import morecantile
 import numpy as np
 import xarray as xr
 from rio_tiler.colormap import apply_cmap
@@ -20,7 +20,6 @@ from rio_tiler.io.xarray import XarrayReader
 from rio_tiler.models import ImageData
 from rioxarray.exceptions import NoDataInBounds
 
-from data_access_service.tiler.services.caching.deduper import Deduper
 from data_access_service.tiler.services.colormap.categorical import (
     RGBA,
     is_categorical_variable,
@@ -36,6 +35,7 @@ from data_access_service.tiler.services.rendering.masks import (
     inpaint_nearest,
     land_mask_for_coords,
 )
+from data_access_service.tiler.services.store.sparse_grid import SparseGrid, SparseSlice
 from data_access_service.tiler.services.store.spatial import bbox_to_wgs84
 from data_access_service.tiler.utils.image import (
     AnimatedFormat,
@@ -47,62 +47,35 @@ from data_access_service.tiler.utils.image import (
 
 logger = logging.getLogger(__name__)
 
-# No persistent cache for the fill step — every call recomputes the inpaint +
-# land-cut fill. This dedup is still worth it on its own: it coalesces a
-# burst of concurrent tile requests for the same (product, date) — the
-# common case when a map viewport loads many tiles at once — onto one
-# compute instead of one per tile.
-_fill_dedup = Deduper()
+_WEB_MERCATOR = morecantile.tms.get("WebMercatorQuad")
 
-# Coalesces the whole _to_scalar_parts computation (float32 cast + antimeridian
-# split, not just the fill step above) per (source_path, date, variable,
-# coastal_fill). Without this, every concurrent tile/bbox request for the same
-# date independently re-casts the full-resolution grid to float32.
-_scalar_parts_dedup = Deduper()
+# Extra source pixels around the window, so rio-tiler sees the neighbours it
+# would have seen in the whole grid.
+_MARGIN_PX = 3
 
+# Aggregate once an output pixel covers more than this many source cells.
+# Below it, read the cells; above it, reading them all to interpolate between
+# four is wasted.
+_OVERSAMPLE = 4
 
-def _get_filled_values(
-    source_path: str,
-    date: str,
-    variable: str,
-    coastal_fill: CoastalFill,
-    values: np.ndarray,
-    lons: np.ndarray,
-    lats: np.ndarray,
-) -> np.ndarray:
-    """Inpaint + land-cut ``values``, deduped per (source_path, date, variable,
-    coastal_fill) so concurrent tile/bbox/animation-frame requests for the same
-    date share one compute instead of each redoing distance_transform_edt + the
-    land lookup.
+# Blocks per output pixel when aggregating. Two, not one, so rio-tiler still
+# has neighbours to interpolate between.
+_AVG_OVERSAMPLE = 2
 
-    The returned array is shared across every concurrent caller for this key —
-    marked read-only so an accidental downstream mutation fails loudly instead
-    of corrupting it for every other caller.
-    """
-    key = (source_path, date, variable, coastal_fill.max_dist_px)
-
-    def compute() -> np.ndarray:
-        filled = inpaint_nearest(values, coastal_fill.max_dist_px).copy()
-        land = land_mask_for_coords(lons, lats)
-        filled[land] = np.nan
-        filled.setflags(write=False)
-        return filled
-
-    return _fill_dedup.dedupe(key, compute)
+# The most cells one part reads. A 256 tile stays under it; a large bbox or
+# animation frame would otherwise read the whole grid cell for cell.
+_MAX_READ_CELLS = 2048 * 2048
 
 
 def warmup_visual() -> None:
-    """Prime rio_tiler + GDAL warp so the first visual tile request doesn't pay
-    one-time init overhead (warp kernel, projection database, rio_tiler internals).
-    Synchronous; intended to be called once during startup.
-    """
+    """Warm up rio-tiler and GDAL at startup, so the first tile isn't slow."""
     da = xr.DataArray(
         np.zeros((16, 16), dtype=np.float32),
         dims=("lat", "lon"),
         coords={"lat": np.linspace(1.0, 0.0, 16), "lon": np.linspace(0.0, 1.0, 16)},
     )
     da = _apply_crs(da)
-    # Synthetic grayscale LUT — avoids depending on the colormap registry being loaded.
+    # A plain grey LUT, so this doesn't need the colormap registry.
     cm = {i: (i, i, i, 255) for i in range(256)}
     try:
         with XarrayReader(da) as reader:
@@ -116,51 +89,33 @@ def warmup_visual() -> None:
 def _img_to_rgba(
     img: ImageData, cm: dict[int, tuple[int, int, int, int]]
 ) -> np.ndarray:
-    """Apply colormap + data mask to a rescaled ImageData, returning an (H, W, 4) RGBA array.
-
-    Mirrors what ImageData.render() does internally but stops before the PNG encode.
-    Used so the antimeridian composite path can merge numpy arrays directly and encode
-    only once at the end — previously each part was encoded to PNG, then re-decoded,
-    composited, and re-encoded.
-    """
+    """A rescaled image -> (H, W, 4) RGBA, before encoding."""
     rgb, cmap_alpha = apply_cmap(img.data, cm)  # rgb: (3, H, W), cmap_alpha: (H, W)
     rgba = np.empty((rgb.shape[1], rgb.shape[2], 4), dtype=np.uint8)
     rgba[..., 0] = rgb[0]
     rgba[..., 1] = rgb[1]
     rgba[..., 2] = rgb[2]
-    # Combine the colormap's own alpha (e.g. transparent categories) with the
-    # ImageData mask (which marks NaN / out-of-extent pixels). Both are uint8 0/255.
+    # Transparent if the colormap or the data mask says so.
     rgba[..., 3] = np.minimum(cmap_alpha, img.mask.astype(np.uint8))
     return rgba
 
 
 def _img_to_rgba_categorical(img: ImageData, lut: dict[int, RGBA]) -> np.ndarray:
-    """Discrete value→colour lookup for a categorical tile, returning (H, W, 4) RGBA.
-
-    Unlike `_img_to_rgba` there is no rescale: the (nearest-resampled) data values are
-    the raw integer flag codes, cast to uint8 so they index the LUT directly. Casting
-    NaN to 0 is safe — those pixels are zeroed out by `img.mask` in the alpha channel.
-    """
+    """A categorical image -> (H, W, 4) RGBA; each code indexes the LUT."""
     codes = np.nan_to_num(img.data, nan=0.0).astype(np.uint8)  # (1, H, W)
     rgb, cmap_alpha = apply_cmap(codes, lut)
     rgba = np.empty((rgb.shape[1], rgb.shape[2], 4), dtype=np.uint8)
     rgba[..., 0] = rgb[0]
     rgba[..., 1] = rgb[1]
     rgba[..., 2] = rgb[2]
-    # We skip img.rescale() on this path, so img.mask is still float (with NaN for
-    # nodata). Derive validity from the data directly: a pixel is opaque only where
-    # it had real data AND its category colour is opaque (transparent "none" stays clear).
+    # Opaque only where there is data and the colour is opaque.
     valid = (~np.isnan(img.data[0])).astype(np.uint8) * 255
     rgba[..., 3] = np.minimum(cmap_alpha, valid)
     return rgba
 
 
 def _composite_over(base: np.ndarray, top: np.ndarray) -> np.ndarray:
-    """Paint `top`'s opaque pixels over `base` (in place) and return it.
-
-    Used to merge antimeridian-split segments — each segment covers a disjoint
-    region, so a simple alpha>0 overwrite is sufficient (no blending needed).
-    """
+    """Copy ``top``'s opaque pixels onto ``base``."""
     mask = top[..., 3] > 0
     base[mask] = top[mask]
     return base
@@ -171,11 +126,7 @@ def _categorical_composite(
     lut: dict[int, RGBA],
     read: Callable[[XarrayReader], ImageData],
 ) -> np.ndarray | None:
-    """Resample each part via ``read`` through the discrete LUT, composite, return RGBA.
-
-    Shared by the tile and bbox categorical paths — they differ only in the reader
-    call (``.tile`` vs ``.part``). Returns None when no part intersects the request.
-    """
+    """Read, colour and composite each part; None if none intersect."""
     result: np.ndarray | None = None
     for da in parts:
         try:
@@ -197,25 +148,11 @@ def _validate_categorical_request(
     rescale: tuple[float, float] | None = None,
     animated: bool = False,
 ) -> None:
-    """Single gate for every categorical request rule, run before rendering.
+    """Reject invalid categorical requests (ValueError -> 400):
 
-    Lives here (not in the router) because the variable's ``attrs`` — the only way
-    to know whether it's categorical — are already loaded for the render dispatch,
-    so the checks cost no extra store read. Raises ``ValueError``; the router maps
-    that to HTTP 400.
-
-    Rules:
-      * categorical variable → reject lossy (animated) WebP, which smears the hard
-        category boundaries into spurious in-between colours;
-      * categorical variable + ``rescale`` → reject (the discrete-lookup path has no
-        continuous scale, so rescale silently does nothing — a client setting it has
-        a misconception worth surfacing);
-      * categorical variable + an explicit *continuous* colormap → reject (pass a
-        categorical colormap, or omit it for the default palette);
-      * categorical variable + a categorical colormap whose values ≠ flag_values →
-        reject (its colours would map to the wrong codes, silently);
-      * continuous variable + a categorical colormap → reject (its fixed colour
-        slots are meaningless on the scale-dependent ramp path).
+    - categorical variable with WebP, ``rescale``, a continuous colormap, or
+      a categorical colormap whose values differ from flag_values;
+    - continuous variable with a categorical colormap.
     """
     colormap_is_categorical = bool(colormap_name) and is_categorical(colormap_name)
 
@@ -264,152 +201,236 @@ def _apply_crs(da: xr.DataArray) -> xr.DataArray:
     )
 
 
-def _to_scalar_parts(
-    ds: xr.Dataset,
-    variable: str,
-    coastal_fill: CoastalFill | None = None,
-    source_path: str = "",
-    date: str = "",
-) -> list[xr.DataArray]:
-    """Return float32 DataArrays ready for XarrayReader.
+@dataclass(frozen=True)
+class _Part:
+    """Grid columns that are contiguous in lon within ±180."""
 
-    Returns one element in the common case. Returns two elements when the data
-    straddles the antimeridian (e.g. GSLA: 57–185°E):
-      - primary:  lon < 180  (unchanged)
-      - minor:    lon > 180  shifted by −360  (e.g. 180.2–185 → −179.8 to −175)
-
-    Detection uses a contiguity check on the normalised coordinate array rather
-    than a heuristic threshold: if wrapping lon > 180 to negative values leaves a
-    gap larger than 2× the native resolution, the data is a regional straddle, not
-    a global periodic grid.
-
-    lon == 180 is excluded from both segments so that rioxarray's half-pixel padding
-    keeps each segment's bounds strictly inside the ±180 limit rio_tiler enforces.
-
-    If ``coastal_fill`` is set (``Product.visual_tile.coastal_fill``), NaN gaps
-    are filled from the nearest valid cell before any reprojection — once, on
-    the native-resolution array, so every zoom level's bilinear resample sees
-    the same filled source (mirrors data_tiles' inpaint, but at native
-    resolution rather than an LOD-resampled grid, and independently
-    configurable — see product.VisualTileConfig). Any fill that landed on real
-    land is then cut back off (via the same committed Natural Earth raster
-    data_tiles uses) before reprojection, so every downstream render path —
-    tile, bbox, animation — inherits the cut with no per-projection logic of
-    its own (see rendering.masks module docstring). ``source_path``/``date``
-    are only used as the cache key for this step (see ``_get_filled_values``)
-    — panning/zooming across many tiles of the same date shares one compute.
-    Default to "" for callers that don't need cross-request cache correctness
-    (e.g. tests exercising a single call in isolation).
-
-    Deduped per (source_path, date, variable, coastal_fill) — see
-    ``_scalar_parts_dedup``. The returned parts are shared across every
-    concurrent caller for this key, so their underlying arrays are marked
-    read-only (an accidental downstream mutation fails loudly instead of
-    corrupting the shared copy for every other caller).
-    """
-    key = (
-        source_path,
-        date,
-        variable,
-        coastal_fill.max_dist_px if coastal_fill is not None else None,
-    )
-
-    def compute() -> list[xr.DataArray]:
-        da = ds[variable].astype(np.float32)
-        if coastal_fill is not None:
-            filled = _get_filled_values(
-                source_path,
-                date,
-                variable,
-                coastal_fill,
-                da.values,
-                da.lon.values,
-                da.lat.values,
-            )
-            da = da.copy(data=filled)
-
-        lat_min, lat_max = float(da.lat.min()), float(da.lat.max())
-        lon_min, lon_max = float(da.lon.min()), float(da.lon.max())
-        if not (
-            -90 <= lat_min and lat_max <= 90 and -180 <= lon_min and lon_max <= 360
-        ):
-            raise ValueError(
-                f"Dataset '{variable}' does not appear to be in EPSG:4326: "
-                f"lat [{lat_min:.1f}, {lat_max:.1f}], lon [{lon_min:.1f}, {lon_max:.1f}]. "
-                "Expected lat ∈ [−90, 90] and lon ∈ [−180, 360]."
-            )
-
-        if float(da.lon.max()) > 180:
-            normalised = np.where(
-                da.lon.values > 180, da.lon.values - 360, da.lon.values
-            )
-            native_res = abs(float(da.lon.values[1] - da.lon.values[0]))
-            max_gap = float(np.max(np.diff(np.sort(normalised))))
-
-            if max_gap <= 2 * native_res:
-                # Contiguous after normalisation → global-style wrap is safe.
-                da = da.assign_coords(lon=("lon", normalised)).sortby("lon")
-                parts = [_apply_crs(da)]
-            else:
-                # Antimeridian straddle: split into two contiguous segments.
-                # Exclude exactly lon=180 from both sides — its half-pixel bound
-                # would land at ±180.x, which exceeds rio_tiler's strict ±180 check.
-                primary = _apply_crs(da.sel(lon=da.lon[da.lon < 180]))
-                minor_da = da.sel(lon=da.lon[da.lon > 180])
-                minor_da = _apply_crs(
-                    minor_da.assign_coords(
-                        lon=("lon", minor_da.lon.values - 360)
-                    ).sortby("lon")
-                )
-                parts = [primary, minor_da]
-        else:
-            parts = [_apply_crs(da)]
-
-        for part in parts:
-            part.values.setflags(write=False)
-        return parts
-
-    return _scalar_parts_dedup.dedupe(key, compute)
+    cols: np.ndarray
+    lon: np.ndarray
 
 
-_rescale_dedup = Deduper()
-
-
-def _rescale_range(
-    parts: list[xr.DataArray],
-    rescale: tuple[float, float] | None,
-    *,
-    source_path: str = "",
-    date: str = "",
-    variable: str = "",
-    coastal_fill: CoastalFill | None = None,
-) -> tuple[float, float] | None:
-    """Return (vmin, vmax) from rescale arg or data range; None if no valid data."""
-    if rescale is not None:
-        return rescale
-
-    def compute() -> tuple[float, float] | None:
-        all_valid = np.concatenate(
-            [p.values[~np.isnan(p.values)].ravel() for p in parts]
+def _split_parts(lat: np.ndarray, lon: np.ndarray, variable: str) -> list[_Part]:
+    """One part, or two when the grid crosses 180°E (the part east of 180
+    shifted by -360)."""
+    lat_min, lat_max = float(lat.min()), float(lat.max())
+    lon_min, lon_max = float(lon.min()), float(lon.max())
+    if not (-90 <= lat_min and lat_max <= 90 and -180 <= lon_min and lon_max <= 360):
+        raise ValueError(
+            f"Dataset '{variable}' does not appear to be in EPSG:4326: "
+            f"lat [{lat_min:.1f}, {lat_max:.1f}], lon [{lon_min:.1f}, {lon_max:.1f}]. "
+            "Expected lat ∈ [−90, 90] and lon ∈ [−180, 360]."
         )
-        if not all_valid.size:
-            return None
-        return float(all_valid.min()), float(all_valid.max())
 
-    if not date:
-        return compute()
+    if lon_max <= 180:
+        return [_Part(np.arange(len(lon)), lon)]
 
-    key = (
-        source_path,
-        date,
-        variable,
-        coastal_fill.max_dist_px if coastal_fill is not None else None,
+    normalised = np.where(lon > 180, lon - 360, lon)
+    native_res = abs(float(lon[1] - lon[0]))
+    max_gap = float(np.max(np.diff(np.sort(normalised))))
+    if max_gap <= 2 * native_res:
+        # Contiguous after wrapping: a global grid.
+        order = np.argsort(normalised, kind="stable")
+        return [_Part(order, normalised[order])]
+
+    # Crosses 180°E: split in two, leaving out lon=180 exactly.
+    primary = np.nonzero(lon < 180)[0]
+    minor = np.nonzero(lon > 180)[0]
+    minor = minor[np.argsort(lon[minor], kind="stable")]
+    return [_Part(primary, lon[primary]), _Part(minor, lon[minor] - 360)]
+
+
+def _window(coords: np.ndarray, lo: float, hi: float, pad: float) -> slice | None:
+    """The positions of ``coords`` (monotonic) within [lo - pad, hi + pad]."""
+    inside = np.nonzero((coords >= lo - pad) & (coords <= hi + pad))[0]
+    if not inside.size:
+        return None
+    return slice(int(inside[0]), int(inside[-1]) + 1)
+
+
+def _steps(
+    n_rows: int, n_cols: int, out_height: int, out_width: int
+) -> tuple[int, int]:
+    """How many source pixels an output pixel covers, per axis, capped at one.
+
+    ``(1, 1)`` means the window is already near the output's own resolution,
+    so it is read cell for cell and the tile comes out exactly as it always
+    did. Anything more means there is something to aggregate.
+
+    Past ``_MAX_READ_CELLS``, the steps grow to about one cell per output
+    pixel.
+    """
+    row_step = max(1, n_rows // max(1, out_height * _OVERSAMPLE))
+    col_step = max(1, n_cols // max(1, out_width * _OVERSAMPLE))
+    if (n_rows // row_step) * (n_cols // col_step) > _MAX_READ_CELLS:
+        row_step = max(row_step, -(-n_rows // max(1, out_height)))
+        col_step = max(col_step, -(-n_cols // max(1, out_width)))
+    return row_step, col_step
+
+
+def _is_run(idx: np.ndarray) -> bool:
+    """Whether these source columns are one increasing run, so they name a
+    slice. A grid whose columns had to be reordered to wrap past 180 doesn't."""
+    return bool(idx.size) and bool(
+        np.array_equal(idx, np.arange(idx[0], idx[0] + idx.size))
     )
-    return _rescale_dedup.dedupe(key, compute)
+
+
+def _centres(coords: np.ndarray, edges: np.ndarray, offset: int) -> np.ndarray:
+    """The middle coordinate of each block the edges mark out."""
+    at = edges[:-1] - offset
+    return np.add.reduceat(coords, at) / np.diff(edges)
+
+
+def _block_count(n: int, out: int, step: int) -> int:
+    """Blocks along one axis of an aggregated window."""
+    return min(n, out * _AVG_OVERSAMPLE, max(out, n // step))
+
+
+def _aggregate_window(
+    grid: SparseGrid,
+    lat: np.ndarray,
+    part_lon: np.ndarray,
+    rows: slice,
+    cols: slice,
+    src_cols: np.ndarray,
+    out_height: int,
+    out_width: int,
+    row_step: int,
+    col_step: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The window as block means at ``_AVG_OVERSAMPLE`` blocks per output pixel.
+
+    Where ``_steps`` capped the read, only as many blocks as the steps leave
+    cells, but never fewer than the output has pixels (or the window cells).
+
+    Averages every cell rather than sampling one per block, and never builds
+    the window at the grid's own resolution.
+    """
+    src = slice(int(src_cols[0]), int(src_cols[-1]) + 1)
+    values, row_edges, col_edges = grid.aggregate(
+        rows,
+        src,
+        _block_count(rows.stop - rows.start, out_height, row_step),
+        _block_count(src.stop - src.start, out_width, col_step),
+    )
+    lat_coords = _centres(lat[rows], row_edges, rows.start)
+    lon_coords = _centres(part_lon[cols], col_edges, src.start)
+    return values, lat_coords, lon_coords
+
+
+def _parts_in_bbox(
+    sparse: SparseSlice,
+    variable: str,
+    bbox_wgs84: tuple[float, float, float, float],
+    coastal_fill: CoastalFill | None = None,
+    out_width: int = 256,
+    out_height: int = 256,
+) -> list[xr.DataArray]:
+    """The variable under ``bbox_wgs84`` as float32 DataArrays for rio-tiler,
+    one per part the bbox touches.
+
+    A window whose cells outnumber the ``out_width`` x ``out_height`` output
+    by more than ``_OVERSAMPLE`` on an axis comes back as block means, so a
+    low-zoom tile never materialises the grid at its own resolution. Windows
+    near the output's resolution are read cell for cell, unchanged.
+
+    Applies ``coastal_fill`` (and cuts filled values off land), reading that
+    many pixels more so the fill sees the same neighbours.
+    """
+    lat, lon = sparse.lat, sparse.lon
+    grid = sparse.grids[variable]
+    attrs = sparse.attrs[variable]
+    # Averaging category codes would invent categories, so those stay sampled.
+    categorical = is_categorical_variable(attrs)
+    w, s, e, n = bbox_wgs84
+    margin = _MARGIN_PX + (coastal_fill.max_dist_px if coastal_fill else 0)
+    lat_res = abs(float(lat[1] - lat[0])) if len(lat) > 1 else 0.0
+    lon_res = abs(float(lon[1] - lon[0])) if len(lon) > 1 else 0.0
+
+    split = _split_parts(lat, lon, variable)
+    plain_rows = _window(lat, s, n, 0.0)
+    if plain_rows is None:
+        return []
+
+    parts = []
+    for part in split:
+        plain_cols = _window(part.lon, w, e, 0.0)
+        if plain_cols is None:
+            continue
+        # The steps come from the unpadded window; the margin is then widened
+        # by them so those extra pixels still land in the result rather than
+        # disappearing inside a block.
+        row_step, col_step = _steps(
+            plain_rows.stop - plain_rows.start,
+            plain_cols.stop - plain_cols.start,
+            out_height,
+            out_width,
+        )
+        rows = _window(lat, s, n, margin * row_step * lat_res)
+        cols = _window(part.lon, w, e, margin * col_step * lon_res)
+        if rows is None or cols is None:
+            continue
+
+        src_cols = part.cols[cols]
+        # Category codes can't be averaged, and a reordered column axis can't
+        # be sliced, so either one falls back to sampling every n-th cell.
+        if (row_step > 1 or col_step > 1) and not categorical and _is_run(src_cols):
+            values, lat_coords, lon_coords = _aggregate_window(
+                grid,
+                lat,
+                part.lon,
+                rows,
+                cols,
+                src_cols,
+                out_height,
+                out_width,
+                row_step,
+                col_step,
+            )
+        else:
+            lat_coords = lat[rows][::row_step]
+            lon_coords = part.lon[cols][::col_step]
+            values = grid.gather(
+                np.arange(len(lat))[rows][::row_step], src_cols[::col_step]
+            )
+            values = values.astype(np.float32, copy=False)
+        if coastal_fill is not None:
+            # max_dist_px counts source pixels, so it shrinks with the window.
+            reach = max(1, round(coastal_fill.max_dist_px / max(row_step, col_step)))
+            values = inpaint_nearest(values, reach).copy()
+            values[land_mask_for_coords(lon_coords, lat_coords)] = np.nan
+        da = xr.DataArray(
+            values,
+            dims=("lat", "lon"),
+            coords={"lat": lat_coords, "lon": lon_coords},
+            attrs=dict(attrs),
+        )
+        parts.append(_apply_crs(da))
+    return parts
+
+
+def _data_range(ranges: list[tuple[float, float]]) -> tuple[float, float] | None:
+    """The overall min/max of these ``(vmin, vmax)`` pairs; None if no data."""
+    lows = [lo for lo, _ in ranges]
+    highs = [hi for _, hi in ranges]
+    if all(np.isnan(lows)):
+        return None
+    return float(np.nanmin(lows)), float(np.nanmax(highs))
+
+
+def _grid_range(sparse: SparseSlice, variable: str) -> tuple[float, float]:
+    grid = sparse.grids[variable]
+    return grid.vmin, grid.vmax
+
+
+def _tile_bbox(x: int, y: int, z: int) -> tuple[float, float, float, float]:
+    """The tile's (west, south, east, north) in lon/lat."""
+    b = _WEB_MERCATOR.bounds(x, y, z)
+    return (b.left, b.bottom, b.right, b.top)
 
 
 def render_tile(
-    ds: xr.Dataset,
+    sparse: SparseSlice,
     variable: str,
     x: int,
     y: int,
@@ -418,21 +439,11 @@ def render_tile(
     rescale: tuple[float, float] | None = None,
     fmt: ImageFormat = "png",
     coastal_fill: CoastalFill | None = None,
-    source_path: str = "",
-    date: str = "",
 ) -> bytes:
-    """Return a 256×256 Web Mercator tile encoded as ``fmt``.
-
-    Returns a fully transparent tile for tiles outside the data extent. Categorical
-    variables (CF ``flag_values``) take the discrete-lookup path — nearest-neighbour
-    resampling and a value-indexed LUT, no rescale; see [[colormap.categorical]].
-    ``colormap_name`` None means "unspecified" (default viridis ramp / default
-    categorical palette). ``coastal_fill`` is ``Product.visual_tile.coastal_fill``;
-    ``source_path``/``date`` key its cache (see ``_to_scalar_parts``).
-    """
-    attrs = ds[variable].attrs
+    """A 256x256 Web Mercator tile; transparent outside the data."""
+    attrs = sparse.attrs[variable]
     _validate_categorical_request(variable, attrs, colormap_name, fmt, rescale=rescale)
-    parts = _to_scalar_parts(ds, variable, coastal_fill, source_path, date)
+    parts = _parts_in_bbox(sparse, variable, _tile_bbox(x, y, z), coastal_fill)
 
     if is_categorical_variable(attrs):
         scheme = resolve_scheme(attrs, colormap_name)
@@ -441,14 +452,7 @@ def render_tile(
         )
         return encode_rgba(result, fmt) if result is not None else empty_tile(fmt)
 
-    vrange = _rescale_range(
-        parts,
-        rescale,
-        source_path=source_path,
-        date=date,
-        variable=variable,
-        coastal_fill=coastal_fill,
-    )
+    vrange = rescale or _data_range([_grid_range(sparse, variable)])
     if vrange is None:
         return empty_tile(fmt)
     vmin, vmax = vrange
@@ -483,11 +487,7 @@ def _bbox_parts_to_rgba(
     cm: dict[int, tuple[int, int, int, int]],
     dst_crs: str = "EPSG:3857",
 ) -> np.ndarray | None:
-    """Resample each antimeridian-split part into the bbox, composite, return RGBA.
-
-    Returns None when the bbox intersects none of the parts (caller decides whether
-    to emit a transparent placeholder or skip).
-    """
+    """Render each part into the bbox and composite; None if none intersect."""
     lon_min, lat_min, lon_max, lat_max = bbox_wgs84
     result: np.ndarray | None = None
     for da in parts:
@@ -513,7 +513,7 @@ def _bbox_parts_to_rgba(
 
 
 def render_bbox(
-    ds: xr.Dataset,
+    sparse: SparseSlice,
     variable: str,
     bbox: tuple[float, float, float, float],
     width: int,
@@ -524,23 +524,13 @@ def render_bbox(
     dst_crs: str = "EPSG:3857",
     fmt: ImageFormat = "png",
     coastal_fill: CoastalFill | None = None,
-    source_path: str = "",
-    date: str = "",
 ) -> bytes:
-    """Return an image for an arbitrary bbox encoded as ``fmt``.
-
-    bbox must be (minx, miny, maxx, maxy) in ``crs`` ('EPSG:4326' degrees or 'EPSG:3857'
-    meters) — this controls only how the input numbers are interpreted. ``dst_crs`` is
-    the CRS of the *output* image, independent of ``crs``.
-    Returns a fully transparent tile when the bbox does not intersect the data. Categorical
-    variables take the discrete-lookup path (see [[colormap.categorical]] / `render_tile`).
-    ``coastal_fill`` is ``Product.visual_tile.coastal_fill``;
-    ``source_path``/``date`` key its cache (see ``_to_scalar_parts``).
-    """
-    attrs = ds[variable].attrs
+    """An image of ``bbox`` (in ``crs``), rendered in ``dst_crs``;
+    transparent if it misses the data."""
+    attrs = sparse.attrs[variable]
     _validate_categorical_request(variable, attrs, colormap_name, fmt, rescale=rescale)
-    parts = _to_scalar_parts(ds, variable, coastal_fill, source_path, date)
     bbox_wgs84 = bbox_to_wgs84(bbox, crs)
+    parts = _parts_in_bbox(sparse, variable, bbox_wgs84, coastal_fill, width, height)
     lo, la_min, hi, la_max = bbox_wgs84
 
     if is_categorical_variable(attrs):
@@ -558,14 +548,7 @@ def render_bbox(
         )
         return encode_rgba(result, fmt) if result is not None else empty_tile(fmt)
 
-    vrange = _rescale_range(
-        parts,
-        rescale,
-        source_path=source_path,
-        date=date,
-        variable=variable,
-        coastal_fill=coastal_fill,
-    )
+    vrange = rescale or _data_range([_grid_range(sparse, variable)])
     if vrange is None:
         return empty_tile(fmt)
     vmin, vmax = vrange
@@ -578,8 +561,40 @@ def render_bbox(
     return encode_rgba(result, fmt) if result is not None else empty_tile(fmt)
 
 
+@dataclass(frozen=True)
+class BboxFrame:
+    """One animation frame: the slice cut to the bbox, and the whole slice's
+    min/max (for one colour range across frames)."""
+
+    parts: list[xr.DataArray]
+    vmin: float
+    vmax: float
+    attrs: dict
+
+
+def cut_frame(
+    sparse: SparseSlice,
+    variable: str,
+    bbox: tuple[float, float, float, float],
+    crs: str = "EPSG:4326",
+    coastal_fill: CoastalFill | None = None,
+    out_width: int = 256,
+    out_height: int = 256,
+) -> BboxFrame:
+    """Keep only what an animation frame needs from ``sparse``.
+
+    ``out_width``/``out_height`` are the animation's size, so each frame is
+    read at the resolution it will be rendered at.
+    """
+    parts = _parts_in_bbox(
+        sparse, variable, bbox_to_wgs84(bbox, crs), coastal_fill, out_width, out_height
+    )
+    vmin, vmax = _grid_range(sparse, variable)
+    return BboxFrame(parts, vmin, vmax, sparse.attrs[variable])
+
+
 def render_bbox_animation(
-    datasets: list[xr.Dataset],
+    frames: list[BboxFrame],
     variable: str,
     bbox: tuple[float, float, float, float],
     width: int,
@@ -590,41 +605,22 @@ def render_bbox_animation(
     dst_crs: str = "EPSG:3857",
     fmt: AnimatedFormat = "webp",
     duration_ms: int = 200,
-    coastal_fill: CoastalFill | None = None,
-    source_path: str = "",
-    dates: list[str] | None = None,
 ) -> bytes:
-    """Render the same bbox across ``datasets`` and assemble as an animated image.
+    """The same bbox for each frame (from ``cut_frame``), as an animated image.
 
-    ``crs`` controls only how the input ``bbox`` numbers are interpreted; ``dst_crs``
-    is the CRS of the output frames, independent of ``crs``.
-    When ``rescale`` is None, vmin/vmax is computed across the union of every frame's
-    data so the colour ramp stays stable from frame to frame; computing it per-frame
-    causes flicker in low-variance areas.
-    Frames whose data does not intersect the bbox are emitted as fully transparent
-    so timing stays aligned with the date sequence. Categorical variables take the
-    discrete-lookup path (nearest resampling, value-indexed LUT, no rescale).
-    ``coastal_fill`` is ``Product.visual_tile.coastal_fill``, applied identically
-    to every frame (it's a static per-product setting, not per-date).
-    ``source_path``/``dates`` (one per ``datasets`` entry) key each frame's fill
-    cache (see ``_to_scalar_parts``) so a repeated animation request — or another
-    endpoint hitting the same (product, date) — reuses each frame's compute.
+    Without ``rescale``, one range across all frames, so colours don't
+    flicker. Frames outside the data are transparent.
     """
-    if not datasets:
-        raise ValueError("render_bbox_animation requires at least one dataset")
-    if dates is None:
-        dates = [""] * len(datasets)
+    if not frames:
+        raise ValueError("render_bbox_animation requires at least one frame")
 
-    attrs = datasets[0][variable].attrs
+    attrs = frames[0].attrs
     _validate_categorical_request(
         variable, attrs, colormap_name, fmt, rescale=rescale, animated=True
     )
 
-    parts_per_frame = [
-        _to_scalar_parts(ds, variable, coastal_fill, source_path, d)
-        for ds, d in zip(datasets, dates, strict=True)
-    ]
     bbox_wgs84 = bbox_to_wgs84(bbox, crs)
+    parts_per_frame = [frame.parts for frame in frames]
 
     if is_categorical_variable(attrs):
         lut = resolve_scheme(attrs, colormap_name).lut()
@@ -647,26 +643,22 @@ def render_bbox_animation(
             cat_frames.append(rgba)
         return encode_rgba_animation(cat_frames, fmt, duration_ms)
 
-    if rescale is not None:
-        vmin, vmax = rescale
-    else:
-        all_parts = [p for parts in parts_per_frame for p in parts]
-        vrange = _rescale_range(all_parts, None)
-        if vrange is None:
-            empty = np.zeros((height, width, 4), dtype=np.uint8)
-            return encode_rgba_animation([empty] * len(datasets), fmt, duration_ms)
-        vmin, vmax = vrange
+    vrange = rescale or _data_range([(f.vmin, f.vmax) for f in frames])
+    if vrange is None:
+        empty = np.zeros((height, width, 4), dtype=np.uint8)
+        return encode_rgba_animation([empty] * len(frames), fmt, duration_ms)
+    vmin, vmax = vrange
 
     span = vmax - vmin or 1.0
     cm = resolve_colormap(colormap_name or "viridis")
 
-    frames: list[np.ndarray] = []
+    images: list[np.ndarray] = []
     for parts in parts_per_frame:
         rgba = _bbox_parts_to_rgba(
             parts, bbox_wgs84, width, height, vmin, span, cm, dst_crs=dst_crs
         )
         if rgba is None:
             rgba = np.zeros((height, width, 4), dtype=np.uint8)
-        frames.append(rgba)
+        images.append(rgba)
 
-    return encode_rgba_animation(frames, fmt, duration_ms)
+    return encode_rgba_animation(images, fmt, duration_ms)

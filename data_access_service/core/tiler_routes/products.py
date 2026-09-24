@@ -3,8 +3,8 @@ import logging
 import math
 
 import anyio
+import numpy as np
 import pandas as pd
-import xarray as xr
 from fastapi import APIRouter, HTTPException, Path, Query, Response
 from fastapi.openapi.models import Example
 
@@ -27,7 +27,7 @@ from data_access_service.tiler.services.store.registry import (
     get_available_dates,
     is_store_available,
 )
-from data_access_service.tiler.utils.geo import dataset_bounds
+from data_access_service.tiler.services.store.sparse_grid import SparseSlice
 
 from .shared import (
     DATE_EX,
@@ -45,14 +45,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _require_point_in_bounds(ds: xr.Dataset, lat: float, lon: float) -> None:
-    """Raise 404 if (lat, lon) falls outside the dataset's coverage.
-
-    sel(method="nearest") snaps unconditionally, so without this guard an
-    out-of-bounds request silently returns the edge cell. Bounds match those
-    advertised by /manifest.
-    """
-    lon_min, lon_max, lat_min, lat_max = dataset_bounds(ds)
+def _require_point_in_bounds(sparse: SparseSlice, lat: float, lon: float) -> None:
+    """404 if (lat, lon) is outside the data, instead of snapping to the edge."""
+    lon_min, lon_max, lat_min, lat_max = sparse.bounds()
     if not (lat_min <= lat <= lat_max and lon_min <= lon <= lon_max):
         raise HTTPException(
             status_code=404,
@@ -113,8 +108,6 @@ async def get_products_availability(
     from_ts = parse_date_or_422(from_date) if from_date else None
     to_ts = parse_date_or_422(to_date) if to_date else None
 
-    # iter_product_items returns a snapshot list so a concurrent reload can't
-    # raise RuntimeError ("dictionary changed size during iteration") here.
     items = iter_product_items()
     if metadata_uuid is not None:
         items = [
@@ -130,14 +123,13 @@ async def get_products_availability(
 
     products = {}
     for product_id, product in items:
-        if not is_store_available(product.source_path):
+        if not is_store_available(product.store):
             continue
 
-        all_dates = get_available_dates(product.source_path)
+        all_dates = get_available_dates(product.store)
         if not all_dates:
             continue
-        # full_date_range is the product's full dataset bounds, independent of from/to;
-        # available_dates below is the from/to-filtered subset.
+        # full_date_range ignores from/to; available_dates doesn't.
         dates = [
             d
             for d, ts in all_dates
@@ -189,23 +181,25 @@ def _load_point(
     product: Product, ts: pd.Timestamp, lat: float, lon: float
 ) -> PointResponse:
     variables = product.variables
-    ds = load_slice_or_404(
-        product.source_path, ts, variables, ocean_masked=product.ocean_masked
+    sparse = load_slice_or_404(
+        product.store, ts, variables, ocean_masked=product.ocean_masked
     )
 
-    _require_point_in_bounds(ds, lat, lon)
-    point = ds.sel(lat=lat, lon=lon, method="nearest")
+    _require_point_in_bounds(sparse, lat, lon)
+    # The nearest grid cell.
+    i = int(np.abs(sparse.lat - lat).argmin())
+    j = int(np.abs(sparse.lon - lon).argmin())
 
     values: dict[str, VariableValue] = {}
     for var in variables:
-        v = float(point[var].squeeze())
+        v = sparse.grids[var].value_at(i, j)
         values[var] = VariableValue(
             value=None if math.isnan(v) else v,
-            units=point[var].attrs.get("units"),
+            units=sparse.attrs[var].get("units"),
         )
 
     return PointResponse(
-        lat=float(point.lat.values),
-        lon=float(point.lon.values),
+        lat=float(sparse.lat[i]),
+        lon=float(sparse.lon[j]),
         variables=values,
     )

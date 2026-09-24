@@ -8,6 +8,7 @@ from apscheduler.triggers.cron import CronTrigger
 from data_access_service import API, Config
 from data_access_service.config.config import EnvType
 from data_access_service.sites.sites_repository import ParquetRepository
+from data_access_service.core.tiler_routes.startup import refresh_catalog
 from data_access_service.tiler.services.store.registry import refresh_stores
 from data_access_service.utils.memory_utils import log_memory_usage
 
@@ -45,12 +46,8 @@ class TaskScheduler:
        only if it changed — a lightweight reload. The repositories share the
        single ``SitesDuckDBClient`` built in :mod:`data_access_service.server`,
        so every read endpoint sees the reloaded tables.
-    2. Re-opens every tiler store already published in
-       ``StoreRegistry._stores`` (see
-       ``data_access_service/tiler/services/store/registry.py``) on a fixed
-       interval, bounding data staleness regardless of how often a given
-       store is requested — see ``tiler/technical.md`` for the design this
-       replaced (request-triggered TTL refresh).
+    2. Refreshes the tiler: re-reads every loaded store's metadata.json (new
+       timestamps), then root_metadata.json (products added or removed).
     """
 
     def __init__(self, api: API, sites_repositories: dict[str, ParquetRepository]):
@@ -82,13 +79,8 @@ class TaskScheduler:
         log_memory_usage(logger, f"after reload check '{name}'")
 
     def _store_refresh_task(self):
-        """Re-open every currently-valid tiler store (the scheduled job).
-
-        Sequential (one store at a time) by design, so this never opens more
-        than one Zarr store's metadata at once regardless of how many stores
-        are registered — the peak-memory/CPU stampede this replaced came from
-        several request-triggered refreshes overlapping.
-        """
+        """Re-read the tiler's store metadata and product catalogue (the
+        scheduled job)."""
         if not Config.is_profile_in(
             EnvType.EDGE,
             EnvType.STAGING,
@@ -106,6 +98,10 @@ class TaskScheduler:
             refresh_stores()
         except Exception:
             logger.exception("Store refresh task failed")
+        try:
+            refresh_catalog()
+        except Exception:
+            logger.exception("Tiler catalogue refresh failed")
         log_memory_usage(logger, "store refresh task end")
         logger.info("Store refresh task completed")
 
@@ -147,7 +143,7 @@ class TaskScheduler:
         self.scheduler.add_job(
             self._store_refresh_task,
             trigger=CronTrigger(
-                hour=f"*/{Config.get_config().get_tiler_config().store_refresh_interval_hours}",
+                hour=f"*/{Config.get_config().get_tiler_api_config().store_refresh_interval_hours}",
                 minute="0",
             ),
             id="store_refresh_task",

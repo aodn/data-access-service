@@ -17,14 +17,18 @@ from data_access_service.models.estimation_types import (
     EstimationIndexConfig,
     EstimationReadDuckDBConfig,
 )
-from data_access_service.models.memory_watchdog_types import MemoryWatchdogConfig
 from data_access_service.models.pmtiles_types import (
     HexLayerSpec,
     PmtilesGenerationConfig,
     TimeGroupBy,
 )
 from data_access_service.models.sites_types import SitesConfig
-from data_access_service.models.tiler_types import TilerConfig
+from data_access_service.models.tiler_types import (
+    TilerApiConfig,
+    TilerBatchConfig,
+    TilerBatchDuckDBConfig,
+    TilerDuckDBConfig,
+)
 from data_access_service.models.zarr_chunking_types import ZarrChunkingConfig
 
 
@@ -86,36 +90,6 @@ class Config:
         base = Config.load_config(base_path) or {}
         override = Config.load_config(override_path) or {}
         return Config._deep_merge(base, override)
-
-    @staticmethod
-    def _load_tiler_catalog_section(section: str):
-        """Read one section of the tiler's static product-catalogue config —
-        straight off the base config.yaml, deliberately bypassing the
-        per-environment overlay merge since this data doesn't vary by
-        environment.
-        """
-        tiler = (
-            Config.load_config("data_access_service/config/config.yaml") or {}
-        ).get("tiler", {})
-        return tiler.get(section)
-
-    @staticmethod
-    def get_tiler_blacklist() -> List | None:
-        """Stores to drop entirely before candidates are fanned out — see
-        services/product/discovery.py::_load_store_blacklist."""
-        return Config._load_tiler_catalog_section("blacklist")
-
-    @staticmethod
-    def get_tiler_gridded_variables() -> List | None:
-        """Variable specifications fanned out across the metadata catalogue at
-        startup — see services/product/discovery.py::_load_gridded_variable_specs."""
-        return Config._load_tiler_catalog_section("gridded_variables")
-
-    @staticmethod
-    def get_tiler_products_customisation() -> List | None:
-        """Per-product tuning layered onto discovered candidates by id — see
-        tiler/schemas/products.py::load_product_overrides."""
-        return Config._load_tiler_catalog_section("products_customisation")
 
     @staticmethod
     def resolve_profile(profile: EnvType = None) -> EnvType:
@@ -431,14 +405,6 @@ class Config:
         sconfig = self.config.get("sites", {}).get("config", {})
         return sconfig["reload_interval_hours"]
 
-    def get_memory_watchdog_config(self) -> MemoryWatchdogConfig:
-        mconfig = self.config.get("memory_watchdog", {}).get("config", {})
-        return MemoryWatchdogConfig(
-            enabled=mconfig["enabled"],
-            interval_seconds=mconfig["interval_seconds"],
-            threshold_mb=mconfig["threshold_mb"],
-        )
-
     def get_zarr_chunking_config(self) -> ZarrChunkingConfig:
         sconfig = self.config.get("subsetting", {}).get("config", {})
         return ZarrChunkingConfig(
@@ -449,25 +415,59 @@ class Config:
             max_chunk_gb=sconfig["max_chunk_gb"],
         )
 
-    def get_tiler_config(self) -> TilerConfig:
-        redis_env = os.getenv("CACHE_HOST")
-        tconfig = self.config.get("tiler", {}).get("config", {})
-        return TilerConfig(
-            co_bucket=f"s3://{tconfig.get('co_bucket', 'aodn-cloud-optimised')}",
-            store_prewarm_workers=tconfig["store_prewarm_workers"],
-            store_refresh_interval_hours=tconfig["store_refresh_interval_hours"],
-            thread_pool_size=tconfig["thread_pool_size"],
-            animation_workers=tconfig["animation_workers"],
-            cache_backend=tconfig["cache_backend"],
-            slice_cache_ttl_seconds=tconfig["slice_cache_ttl_seconds"],
-            redis_host=redis_env or tconfig.get("redis_host"),
-            redis_port=tconfig["redis_port"],
-            is_tls=redis_env is not None,
-            s3_anon=tconfig["s3_anon"],
-            s3_connect_timeout=tconfig["s3_connect_timeout"],
-            s3_read_timeout=tconfig["s3_read_timeout"],
-            s3_max_attempts=tconfig["s3_max_attempts"],
+    def _tiler(self) -> dict:
+        return self.config["tiler"]
+
+    def get_tiler_root_dir(self) -> str:
+        """The S3 prefix batch writes and the tiler reads."""
+        prefix = self._tiler()["config"]["root_prefix"]
+        return f"s3://{self.get_datavis_data_bucket_name()}/{prefix}"
+
+    def get_tiler_api_config(self) -> TilerApiConfig:
+        api = self._tiler()["config"]["api"]
+        duckdb = api["duckdb"]
+        return TilerApiConfig(
+            store_refresh_interval_hours=int(api["store_refresh_interval_hours"]),
+            thread_pool_size=int(api["thread_pool_size"]),
+            animation_workers=int(api["animation_workers"]),
+            trim_threshold_mb=int(api["trim_threshold_mb"]),
+            duckdb=TilerDuckDBConfig(
+                memory_limit=duckdb["memory_limit"],
+                threads=int(duckdb["threads"]),
+                enable_external_file_cache=bool(duckdb["enable_external_file_cache"]),
+                parquet_metadata_cache=bool(duckdb["parquet_metadata_cache"]),
+                enable_http_metadata_cache=bool(duckdb["enable_http_metadata_cache"]),
+            ),
         )
+
+    def get_tiler_batch_config(self) -> TilerBatchConfig:
+        batch = self._tiler()["config"]["batch"]
+        duckdb = batch["duckdb"]
+        max_chunks = batch["max_chunks_per_run"]
+        return TilerBatchConfig(
+            tiler_root_dir=self.get_tiler_root_dir(),
+            max_chunks_per_run=int(max_chunks) if max_chunks is not None else None,
+            use_fork_process=bool(batch["use_fork_process"]),
+            duckdb=TilerBatchDuckDBConfig(
+                memory_limit=duckdb["memory_limit"],
+                threads=int(duckdb["threads"]),
+                temp_dir_prefix=duckdb["temp_dir_prefix"],
+            ),
+        )
+
+    def get_tiler_blacklist(self) -> list[str]:
+        """Stores batch discovery skips (``tiler.catalog.blacklist``)."""
+        return self._tiler()["catalog"]["blacklist"]
+
+    def get_tiler_gridded_variables(self) -> list:
+        """Variable specs batch discovery turns into products
+        (``tiler.catalog.gridded_variables``)."""
+        return self._tiler()["catalog"]["gridded_variables"]
+
+    def get_tiler_products_customisation(self) -> list:
+        """Per-product tuning the API applies by product id
+        (``tiler.products_customisation``)."""
+        return self._tiler()["products_customisation"]
 
     def get_hex_layer_specs(self, dname: str) -> List[HexLayerSpec] | None:
         """

@@ -1,5 +1,5 @@
 """Grid-mask tests: nearest-valid inpaint, land-mask sampling, the fill+land-cut
-integration through _compute_processed, and the source-grid ocean mask.
+integration through _compute_window, and the source-grid ocean mask.
 
 These exercise the real committed mask assets (src/app/assets/land_mask.npz and
 ocean_mask.npz), so the geographic assertions double as a smoke test that the
@@ -14,11 +14,8 @@ from data_access_service.tiler.services.product.product import (
     DataTileConfig,
     Product,
 )
-from data_access_service.tiler.services.rendering.data_tiles import (
-    _compute_processed,
-)
+from data_access_service.tiler.services.rendering.data_tiles import _compute_window
 from data_access_service.tiler.services.rendering.masks import (
-    apply_ocean_mask,
     inpaint_nearest,
     land_mask_for_coords,
     land_mask_for_grid,
@@ -26,6 +23,7 @@ from data_access_service.tiler.services.rendering.masks import (
     load_ocean_mask,
     ocean_valid_for_coords,
 )
+from tests.tiler.sparse_helpers import sparse_of
 
 # --- inpaint_nearest ------------------------------------------------------
 
@@ -87,7 +85,7 @@ def test_land_mask_antimeridian_wraps():
 def test_land_mask_for_coords_matches_known_points():
     """Same known points as test_land_mask_known_points, via explicit coords
     rather than a linspace grid — exercises the path visual_tiles uses to cut
-    land at native resolution (see _to_scalar_parts)."""
+    land at native resolution (see _parts_in_bbox)."""
     land = land_mask_for_coords(
         np.array([133.9, -0.1, 160.0, -140.0]), np.array([-23.7, 51.5, -40.0, 0.0])
     )
@@ -127,31 +125,6 @@ def test_ocean_mask_out_of_domain_is_invalid():
     assert _ocean_valid_at(30.0, 60.0) is False  # lat north of the domain
 
 
-def test_apply_ocean_mask_nulls_invalid_cells_only():
-    # 2x2 grid straddling the mask edge: open ocean vs New Guinea land.
-    lats = [-40.0, -6.4]
-    lons = [150.0, 137.0]
-    data = np.ones((2, 2), dtype=np.float32)
-    ds = xr.Dataset(
-        {
-            "UCUR": xr.DataArray(
-                data, dims=["lat", "lon"], coords={"lat": lats, "lon": lons}
-            )
-        }
-    )
-
-    masked = apply_ocean_mask(ds, ["UCUR"])
-
-    # Open-ocean cell survives; the New Guinea land cell is nulled.
-    assert float(masked["UCUR"].sel(lat=-40.0, lon=150.0)) == 1.0
-    assert np.isnan(float(masked["UCUR"].sel(lat=-6.4, lon=137.0)))
-    # Input is not mutated.
-    assert not np.isnan(ds["UCUR"]).any()
-
-
-# --- integration through _compute_processed -------------------------------
-
-
 def _ds_over(lon_min, lon_max, lat_max, lat_min, n=20, fill=0.5):
     """Synthetic single-variable dataset on a regular grid, north→south lat."""
     lat = np.linspace(lat_max, lat_min, n)
@@ -169,7 +142,7 @@ def _ds_over(lon_min, lon_max, lat_max, lat_min, n=20, fill=0.5):
 def _product(coastal_fill, product_id="t"):
     return Product(
         id=product_id,
-        source_path="",
+        store="",
         variable="GSLA",
         data_tile=DataTileConfig(
             lod_grids={1: (2, 2)},
@@ -178,6 +151,11 @@ def _product(coastal_fill, product_id="t"):
             coastal_fill=coastal_fill,
         ),
     )
+
+
+def _compute_processed(product, ds, lod):
+    """The whole 16x16 LOD grid (2x2 chunks of 8px) in one window."""
+    return _compute_window(product, sparse_of(ds), lod, (0, 16), (0, 16))
 
 
 def test_compute_fills_ocean_gap_when_enabled():
@@ -206,8 +184,8 @@ def test_compute_cuts_land_when_enabled():
 
 
 def test_compute_no_longer_applies_ocean_mask_by_product_id():
-    # Ocean masking moved to the raw slice (masks.apply_ocean_mask, opt-in via
-    # Product.ocean_masked), so _compute_processed must NOT cut by product id any
+    # Ocean masking moved to the raw slice (slice_loader, opt-in via
+    # Product.ocean_masked), so the data-tile compute must NOT cut by product id any
     # more: the currents id and any other id produce identical output. Region
     # straddles the ocean-mask edge geographically to make the old behaviour visible
     # if it ever regressed.
@@ -225,7 +203,7 @@ def test_compute_no_longer_applies_ocean_mask_by_product_id():
 
 
 def test_compute_propagates_premasked_nans_to_ocean_validity():
-    # By the time _compute_processed runs, anomalous cells are already NaN (nulled
+    # By the time the data-tile compute runs, anomalous cells are already NaN (nulled
     # on the raw slice). Those NaNs must fall out of the ocean-validity mask — the
     # cut is inherited from the source, not re-applied here.
     ds = _ds_over(150, 160, -40, -45)

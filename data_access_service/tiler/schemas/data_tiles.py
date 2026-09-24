@@ -18,12 +18,10 @@ class LodMeta(BaseModel):
 class DataTileManifestResponse(BaseModel):
     bounds: GeoBounds
     lods: dict[str, LodMeta]
-    # Scalar products populate valueRange; UV vector products populate uRange + vRange.
-    # None fields are excluded from the serialized response via response_model_exclude_none.
+    # valueRange for scalar products, uRange + vRange for vector pairs.
     valueRange: list[float] | None = None
     uRange: list[float] | None = None
     vRange: list[float] | None = None
-    # Categorical variables (CF flag_values) additionally populate flagValues, and
-    # flagMeanings when the labels align 1:1. Absent for continuous products.
+    # Categorical variables only.
     flagValues: list[int] | None = None
     flagMeanings: list[str] | None = None

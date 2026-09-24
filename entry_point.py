@@ -15,6 +15,9 @@ from data_access_service.batch.sites_parquet.refresher import (
     refresh_sites_parquet_snapshots,
 )
 from data_access_service.batch.subsetting.enums import Parameters
+from data_access_service.batch.tiler.generator import (
+    generate_tiler_parquet_for_all_products,
+)
 from data_access_service.config.config import DevConfig
 
 logger = init_log(Config.get_config())
@@ -177,6 +180,13 @@ match call_type:
                 "Estimation index generation restricted to uuid=%s", target_uuid
             )
         generate_estimation_index_for_all_parquets(api=api, uuid=target_uuid or None)
+    case "generate-tiler-parquet":
+        api = API()
+        api.initialize_metadata()
+        target_uuid = parameters.get("uuid") or os.getenv("TILER_PARQUET_TARGET_UUID")
+        if target_uuid:
+            logger.info("Tiler parquet generation restricted to uuid=%s", target_uuid)
+        generate_tiler_parquet_for_all_products(api=api, uuid=target_uuid or None)
     case "refresh-sites-parquet":
         refresh_sites_parquet_snapshots()
     case _:

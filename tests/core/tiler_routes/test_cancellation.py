@@ -26,7 +26,7 @@ def test_tile_thread_limiter_sized_from_config():
     process-wide default."""
     assert (
         TILE_THREAD_LIMITER.total_tokens
-        == Config.get_config().get_tiler_config().thread_pool_size
+        == Config.get_config().get_tiler_api_config().thread_pool_size
     )
 
 

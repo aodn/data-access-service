@@ -12,7 +12,6 @@ import dataclasses
 import pytest
 from pydantic import ValidationError
 
-from data_access_service.config.config import Config
 from data_access_service.tiler.schemas.products import ProductConfig, ProductOverride
 from data_access_service.tiler.schemas.products import (
     DataTileConfig as DataTileConfigSchema,
@@ -21,7 +20,6 @@ from data_access_service.tiler.schemas.products import (
     VisualTileConfig as VisualTileConfigSchema,
 )
 from data_access_service.tiler.schemas.products import (
-    load_product_overrides,
     parse_product_overrides,
 )
 from data_access_service.tiler.services.product.product import (
@@ -47,17 +45,13 @@ def test_from_product_carries_visual_capability():
     from_product actually maps it. ogcapi-java keys tile_types on it, so a
     dropped mapping would silently downgrade every product to the arity rule.
     """
-    scalar = Product(id="s", source_path="s3://b/x.zarr", variable="V")
+    scalar = Product(id="s", store="x", variable="V")
     assert ProductConfig.from_product(scalar).visual is True
 
-    non_visual = Product(
-        id="n", source_path="s3://b/x.zarr", variable="WDIR", visual=False
-    )
+    non_visual = Product(id="n", store="x", variable="WDIR", visual=False)
     assert ProductConfig.from_product(non_visual).visual is False
 
-    pair = Product(
-        id="p", source_path="s3://b/x.zarr", variable=["U", "V"], visual=False
-    )
+    pair = Product(id="p", store="x", variable=["U", "V"], visual=False)
     assert ProductConfig.from_product(pair).visual is False
 
 
@@ -113,16 +107,3 @@ def test_parse_product_overrides_rejects_non_array():
 
 def test_parse_product_overrides_accepts_empty_array():
     assert parse_product_overrides([]) == {}
-
-
-def test_load_missing_products_file_raises(monkeypatch):
-    """load_product_overrides has no path to inject — it always reads the
-    committed config.yaml — so a missing/misconfigured file is simulated at
-    Config.load_config, the one place that actually opens it."""
-
-    def _raise_missing(path):
-        raise FileNotFoundError(path)
-
-    monkeypatch.setattr(Config, "load_config", _raise_missing)
-    with pytest.raises(FileNotFoundError):
-        load_product_overrides()

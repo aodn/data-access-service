@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from .test_data_tiles import _make_ds
+from .test_data_tiles import _make_sparse
 
 _FAKE_PRODUCTS = {}
 
@@ -12,7 +12,7 @@ _POINT_URL = "/api/v1/das/tiler/data_tiles/sea_level_anomaly/point?date=2024-01-
 def test_immutable_endpoint_disables_browser_caching_but_not_cdn(client):
     with patch(
         "data_access_service.core.tiler_routes.shared.load_slice",
-        return_value=_make_ds(),
+        return_value=_make_sparse(),
     ):
         response = client.get(_POINT_URL)
     assert response.status_code == 200

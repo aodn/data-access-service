@@ -15,3 +15,8 @@ estimation:
     use_fork_process: False
     duckdb:
       threads: 12
+tiler:
+  config:
+    batch:
+      use_fork_process: False
+      max_chunks_per_run: 2

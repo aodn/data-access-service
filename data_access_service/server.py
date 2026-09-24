@@ -18,13 +18,18 @@ from data_access_service.core.estimation_index import (
 from data_access_service.core.estimation_index import (
     init_client as init_estimation_client,
 )
-from data_access_service.core.memory_watchdog import run_memory_watchdog
 from data_access_service.core.middleware import configure_gzip_middleware
 from data_access_service.core.routes import router as api_router
 from data_access_service.core.scheduler import TaskScheduler
 from data_access_service.core.tiler_routes import router as tiler_router
 from data_access_service.core.tiler_routes.startup import run_tiler_warmup
 from data_access_service.sites.sites_repository import build_repositories
+from data_access_service.tiler.services.store.tiler_repository import (
+    close_client as close_tiler_duckdb_client,
+)
+from data_access_service.tiler.services.store.tiler_repository import (
+    init_client as init_tiler_duckdb_client,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +90,7 @@ async def lifespan(application: FastAPI):
             # rather than on first use so a broken read path fails the deploy
             # instead of silently degrading to the (50x slower) live scan.
             init_estimation_client()
+            init_tiler_duckdb_client()
             application.state.sites_repositories = build_repositories(
                 sites_duckdb_session
             )
@@ -93,15 +99,11 @@ async def lifespan(application: FastAPI):
                 scheduler.start_with_initial_run(), name="task_scheduler_startup"
             )
             tiler_warmup_task = asyncio.create_task(
-                run_tiler_warmup(api), name="tiler_warmup"
-            )
-            memory_watchdog_task = asyncio.create_task(
-                run_memory_watchdog(), name="memory_watchdog"
+                run_tiler_warmup(), name="tiler_warmup"
             )
             background_tasks = (
                 scheduler_startup_task,
                 tiler_warmup_task,
-                memory_watchdog_task,
             )
 
             yield
@@ -117,6 +119,7 @@ async def lifespan(application: FastAPI):
         if scheduler:
             scheduler.shutdown()
         close_estimation_client()
+        close_tiler_duckdb_client()
         if sites_duckdb_session:
             sites_duckdb_session.close()
         api.destroy()

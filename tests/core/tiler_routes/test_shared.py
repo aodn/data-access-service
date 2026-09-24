@@ -6,30 +6,38 @@ Both share `registry.unavailable_date_message`, so the 404 detail here must
 match the FileNotFoundError message load_slice raises for the same case.
 """
 
-import numpy as np
 import pandas as pd
 import pytest
-import xarray as xr
 from fastapi import HTTPException
 
 from data_access_service.core.tiler_routes.shared import (
     parse_date_or_422,
     resolve_timestamp_or_404,
 )
+from data_access_service.models.tiler_parquet_types import (
+    TilerParquetMetadata,
+    TilerVariableMetadata,
+)
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.store.registry import store_registry
 
 
-class _FakeZarrSource:
-    def __init__(self, ds: xr.Dataset):
-        self.zarr_store = ds
-
-
-def _patch_source(monkeypatch, ds: xr.Dataset):
-    monkeypatch.setattr(
-        "data_access_service.tiler.services.store.registry._resolve_zarr_source",
-        lambda _url: _FakeZarrSource(ds),
+def _seed_metadata(store: str, times: list[str]) -> None:
+    """Publish a fake sidecar directly into the registry, bypassing the
+    metadata.json file read — the seam this test suite uses in place of the
+    old fake-ZarrDataSource monkeypatch."""
+    meta = TilerParquetMetadata(
+        uuid="u",
+        dataset=f"{store}.zarr",
+        n_i=1,
+        n_j=1,
+        lat=[0.0],
+        lon=[0.0],
+        timestamps=[f"{t}.000000000Z" for t in times],
+        variables={"v": TilerVariableMetadata(dtype="float32", attrs={})},
+        generated_at="",
     )
+    store_registry._publish(store, meta)
 
 
 @pytest.fixture(autouse=True)
@@ -46,20 +54,7 @@ def resolve_timestamp_mock():
     yield None
 
 
-def _ds_with_time(times: list[str]) -> xr.Dataset:
-    t = pd.to_datetime(times)
-    return xr.Dataset(
-        {
-            "v": xr.DataArray(
-                np.zeros((len(times), 1, 1), dtype=np.float32),
-                dims=["time", "lat", "lon"],
-                coords={"time": t, "lat": [0.0], "lon": [0.0]},
-            )
-        }
-    )
-
-
-_PRODUCT = Product(id="p", source_path="s3://b/x.zarr", variable="v")
+_PRODUCT = Product(id="p", store="x", variable="v")
 
 
 def test_parse_date_or_422_rejects_bare_date():
@@ -88,13 +83,13 @@ def test_parse_date_or_422_normalizes_offset_to_utc():
     )
 
 
-def test_resolve_timestamp_or_404_passes_for_a_known_date(monkeypatch):
-    _patch_source(monkeypatch, _ds_with_time(["2024-01-15T13:00:00"]))
+def test_resolve_timestamp_or_404_passes_for_a_known_date():
+    _seed_metadata("x", ["2024-01-15T13:00:00"])
     resolve_timestamp_or_404(_PRODUCT, pd.Timestamp("2024-01-15T13:00:00"))  # no raise
 
 
-def test_resolve_timestamp_or_404_404s_for_an_unknown_date(monkeypatch):
-    _patch_source(monkeypatch, _ds_with_time(["2024-01-15T13:00:00"]))
+def test_resolve_timestamp_or_404_404s_for_an_unknown_date():
+    _seed_metadata("x", ["2024-01-15T13:00:00"])
 
     with pytest.raises(HTTPException) as exc_info:
         resolve_timestamp_or_404(_PRODUCT, pd.Timestamp("1999-01-01"))
