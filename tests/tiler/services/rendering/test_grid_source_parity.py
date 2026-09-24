@@ -275,8 +275,8 @@ def test_data_tiles_and_manifest_match(data, store, variable, config, ocean_mask
         for cy in range(rows):
             for cx in range(cols):
                 assert data_tiles.render_tile(
-                    product, lambda: new, lod, cx, cy
-                ) == data_tiles.render_tile(product, lambda: old, lod, cx, cy), (
+                    product, new, lod, cx, cy
+                ) == data_tiles.render_tile(product, old, lod, cx, cy), (
                     lod,
                     cx,
                     cy,
@@ -320,5 +320,5 @@ def test_the_cases_reach_the_aggregate_path(data, monkeypatch):
     calls.clear()
     product = Product(id="p", store="region", variable="sst")
     coarsest = min(get_lod_grids(product))
-    data_tiles.render_tile(product, lambda: region, coarsest, 0, 0)
+    data_tiles.render_tile(product, region, coarsest, 0, 0)
     assert calls, "the coarsest data-tile LOD should aggregate"

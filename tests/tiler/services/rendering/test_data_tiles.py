@@ -46,13 +46,13 @@ UV_PRODUCT = Product(
 
 def test_render_tile_scalar_is_valid_png():
     ds = _make_ds(["sst"])
-    png = render_tile(SCALAR_PRODUCT, lambda: sparse_of(ds), 1, 0, 0)
+    png = render_tile(SCALAR_PRODUCT, sparse_of(ds), 1, 0, 0)
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
 
 
 def test_render_tile_uv_is_valid_png():
     ds = _make_ds(["u", "v"])
-    png = render_tile(UV_PRODUCT, lambda: sparse_of(ds), 1, 0, 0)
+    png = render_tile(UV_PRODUCT, sparse_of(ds), 1, 0, 0)
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
 
 
@@ -153,9 +153,7 @@ def test_resample_continuous_uses_bilinear_blends():
 def test_render_tile_categorical_is_valid_png():
     # End-to-end data-tile render of a categorical product must not crash and
     # must produce a valid PNG (resample is nearest under the hood).
-    png = render_tile(
-        CATEGORICAL_PRODUCT, lambda: sparse_of(_make_categorical_ds()), 1, 0, 0
-    )
+    png = render_tile(CATEGORICAL_PRODUCT, sparse_of(_make_categorical_ds()), 1, 0, 0)
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
 
 
@@ -222,7 +220,7 @@ def test_tiles_are_the_windows_of_one_whole_grid_render(monkeypatch):
         padded_ocean = np.pad(ocean, 1, mode="edge")
         for cy in range(2):
             for cx in range(3):
-                png = render_tile(product, lambda: sparse, 1, cx, cy)
+                png = render_tile(product, sparse, 1, cx, cy)
                 img = _decode(png)
                 window = (slice(cy * 6, cy * 6 + 8), slice(cx * 8, cx * 8 + 10))
                 value = (
@@ -259,7 +257,7 @@ def test_a_coarse_lod_never_builds_the_source_at_full_resolution(monkeypatch):
     monkeypatch.setattr(SparseGrid, "gather", gather)
     monkeypatch.setattr(SparseGrid, "aggregate_blocks", aggregate_blocks)
 
-    render_tile(SCALAR_PRODUCT, lambda: sparse, 1, 0, 0)
+    render_tile(SCALAR_PRODUCT, sparse, 1, 0, 0)
 
     # Aggregating returns one value per output pixel; sampling reads a couple
     # of source cells per pixel. For an 8x8 tile neither approaches 400x600.

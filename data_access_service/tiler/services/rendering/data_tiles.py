@@ -6,7 +6,6 @@ variable each in R and G, the mask in B, and keep alpha opaque.
 """
 
 import math
-from collections.abc import Callable
 
 import numpy as np
 
@@ -141,7 +140,7 @@ def _compute_window(
 
 def render_tile(
     product: Product,
-    load_slice: Callable[[], SparseSlice],
+    sparse: SparseSlice,
     lod: int,
     cx: int,
     cy: int,
@@ -153,7 +152,7 @@ def render_tile(
     rows, cols, pads = _chunk_window(
         cx, cy, total_w, total_h, data_tile.chunk_px, data_tile.padding
     )
-    normalised, ocean = _compute_window(product, load_slice(), lod, rows, cols)
+    normalised, ocean = _compute_window(product, sparse, lod, rows, cols)
 
     def pad(arr: np.ndarray) -> np.ndarray:
         if any(p for pair in pads for p in pair):

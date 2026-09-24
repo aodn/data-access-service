@@ -189,17 +189,7 @@ async def get_tile(
 
     rescale_range = parse_rescale(rescale)
 
-    key = (
-        product.store,
-        date,
-        variable,
-        z,
-        x,
-        y,
-        colormap_name,
-        rescale_range,
-        ext,
-    )
+    key = (product.id, ts, z, x, y, colormap_name, rescale_range, ext)
 
     def _do_render() -> bytes:
         sparse = load_slice_or_404(
