@@ -172,7 +172,7 @@ tiler:
         enable_http_metadata_cache: True
     batch:
       # Zarr time chunks converted per store per run, newest firs. null = all.
-      max_chunks_per_run: null
+      max_chunks_per_run: 4
       use_fork_process: True
       duckdb:
         temp_dir_prefix: "tiler_batch_duckdb_tmp"
