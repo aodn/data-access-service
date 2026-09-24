@@ -29,6 +29,8 @@ def test_zarr_chunking_config_from_yaml():
     assert cfg.target_peak_fraction == yaml_cfg["target_peak_fraction"]
     assert cfg.min_chunk_mb == yaml_cfg["min_chunk_mb"]
     assert cfg.memory_fraction == yaml_cfg["memory_fraction"]
+    assert cfg.max_chunk_gb == yaml_cfg["max_chunk_gb"]
+    assert cfg.max_chunk_bytes == int(yaml_cfg["max_chunk_gb"] * 1024**3)
     assert cfg.headroom_bytes == int(yaml_cfg["headroom_gb"] * 1024**3)
     assert cfg.min_chunk_bytes == int(yaml_cfg["min_chunk_mb"] * 1024**2)
 

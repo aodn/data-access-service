@@ -65,6 +65,9 @@ subsetting:
     min_chunk_mb: 32
     # Fraction of the remaining peak budget to use for one dask chunk.
     memory_fraction: 0.1
+    # Hard ceiling on process RSS while a time block is loaded. The block is
+    # sized from the room left under this ceiling, not added on top of it.
+    max_chunk_gb: 6
 estimation:
   config:
     s3_prefix: "portal/estimation"
