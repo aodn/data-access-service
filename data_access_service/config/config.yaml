@@ -158,8 +158,8 @@ pmtiles:
       maxzoom: 12
 tiler:
   config:
-    # Must match tiler_folder_name in appdeploy batch-tiler-parquet (IAM write scope).
-    root_prefix: "tiler"
+    # Must sit under tiler_folder_name in appdeploy batch-tiler-parquet (IAM write scope).
+    root_prefix: "shared/tiler"
     api:
       store_refresh_interval_hours: 4
       thread_pool_size: 20
