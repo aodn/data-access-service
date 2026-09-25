@@ -17,8 +17,6 @@ import logging
 import pyarrow as pa
 import xarray
 
-from pyarrow import compute as pc
-
 from datetime import timedelta, timezone
 from io import BytesIO
 from typing import Iterator, Optional, Dict, Any, List, Tuple, Hashable, overload
@@ -27,7 +25,6 @@ from aodn_cloud_optimised.lib.DataQuery import (
     ParquetDataSource,
     ZarrDataSource,
     Metadata,
-    create_bbox_filter,
 )
 from aodn_cloud_optimised.lib.config import get_notebook_url
 from bokeh.server.tornado import psutil
@@ -42,14 +39,20 @@ from data_access_service.core.constants import (
 )
 from data_access_service.models.subset_request import NON_SPECIFIED
 from data_access_service.utils.cancellation import Cancellation, raise_if_client_gone
+from data_access_service.utils.date_time_utils import time_it
 from data_access_service.utils.format_utils import SUPPORTED_OUTPUT_FORMATS
 from data_access_service.core.estimation_index import sidecar_extent_provider
 from data_access_service.core.size_estimation import estimate_single_key_size
 from data_access_service.utils.subset_request_resolver import resolve_subset_request
 from data_access_service.core.descriptor import Depth, Descriptor, Coordinate
+from data_access_service.utils.parquet_filter import (
+    PARQUET_BATCH_ROWS,
+    parquet_data_filter,
+    scan_parquet_batches,
+    typed_time_filter,
+)
 from data_access_service.utils.time_column_utils import (
     TimeColumn,
-    build_time_filter,
     resolve_time_column,
 )
 
@@ -943,6 +946,34 @@ class API(BaseAPI):
         else:
             return None
 
+    def _naive_utc_range(self, date_start, date_end):
+        """UTC timestamps with tz removed, the form pyarrow time filters compare.
+
+        Missing endpoints default to the last 10 days through the end of today.
+        A naive timestamp is rejected: the caller has to say which zone it is.
+        """
+        if date_start is None:
+            date_start = (pd.Timestamp.now() - timedelta(days=10)).tz_convert("UTC")
+        else:
+            if date_start.tz is None:
+                raise ValueError("Missing timezone info in date_start")
+            date_start = pd.to_datetime(date_start).tz_convert(timezone.utc)
+
+        if date_end is None:
+            date_end = (
+                pd.Timestamp.now() + pd.offsets.Day(1) - pd.offsets.Nano(1)
+            ).tz_convert("UTC")
+        else:
+            if date_end.tzinfo is None:
+                raise ValueError("Missing timezone info in date_end")
+            date_end = date_end.tz_convert(timezone.utc)
+
+        if date_start.tz is not None:
+            date_start = date_start.tz_localize(None)
+        if date_end.tz is not None:
+            date_end = date_end.tz_localize(None)
+        return date_start, date_end
+
     def _read_parquet_with_typed_time(
         self,
         ds: ParquetDataSource,
@@ -966,34 +997,19 @@ class API(BaseAPI):
         the sort come from the library path so both paths return the same frame.
         """
         dataset = ds.dataset
-        data_filter = build_time_filter(dataset, time_column, date_start, date_end)
-
-        if None not in (lat_min, lat_max, lon_min, lon_max):
-            bbox_kwargs = dict()
-            if lat_varname is not None:
-                bbox_kwargs["lat_varname"] = lat_varname
-            if lon_varname is not None:
-                bbox_kwargs["lon_varname"] = lon_varname
-
-            data_filter = data_filter & create_bbox_filter(
-                dataset,
-                lat_min=lat_min,
-                lat_max=lat_max,
-                lon_min=lon_min,
-                lon_max=lon_max,
-                **bbox_kwargs,
-            )
-
-        if scalar_filter is not None:
-            for name, value in scalar_filter.items():
-                field_type = (
-                    dataset.schema.field(name).type
-                    if name in dataset.schema.names
-                    else pa.scalar(value).type
-                )
-                data_filter = data_filter & (
-                    pc.field(name) == pa.scalar(value, type=field_type)
-                )
+        data_filter = typed_time_filter(
+            dataset,
+            time_column,
+            date_start,
+            date_end,
+            lat_min,
+            lat_max,
+            lon_min,
+            lon_max,
+            lat_varname,
+            lon_varname,
+            scalar_filter,
+        )
 
         log.info(
             "Scanning parquet [%s → %s] on %s (this may take a while)",
@@ -1015,6 +1031,7 @@ class API(BaseAPI):
             df = df.sort_values(by=time_column.name).reset_index(drop=True)
         return df
 
+    @time_it
     def get_dataset(
         self,
         uuid: str,
@@ -1045,34 +1062,8 @@ class API(BaseAPI):
         ds = self.get_datasource(uuid, key)
 
         if ds is not None:
-            # Default get 10 days of data
-            if date_start is None:
-                date_start = (pd.Timestamp.now() - timedelta(days=10)).tz_convert("UTC")
-            else:
-                if date_start.tz is None:
-                    raise ValueError("Missing timezone info in date_start")
-                else:
-                    date_start = pd.to_datetime(date_start).tz_convert(timezone.utc)
-
-            if date_end is None:
-                date_end = (
-                    pd.Timestamp.now() + pd.offsets.Day(1) - pd.offsets.Nano(1)
-                ).tz_convert("UTC")
-            else:
-                if date_end.tzinfo is None:
-                    raise ValueError("Missing timezone info in date_end")
-                else:
-                    date_end = date_end.tz_convert(timezone.utc)
-
-            # The get_data call the pyarrow and compare only works with non timezone datetime
-            # now make sure the timezone is correctly convert to utc then remove it.
-            # As get_date datetime are all utc, but the pyarrow do not support compare of datetime vs
-            # datetime with timezone.
-            if date_start.tz is not None:
-                date_start = date_start.tz_localize(None)
-
-            if date_end.tz is not None:
-                date_end = date_end.tz_localize(None)
+            # pyarrow compares naive datetimes. Normalise to UTC, then drop the tz.
+            date_start, date_end = self._naive_utc_range(date_start, date_end)
 
             # First, make sure lon is [-180, 180], some map application allow > 180
             lon_min = BaseAPI.normalize_lon(lon_min)
@@ -1151,7 +1142,6 @@ class API(BaseAPI):
                             date_start,
                             date_end,
                         )
-                        started = time.monotonic()
                         # Accuracy to nanoseconds
                         result = ds.get_data(
                             query_start,
@@ -1165,13 +1155,6 @@ class API(BaseAPI):
                             lat_varname=lat_varname,
                             lon_varname=lon_varname,
                             time_varname=query_time_varname,
-                        )
-                        log.info(
-                            "Finished library get_data for %s/%s: %s rows in %.1fs",
-                            uuid,
-                            key,
-                            0 if result is None else len(result),
-                            time.monotonic() - started,
                         )
 
                     return ddf.from_pandas(
@@ -1203,15 +1186,105 @@ class API(BaseAPI):
         else:
             return None
 
+    def iter_parquet_batches(
+        self,
+        uuid: str,
+        key: str,
+        date_start: pd.Timestamp = None,
+        date_end: pd.Timestamp = None,
+        lat_min=None,
+        lat_max=None,
+        lon_min=None,
+        lon_max=None,
+        scalar_filter=None,
+        columns: list[str] = None,
+        batch_size: int = PARQUET_BATCH_ROWS,
+    ) -> Iterator[pa.RecordBatch]:
+        """Same rows as `get_dataset` for a parquet key, one batch at a time.
+
+        `get_dataset` materialises the whole window with `ParquetDataSource.get_data`
+        (`to_table` then `to_pandas`) and then copies it into a dask frame. A
+        single month of argo over a wide bbox reaches the 8 GB task limit inside
+        that call, before the subset writer starts. This scanner applies the
+        same time, bbox, and scalar filter and yields bounded batches instead.
+        """
+        ds = self.get_datasource(uuid, key)
+        if ds is None or not isinstance(ds, ParquetDataSource):
+            return iter(())
+
+        date_start, date_end = self._naive_utc_range(date_start, date_end)
+        lon_min = BaseAPI.normalize_lon(lon_min)
+        lon_max = BaseAPI.normalize_lon(lon_max)
+        lon_min = self.normalize_to_0_360_if_needed(uuid, key, lon_min)
+        lon_max = self.normalize_to_0_360_if_needed(uuid, key, lon_max)
+
+        lat_varname, lon_varname, time_varname = self.resolve_dim_names(uuid, key)
+        temporal_start, temporal_end = self.get_temporal_extent(uuid, key)
+        if temporal_start is None and temporal_end is None:
+            log.info(
+                "Dataset %s/%s has no temporal extent; " "ignoring date range %s to %s",
+                uuid,
+                key,
+                date_start,
+                date_end,
+            )
+            query_start = None
+            query_end = None
+            query_time_varname = None
+        else:
+            query_start = (
+                f"{date_start.strftime('%Y-%m-%d %H:%M:%S.%f')}"
+                f"{date_start.nanosecond:03d}"
+            )
+            query_end = (
+                f"{date_end.strftime('%Y-%m-%d %H:%M:%S.%f')}"
+                f"{date_end.nanosecond:03d}"
+            )
+            query_time_varname = time_varname
+
+        time_column = (
+            resolve_time_column(ds.dataset, query_time_varname)
+            if query_time_varname is not None
+            else None
+        )
+        mapped_columns = self.map_column_names(uuid, key, columns)
+        dataset = ds.dataset
+        data_filter = parquet_data_filter(
+            dataset,
+            time_column=time_column,
+            date_start=date_start,
+            date_end=date_end,
+            query_start=query_start,
+            query_end=query_end,
+            time_varname=query_time_varname,
+            lat_min=lat_min,
+            lat_max=lat_max,
+            lon_min=lon_min,
+            lon_max=lon_max,
+            lat_varname=lat_varname,
+            lon_varname=lon_varname,
+            scalar_filter=scalar_filter,
+        )
+
+        log.info(
+            "Scanning parquet in batches of %s rows for %s/%s [%s → %s]",
+            batch_size,
+            uuid,
+            key,
+            date_start,
+            date_end,
+        )
+        return scan_parquet_batches(dataset, data_filter, mapped_columns, batch_size)
+
     def estimate_datasets_size(
         self,
         uuid: str,
-        keys: list[str] = None,
+        keys: list[str] | None = None,
         start_date: str = NON_SPECIFIED,
         end_date: str = NON_SPECIFIED,
         multi_polygon=None,
-        columns: list[str] = None,
-        output_format: str = None,
+        columns: list[str] | None = None,
+        output_format: str | None = None,
         cancellation: Optional[Cancellation] = None,
     ) -> Optional[dict]:
         """
@@ -1224,6 +1297,13 @@ class API(BaseAPI):
         data, csv on a zarr key) is skipped and reported in the notes instead
         of failing the whole request.
 
+        :param uuid:
+        :param output_format:
+        :param columns:
+        :param multi_polygon:
+        :param end_date:
+        :param start_date:
+        :param keys:
         :param cancellation: set when the SSE client disconnects; None outside an
             SSE request (batch jobs, tests), which disables the checkpoints
         :return: aggregated estimate dict, or None if no requested key exists

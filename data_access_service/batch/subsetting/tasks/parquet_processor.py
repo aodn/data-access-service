@@ -3,11 +3,13 @@ import os
 import geojson
 import dask.dataframe as ddf
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
+from pathlib import Path
 from shapely.geometry import Polygon as ShapelyPolygon
 
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
-from pathlib import Path
 from geojson import MultiPolygon
 from typing import Dict, Optional
 
@@ -126,6 +128,163 @@ def process_parquet_files(
     return None
 
 
+def _is_empty_window_error(error: ValueError) -> bool:
+    """True when the query missed the dataset and this window can be skipped.
+
+    Same two cases `query_data` used to swallow: a date that only misses because
+    of nanosecond rounding, and a bbox that does not meet the dataset extent.
+    """
+    message = str(error)
+    if "is out of range of dataset" in message:
+        log.error(
+            "The provided date range is out of bounds for the dataset. "
+            f"Error message is: `{error}`."
+        )
+        return True
+    if "No data for given bounding box. Amend lat/lon values" in message:
+        log.error(
+            "The provided bounding box does not intersect with the dataset's "
+            f"spatial extent. Error message is: `{error}`."
+        )
+        return True
+    return False
+
+
+def _next_part_path(directory: Path) -> Path:
+    """Next `part.N.parquet` in `directory` so a later window does not overwrite."""
+    index = 0
+    while True:
+        candidate = directory / f"part.{index}.parquet"
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
+def _write_batches(
+    batches,
+    output_dir: str,
+    partition_label: Optional[str],
+    time_key: Optional[str],
+    polygon: Optional[ShapelyPolygon],
+    lat_key: Optional[str],
+    lon_key: Optional[str],
+) -> bool:
+    """Write each batch to its hive partition and drop it before the next.
+
+    `partition_label` pins every row (polygon partitions have no time column).
+    Otherwise the month comes from `time_key`, because a window that starts on
+    the last day of a month also contains the next month.
+    """
+    writers: dict[str, pq.ParquetWriter] = {}
+    schema = None
+    wrote = False
+    try:
+        for batch in batches:
+            if batch.num_rows == 0:
+                continue
+            batch_schema = schema if schema is not None else batch.schema
+            frame = batch.to_pandas()
+            del batch
+            if polygon is not None and lat_key is not None and lon_key is not None:
+                frame = _filter_partition_by_polygon(frame, polygon, lat_key, lon_key)
+            if frame.empty:
+                del frame
+                continue
+
+            if partition_label is not None:
+                groups = [(partition_label, frame)]
+            else:
+                series = frame[time_key]
+                if series.dtype.kind != "M":
+                    series = pd.to_datetime(series)
+                labelled = frame.copy()
+                labelled["_part"] = series.dt.strftime("%Y-%m")
+                groups = [
+                    (label, part.drop(columns="_part"))
+                    for label, part in labelled.groupby("_part", sort=False)
+                ]
+                del labelled
+
+            for label, part in groups:
+                if part.empty:
+                    continue
+                table = pa.Table.from_pandas(
+                    part, schema=batch_schema, preserve_index=False
+                )
+                writer = writers.get(label)
+                if writer is None:
+                    part_dir = Path(output_dir) / f"{PARTITION_KEY}={label}"
+                    part_dir.mkdir(parents=True, exist_ok=True)
+                    writer = pq.ParquetWriter(
+                        _next_part_path(part_dir), table.schema, compression="zstd"
+                    )
+                    writers[label] = writer
+                    if schema is None:
+                        schema = table.schema
+                writer.write_table(table)
+                wrote = True
+                del part
+                del table
+            del frame
+            pa.default_memory_pool().release_unused()
+    finally:
+        for writer in writers.values():
+            writer.close()
+    return wrote
+
+
+def _stream_window_to_parquet(
+    api: API,
+    uuid: str,
+    key: str,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
+    min_lat,
+    max_lat,
+    min_lon,
+    max_lon,
+    output_path: str,
+    partition_label: Optional[str] = None,
+    time_key: Optional[str] = None,
+    polygon: Optional[ShapelyPolygon] = None,
+    lat_key: Optional[str] = None,
+    lon_key: Optional[str] = None,
+    scalar_filter: Optional[dict] = None,
+) -> bool:
+    """Scan one window in row batches and write them. False when it has no rows."""
+    log.info(
+        f"Querying data for uuid={uuid}, key={key}, start_date={start_date}, end_date={end_date}, "
+    )
+    log.info(
+        f"lat_min={min_lat}, lat_max={max_lat}, lon_min={min_lon}, lon_max={max_lon}"
+    )
+    try:
+        batches = api.iter_parquet_batches(
+            uuid=uuid,
+            key=key,
+            date_start=start_date,
+            date_end=end_date,
+            lat_min=min_lat,
+            lat_max=max_lat,
+            lon_min=min_lon,
+            lon_max=max_lon,
+            scalar_filter=scalar_filter,
+        )
+        return _write_batches(
+            batches,
+            output_path,
+            partition_label,
+            time_key,
+            polygon,
+            lat_key,
+            lon_key,
+        )
+    except ValueError as error:
+        if _is_empty_window_error(error):
+            return False
+        raise
+
+
 def _filter_partition_by_polygon(df, shapely_poly, lat_key, lon_key):
     import geopandas as gpd
 
@@ -150,8 +309,8 @@ def _generate_partition_output(
     polygon: Optional[ShapelyPolygon] = None,
 ):
     has_data = False
-    # We need to split it smaller due to fact that the lib return data with to_parquet internally
-    # which use a lot of memory.
+    # One calendar month at a time. Each month is scanned in row batches so the
+    # window is never one pandas frame (that frame is what pushed argo near 8 GB).
     start_date, end_date = trim_date_range(
         api=api,
         uuid=uuid,
@@ -195,6 +354,23 @@ def _generate_partition_output(
                 min_lon = None
                 max_lon = None
 
+            lat_key = None
+            lon_key = None
+            if polygon is not None:
+                values = api.map_column_names(
+                    uuid=uuid,
+                    key=key,
+                    columns=[STR_LATITUDE_UPPER_CASE, STR_LONGITUDE_UPPER_CASE],
+                )
+                if values is not None:
+                    lat_key, lon_key = values
+
+            if not checked_date_ranges:
+                return has_data
+
+            time_key = api.require_time_column(uuid=uuid, key=key)
+            output_path = f"{root_folder_path}/{key}/part-{job_index}/"
+
             for index, date_range in enumerate(checked_date_ranges, start=1):
                 log.info(
                     "Window %s/%s: %s → %s",
@@ -203,7 +379,13 @@ def _generate_partition_output(
                     date_range["start_date"],
                     date_range["end_date"],
                 )
-                result: Optional[ddf.DataFrame] = query_data(
+                log.info(
+                    "Writing parquet for window %s/%s to %s",
+                    index,
+                    len(checked_date_ranges),
+                    output_path,
+                )
+                wrote = _stream_window_to_parquet(
                     api,
                     uuid,
                     key,
@@ -213,53 +395,14 @@ def _generate_partition_output(
                     max_lat,
                     min_lon,
                     max_lon,
+                    output_path,
+                    time_key=time_key,
+                    polygon=polygon,
+                    lat_key=lat_key,
+                    lon_key=lon_key,
                 )
-                if result is not None:
-                    lat_key, lon_key = api.map_column_names(
-                        uuid=uuid,
-                        key=key,
-                        columns=[STR_LATITUDE_UPPER_CASE, STR_LONGITUDE_UPPER_CASE],
-                    )
-
-                    # If we have polygon to filter, apply map_partitions lazily
-                    if polygon is not None:
-                        result = result.map_partitions(
-                            _filter_partition_by_polygon,
-                            shapely_poly=polygon,
-                            lat_key=lat_key,
-                            lon_key=lon_key,
-                            meta=result._meta,
-                        )
-
-                    # With parquet we can write on each result because of the partition by TIME
-                    # create different directory
-                    output_path = f"{root_folder_path}/{key}/part-{job_index}/"
-
-                    # Derive partition key without time
-                    time_key = api.require_time_column(uuid=uuid, key=key)
-
-                    # 'M' stands for Datetime in NumPy/Pandas dtypes, some dataset return
-                    # time field of different type
-                    if result[time_key].dtype.kind != "M":
-                        result[time_key] = ddf.to_datetime(result[time_key])
-
-                    result[PARTITION_KEY] = result[time_key].dt.strftime("%Y-%m")
-
-                    log.info(
-                        "Writing parquet for window %s/%s to %s",
-                        index,
-                        len(checked_date_ranges),
-                        output_path,
-                    )
-                    result.to_parquet(
-                        output_path,
-                        partition_on=[PARTITION_KEY],  # Partition by region column
-                        compression="zstd",  # Use Zstd for small file size
-                        engine="pyarrow",  # Use pyarrow for performance
-                        write_index=False,  # Exclude index to save space
-                    )
+                if wrote:
                     log.info(f"Saved partition to {output_path}")
-
                     has_data = True
                 else:
                     log.info(
@@ -284,8 +427,8 @@ def _generate_polygon_partition_output(
     """Write the `polygon` partitions in `polygon_range`, one partition at a time.
 
     Used for a dataset without a time column, where date windows cannot split
-    the work. Reading one partition at a time bounds memory by the largest
-    partition rather than the whole range.
+    the work. Each polygon partition is scanned in row batches, so memory
+    follows one batch rather than the whole partition.
     """
     has_data = False
     datasource = api.get_datasource(uuid, key)
@@ -320,9 +463,21 @@ def _generate_polygon_partition_output(
         min_lon = None
         max_lon = None
 
+    lat_key = None
+    lon_key = None
+    if polygon is not None:
+        lat_key, lon_key = api.map_column_names(
+            uuid=uuid,
+            key=key,
+            columns=[STR_LATITUDE_UPPER_CASE, STR_LONGITUDE_UPPER_CASE],
+        )
+
+    output_path = f"{root_folder_path}/{key}/part-{job_index}/"
     for index, partition_value in enumerate(partition_values, start=1):
         log.info("Polygon partition %s/%s", index, len(partition_values))
-        result: Optional[ddf.DataFrame] = query_data(
+        # No time column to derive a month from; a label per partition (and per
+        # requested shape) keeps each write in its own directory.
+        wrote = _stream_window_to_parquet(
             api,
             uuid,
             key,
@@ -332,40 +487,19 @@ def _generate_polygon_partition_output(
             max_lat,
             min_lon,
             max_lon,
+            output_path,
+            partition_label=f"polygon-{shape_index}-{index}",
+            polygon=polygon,
+            lat_key=lat_key,
+            lon_key=lon_key,
             scalar_filter={POLYGON_PARTITION: partition_value},
         )
-        if result is None:
+        if not wrote:
             log.info(
                 f"No data found for uuid={uuid}, key={key}, polygon partition {index}"
             )
             continue
 
-        if polygon is not None:
-            lat_key, lon_key = api.map_column_names(
-                uuid=uuid,
-                key=key,
-                columns=[STR_LATITUDE_UPPER_CASE, STR_LONGITUDE_UPPER_CASE],
-            )
-            result = result.map_partitions(
-                _filter_partition_by_polygon,
-                shapely_poly=polygon,
-                lat_key=lat_key,
-                lon_key=lon_key,
-                meta=result._meta,
-            )
-
-        output_path = f"{root_folder_path}/{key}/part-{job_index}/"
-        # No time column to derive a month from; a label per partition (and per
-        # requested shape) keeps each write in its own directory.
-        result[PARTITION_KEY] = f"polygon-{shape_index}-{index}"
-
-        result.to_parquet(
-            output_path,
-            partition_on=[PARTITION_KEY],
-            compression="zstd",
-            engine="pyarrow",
-            write_index=False,
-        )
         log.info(f"Saved polygon partition {index} to {output_path}")
         has_data = True
 
@@ -487,24 +621,9 @@ def query_data(
             return None
     except ValueError as e:
         log.info(f"seems like no data for this polygon. Error: {e}")
-
-        # sometimes even though we get the temoral extents correctly, the requested date range may still be out of bounds because we want to cover nanoseconds precision.
-        # e.g. ValueError: date_start=2021-02-01 00:00:00.000000000 is out of range of dataset. The maximum date_end is 2021-02-01 00:00:00.
-        # so we need to check the error message and ignore it if the two dates are close.
-        # In summary, this error is not that important so it needs to be reduced the weight, from throwing it to logging it.
-        if "is out of range of dataset" in str(e):
-            log.error(
-                f"The provided date range is out of bounds for the dataset. Error message is: `{e}`. Please check whether it is acceptable."
-            )
-            return None
-
-        # the below error is raised if the requested bounding box does not intersect with the dataset's spatial extent.
-        # The User behaviors are not predictable, so this error is acceptable. Therefore, it will be downgraded to an error log
-        # rather than throwing it.
-        if "No data for given bounding box. Amend lat/lon values" in str(e):
-            log.error(
-                f"The provided bounding box does not intersect with the dataset's spatial extent. Error message is: `{e}`. Please check whether it is acceptable."
-            )
+        # A date that only misses on nanosecond rounding, or a bbox that misses
+        # the dataset extent, is an empty window rather than a failed job.
+        if _is_empty_window_error(e):
             return None
 
         raise e
