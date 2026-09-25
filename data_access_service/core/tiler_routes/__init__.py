@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 
 from data_access_service.config.config import Config
 from data_access_service.core.tiler_routes.data_tiles import router as data_tiles_router
+from data_access_service.core.tiler_routes.refresh import router as refresh_router
 from data_access_service.core.tiler_routes.shared import require_tiler_ready
 from data_access_service.core.tiler_routes.visual_tiles import (
     router as visual_tiles_router,
@@ -18,3 +19,4 @@ router.include_router(
 router.include_router(
     visual_tiles_router, prefix="/tiler/visual_tiles", tags=["visual_tiles"]
 )
+router.include_router(refresh_router, prefix="/tiler", tags=["tiler"])
