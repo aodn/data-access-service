@@ -246,3 +246,41 @@ def test_refresh_catalog_forgets_removed_stores(warmup_env, monkeypatch):
     startup.refresh_catalog()
 
     assert kept == [{"a", "b"}]
+
+
+# --- refresh_tiler ----------------------------------------------------------
+
+
+def test_refresh_tiler_refreshes_stores_then_catalogue(monkeypatch):
+    calls = []
+    monkeypatch.setattr(startup, "refresh_stores", lambda: calls.append("stores"))
+    monkeypatch.setattr(
+        startup, "refresh_catalog", lambda: calls.append("catalog") or ({}, {})
+    )
+
+    assert startup.refresh_tiler() == ({}, {})
+    assert calls == ["stores", "catalog"]
+
+
+def test_refresh_tiler_rejects_concurrent_refresh(monkeypatch):
+    monkeypatch.setattr(startup, "refresh_stores", lambda: None)
+    monkeypatch.setattr(startup, "refresh_catalog", lambda: ({}, {}))
+
+    with startup._refresh_lock:
+        with pytest.raises(startup.RefreshInProgressError):
+            startup.refresh_tiler()
+
+    startup.refresh_tiler()  # lock released, runs again
+
+
+def test_refresh_tiler_releases_lock_on_error(monkeypatch):
+    monkeypatch.setattr(startup, "refresh_stores", lambda: None)
+
+    def boom():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(startup, "refresh_catalog", boom)
+
+    with pytest.raises(RuntimeError):
+        startup.refresh_tiler()
+    assert not startup._refresh_lock.locked()

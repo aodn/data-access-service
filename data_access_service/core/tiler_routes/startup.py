@@ -4,6 +4,7 @@ store's ``metadata.json``, then mark the tiler ready.
 
 import asyncio
 import logging
+import threading
 
 import anyio
 
@@ -24,6 +25,7 @@ from data_access_service.tiler.services.rendering.kernels import warmup_kernels
 from data_access_service.tiler.services.rendering.visual_tiles import warmup_visual
 from data_access_service.tiler.services.store.registry import (
     load_stores,
+    refresh_stores,
     retain_stores,
 )
 from data_access_service.utils.s3_json import read_json
@@ -49,6 +51,24 @@ def refresh_catalog() -> tuple[dict[str, Product], dict[str, BaseException | Non
     outcomes = load_stores(sorted(stores))
     load_products(products)
     return products, outcomes
+
+
+class RefreshInProgressError(Exception):
+    """A tiler refresh is already running."""
+
+
+_refresh_lock = threading.Lock()
+
+
+def refresh_tiler() -> tuple[dict[str, Product], dict[str, BaseException | None]]:
+    """Re-read every loaded store's metadata.json, then root_metadata.json."""
+    if not _refresh_lock.acquire(blocking=False):
+        raise RefreshInProgressError("Tiler refresh is already in progress")
+    try:
+        refresh_stores()
+        return refresh_catalog()
+    finally:
+        _refresh_lock.release()
 
 
 async def run_tiler_warmup() -> None:
