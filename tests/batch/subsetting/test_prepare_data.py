@@ -16,6 +16,11 @@ from data_access_service.batch.subsetting.tasks.parquet_collector import (
     collect_parquet_files,
 )
 from tests.batch.batch_test_consts import PREPARATION_PARAMETERS, INIT_JOB_ID
+from tests.core.result_check import (
+    assert_same_rows,
+    load_canned_parquet,
+    rows_between,
+)
 from tests.core.test_with_s3 import TestWithS3, REGION
 
 COLLECTION_ZIP_NAME = "Test_Ocean_Data_Collection"
@@ -161,6 +166,20 @@ class TestDataGeneration(TestWithS3):
                 # Expect a csv in this case so we can load it back with panda
                 csv = pd.read_csv(f"/tmp/{data_files[0]}")
                 assert len(csv) == 16703, f"Expected 16703 rows, got {len(csv)}"
+                expected = rows_between(
+                    load_canned_parquet(
+                        Path(__file__).parent.parent.parent
+                        / "canned/s3_sample1/autonomous_underwater_vehicle.parquet"
+                    ),
+                    "TIME",
+                    "2010-11-01 00:00:00.000000000",
+                    "2011-01-31 23:59:59.999999999",
+                )
+                assert_same_rows(
+                    csv,
+                    expected,
+                    ["TIME", "LATITUDE", "LONGITUDE", "DEPTH", "TEMP", "PSAL"],
+                )
 
             except Exception as ex:
                 raise ex
@@ -330,6 +349,26 @@ class TestDataGeneration(TestWithS3):
                 # Expect a csv in this case so we can load it back with panda
                 csv = pd.read_csv(f"/tmp/{data_files[0]}")
                 assert len(csv) == 93, f"Expected 93 rows, got {len(csv)}"
+                expected = rows_between(
+                    load_canned_parquet(
+                        Path(__file__).parent.parent.parent
+                        / "canned/s3_sample1/aggregated_seabird_nonqc.parquet"
+                    ),
+                    "eventDate",
+                    "2025-03-01 00:00:00.000000000",
+                    "2025-03-30 23:59:59.999999999",
+                )
+                assert_same_rows(
+                    csv,
+                    expected,
+                    [
+                        "occurrenceID",
+                        "eventDate",
+                        "decimalLatitude",
+                        "decimalLongitude",
+                        "scientificName",
+                    ],
+                )
 
             except Exception as ex:
                 raise ex
@@ -542,6 +581,29 @@ class TestDataGeneration(TestWithS3):
                         point
                     ), f"Point {point} is outside the multipolygon union"
 
+                source = load_canned_parquet(
+                    Path(__file__).parent.parent.parent
+                    / "canned/s3_sample1/aggregated_seabird_nonqc.parquet"
+                )
+                inside = [
+                    union_poly.contains(ShapelyPoint(lon, lat))
+                    or union_poly.touches(ShapelyPoint(lon, lat))
+                    for lon, lat in zip(
+                        source["decimalLongitude"], source["decimalLatitude"]
+                    )
+                ]
+                assert_same_rows(
+                    csv,
+                    source.loc[inside],
+                    [
+                        "occurrenceID",
+                        "eventDate",
+                        "decimalLatitude",
+                        "decimalLongitude",
+                        "scientificName",
+                    ],
+                )
+
             except Exception as ex:
                 raise ex
             finally:
@@ -623,6 +685,25 @@ class TestDataGeneration(TestWithS3):
                     in objects
                 )
                 assert "996/temp/dataschema.json" in objects
+
+                subset = helper.read_parquet_from_s3(
+                    f"s3://{bucket_name}/{config.get_s3_temp_folder_name('996')}"
+                    "autonomous_underwater_vehicle.parquet"
+                )
+                expected = rows_between(
+                    load_canned_parquet(
+                        Path(__file__).parent.parent.parent
+                        / "canned/s3_sample1/autonomous_underwater_vehicle.parquet"
+                    ),
+                    "TIME",
+                    "2010-11-01 00:00:00.000000000",
+                    "2011-01-31 23:59:59.999999999",
+                )
+                assert_same_rows(
+                    subset,
+                    expected,
+                    ["TIME", "LATITUDE", "LONGITUDE", "DEPTH", "TEMP", "PSAL"],
+                )
 
             except Exception as ex:
                 raise ex

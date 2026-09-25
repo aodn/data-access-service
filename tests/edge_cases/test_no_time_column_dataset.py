@@ -21,6 +21,7 @@ from data_access_service.batch.subsetting import init, prepare_data
 from data_access_service.batch.subsetting.enums import Parameters
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.models.subset_request import NON_SPECIFIED
+from tests.core.result_check import assert_same_rows
 from tests.core.test_with_s3 import TestWithS3, REGION
 
 CANNED: Final = Path(__file__).parent.parent / "canned/s3_sample_edge_cases"
@@ -125,6 +126,10 @@ class TestNoTimeColumnDataset(TestWithS3):
 
                 # Every row once: no child re-reads another child's partitions
                 assert subset["site_code"].is_unique
-                assert sorted(subset["site_code"]) == sorted(source["site_code"])
+                assert_same_rows(
+                    subset,
+                    source,
+                    ["site_code", "site_name", "latitude", "longitude", "location"],
+                )
         finally:
             shutil.rmtree(config.get_temp_folder(INIT_JOB_ID), ignore_errors=True)

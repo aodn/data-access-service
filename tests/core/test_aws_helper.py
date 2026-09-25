@@ -179,6 +179,8 @@ class TestAWSHelper(TestWithS3):
             with zipfile.ZipFile(zip_path, "r") as zf:
                 namelist = zf.namelist()
                 assert "test_part_000000000.csv" in namelist
+                written = pd.read_csv(io.StringIO(zf.read(namelist[0]).decode()))
+                pd.testing.assert_frame_equal(written, mock_df)
 
     def test_write_csv_to_s3(self, setup, aws_clients, localstack, mock_boto3_client):
         helper = AWSHelper()

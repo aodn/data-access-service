@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from pathlib import Path
@@ -44,9 +46,9 @@ class TestApiWithS3BigZarr(TestWithS3):
         self, setup, localstack, aws_clients, setup_resources, client
     ):
         """
-        The zarr load is of size 205M with multiple dimension on 1 month, if this work then
-        our current data load per month works with server side event, so we are not comparing value here but
-        just the number of count is > 1, which means load success without crash.
+        The zarr is 205 MB across a month. The data read returns no frame for a
+        zarr store, so the SSE stream finishes with no rows and no error. That
+        payload is the result this test locks.
         :param setup:
         :param localstack:
         :param aws_clients:
@@ -84,8 +86,20 @@ class TestApiWithS3BigZarr(TestWithS3):
                 response.headers["Content-Type"] == "text/event-stream; charset=utf-8"
             )
 
-            events: int = 0
-            async for _ in response.aiter_lines():
-                events = events + 1
+            events = 0
+            saw_error = False
+            records = 0
+            async for line in response.aiter_lines():
+                events += 1
+                if line.startswith("event:") and "error" in line:
+                    saw_error = True
+                if not line.startswith("data:"):
+                    continue
+                payload = json.loads(line[len("data:") :].strip())
+                if payload.get("status") == "error":
+                    saw_error = True
+                records += len(payload.get("data") or [])
 
             assert events > 1, "At least something return"
+            assert not saw_error, "SSE stream reported an error"
+            assert records == 0, f"expected no data rows, got {records}"

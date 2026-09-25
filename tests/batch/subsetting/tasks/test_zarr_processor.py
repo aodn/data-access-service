@@ -14,6 +14,7 @@ from data_access_service.batch.subsetting.tasks.zarr_processor import ZarrProces
 from data_access_service.utils.email_templates.no_data_email import (
     NO_DATA_EMAIL_SUBJECT,
 )
+from tests.core.result_check import assert_exported_matches_source
 from tests.core.test_with_s3 import TestWithS3, REGION
 
 # A real-valued gridded store (SST analysis, lowercase lat/lon/time coords), so a
@@ -21,6 +22,8 @@ from tests.core.test_with_s3 import TestWithS3, REGION
 RAMSSA_KEY = "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia.zarr"
 RAMSSA_UUID = "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
 COLLECTION_OUTPUT_NAME = "Test_Ocean_Data_Collection"
+CANNED_SAMPLE2 = Path(__file__).parent.parent.parent.parent / "canned/s3_sample2"
+RADAR_VARIABLES = ["TIME", "LATITUDE", "LONGITUDE", "WDIR", "WWAV", "WWDS"]
 
 
 def _multi_polygon_of(*boxes) -> str:
@@ -101,6 +104,11 @@ class TestSubsetZarr(TestWithS3):
                         assert (
                             netcdf_xarray.sizes["TIME"] == 1
                         ), f"TIME dimension size expected to be 1, but got {netcdf_xarray.dims['TIME']}"
+                        assert_exported_matches_source(
+                            netcdf_xarray,
+                            xarray.open_zarr(CANNED_SAMPLE2 / key, consolidated=False),
+                            RADAR_VARIABLES,
+                        )
 
                 except Exception as ex:
                     # Should not land here
@@ -168,6 +176,11 @@ class TestSubsetZarr(TestWithS3):
                         assert (
                             netcdf_xarray.sizes["LATITUDE"] == 167
                         ), f"LATITUDE dimension size expected to be 167, but got {netcdf_xarray.dims['LATITUDE']}"
+                        assert_exported_matches_source(
+                            netcdf_xarray,
+                            xarray.open_zarr(CANNED_SAMPLE2 / key, consolidated=False),
+                            RADAR_VARIABLES,
+                        )
 
                 except Exception as ex:
                     # Should not land here
@@ -224,6 +237,11 @@ class TestSubsetZarr(TestWithS3):
                             config.get_subsetting_bucket_name(),
                             f"job_id_888/{output_name}.nc",
                             str(temp_file_path),
+                        )
+                        assert_exported_matches_source(
+                            xarray.open_dataset(temp_file_path),
+                            xarray.open_zarr(CANNED_SAMPLE2 / key, consolidated=False),
+                            RADAR_VARIABLES,
                         )
                 except Exception as ex:
                     # Should not have any errors
@@ -311,6 +329,10 @@ class TestSubsetZarr(TestWithS3):
                         np.testing.assert_allclose(
                             in_north.values,
                             source.sel(lat=in_north.lat, lon=in_north.lon).values,
+                        )
+                        np.testing.assert_allclose(
+                            in_south.values,
+                            source.sel(lat=in_south.lat, lon=in_south.lon).values,
                         )
                 finally:
                     shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
@@ -493,6 +515,15 @@ class TestSubsetZarr(TestWithS3):
                     # Australian / Tasman side of the split must be present.
                     assert ((lons >= 150.0) & (lons <= 180.0)).any()
                     assert np.isfinite(from_unwrapped["analysed_sst"].values).any()
+                    source = xarray.open_zarr(
+                        CANNED_SAMPLE2 / RAMSSA_KEY, consolidated=False
+                    )["analysed_sst"].sel(time=from_unwrapped["time"].values[0])
+                    exported = from_unwrapped["analysed_sst"].isel(time=0)
+                    finite = np.isfinite(exported.values)
+                    original = source.sel(lat=exported.lat, lon=exported.lon)
+                    np.testing.assert_allclose(
+                        exported.values[finite], original.values[finite]
+                    )
                 finally:
                     shutil.rmtree(config.get_temp_folder("888"), ignore_errors=True)
 
@@ -544,6 +575,11 @@ class TestSubsetZarr(TestWithS3):
                             config.get_subsetting_bucket_name(),
                             f"job_id_888/{output_name}.nc",
                             str(temp_file_path),
+                        )
+                        assert_exported_matches_source(
+                            xarray.open_dataset(temp_file_path),
+                            xarray.open_zarr(CANNED_SAMPLE2 / key, consolidated=False),
+                            RADAR_VARIABLES,
                         )
                 except Exception as ex:
                     # Should not have any errors
@@ -612,6 +648,11 @@ class TestSubsetZarr(TestWithS3):
                         assert (
                             netcdf_xarray.sizes["TIME"] == 4519
                         ), f"TIME dimension size expected to be 4519, but got {netcdf_xarray.dims['TIME']}"
+                        assert_exported_matches_source(
+                            netcdf_xarray,
+                            xarray.open_zarr(CANNED_SAMPLE2 / key, consolidated=False),
+                            ["TIME", "LATITUDE", "LONGITUDE", "Ed", "Lsky", "Lu"],
+                        )
 
                 except Exception as ex:
                     # Should not land here

@@ -7,6 +7,11 @@ from aodn_cloud_optimised.lib import DataQuery
 
 from data_access_service import Config
 from data_access_service.server import app, api_setup
+from tests.core.result_check import (
+    assert_json_points_match,
+    load_canned_parquet,
+    rows_between,
+)
 from tests.core.test_with_s3 import TestWithS3, REGION
 from data_access_service.core.AWSHelper import AWSHelper
 from starlette.status import HTTP_200_OK, HTTP_401_UNAUTHORIZED
@@ -110,6 +115,18 @@ class TestApiWithS3(TestWithS3):
                     "longitude": 151.3,
                     "time": "2014-07-01",
                 }, f"Unexpected JSON content: {parsed[21]}"
+                acoustic = rows_between(
+                    load_canned_parquet(
+                        Path(__file__).parent.parent
+                        / "canned/s3_sample2/animal_acoustic_tracking_delayed_qc.parquet"
+                    ),
+                    "detection_timestamp",
+                    param["start_date"],
+                    param["end_date"],
+                )
+                assert_json_points_match(
+                    parsed, acoustic, "detection_timestamp", "latitude", "longitude"
+                )
             except json.JSONDecodeError as e:
                 assert False, "Fail to parse to JSON"
 
@@ -155,6 +172,18 @@ class TestApiWithS3(TestWithS3):
                     "longitude": 150.2,
                     "time": "2015-03-31",
                 }, f"Unexpected JSON content: {parsed[269051]}"
+                mooring = rows_between(
+                    load_canned_parquet(
+                        Path(__file__).parent.parent
+                        / "canned/s3_sample2/mooring_temperature_logger_delayed_qc.parquet"
+                    ),
+                    "TIME",
+                    param["start_date"],
+                    param["end_date"],
+                )
+                assert_json_points_match(
+                    parsed, mooring, "TIME", "LATITUDE", "LONGITUDE"
+                )
             except json.JSONDecodeError as e:
                 assert False, "Fail to parse to JSON"
 
@@ -280,6 +309,22 @@ class TestApiWithS3(TestWithS3):
                     "longitude": 144.4,
                     "time": "2025-03-13",
                 }, f"Unexpected JSON content: {parsed[92]}"
+                seabird = rows_between(
+                    load_canned_parquet(
+                        Path(__file__).parent.parent
+                        / "canned/s3_sample2/aggregated_seabird_nonqc.parquet"
+                    ),
+                    "eventDate",
+                    param["start_date"],
+                    param["end_date"],
+                )
+                assert_json_points_match(
+                    parsed,
+                    seabird,
+                    "eventDate",
+                    "decimalLatitude",
+                    "decimalLongitude",
+                )
             except json.JSONDecodeError as e:
                 assert False, "Fail to parse to JSON"
 
@@ -339,3 +384,19 @@ class TestApiWithS3(TestWithS3):
                 "longitude": 148.0,
                 "time": "2025-02-23",
             }, f"Unexpected JSON content: {parsed[24]}"
+            seagrass = rows_between(
+                load_canned_parquet(
+                    Path(__file__).parent.parent
+                    / "canned/s3_sample2/aggregated_seagrass_nonqc.parquet"
+                ),
+                "_temporal_extent",
+                "2025-02-01 00:00:00.000000000",
+                "2025-02-28 23:59:59.999999999",
+            )
+            assert_json_points_match(
+                parsed,
+                seagrass,
+                "_temporal_extent",
+                "decimalLatitude",
+                "decimalLongitude",
+            )
