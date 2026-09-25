@@ -8,21 +8,20 @@ from apscheduler.triggers.cron import CronTrigger
 from data_access_service import API, Config
 from data_access_service.config.config import EnvType
 from data_access_service.sites.sites_repository import ParquetRepository
-from data_access_service.core.tiler_routes.startup import refresh_catalog
-from data_access_service.tiler.services.store.registry import refresh_stores
+from data_access_service.core.tiler_routes.startup import (
+    RefreshInProgressError,
+    refresh_tiler,
+)
 from data_access_service.utils.memory_utils import log_memory_usage
 
 logger = logging.getLogger(__name__)
 
 
 def _format_exception(exc: BaseException) -> str:
-    """Render an exception message, recovering DuckDB errors whose bytes are not valid UTF-8.
+    """The exception message as a string.
 
-    DuckDB's Python binding decodes its C++ error messages as UTF-8. When a message
-    contains a non-UTF-8 byte (e.g. raw bytes from a corrupt or non-Parquet S3 object),
-    the decode itself raises UnicodeDecodeError, masking the real error. The raw message
-    bytes are preserved on the exception's ``object`` attribute, so we recover them here
-    with ``errors="replace"`` rather than letting the cryptic decode error surface.
+    DuckDB errors containing non-UTF-8 bytes surface as UnicodeDecodeError,
+    which hides the real message, so decode the raw bytes leniently instead.
     """
     if isinstance(exc, UnicodeDecodeError):
         recovered = exc.object.decode(exc.encoding, errors="replace")
@@ -31,23 +30,10 @@ def _format_exception(exc: BaseException) -> str:
 
 
 class TaskScheduler:
-    """Runs the app's recurring background jobs on a single APScheduler instance.
+    """Runs the recurring background jobs.
 
-    Two independent jobs:
-
-    1. Keeps every registered :class:`ParquetRepository`'s table in sync with
-       its S3 snapshot. The heavy read of each dataset's primary source runs
-       in a separate AWS Batch job (see
-       ``data_access_service/batch/sites_parquet/refresher.py``), which
-       writes the result to S3 as a flat snapshot file — see
-       ``data_access_service/sites/technical.md`` for the full design. This
-       scheduler only ever does the cheap side: on a recurring schedule, a
-       single S3 HEAD per repository to check its snapshot's ETag, and —
-       only if it changed — a lightweight reload. The repositories share the
-       single ``SitesDuckDBClient`` built in :mod:`data_access_service.server`,
-       so every read endpoint sees the reloaded tables.
-    2. Refreshes the tiler: re-reads every loaded store's metadata.json (new
-       timestamps), then root_metadata.json (products added or removed).
+    1. Sites reload: reload each repository's table if its S3 snapshot changed.
+    2. Tiler refresh: re-read store metadata and root_metadata.json.
     """
 
     def __init__(self, api: API, sites_repositories: dict[str, ParquetRepository]):
@@ -56,13 +42,9 @@ class TaskScheduler:
         self.scheduler = AsyncIOScheduler()
 
     def _reload_repository(self, name: str, repo: ParquetRepository):
-        """Reload one repository's table from its S3 snapshot if it changed.
+        """Reload one repository if its snapshot changed.
 
-        Only the snapshot-bucket S3 secret needs refreshing here — this process
-        never reads the primary dataset, so it never needs the primary
-        bucket's secret. ECS task role credentials are valid for ~6 hours and
-        boto3 always returns fresh ones, so re-creating the secret every
-        reload keeps it current.
+        The snapshot S3 secret is recreated first so the credentials don't expire.
         """
         repo._configure_snapshot_bucket_s3()
         log_memory_usage(logger, f"before reload check '{name}'")
@@ -79,8 +61,7 @@ class TaskScheduler:
         log_memory_usage(logger, f"after reload check '{name}'")
 
     def _store_refresh_task(self):
-        """Re-read the tiler's store metadata and product catalogue (the
-        scheduled job)."""
+        """Refresh the tiler's store metadata and product catalogue."""
         if not Config.is_profile_in(
             EnvType.EDGE,
             EnvType.STAGING,
@@ -95,18 +76,16 @@ class TaskScheduler:
         logger.info("Store refresh task is running...")
         log_memory_usage(logger, "store refresh task start")
         try:
-            refresh_stores()
+            refresh_tiler()
+        except RefreshInProgressError:
+            logger.info("Tiler refresh already running; skipped")
         except Exception:
             logger.exception("Store refresh task failed")
-        try:
-            refresh_catalog()
-        except Exception:
-            logger.exception("Tiler catalogue refresh failed")
         log_memory_usage(logger, "store refresh task end")
         logger.info("Store refresh task completed")
 
     def _reload_task(self):
-        """Reload every registered repository whose snapshot changed (the scheduled job)."""
+        """Reload every repository whose snapshot changed."""
         if not Config.is_profile_in(
             EnvType.EDGE,
             EnvType.STAGING,
@@ -126,7 +105,7 @@ class TaskScheduler:
         logger.info("Reload task completed")
 
     def _start(self):
-        """Start the scheduler and add the recurring jobs."""
+        """Add the recurring jobs and start the scheduler."""
         self.scheduler.add_job(
             self._reload_task,
             trigger=CronTrigger(
@@ -158,19 +137,18 @@ class TaskScheduler:
         logger.info("Task scheduler started successfully")
 
     async def start_with_initial_run(self):
-        """Start the scheduler and run the reload task immediately."""
+        """Run the reload task once, then start the scheduler."""
         await self.api.wait_until_ready()
 
         loop = asyncio.get_running_loop()
         with ThreadPoolExecutor() as executor:
-            # Reload is cheap (one HEAD + a small-file read per repository) but
-            # still blocking S3 I/O, so keep it off the event loop at startup.
+            # Blocking S3 I/O, so keep it off the event loop.
             logger.info("Running reload task on startup...")
             await loop.run_in_executor(executor, self._reload_task)
         self._start()
 
     def shutdown(self):
-        """Shutdown the scheduler gracefully."""
+        """Stop the scheduler, waiting for running jobs to finish."""
         logger.info("Shutting down task scheduler...")
         if self.scheduler.running:
             self.scheduler.shutdown(wait=True)

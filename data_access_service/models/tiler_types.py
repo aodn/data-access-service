@@ -46,6 +46,9 @@ class TilerBatchConfig:
     # Cap on zarr time chunks read per store per run, for quick dev runs;
     # None converts everything missing.
     max_chunks_per_run: int | None
+    # Convert every timestamp of every store again on each run, instead of
+    # only the ones not yet converted.
+    regenerate_all: bool
     # Fork one worker per store. Off for local macOS runs, where a child
     # forked after the parent touched the network stack segfaults.
     use_fork_process: bool

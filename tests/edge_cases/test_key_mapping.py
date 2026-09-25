@@ -11,6 +11,11 @@ from data_access_service import Config, API
 from data_access_service.batch.subsetting.tasks.parquet_processor import (
     process_parquet_files,
 )
+from tests.core.result_check import (
+    assert_same_rows,
+    load_canned_parquet,
+    rows_between,
+)
 from tests.core.test_with_s3 import TestWithS3, REGION
 
 
@@ -80,6 +85,27 @@ class TestKeyMapping(TestWithS3):
                     target_path = f"s3://{config.get_subsetting_bucket_name()}/{config.get_s3_temp_folder_name('888')}argo.parquet"
                     subset = helper.read_parquet_from_s3(target_path)
                     assert len(subset) == 77555
+                    expected = rows_between(
+                        load_canned_parquet(
+                            Path(__file__).parent.parent
+                            / "canned/s3_sample_edge_cases/argo.parquet"
+                        ),
+                        "JULD",
+                        "2000-01-01 00:00:00",
+                        "2013-01-01 23:59:59.999999999",
+                    )
+                    assert_same_rows(
+                        subset,
+                        expected,
+                        [
+                            "JULD",
+                            "LATITUDE",
+                            "LONGITUDE",
+                            "PLATFORM_NUMBER",
+                            "PRES",
+                            "TEMP",
+                        ],
+                    )
                 except Exception as ex:
                     # Should not land here
                     assert False, f"{ex}"

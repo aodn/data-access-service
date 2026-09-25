@@ -154,6 +154,7 @@ class TestGeotiffExportWithS3(TestWithS3):
                 "mask",
                 "sea_ice_fraction",
             }
+            source = xarray.open_zarr(SAMPLES / KEY)
             for name in tif_names:
                 var = name.split("/")[0]
                 assert name == f"{var}/{base}_{var}_{REQUESTED_DATE}.tif"
@@ -165,6 +166,9 @@ class TestGeotiffExportWithS3(TestWithS3):
                     # clipped to within the requested bbox (allow one cell of edge).
                     assert bounds.left >= WEST - 0.1 and bounds.right <= EAST + 0.1
                     assert bounds.bottom >= SOUTH - 0.1 and bounds.top <= NORTH + 0.1
+                    np.testing.assert_array_equal(
+                        raster.read(1), _source_at(source, var, raster)
+                    )
 
     def test_skewed_polygon_does_not_export_scalar_crs(
         self, aws_clients, upload_samples_to_s3, subset_request_factory
@@ -212,12 +216,26 @@ class TestGeotiffExportWithS3(TestWithS3):
                 "mask",
                 "sea_ice_fraction",
             }
+            source = xarray.open_zarr(SAMPLES / KEY)
             for name in tif_names:
                 var = name.split("/")[0]
                 assert name == f"{var}/{base}_{var}_{REQUESTED_DATE}.tif"
                 with rasterio.open(Path(tmp) / name) as raster:
                     assert raster.crs.to_epsg() == 4326
                     assert raster.count == 1
+                    band = raster.read(1)
+                    expected = _source_at(source, var, raster)
+                    finite = np.isfinite(band)
+                    if finite.any():
+                        np.testing.assert_array_equal(band[finite], expected[finite])
+                    else:
+                        assert not np.isfinite(
+                            expected
+                        ).any(), f"{var} is empty but the source has values"
+                    if var == "analysed_sst":
+                        assert (
+                            finite.any()
+                        ), "analysed_sst has no data inside the polygon"
 
     def test_matches_netcdf_original(
         self, aws_clients, upload_samples_to_s3, subset_request_factory

@@ -5,8 +5,8 @@ How a run goes:
 
 1. Stores run one at a time, by name, each in a forked worker (or
    in-process when ``use_fork_process`` is off), so only one is in memory.
-2. In a store, only timestamps not yet converted are read, one zarr time
-   chunk at a time, newest chunk first.
+2. In a store, only timestamps not yet converted are read (or all of them
+   with ``regenerate_all``), one zarr time chunk at a time, newest chunk first.
 3. Each timestamp and variable becomes one parquet file. All-NaN
    timestamps are recorded as empty.
 4. The store's ``metadata.json`` is saved after each chunk, so a failed
@@ -231,6 +231,7 @@ def _sync_one(
             batch_config.tiler_root_dir,
             max_chunks_per_run=batch_config.max_chunks_per_run,
             duckdb_config=batch_config.duckdb,
+            regenerate_all=batch_config.regenerate_all,
         )
         logger.info(
             "Tiler parquet for store=%s synced: %d new timestamp(s), sidecar=%s",

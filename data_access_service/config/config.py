@@ -447,6 +447,7 @@ class Config:
         return TilerBatchConfig(
             tiler_root_dir=self.get_tiler_root_dir(),
             max_chunks_per_run=int(max_chunks) if max_chunks is not None else None,
+            regenerate_all=bool(batch["regenerate_all"]),
             use_fork_process=bool(batch["use_fork_process"]),
             duckdb=TilerBatchDuckDBConfig(
                 memory_limit=duckdb["memory_limit"],

@@ -14,6 +14,11 @@ from data_access_service.config.config import Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.constants import STR_TIME_UPPER_CASE
 from data_access_service.utils.date_time_utils import parse_date
+from tests.core.result_check import (
+    assert_same_rows,
+    load_canned_parquet,
+    rows_between,
+)
 from tests.core.test_with_s3 import TestWithS3, REGION
 from typing import Final
 
@@ -157,6 +162,23 @@ class TestParquetProcessorWithS3(TestWithS3):
                 assert (
                     times.max() <= end_date
                 ), f"subset time {times.max()} is after range end {end_date}"
+                expected = rows_between(
+                    load_canned_parquet(_canned_s3_sample2() / SEAGRASS_KEY),
+                    time_key,
+                    date_ranges[SEAGRASS_JOB_INDEX][0],
+                    date_ranges[SEAGRASS_JOB_INDEX][1],
+                )
+                assert_same_rows(
+                    subset,
+                    expected,
+                    [
+                        time_key,
+                        "decimalLatitude",
+                        "decimalLongitude",
+                        "scientificName",
+                        "organismQuantity",
+                    ],
+                )
             finally:
                 shutil.rmtree(config.get_temp_folder(MASTER_JOB_ID), ignore_errors=True)
                 shutil.rmtree(
@@ -278,6 +300,24 @@ class TestParquetProcessorWithS3(TestWithS3):
                 assert (
                     times.max() <= end_date
                 ), f"subset time {times.max()} is after range end {end_date}"
+                expected = rows_between(
+                    load_canned_parquet(_canned_s3_sample2() / ANIMAL_METADATA_KEY),
+                    time_key,
+                    date_ranges[ANIMAL_METADATA_JOB_INDEX][0],
+                    date_ranges[ANIMAL_METADATA_JOB_INDEX][1],
+                )
+                assert_same_rows(
+                    subset,
+                    expected,
+                    [
+                        time_key,
+                        "device_id",
+                        "ptt",
+                        "release_latitude",
+                        "release_longitude",
+                        "common_name",
+                    ],
+                )
             finally:
                 shutil.rmtree(config.get_temp_folder(MASTER_JOB_ID), ignore_errors=True)
                 shutil.rmtree(
@@ -417,6 +457,17 @@ class TestParquetProcessorWithS3(TestWithS3):
                 assert (
                     times.max() <= end_date
                 ), f"subset time {times.max()} is after range end {end_date}"
+                expected = rows_between(
+                    load_canned_parquet(_canned_s3_sample2() / HAULOUT_KEY),
+                    time_key,
+                    date_ranges[HAULOUT_JOB_INDEX][0],
+                    date_ranges[HAULOUT_JOB_INDEX][1],
+                )
+                assert_same_rows(
+                    subset,
+                    expected,
+                    [time_key, "ref", "ptt", "lat", "lon", "cnt"],
+                )
             finally:
                 shutil.rmtree(config.get_temp_folder(MASTER_JOB_ID), ignore_errors=True)
                 shutil.rmtree(

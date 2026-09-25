@@ -5,6 +5,7 @@ import pytest
 
 from data_access_service.config.config import Config, EnvType
 from data_access_service.core.scheduler import TaskScheduler
+from data_access_service.core.tiler_routes.startup import RefreshInProgressError
 
 
 def _make_repo(reload_result: bool = True):
@@ -80,57 +81,39 @@ class TestReloadTask:
 
 
 class TestStoreRefreshTask:
-    def test_refreshes_stores_and_catalogue_when_profile_allowed(self, monkeypatch):
+    def test_refreshes_tiler_when_profile_allowed(self, monkeypatch):
         monkeypatch.setattr(Config, "is_profile_in", lambda *a, **k: True)
         refresh = MagicMock()
-        catalog = MagicMock()
-        monkeypatch.setattr(
-            "data_access_service.core.scheduler.refresh_stores", refresh
-        )
-        monkeypatch.setattr(
-            "data_access_service.core.scheduler.refresh_catalog", catalog
-        )
+        monkeypatch.setattr("data_access_service.core.scheduler.refresh_tiler", refresh)
         scheduler = TaskScheduler(api=MagicMock(), sites_repositories={})
 
         scheduler._store_refresh_task()
 
         refresh.assert_called_once()
-        catalog.assert_called_once()
 
     def test_skips_on_disallowed_profile(self, monkeypatch):
         monkeypatch.setattr(Config, "is_profile_in", lambda *a, **k: False)
         monkeypatch.setattr(Config, "resolve_profile", lambda: EnvType.DEV)
         refresh = MagicMock()
-        catalog = MagicMock()
-        monkeypatch.setattr(
-            "data_access_service.core.scheduler.refresh_stores", refresh
-        )
-        monkeypatch.setattr(
-            "data_access_service.core.scheduler.refresh_catalog", catalog
-        )
+        monkeypatch.setattr("data_access_service.core.scheduler.refresh_tiler", refresh)
         scheduler = TaskScheduler(api=MagicMock(), sites_repositories={})
 
         scheduler._store_refresh_task()
 
         refresh.assert_not_called()
-        catalog.assert_not_called()
 
-    def test_does_not_raise_when_refresh_fails(self, monkeypatch):
+    @pytest.mark.parametrize(
+        "error", [RuntimeError("boom"), RefreshInProgressError("busy")]
+    )
+    def test_does_not_raise_when_refresh_fails(self, monkeypatch, error):
         monkeypatch.setattr(Config, "is_profile_in", lambda *a, **k: True)
         monkeypatch.setattr(
-            "data_access_service.core.scheduler.refresh_stores",
-            MagicMock(side_effect=RuntimeError("boom")),
-        )
-        catalog = MagicMock(side_effect=RuntimeError("boom"))
-        monkeypatch.setattr(
-            "data_access_service.core.scheduler.refresh_catalog", catalog
+            "data_access_service.core.scheduler.refresh_tiler",
+            MagicMock(side_effect=error),
         )
         scheduler = TaskScheduler(api=MagicMock(), sites_repositories={})
 
         scheduler._store_refresh_task()  # must not raise
-
-        # A store refresh failure doesn't skip the catalogue refresh.
-        catalog.assert_called_once()
 
 
 class TestStartWithInitialRun:

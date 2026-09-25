@@ -1,12 +1,10 @@
 """Tiler startup: load the catalogue from ``root_metadata.json`` and each
 store's ``metadata.json``, then mark the tiler ready.
-
-Any failure, or every store failing to load, leaves it unready (503).
-``refresh_catalog`` is also run by the scheduler, to pick up batch changes.
 """
 
 import asyncio
 import logging
+import threading
 
 import anyio
 
@@ -26,7 +24,8 @@ from data_access_service.tiler.services.product.registry import load_products
 from data_access_service.tiler.services.rendering.kernels import warmup_kernels
 from data_access_service.tiler.services.rendering.visual_tiles import warmup_visual
 from data_access_service.tiler.services.store.registry import (
-    prewarm_stores,
+    load_stores,
+    refresh_stores,
     retain_stores,
 )
 from data_access_service.utils.s3_json import read_json
@@ -47,11 +46,29 @@ def refresh_catalog() -> tuple[dict[str, Product], dict[str, BaseException | Non
     Returns ``(products, {store: None or the load error})``.
     """
     products = _load_catalog()
-    load_products(products)
     stores = {product.store for product in products.values()}
     retain_stores(stores)
-    outcomes = prewarm_stores(sorted(stores))
+    outcomes = load_stores(sorted(stores))
+    load_products(products)
     return products, outcomes
+
+
+class RefreshInProgressError(Exception):
+    """A tiler refresh is already running."""
+
+
+_refresh_lock = threading.Lock()
+
+
+def refresh_tiler() -> tuple[dict[str, Product], dict[str, BaseException | None]]:
+    """Re-read every loaded store's metadata.json, then root_metadata.json."""
+    if not _refresh_lock.acquire(blocking=False):
+        raise RefreshInProgressError("Tiler refresh is already in progress")
+    try:
+        refresh_stores()
+        return refresh_catalog()
+    finally:
+        _refresh_lock.release()
 
 
 async def run_tiler_warmup() -> None:
@@ -63,15 +80,7 @@ async def run_tiler_warmup() -> None:
         await anyio.to_thread.run_sync(warmup_kernels, limiter=TILE_THREAD_LIMITER)
         await anyio.to_thread.run_sync(warmup_visual, limiter=TILE_THREAD_LIMITER)
 
-        # TODO: We might not need the failed logs, as it only reads the metadata of each store. Becase now the real store validation is done in batch tiler.
-        failed = sum(1 for outcome in outcomes.values() if outcome is not None)
-        if failed == len(outcomes):
-            raise RuntimeError(
-                f"All {len(outcomes)} store(s) failed to load; refusing to "
-                "mark the tiler ready with a catalogue that would 404 on "
-                "every request"
-            )
-
+        failed = sum(error is not None for error in outcomes.values())
         mark_tiler_ready()
         logger.info(
             "Tiler ready: %d products from %d stores (%d store(s) failed to load)",

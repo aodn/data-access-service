@@ -112,7 +112,6 @@ def test_is_store_available_true_after_successful_load(tiler_root_dir):
 
 
 def test_is_store_available_false_when_metadata_json_missing(tiler_root_dir):
-    assert is_store_available("never-written") is True  # optimistic default
     with pytest.raises(FileNotFoundError):
         get_store_metadata("never-written")
     assert is_store_available("never-written") is False
@@ -174,4 +173,4 @@ def test_get_lod_grids_fast_path_skips_metadata_load(tiler_root_dir):
     grids = get_lod_grids(product)
     assert grids == {1: (2, 2)}
     # No metadata.json exists for this store at all; reaching for it would raise.
-    assert is_store_available("read") is True
+    assert store_registry.time_index("read") == {}

@@ -158,8 +158,8 @@ pmtiles:
       maxzoom: 12
 tiler:
   config:
-    # Must match tiler_folder_name in appdeploy batch-tiler-parquet (IAM write scope).
-    root_prefix: "tiler"
+    # Must sit under tiler_folder_name in appdeploy batch-tiler-parquet (IAM write scope).
+    root_prefix: "shared/tiler"
     api:
       store_refresh_interval_hours: 4
       thread_pool_size: 20
@@ -176,6 +176,8 @@ tiler:
     batch:
       # Zarr time chunks converted per store per run, newest firs. null = all.
       max_chunks_per_run: null
+      # True: convert every timestamp again each run. False: only new ones.
+      regenerate_all: True
       use_fork_process: True
       duckdb:
         temp_dir_prefix: "tiler_batch_duckdb_tmp"
