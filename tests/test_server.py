@@ -63,6 +63,10 @@ def test_gzip_skips_image_tiles(client):
             return_value="raw-ts",
         ),
         patch(
+            "data_access_service.core.tiler_routes.shared.is_store_available",
+            return_value=True,
+        ),
+        patch(
             "data_access_service.core.tiler_routes.visual_tiles.render_tile",
             return_value=_BIG_PNG,
         ),

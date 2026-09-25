@@ -89,7 +89,7 @@ flowchart LR
     RC --> LOAD["read root_metadata.json"]
     LOAD --> CAT["catalog.build_catalog<br/>identity + products_customisation<br/>(visual, ocean_masked, tiles)"]
     CAT --> PREG["product.registry.PRODUCTS"]
-    RC --> SREG["store.registry.prewarm_stores<br/>cache each metadata.json"]
+    RC --> SREG["store.registry.load_stores<br/>cache each metadata.json"]
     RC --> RETAIN["retain_stores<br/>forget removed stores"]
 
     WARM --> CM["load_colormaps"]

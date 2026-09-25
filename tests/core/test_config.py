@@ -24,7 +24,7 @@ def _with_tiler(monkeypatch, config, edit):
 
 def test_tiler_root_dir_is_the_datavis_bucket():
     config = Config.get_config(EnvType.TESTING)
-    assert config.get_tiler_root_dir() == "s3://test-site-snapshot-bucket/tiler"
+    assert config.get_tiler_root_dir() == "s3://test-site-snapshot-bucket/shared/tiler"
     assert config.get_tiler_batch_config().tiler_root_dir == config.get_tiler_root_dir()
 
 

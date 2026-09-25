@@ -1,6 +1,6 @@
-"""Prewarm outcome reporting for the metadata.json-backed registry.
+"""load_stores outcome reporting for the metadata.json-backed registry.
 
-Prewarm reports what happened per store and decides nothing; only the caller
+load_stores reports what happened per store and decides nothing; only the caller
 can tell "one sidecar missing" from "the tiler is down".
 """
 
@@ -12,7 +12,7 @@ from data_access_service.models.tiler_parquet_types import (
 )
 from data_access_service.tiler.services.store.registry import (
     is_store_available,
-    prewarm_stores,
+    load_stores,
     retain_stores,
     store_registry,
 )
@@ -65,11 +65,11 @@ def _write_metadata(s3_store: dict, store: str) -> None:
     s3_store[f"{OUTPUT_DIR}/{store}/metadata.json"] = _meta(store).to_dict()
 
 
-def test_successful_prewarm_reports_none_per_store(tiler_root_dir):
+def test_successful_load_reports_none_per_store(tiler_root_dir):
     _write_metadata(tiler_root_dir, "a")
     _write_metadata(tiler_root_dir, "b")
 
-    outcomes = prewarm_stores(["a", "b"])
+    outcomes = load_stores(["a", "b"])
 
     assert outcomes == {"a": None, "b": None}
 
@@ -77,7 +77,7 @@ def test_successful_prewarm_reports_none_per_store(tiler_root_dir):
 def test_missing_sidecar_yields_file_not_found(tiler_root_dir):
     _write_metadata(tiler_root_dir, "ok")
 
-    outcomes = prewarm_stores(["ok", "missing"])
+    outcomes = load_stores(["ok", "missing"])
 
     assert outcomes["ok"] is None
     assert isinstance(outcomes["missing"], FileNotFoundError)
@@ -87,56 +87,55 @@ def test_one_bad_store_does_not_block_the_others(tiler_root_dir):
     _write_metadata(tiler_root_dir, "ok1")
     _write_metadata(tiler_root_dir, "ok2")
 
-    outcomes = prewarm_stores(["bad", "ok1", "ok2"])
+    outcomes = load_stores(["bad", "ok1", "ok2"])
 
     assert outcomes["ok1"] is None
     assert outcomes["ok2"] is None
     assert isinstance(outcomes["bad"], FileNotFoundError)
 
 
-def test_never_prewarmed_store_is_available_by_default():
-    """Optimistic default: nothing has classified this store as failed, so a
-    caller that bypasses prewarm entirely (tests, a request racing startup)
-    is not blocked by it."""
-    assert is_store_available("never-touched") is True
+def test_never_loaded_store_is_unavailable():
+    """Every catalogue store is loaded before its products are published, so
+    one that is not loaded is treated as failed."""
+    assert is_store_available("never-touched") is False
 
 
 def test_successfully_loaded_store_is_available(tiler_root_dir):
     _write_metadata(tiler_root_dir, "ok")
 
-    prewarm_stores(["ok"])
+    load_stores(["ok"])
 
     assert is_store_available("ok") is True
 
 
 def test_failed_store_is_unavailable(tiler_root_dir):
-    prewarm_stores(["gone"])
+    load_stores(["gone"])
 
     assert is_store_available("gone") is False
 
 
-def test_a_store_that_recovers_on_a_later_prewarm_becomes_available(tiler_root_dir):
-    prewarm_stores(["flaky"])
+def test_a_store_that_recovers_on_a_later_load_becomes_available(tiler_root_dir):
+    load_stores(["flaky"])
     assert is_store_available("flaky") is False
 
-    # Sidecar appears (e.g. the batch job publishes it, then a later cron re-prewarm).
+    # Sidecar appears (e.g. the batch job publishes it, then a later scheduled refresh).
     _write_metadata(tiler_root_dir, "flaky")
-    prewarm_stores(["flaky"])
+    load_stores(["flaky"])
 
     assert is_store_available("flaky") is True
 
 
-def test_prewarm_of_an_empty_store_list_is_a_no_op():
-    assert prewarm_stores([]) == {}
+def test_load_of_an_empty_store_list_is_a_no_op():
+    assert load_stores([]) == {}
 
 
 def test_retain_forgets_stores_not_kept(tiler_root_dir):
     _write_metadata(tiler_root_dir, "keep")
     _write_metadata(tiler_root_dir, "gone")
-    prewarm_stores(["keep", "gone", "broken"])
+    load_stores(["keep", "gone", "broken"])
 
     retain_stores({"keep"})
 
     assert store_registry.time_index("keep")
     assert store_registry.time_index("gone") == {}
-    assert is_store_available("broken") is True  # its failure is forgotten too
+    assert is_store_available("gone") is False

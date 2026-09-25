@@ -1,9 +1,8 @@
 """Tiler warmup sequencing and readiness.
 
 The shape being defended: every product in ``root_metadata.json`` is
-published up front — nothing waits on its store's sidecar loading — but the
-tiler still exits unready, without ``mark_tiler_ready()``, if every store
-fails to load.
+published after its store's metadata is loaded, even when that load fails,
+and a store failing to load never keeps the tiler unready.
 """
 
 import asyncio
@@ -36,9 +35,9 @@ def warmup_env(monkeypatch):
 
         return _fn
 
-    def fake_prewarm(urls):
-        calls.append("prewarm")
-        state["prewarm_urls"] = urls
+    def fake_load_stores(stores):
+        calls.append("load_stores")
+        state["loaded_stores"] = stores
         return state["outcomes"]
 
     def fake_publish(products):
@@ -57,7 +56,7 @@ def warmup_env(monkeypatch):
     monkeypatch.setattr(startup, "load_colormaps", record("colormaps"))
     monkeypatch.setattr(startup, "warmup_kernels", record("kernels"))
     monkeypatch.setattr(startup, "warmup_visual", record("visual"))
-    monkeypatch.setattr(startup, "prewarm_stores", fake_prewarm)
+    monkeypatch.setattr(startup, "load_stores", fake_load_stores)
     monkeypatch.setattr(startup, "load_products", fake_publish)
     monkeypatch.setattr(startup, "mark_tiler_ready", fake_mark_ready)
 
@@ -65,16 +64,16 @@ def warmup_env(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_happy_path_publishes_then_prewarms_then_marks_ready(warmup_env):
+async def test_happy_path_loads_stores_then_publishes_then_marks_ready(warmup_env):
     calls, state = warmup_env
     await run_tiler_warmup()
 
     assert state["ready"] is True
     assert state["published"] == state["candidates"]
-    # Publication does not wait on store health.
-    assert calls.index("load_catalog") < calls.index("publish")
-    assert calls.index("publish") < calls.index("prewarm")
-    assert calls.index("prewarm") < calls.index("mark_ready")
+    # Stores load first, so a published product's store is never unknown.
+    assert calls.index("load_catalog") < calls.index("load_stores")
+    assert calls.index("load_stores") < calls.index("publish")
+    assert calls.index("publish") < calls.index("mark_ready")
 
 
 @pytest.mark.asyncio
@@ -97,7 +96,7 @@ async def test_missing_root_metadata_leaves_the_tiler_unready(
 
 
 @pytest.mark.asyncio
-async def test_prewarm_receives_every_unique_candidate_store(warmup_env):
+async def test_load_stores_receives_every_unique_candidate_store(warmup_env):
     calls, state = warmup_env
     state["candidates"] = {
         "a:v": Product(id="a:v", store="a", variable="v"),
@@ -109,12 +108,12 @@ async def test_prewarm_receives_every_unique_candidate_store(warmup_env):
     await run_tiler_warmup()
 
     # Deduplicated and sorted — 3 products but only 2 opens.
-    assert state["prewarm_urls"] == ["a", "b"]
+    assert state["loaded_stores"] == ["a", "b"]
 
 
 @pytest.mark.asyncio
 async def test_all_candidates_are_published_even_with_a_failed_store(warmup_env):
-    """A store failing prewarm no longer withholds its products from the
+    """A store failing to load no longer withholds its products from the
     registry — that is now enforced per-request, not by publication."""
     calls, state = warmup_env
     state["outcomes"] = {"a": RuntimeError("s3 down")}
@@ -126,18 +125,16 @@ async def test_all_candidates_are_published_even_with_a_failed_store(warmup_env)
 
 
 @pytest.mark.asyncio
-async def test_every_store_failing_leaves_the_tiler_unready(warmup_env, caplog):
+async def test_every_store_failing_still_reaches_ready(warmup_env):
+    """Failed stores are retried by the scheduled refresh, so they must not
+    leave the tiler unready until a restart."""
     calls, state = warmup_env
     state["outcomes"] = {"a": RuntimeError("s3 down")}
 
-    with caplog.at_level("CRITICAL"):
-        await run_tiler_warmup()
+    await run_tiler_warmup()
 
-    assert state["ready"] is False
-    # Publication already happened — only readiness is withheld.
+    assert state["ready"] is True
     assert "publish" in calls
-    assert "mark_ready" not in calls
-    assert any(r.levelname == "CRITICAL" for r in caplog.records)
 
 
 @pytest.mark.asyncio
@@ -219,7 +216,7 @@ def test_refresh_catalog_publishes_and_loads_the_new_stores(warmup_env):
 
     assert products == state["candidates"]
     assert state["published"] == state["candidates"]
-    assert state["prewarm_urls"] == ["a", "b"]
+    assert state["loaded_stores"] == ["a", "b"]
 
 
 @pytest.mark.asyncio
@@ -228,7 +225,7 @@ async def test_catalogue_is_loaded_off_the_event_loop(warmup_env, monkeypatch):
     seen = []
     monkeypatch.setattr(
         startup,
-        "prewarm_stores",
+        "load_stores",
         lambda stores: seen.append(threading.current_thread()) or {"a": None},
     )
 

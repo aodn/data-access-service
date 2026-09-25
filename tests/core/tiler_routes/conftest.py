@@ -42,6 +42,23 @@ def resolve_timestamp_mock():
         yield m
 
 
+@pytest.fixture(autouse=True)
+def store_available_mock():
+    """Route tests never load a store into the registry, so default every
+    store to available; a test simulating a failed store patches it False."""
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.shared.is_store_available",
+            return_value=True,
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.products.is_store_available",
+            return_value=True,
+        ),
+    ):
+        yield
+
+
 @pytest.fixture
 def client():
     """Entering TestClient as a context manager triggers lifespan / api_setup.
