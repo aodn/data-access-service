@@ -160,6 +160,46 @@ def _next_part_path(directory: Path) -> Path:
         index += 1
 
 
+def _store_time_as_timestamp(
+    frame: pd.DataFrame, time_key: Optional[str]
+) -> pd.DataFrame:
+    """Match the previous writer, which ran `to_datetime` on the time column.
+
+    A date32 column such as seagrass `_temporal_extent` arrives as `datetime.date`.
+    Leaving it as a date makes a later dask read return a date, which no longer
+    matches the timestamp the previous `to_parquet` wrote.
+    """
+    if time_key is None or time_key not in frame.columns:
+        return frame
+    series = frame[time_key]
+    if getattr(series.dtype, "kind", None) == "M":
+        return frame
+    updated = frame.copy()
+    updated[time_key] = pd.to_datetime(series)
+    return updated
+
+
+def _timestamp_write_schema(
+    arrow_schema: pa.Schema, frame: pd.DataFrame, time_key: Optional[str]
+) -> pa.Schema:
+    """Keep a datetime time column as timestamp instead of casting it back to date.
+
+    `Table.from_pandas(..., schema=batch.schema)` follows the source field. For a
+    date32 column that puts the timestamp back on disk as a date.
+    """
+    if time_key is None or time_key not in frame.columns:
+        return arrow_schema
+    if getattr(frame[time_key].dtype, "kind", None) != "M":
+        return arrow_schema
+    index = arrow_schema.get_field_index(time_key)
+    if index < 0:
+        return arrow_schema
+    field = arrow_schema.field(index)
+    if pa.types.is_timestamp(field.type):
+        return arrow_schema
+    return arrow_schema.set(index, field.with_type(pa.timestamp("ns")))
+
+
 def _write_batches(
     batches,
     output_dir: str,
@@ -191,12 +231,11 @@ def _write_batches(
                 del frame
                 continue
 
+            frame = _store_time_as_timestamp(frame, time_key)
             if partition_label is not None:
                 groups = [(partition_label, frame)]
             else:
                 series = frame[time_key]
-                if series.dtype.kind != "M":
-                    series = pd.to_datetime(series)
                 labelled = frame.copy()
                 labelled["_part"] = series.dt.strftime("%Y-%m")
                 groups = [
@@ -209,7 +248,9 @@ def _write_batches(
                 if part.empty:
                     continue
                 table = pa.Table.from_pandas(
-                    part, schema=batch_schema, preserve_index=False
+                    part,
+                    schema=_timestamp_write_schema(batch_schema, part, time_key),
+                    preserve_index=False,
                 )
                 writer = writers.get(label)
                 if writer is None:

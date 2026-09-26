@@ -86,6 +86,41 @@ def test_write_batches_splits_months_and_does_not_overwrite(tmp_path):
     assert pq.read_table(parts[0]).num_rows == 1
 
 
+def test_write_batches_stores_a_date_time_column_as_timestamp(tmp_path):
+    """date32 time columns are written as timestamps, matching the old to_parquet path.
+
+    Dask reads a stored date32 as a date (`2025-02-23`). The previous writer
+    converted that column with to_datetime, so readers see `2025-02-23 00:00:00`.
+    """
+    import datetime as dt
+
+    import dask.dataframe as dd
+
+    from tests.core.result_check import assert_same_rows
+
+    batch = pa.record_batch(
+        {
+            "_temporal_extent": pa.array([dt.date(2025, 2, 23)] * 2, type=pa.date32()),
+            "scientificName": pa.array(["Posidonia", "Zostera"]),
+            "organismQuantity": pa.array([1.0, 2.0]),
+        }
+    )
+    output = tmp_path / "seagrass"
+    assert _write_batches(
+        [batch], str(output), None, "_temporal_extent", None, None, None
+    )
+    written = pq.read_schema(next(output.rglob("*.parquet")))
+    assert pa.types.is_timestamp(written.field("_temporal_extent").type)
+
+    subset = dd.read_parquet(str(output), engine="pyarrow")
+    expected = pa.Table.from_batches([batch]).to_pandas()
+    assert_same_rows(
+        subset,
+        expected,
+        ["_temporal_extent", "scientificName", "organismQuantity"],
+    )
+
+
 def test_write_batches_applies_the_polygon_and_uses_the_given_label(tmp_path):
     batch = pa.record_batch(
         {
