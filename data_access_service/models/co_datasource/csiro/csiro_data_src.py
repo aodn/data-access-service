@@ -2,6 +2,8 @@
 
 CSIRO keeps its parquet in its own bucket behind its own S3 endpoint, and the
 keys to read it are short lived (about two days) and handed out per collection.
+One key is fetched for the whole service and shared through the cache.
+
 Two very different readers need that access, so both live here:
 
 * :class:`CsiroDataSrc` wraps it in a ``GetAodn`` handle for the API.
@@ -10,6 +12,7 @@ Two very different readers need that access, so both live here:
 """
 
 import logging
+import threading
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Optional
@@ -25,6 +28,7 @@ from data_access_service.models.co_datasource.abstract_data_src import (
     CSIRO,
 )
 from data_access_service.models.co_datasource.dataset_location import DatasetLocation
+from data_access_service.utils.caching.memoizer import CacheBackend, create_memoizer
 from data_access_service.utils.retry_utils import log_retry_attempt
 
 log = logging.getLogger(__name__)
@@ -140,7 +144,7 @@ def _call_csiro_api(
     return response.json()
 
 
-def request_csiro_s3_access(dataset_name: str, fedora_pid: str) -> CsiroS3Access:
+def _request_csiro_s3_access(dataset_name: str, fedora_pid: str) -> CsiroS3Access:
     """Ask CSIRO for temporary keys for the latest version of one dataset.
 
     Two calls: CSIRO mints a new collection id for every data version, so a
@@ -199,6 +203,54 @@ def request_csiro_s3_access(dataset_name: str, fedora_pid: str) -> CsiroS3Access
     return access
 
 
+_CSIRO_KEY_CACHE_NAMESPACE = "csiro-key"
+
+# Longest a key request can take, retries included (worst case is about 220s).
+# The cache lock must outlive it
+_KEY_REQUEST_MAX_SECONDS = 240
+
+_key_memo: Optional[CacheBackend] = None
+_key_memo_lock = threading.Lock()
+
+
+def _key_memoizer() -> CacheBackend:
+    """The shared key cache, built on first use.
+
+    Built lazily, not at import: a forked batch child imports this module to
+    resolve one dataset and should not open a cache connection until it asks
+    for a key. Tests replace ``_key_memo`` directly.
+    """
+    global _key_memo
+    with _key_memo_lock:
+        if _key_memo is None:
+            csiro = Config.get_config().get_csiro_config()
+            _key_memo = create_memoizer(
+                namespace=_CSIRO_KEY_CACHE_NAMESPACE,
+                ttl_seconds=csiro.key_cache_ttl_seconds,
+                lock_ttl_seconds=_KEY_REQUEST_MAX_SECONDS,
+                max_wait_seconds=_KEY_REQUEST_MAX_SECONDS,
+            )
+    return _key_memo
+
+
+def request_csiro_s3_access(dataset_name: str, fedora_pid: str) -> CsiroS3Access:
+    """The temporary keys for one dataset, asking CSIRO only when nobody has.
+
+    Every container of this service - each ECS task, each Batch job - used to
+    ask for its own key, which is how a load test made CSIRO answer 417 and how
+    one slow reply stopped a whole container from starting. The answer now goes
+    through the shared cache, so one container asks and the rest read what it
+    got.
+
+    Caching is only an optimisation: with no cache reachable, or
+    ``cache.backend: none``, this asks CSIRO directly.
+    """
+    return _key_memoizer().get_or_compute(
+        (dataset_name, fedora_pid),
+        lambda: _request_csiro_s3_access(dataset_name, fedora_pid),
+    )
+
+
 class CsiroDataSrc(AbstractDataSrc):
     """
     Integrates with CSIRO cloud optimised datasets.
@@ -240,8 +292,9 @@ class CsiroDataSrc(AbstractDataSrc):
     def locate_dataset(cls, dataset_name_with_ext: str) -> Optional[DatasetLocation]:
         """Where CSIRO keeps this dataset, or None when it is not theirs.
 
-        Keys are requested per call because they expire: a long job that
-        resolved once at start-up could find them dead by the time it reads.
+        Called per read rather than resolved once at start-up, because the keys
+        expire. A cached key is still safe: its cache TTL is far shorter than
+        its own lifetime (see ``request_csiro_s3_access``).
         """
         fedora_pid = get_csiro_fedora_pid(dataset_name_with_ext)
         if fedora_pid is None:
