@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from data_access_service.config.config import Config, EnvType
+from data_access_service.models.cache_types import CacheConfig
 from data_access_service.models.co_datasource.csiro.csiro_types import CsiroConfig
 
 
@@ -120,3 +121,45 @@ def test_csiro_urls_are_templates_the_code_can_fill_in():
     assert csiro.key_request_url.format(collection_id=2).endswith("/2/files/s3")
     assert csiro.data_folder == "data/"
     assert csiro.request_timeout_seconds > 0
+
+
+# is_tls follows the CACHE_HOST env var rather than the yaml, so it is the one
+# CacheConfig field with no key of its own.
+_DERIVED_CACHE_FIELDS = {"is_tls"}
+
+
+def test_cache_config_fields_all_come_from_yaml():
+    yaml_keys = set(Config.get_config(EnvType.TESTING).config["cache"])
+    fields = {f.name for f in dataclasses.fields(CacheConfig)}
+    assert fields - _DERIVED_CACHE_FIELDS == yaml_keys
+
+
+def test_cache_config_local_default_has_no_tls(monkeypatch):
+    monkeypatch.delenv("CACHE_HOST", raising=False)
+    cache = Config.get_config(EnvType.TESTING).get_cache_config()
+
+    assert (cache.host, cache.port) == ("localhost", 6379)
+    assert cache.is_tls is False
+
+
+def test_cache_host_env_wins_and_turns_tls_on(monkeypatch):
+    """Deployed environments inject the ElastiCache endpoint, which is the only
+    one requiring in-transit encryption."""
+    monkeypatch.setenv(
+        "CACHE_HOST", "das-cache.abc123.serverless.apse2.cache.amazonaws.com"
+    )
+    cache = Config.get_config(EnvType.TESTING).get_cache_config()
+
+    assert cache.host.endswith(".cache.amazonaws.com")
+    assert cache.is_tls is True
+
+
+@pytest.mark.parametrize("missing", ["backend", "host", "port"])
+def test_get_cache_config_raises_on_missing_yaml_key(monkeypatch, missing):
+    config = Config.get_config(EnvType.TESTING)
+    cache_section = copy.deepcopy(config.config["cache"])
+    del cache_section[missing]
+    monkeypatch.setitem(config.config, "cache", cache_section)
+
+    with pytest.raises(KeyError):
+        config.get_cache_config()

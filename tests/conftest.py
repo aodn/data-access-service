@@ -8,6 +8,19 @@ from unittest.mock import MagicMock
 from data_access_service.batch.subsetting.helpers.request_helper import (
     get_subset_request,
 )
+from data_access_service.models.co_datasource.csiro import csiro_data_src
+from data_access_service.utils.caching.memoizer import NullMemoizer
+
+
+@pytest.fixture(autouse=True)
+def no_csiro_key_cache(monkeypatch):
+    """Never share CSIRO keys between tests.
+
+    A cached key would make a test pass or fail depending on what ran before it,
+    and on whether a Redis happens to be listening on the developer's machine.
+    Tests about the cache build their own memoizer.
+    """
+    monkeypatch.setattr(csiro_data_src, "_key_memo", NullMemoizer())
 
 
 @pytest.fixture(autouse=True)
