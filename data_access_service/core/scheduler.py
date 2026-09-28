@@ -42,11 +42,7 @@ class TaskScheduler:
         self.scheduler = AsyncIOScheduler()
 
     def _reload_repository(self, name: str, repo: ParquetRepository):
-        """Reload one repository if its snapshot changed.
-
-        The snapshot S3 secret is recreated first so the credentials don't expire.
-        """
-        repo._configure_snapshot_bucket_s3()
+        """Reload one repository if its snapshot changed."""
         log_memory_usage(logger, f"before reload check '{name}'")
         try:
             if repo.reload_if_changed():

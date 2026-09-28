@@ -26,6 +26,7 @@ from data_access_service.config.config import Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.duckdbclient import SitesDuckDBClient
 from data_access_service.utils.retry_utils import log_retry_attempt
+from data_access_service.utils.sql_utils import quote_ident
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +34,6 @@ logger = logging.getLogger(__name__)
 _LOAD_RETRY_MIN_WAIT = timedelta(seconds=30)
 _LOAD_RETRY_MAX_WAIT = timedelta(minutes=1)
 _LOAD_RETRY_MAX_ATTEMPTS = 3
-
-
-def quote_ident(name: str) -> str:
-    """Quote an SQL identifier (table/column) so it can't break out of context.
-
-    Identifiers are interpolated as text (they can't be bound as ``?``
-    parameters), so they go through here. Quoting also makes the identifier
-    case-sensitive, so the name must match the stored column's case.
-    """
-    return '"' + str(name).replace('"', '""') + '"'
 
 
 class ParquetRepository(ABC):
@@ -110,8 +101,8 @@ class ParquetRepository(ABC):
                 "ParquetRepository is abstract; instantiate a dataset subclass"
             )
         self.session = session
-        self._configure_s3()
-        self._configure_snapshot_bucket_s3()
+        self.session.create_s3_secret(self.bucket)
+        self.session.create_s3_secret(self.snapshot_bucket)
         self._loaded_snapshot_etag: str | None = None
 
     @property
@@ -145,14 +136,6 @@ class ParquetRepository(ABC):
         cols += [c for c in self.value_columns if c not in cols]
         cols += [c for c in self.value_columns_quality_control_columns if c not in cols]
         return cols
-
-    def _configure_s3(self) -> None:
-        """Create the S3 secret DuckDB uses to read the primary dataset."""
-        self.session.create_s3_secret(self.bucket)
-
-    def _configure_snapshot_bucket_s3(self) -> None:
-        """Create the S3 secret DuckDB uses to read the snapshot dataset."""
-        self.session.create_s3_secret(self.snapshot_bucket)
 
     # Bug in tenacity, the type check always fail but function ok
     # noinspection PyCallingNonCallable

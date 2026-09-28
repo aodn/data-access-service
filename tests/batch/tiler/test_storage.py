@@ -18,14 +18,23 @@ def test_join_strips_trailing_slash_on_base():
 # --- S3 read/write (AWSHelper mocked) ------------------------------------
 
 
-def test_write_json_uploads_fileobj_to_s3(monkeypatch):
+def test_write_json_uploads_fileobj_to_s3():
     helper = MagicMock()
-    monkeypatch.setattr(storage, "AWSHelper", lambda: helper)
 
-    storage.write_json("s3://bucket/a/metadata.json", {"a": 1})
+    storage.write_json(helper, "s3://bucket/a/metadata.json", {"a": 1})
 
     helper.upload_fileobj_to_s3.assert_called_once()
     file_obj, bucket, key = helper.upload_fileobj_to_s3.call_args[0]
     assert bucket == "bucket"
     assert key == "a/metadata.json"
     assert file_obj.read() == b'{"a": 1}'
+
+
+def test_upload_file_uploads_to_s3():
+    helper = MagicMock()
+
+    storage.upload_file(helper, "/tmp/slice.parquet", "s3://bucket/a/b.parquet")
+
+    helper.upload_file_to_s3.assert_called_once_with(
+        "/tmp/slice.parquet", "bucket", "a/b.parquet"
+    )
