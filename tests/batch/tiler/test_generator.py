@@ -47,7 +47,7 @@ def _batch_config(
         duckdb=TilerBatchDuckDBConfig(
             memory_limit="256MB",
             threads=1,
-            temp_dir_prefix="test_tiler_parquet_tmp",
+            duckdb_temp_dir="test_tiler_parquet_tmp",
         ),
     )
     base.update(overrides)

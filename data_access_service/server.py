@@ -5,8 +5,7 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI
 
 from data_access_service import Config
 from data_access_service.config.config import IntTestConfig
@@ -23,6 +22,7 @@ from data_access_service.core.routes import router as api_router
 from data_access_service.core.scheduler import TaskScheduler
 from data_access_service.core.tiler_routes import router as tiler_router
 from data_access_service.core.tiler_routes.startup import run_tiler_warmup
+from data_access_service.exceptions.handlers import register_exception_handlers
 from data_access_service.sites.sites_repository import build_repositories
 from data_access_service.tiler.services.store.tiler_repository import (
     close_client as close_tiler_duckdb_client,
@@ -130,11 +130,7 @@ configure_gzip_middleware(app)
 
 app.include_router(api_router)
 app.include_router(tiler_router)
-
-
-@app.exception_handler(FileNotFoundError)
-async def file_not_found_handler(request: Request, exc: FileNotFoundError):
-    return JSONResponse(status_code=404, content={"detail": str(exc)})
+register_exception_handlers(app)
 
 
 if __name__ == "__main__":
