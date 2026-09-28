@@ -34,6 +34,7 @@ from data_access_service.models.tiler_types import (
 if TYPE_CHECKING:
     import pandas as pd
 from data_access_service.utils.retry_utils import log_retry_attempt
+from data_access_service.utils.sql_utils import quote_ident, sql_literal
 
 # How often to emit a progress log line while a long query is running.
 _PROGRESS_LOG_INTERVAL_SECONDS = 60
@@ -80,23 +81,26 @@ class DuckDBClient(ABC):
         """Release the connection or cursor held by this client."""
 
     def create_s3_secret(self, bucket: str) -> None:
-        """Create a DuckDB S3 secret scoped to ``bucket`` from boto3 credentials."""
+        """Create a DuckDB S3 secret scoped to ``bucket`` from the AWS credential chain.
+
+        ``REFRESH auto`` makes DuckDB fetch new credentials when a read fails
+        because they expired. 
+        """
         boto_session = boto3.Session()
 
         # Not useful in testing
-        if (
-            boto_session is not None
-            and boto_session.get_credentials() is not None
-            and not isinstance(Config.get_config(), IntTestConfig)
+        if boto_session.get_credentials() is None or isinstance(
+            Config.get_config(), IntTestConfig
         ):
-            creds = boto_session.get_credentials().get_frozen_credentials()
-            self._create_s3_secret(
-                bucket=bucket,
-                key_id=creds.access_key,
-                secret=creds.secret_key,
-                session_token=creds.token or "",
-                region=boto_session.region_name or "ap-southeast-2",
-            )
+            return
+        region = boto_session.region_name or "ap-southeast-2"
+        self.execute("INSTALL aws; LOAD aws;")
+        # No CHAIN: the default chain includes the ECS (Fargate) task role.
+        self.execute(
+            f"CREATE OR REPLACE SECRET {quote_ident(f'{bucket}_s3')} ("
+            "TYPE S3, PROVIDER credential_chain, REFRESH auto, "
+            f"REGION {sql_literal(region)}, SCOPE {sql_literal(f's3://{bucket}')})"
+        )
 
     def create_s3_secret_with_keys(
         self,
@@ -114,54 +118,26 @@ class DuckDBClient(ABC):
         instead of AWS. Secrets are scoped per bucket, so this one sits
         alongside the AODN secret rather than replacing it.
         """
-        self._create_s3_secret(
-            bucket=bucket,
-            key_id=access_key,
-            secret=secret_access_key,
-            # These keys are long-lived enough not to be STS session keys.
-            session_token="",
-            region=region,
-            endpoint=endpoint,
-            use_ssl=use_ssl,
-        )
-
-    def _create_s3_secret(
-        self,
-        bucket: str,
-        key_id: str,
-        secret: str,
-        session_token: str,
-        region: str,
-        endpoint: Optional[str] = None,
-        use_ssl: bool = True,
-    ) -> None:
-        """The CREATE SECRET statement shared by both credential sources."""
-
-        def lit(value: str) -> str:
-            return "'" + value.replace("'", "''") + "'"
-
-        def ident(name: str) -> str:
-            return '"' + name.replace('"', '""') + '"'
-
         clauses = [
             "TYPE S3",
-            f"KEY_ID {lit(key_id)}",
-            f"SECRET {lit(secret)}",
-            f"SESSION_TOKEN {lit(session_token)}",
-            f"REGION {lit(region)}",
+            f"KEY_ID {sql_literal(access_key)}",
+            f"SECRET {sql_literal(secret_access_key)}",
+            # These keys are long-lived enough not to be STS session keys.
+            f"SESSION_TOKEN {sql_literal('')}",
+            f"REGION {sql_literal(region)}",
         ]
         if endpoint is not None:
             clauses += [
-                f"ENDPOINT {lit(endpoint)}",
+                f"ENDPOINT {sql_literal(endpoint)}",
                 # Path style: an S3-compatible service usually cannot serve
                 # the bucket as a subdomain of its own host.
                 "URL_STYLE 'path'",
                 f"USE_SSL {str(use_ssl).lower()}",
             ]
-        clauses.append(f"SCOPE {lit(f's3://{bucket}')}")
+        clauses.append(f"SCOPE {sql_literal(f's3://{bucket}')}")
 
         self.execute(
-            f"CREATE OR REPLACE SECRET {ident(f'{bucket}_s3')} "
+            f"CREATE OR REPLACE SECRET {quote_ident(f'{bucket}_s3')} "
             f"({', '.join(clauses)})"
         )
 
@@ -743,22 +719,10 @@ class PmTileDuckDBClient(DuckDBClient):
 
 
 class SitesDuckDBClient(DuckDBClient):
-    """Owns a DuckDB connection and its extension/region configuration.
+    """DuckDB connection for the sites repositories, used by the API and batch.
 
-    A concrete :class:`DuckDBClient`. Like :class:`PmTileDuckDBClient` it builds
-    its connection lazily in :meth:`get_instance` (called once from
-    ``__init__``) and caches the handle in ``self._con``. It differs in lifetime
-    and concurrency: the connection is owned per-instance (not process-global),
-    and every :meth:`execute` runs on its own cursor so the threadpool serving
-    sync API endpoints can read in parallel.
-
-    Loads httpfs/json and sets the S3 region. The client does not
-    decide *which* buckets get credentials — each
-    :class:`~data_access_service.sites.duckdb_repository.ParquetRepository`
-    calls :meth:`create_s3_secret` for its own buckets on construction (see
-    ``ParquetRepository._configure_s3``). The client owns the secret SQL and the
-    boto3 plumbing; the repository owns the bucket choice. Usable as a context
-    manager.
+    Each :meth:`execute` runs on its own cursor, so API threads can read in
+    parallel. Each repository creates the S3 secrets for its own buckets.
     """
 
     def __init__(self) -> None:
@@ -775,17 +739,9 @@ class SitesDuckDBClient(DuckDBClient):
         self._con = self.get_instance()
 
     def get_instance(self) -> duckdb.DuckDBPyConnection:
-        """Initialize this client's owned connection if it does not exist.
+        """Open the connection on first use.
 
-        Mirrors :meth:`PmTileDuckDBClient.get_instance` — lazy, double-checked
-        creation under a lock — but the connection is owned per-instance rather
-        than shared process-global. httpfs and json are loaded unconditionally,
-        same as :meth:`PmTileDuckDBClient.get_instance` does for httpfs/h3:
-        every dataset here is read from S3 (primary and snapshot alike), and
-        sites metadata is read from JSON. Applies the memory limit and thread
-        count from :meth:`Config.get_sites_config` and sets the S3 region on
-        first build. The spill (temp) directory is only set for on-disk
-        databases — an in-memory test DB never spills.
+        The spill directory is only set for an on-disk database.
         """
         if self._duckdb_client is None:
             with self._lock:
@@ -806,14 +762,7 @@ class SitesDuckDBClient(DuckDBClient):
         return self._duckdb_client
 
     def execute(self, sql: str, params: Sequence[Any] | None = None):
-        """Run ``sql`` (optionally with bound ``params``) and return the relation.
-
-        Each call runs on a fresh ``cursor()`` — a child connection that shares
-        this client's in-memory catalog (so loaded tables are visible) but has
-        its own result state. A single DuckDB connection is not safe to use
-        concurrently; per-call cursors let the threadpool that serves sync API
-        endpoints issue reads in parallel without stepping on each other.
-        """
+        """Run ``sql`` on a new cursor, so concurrent calls don't clash."""
         cursor = self._con.cursor()
         with self._cursors_lock:
             self._active_cursors.add(cursor)
@@ -826,12 +775,7 @@ class SitesDuckDBClient(DuckDBClient):
                 self._active_cursors.discard(cursor)
 
     def close(self) -> None:
-        """Cancel any in-flight queries, then close the connection.
-
-        Interrupting first keeps ``close`` from blocking on a slow query (e.g. a
-        background dataset load still reading S3); the interrupted call raises in
-        its own thread.
-        """
+        """Cancel running queries, then close the connection."""
         with self._cursors_lock:
             cursors = list(self._active_cursors)
         for cursor in cursors:
@@ -921,15 +865,10 @@ class EstimationDuckDBClient(DuckDBClient):
 
 
 class TilerDuckDBClient(DuckDBClient):
-    """Reads batch-generated parquet slices for the live tiler API.
+    """Reads the batch's parquet files for the tiler API.
 
-    Every store's parquet files are written to S3 by the batch job (see
-    :class:`TilerBatchDuckDBClient`); live reads are a small point query
-    against one file. Owns one ``:memory:`` connection; like
-    :class:`SitesDuckDBClient`/:class:`EstimationDuckDBClient`, each
-    :meth:`execute` runs on its own cursor so the tiler's request threadpool
-    can read slices concurrently without stepping on each other. httpfs and
-    the datavis_data bucket's S3 secret are set up once, on first use.
+    Each :meth:`execute` runs on its own cursor, so request threads can read
+    in parallel. ``tiler_repository`` creates the S3 secret.
     """
 
     def __init__(self, config: Optional[TilerDuckDBConfig] = None) -> None:
@@ -941,10 +880,9 @@ class TilerDuckDBClient(DuckDBClient):
         self._cursors_lock = threading.Lock()
         self._lock = Lock()
         self._con = self.get_instance()
-        self.create_s3_secret(Config.get_config().get_datavis_data_bucket_name())
 
     def get_instance(self) -> duckdb.DuckDBPyConnection:
-        """Initialize this client's owned in-memory connection if it does not exist."""
+        """Open the connection on first use."""
         if self._duckdb_client is None:
             with self._lock:
                 if self._duckdb_client is None:
@@ -971,9 +909,8 @@ class TilerDuckDBClient(DuckDBClient):
         params: Sequence[Any] | None = None,
         tables: Mapping[str, Any] | None = None,
     ):
-        """Run ``sql`` (optionally with bound ``params``) on a fresh cursor.
-        ``tables`` (name -> Arrow table or DataFrame) are registered on that
-        cursor only, so concurrent queries can use the same names."""
+        """Run ``sql`` on a new cursor. ``tables`` are registered on that
+        cursor only, so concurrent queries can reuse names."""
         cursor = self._con.cursor()
         with self._cursors_lock:
             self._active_cursors.add(cursor)
@@ -988,7 +925,7 @@ class TilerDuckDBClient(DuckDBClient):
                 self._active_cursors.discard(cursor)
 
     def close(self) -> None:
-        """Cancel any in-flight queries, then close the connection."""
+        """Cancel running queries, then close the connection."""
         with self._cursors_lock:
             cursors = list(self._active_cursors)
         for cursor in cursors:
@@ -1009,18 +946,14 @@ class TilerDuckDBClient(DuckDBClient):
 
 
 class TilerBatchDuckDBClient(DuckDBClient):
-    """Batch-only writer for the zarr -> parquet conversion (see
-    ``batch.tiler.parquet_generator``). One per forked store, used from a
-    single thread, so SQL runs on the connection directly rather than on
-    per-call cursors like the read-side :class:`TilerDuckDBClient`.
+    """Writes local parquet files for the tiler batch job.
 
-    Owns a spill directory for its lifetime and removes it on close. The S3
-    secret is created up front; :meth:`refresh_s3_secret` re-creates it, since
-    a long conversion can outlive the temporary credentials it started with.
+    One per store, used from one thread, so SQL runs on the connection
+    directly. Removes its spill directory on close. ``parquet_generator``
+    uploads the files with boto3.
     """
 
     def __init__(self, config: TilerBatchDuckDBConfig) -> None:
-        self._bucket = Config.get_config().get_datavis_data_bucket_name()
         self._temp_dir = TemporaryDirectory(prefix=config.temp_dir_prefix)
         self._con: Optional[duckdb.DuckDBPyConnection] = duckdb.connect(
             database=":memory:",
@@ -1030,9 +963,6 @@ class TilerBatchDuckDBClient(DuckDBClient):
                 "temp_directory": self._temp_dir.name,
             },
         )
-        self._con.execute("INSTALL httpfs; LOAD httpfs;")
-        self._con.execute("SET GLOBAL s3_region = 'ap-southeast-2';")
-        self.create_s3_secret(self._bucket)
 
     def get_instance(self) -> duckdb.DuckDBPyConnection:
         if self._con is None:
@@ -1046,18 +976,16 @@ class TilerBatchDuckDBClient(DuckDBClient):
         return con.execute(sql, params)
 
     def write_parquet(self, frame: pd.DataFrame, path: str) -> None:
-        """Write ``frame`` to one parquet file at ``path`` (local or S3)."""
+        """Write ``frame`` to one local parquet file at ``path``."""
         con = self.get_instance()
         con.register("_frame", frame)
         try:
             # COPY ... TO takes no bound parameter for the path.
-            target = "'" + path.replace("'", "''") + "'"
-            con.execute(f"COPY (SELECT * FROM _frame) TO {target} (FORMAT PARQUET)")
+            con.execute(
+                f"COPY (SELECT * FROM _frame) TO {sql_literal(path)} (FORMAT PARQUET)"
+            )
         finally:
             con.unregister("_frame")
-
-    def refresh_s3_secret(self) -> None:
-        self.create_s3_secret(self._bucket)
 
     def close(self) -> None:
         if self._con is not None:

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import replace
 from datetime import datetime, timezone
+from tempfile import TemporaryDirectory
 
 import numpy as np
 import pandas as pd
@@ -10,6 +12,7 @@ import xarray as xr
 
 from data_access_service.batch.tiler import storage
 from data_access_service.batch.tiler.zarr_registry import get_datasource, get_store
+from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.duckdbclient import TilerBatchDuckDBClient
 from data_access_service.models.tiler_parquet_types import (
     TilerParquetMetadata,
@@ -92,9 +95,11 @@ def read_metadata(tiler_root_dir: str, store: str) -> TilerParquetMetadata | Non
     return TilerParquetMetadata.from_dict(data) if data is not None else None
 
 
-def write_metadata(meta: TilerParquetMetadata, tiler_root_dir: str, store: str) -> str:
+def write_metadata(
+    aws: AWSHelper, meta: TilerParquetMetadata, tiler_root_dir: str, store: str
+) -> str:
     path = store_metadata_path(tiler_root_dir, store)
-    storage.write_json(path, meta.to_dict())
+    storage.write_json(aws, path, meta.to_dict())
     return path
 
 
@@ -236,15 +241,15 @@ def sync_store(
     sidecar_written = False
     metadata_path = store_metadata_path(tiler_root_dir, store)
 
-    with TilerBatchDuckDBClient(duckdb_config) as client:
+    aws = AWSHelper()
+    with TilerBatchDuckDBClient(duckdb_config) as client, TemporaryDirectory() as tmp:
+        local_path = os.path.join(tmp, "slice.parquet")
         for n, batch_raw_ts in enumerate(batches, start=1):
             changed = False
             # Drop the last chunk before reading the next, or both are held at once.
             ds = None
             ds = _fetch_batch(store, variables, batch_raw_ts)
             batch_ts_set = {_ts_native(t) for t in batch_raw_ts}
-            # Long runs can outlive the S3 credentials.
-            client.refresh_s3_secret()
 
             for k in range(ds.sizes["time"]):
                 ts = _ts_native(ds["time"].values[k])
@@ -260,14 +265,17 @@ def sync_store(
                     empty.add(ts)
                     continue
                 for v, frame in frames.items():
-                    client.write_parquet(
-                        frame, variable_parquet_path(tiler_root_dir, store, v, ts)
+                    client.write_parquet(frame, local_path)
+                    storage.upload_file(
+                        aws,
+                        local_path,
+                        variable_parquet_path(tiler_root_dir, store, v, ts),
                     )
                 converted.add(ts)
                 written.append(ts)
 
             if changed:
-                write_metadata(current(), tiler_root_dir, store)
+                write_metadata(aws, current(), tiler_root_dir, store)
                 sidecar_written = True
             logger.info(
                 "Tiler parquet sync for %s: %d/%d chunk(s) processed",
@@ -279,6 +287,6 @@ def sync_store(
     if not sidecar_written and (
         existing is None or not _same_content(existing, current())
     ):
-        write_metadata(current(), tiler_root_dir, store)
+        write_metadata(aws, current(), tiler_root_dir, store)
 
     return written, metadata_path

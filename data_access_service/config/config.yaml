@@ -184,7 +184,6 @@ tiler:
         memory_limit: "4G"
         threads: 4
   catalog:
-    # Stores to skip, by store name (the dataset name minus ".zarr").
     blacklist:
       - radar_Newcastle_velocity_hourly_averaged_delayed_qc
       - radar_Newcastle_velocity_hourly_averaged_realtime_nonqc
@@ -194,8 +193,6 @@ tiler:
       - radar_BonneyCoast_velocity_hourly_averaged_delayed_qc
       - radar_TurquoiseCoast_velocity_hourly_averaged_delayed_qc
       - radar_CoralCoast_velocity_hourly_averaged_delayed_qc
-    # A plain string matches one variable; a list matches an ordered pair
-    # (e.g. current vectors), which is data-only, never visual.
     gridded_variables:
       - GSLA
       - [UCUR, VCUR]
@@ -217,7 +214,6 @@ tiler:
       - MCS_category_mosaic
       - MHW_category_mosaic
   # Per-product tuning, keyed by product id and applied by the API only
-  # (tiler/schemas/products.py).
   products_customisation:
     - id: model_sea_level_anomaly_gridded_realtime:gsla
       data_tile:

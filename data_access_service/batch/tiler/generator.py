@@ -22,6 +22,7 @@ from data_access_service.batch.tiler import storage
 from data_access_service.batch.tiler.discovery import discover_products
 from data_access_service.batch.tiler.parquet_generator import read_metadata, sync_store
 from data_access_service.batch.tiler.zarr_registry import close_store, open_store
+from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.api import API
 from data_access_service.models.tiler_parquet_types import (
     ROOT_METADATA_VERSION,
@@ -156,7 +157,7 @@ def write_root_metadata(
         logger.info("Root metadata unchanged: %s", path)
         return path
 
-    storage.write_json(path, meta.to_dict())
+    storage.write_json(AWSHelper(), path, meta.to_dict())
     logger.info(
         "Wrote root metadata: %s (%d store(s), %d product(s) total, "
         "%d store(s) updated this run)",

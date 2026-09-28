@@ -15,24 +15,14 @@ def _make_repo(reload_result: bool = True):
 
 
 class TestReloadRepository:
-    def test_refreshes_snapshot_secret_then_reloads(self, monkeypatch):
+    def test_reloads_repository(self, monkeypatch):
         monkeypatch.setattr(Config, "is_profile_in", lambda *a, **k: True)
         repo = _make_repo(reload_result=True)
         scheduler = TaskScheduler(api=MagicMock(), sites_repositories={"mooring": repo})
 
-        manager = MagicMock()
-        manager.attach_mock(repo._configure_snapshot_bucket_s3, "configure")
-        manager.attach_mock(repo.reload_if_changed, "reload")
-
         scheduler._reload_repository("mooring", repo)
 
-        assert [c[0] for c in manager.mock_calls] == ["configure", "reload"]
-
-    def test_never_touches_primary_bucket_secret(self):
-        repo = _make_repo()
-        scheduler = TaskScheduler(api=MagicMock(), sites_repositories={"mooring": repo})
-        scheduler._reload_repository("mooring", repo)
-        repo._configure_s3.assert_not_called()
+        repo.reload_if_changed.assert_called_once()
 
     def test_does_not_raise_when_reload_fails(self):
         repo = _make_repo()

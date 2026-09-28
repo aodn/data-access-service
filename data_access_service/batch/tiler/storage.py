@@ -1,4 +1,4 @@
-"""Write the batch's JSON files to S3."""
+"""Write the batch's files to S3."""
 
 import io
 import json
@@ -12,7 +12,13 @@ def join(base: str, *parts: str) -> str:
     return "/".join([base.rstrip("/"), *parts])
 
 
-def write_json(path: str, data: dict[str, Any]) -> None:
+def write_json(aws: AWSHelper, path: str, data: dict[str, Any]) -> None:
     """Write ``data`` as JSON to ``path``."""
     bucket, key = split_s3(path)
-    AWSHelper().upload_fileobj_to_s3(io.BytesIO(json.dumps(data).encode()), bucket, key)
+    aws.upload_fileobj_to_s3(io.BytesIO(json.dumps(data).encode()), bucket, key)
+
+
+def upload_file(aws: AWSHelper, local_path: str, path: str) -> None:
+    """Upload the file at ``local_path`` to ``path``."""
+    bucket, key = split_s3(path)
+    aws.upload_file_to_s3(local_path, bucket, key)

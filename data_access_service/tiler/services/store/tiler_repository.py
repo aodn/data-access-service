@@ -18,6 +18,7 @@ import pyarrow as pa
 from data_access_service.config.config import Config
 from data_access_service.core.duckdbclient import TilerDuckDBClient
 from data_access_service.models.tiler_parquet_types import variable_parquet_path
+from data_access_service.utils.sql_utils import sql_literal
 
 _client: TilerDuckDBClient | None = None
 # Cell tables built on ``_client``, by the caller's key. They live and die
@@ -31,7 +32,9 @@ def _get_client() -> TilerDuckDBClient:
     global _client
     with _client_lock:
         if _client is None:
-            _client = TilerDuckDBClient()
+            client = TilerDuckDBClient()
+            client.create_s3_secret(Config.get_config().get_datavis_data_bucket_name())
+            _client = client
         return _client
 
 
@@ -65,11 +68,6 @@ def cell_table(key: object, cells: Callable[[], tuple[np.ndarray, np.ndarray]]) 
 
 
 _READ_BATCH_ROWS = 1_000_000
-
-
-def _sql_literal(value: str) -> str:
-    """Quote ``value`` for SQL (``read_parquet`` can't bind its path)."""
-    return "'" + value.replace("'", "''") + "'"
 
 
 def _as_float(value: float | None) -> float:
@@ -112,7 +110,7 @@ class TilerParquetRepository:
         """The file's rows as a subquery, cut to ``keep`` and ``where``."""
         semi = f" SEMI JOIN {keep} USING (i, j)" if keep else ""
         cond = f" WHERE {where}" if where else ""
-        return f"(SELECT {columns} FROM read_parquet({_sql_literal(path)}){semi}{cond})"
+        return f"(SELECT {columns} FROM read_parquet({sql_literal(path)}){semi}{cond})"
 
     def create_cell_table(self, name: str, i: np.ndarray, j: np.ndarray) -> None:
         """A table ``name`` of these ``(i, j)`` cells, for ``keep``."""
@@ -140,7 +138,7 @@ class TilerParquetRepository:
                     "max(stats_max_value::DOUBLE), any_value(type), "
                     "count(*) FILTER (stats_min_value IS NULL "
                     "AND row_group_num_rows > 0) "
-                    f"FROM parquet_metadata({_sql_literal(path)}) "
+                    f"FROM parquet_metadata({sql_literal(path)}) "
                     "WHERE path_in_schema = 'value'"
                 ).fetchone()
                 lo, hi, physical, unstated = row
