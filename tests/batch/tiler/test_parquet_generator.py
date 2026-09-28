@@ -176,14 +176,22 @@ class _Env:
         self.events: list[tuple[str, str]] = []
         self.client = MagicMock()
         self.client.__enter__.return_value = self.client
+        self.written_locally: list[str] = []
         self.client.write_parquet.side_effect = lambda frame, path: (
-            self.events.append(("parquet", path))
+            self.written_locally.append(path)
         )
+        self.uploads: list[tuple[str, str]] = []
         monkeypatch.setattr(gen, "read_json", lambda path, **_: self.json.get(path))
         monkeypatch.setattr(gen.storage, "write_json", self._write_json)
+        monkeypatch.setattr(gen.storage, "upload_file", self._upload_file)
+        monkeypatch.setattr(gen, "AWSHelper", MagicMock)
         monkeypatch.setattr(gen, "TilerBatchDuckDBClient", lambda config: self.client)
 
-    def _write_json(self, path, data):
+    def _upload_file(self, aws, local_path, path):
+        self.events.append(("parquet", path))
+        self.uploads.append((local_path, path))
+
+    def _write_json(self, aws, path, data):
         self.events.append(("json", path))
         self.json[path] = data
 
@@ -353,13 +361,17 @@ def test_missing_by_chunk_skips_handled_timestamps():
     assert batches == [[times[6]], [times[5]], [times[1], times[2]]]
 
 
-def test_s3_secret_is_refreshed_before_writing(monkeypatch):
+def test_parquet_is_written_locally_then_uploaded(monkeypatch):
     env = _Env(monkeypatch)
 
     _sync(monkeypatch, _fake_dataset(DAYS))
 
-    names = [c[0] for c in env.client.method_calls]
-    assert names.index("refresh_s3_secret") < names.index("write_parquet")
+    assert env.uploads
+    assert len(env.written_locally) == len(env.uploads)
+    for local_path, (uploaded_from, s3_path) in zip(env.written_locally, env.uploads):
+        assert not local_path.startswith("s3://")
+        assert uploaded_from == local_path
+        assert s3_path.startswith(OUTPUT_DIR)
 
 
 def test_all_empty_timestamp_is_recorded_and_not_read_again(monkeypatch):

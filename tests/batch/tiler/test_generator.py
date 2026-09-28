@@ -63,7 +63,7 @@ def _fake_s3_json_store(monkeypatch) -> dict[str, dict]:
     monkeypatch.setattr(
         generator.storage,
         "write_json",
-        lambda path, data: store.__setitem__(path, data),
+        lambda aws, path, data: store.__setitem__(path, data),
     )
     return store
 
@@ -94,7 +94,7 @@ class TestWriteRootMetadataToS3:
         monkeypatch.setattr(
             generator.storage,
             "write_json",
-            lambda path, data: written.update(path=path, data=data),
+            lambda aws, path, data: written.update(path=path, data=data),
         )
 
         stores = {"new": [_product("new", "new", "v", uuid="uuid-new")]}
@@ -114,7 +114,7 @@ class TestWriteRootMetadataToS3:
         monkeypatch.setattr(
             generator.storage,
             "write_json",
-            lambda path, data: written.update(data=data),
+            lambda aws, path, data: written.update(data=data),
         )
 
         write_root_metadata({"x": [_product("p1", "x", "v")]}, "s3://my-bucket/tiler")
@@ -127,7 +127,7 @@ class TestWriteRootMetadataToS3:
         monkeypatch.setattr(generator, "read_json", lambda path, **_: existing)
         writes = []
         monkeypatch.setattr(
-            generator.storage, "write_json", lambda path, data: writes.append(path)
+            generator.storage, "write_json", lambda aws, path, data: writes.append(path)
         )
 
         write_root_metadata(stores, "s3://my-bucket/tiler")
@@ -142,7 +142,7 @@ class TestWriteRootMetadataToS3:
         monkeypatch.setattr(
             generator.storage,
             "write_json",
-            lambda path, data: written.update(data=data),
+            lambda aws, path, data: written.update(data=data),
         )
 
         write_root_metadata({"x": [_product("p1", "x", "v")]}, "s3://my-bucket/tiler")
@@ -154,7 +154,7 @@ class TestWriteRootMetadataToS3:
         monkeypatch.setattr(generator, "read_json", lambda path, **_: None)
         writes = []
         monkeypatch.setattr(
-            generator.storage, "write_json", lambda path, data: writes.append(path)
+            generator.storage, "write_json", lambda aws, path, data: writes.append(path)
         )
 
         write_root_metadata({}, "s3://my-bucket/tiler")
@@ -167,7 +167,7 @@ class TestWriteRootMetadataToS3:
         monkeypatch.setattr(
             generator.storage,
             "write_json",
-            lambda path, data: written.update(data=data),
+            lambda aws, path, data: written.update(data=data),
         )
 
         write_root_metadata({"x": [_product("p1", "x", "v")]}, "s3://my-bucket/tiler")
@@ -176,6 +176,11 @@ class TestWriteRootMetadataToS3:
         assert written["data"]["stores"]["x"]["products"] == [
             {"id": "p1", "variable": "v", "metadata_uuid": "uuid-a"}
         ]
+
+
+@pytest.fixture(autouse=True)
+def stub_aws(monkeypatch):
+    monkeypatch.setattr(generator, "AWSHelper", MagicMock)
 
 
 @pytest.fixture(autouse=True)

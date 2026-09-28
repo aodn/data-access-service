@@ -91,8 +91,7 @@ class FakeApi:
     def map_column_names(self, uuid, key, columns):
         return ["latitude", "longitude"]
 
-    def get_dataset(self, **kwargs):
-        self.get_dataset_calls.append(kwargs)
+    def _filtered_frame(self, kwargs) -> pd.DataFrame:
         frame = self.dataset.to_table().to_pandas()
         frame["polygon"] = frame["polygon"].astype(str)
         for name, value in (kwargs.get("scalar_filter") or {}).items():
@@ -102,9 +101,23 @@ class FakeApi:
                 frame["latitude"].between(kwargs["lat_min"], kwargs["lat_max"])
                 & frame["longitude"].between(kwargs["lon_min"], kwargs["lon_max"])
             ]
+        return frame.reset_index(drop=True)
+
+    def get_dataset(self, **kwargs):
+        self.get_dataset_calls.append(kwargs)
+        frame = self._filtered_frame(kwargs)
         if frame.empty:
             return None
-        return ddf.from_pandas(frame.reset_index(drop=True), npartitions=1)
+        return ddf.from_pandas(frame, npartitions=1)
+
+    def iter_parquet_batches(self, **kwargs):
+        """What the subset writer scans now, one batch for the filtered rows."""
+        self.get_dataset_calls.append(kwargs)
+        frame = self._filtered_frame(kwargs)
+        if frame.empty:
+            return iter(())
+        table = pa.Table.from_pandas(frame, preserve_index=False)
+        return iter(table.to_batches())
 
 
 def _run_init(monkeypatch, api, resolved_keys=(KEY,)) -> MagicMock:
@@ -228,7 +241,7 @@ class TestPrepareData:
 
         assert len(written) == len(source)
         assert sorted(written["site_code"]) == sorted(source["site_code"])
-        # one get_dataset call per polygon partition, none repeated
+        # one scan per polygon partition, none repeated
         filters = [call["scalar_filter"]["polygon"] for call in api.get_dataset_calls]
         assert sorted(filters) == sorted(set(source["polygon"]))
         # each child writes each polygon to its own partition directory
