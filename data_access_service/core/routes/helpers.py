@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import json
 import os
 import re
@@ -306,8 +307,11 @@ def async_response_json(result: AsyncGenerator[dict, None], compress: bool):
         finally:
             loop.close()
 
-    # Start thread to run async iteration
-    thread = threading.Thread(target=run_async_iteration)
+    # Start thread to run async iteration. A new thread starts with an empty
+    # context, so hand it a copy to keep log fields such as request_id.
+    thread = threading.Thread(
+        target=contextvars.copy_context().run, args=(run_async_iteration,)
+    )
     thread.start()
 
     # Wait for results and collect

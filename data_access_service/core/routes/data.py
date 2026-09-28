@@ -1,6 +1,5 @@
 import json
 import time
-import uuid as uuid_module
 from http import HTTPStatus
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -230,9 +229,8 @@ async def get_data(
     end_depth: float | None = Query(default=-1.0),
     f: str | None = Query(default="json"),
 ):
-    # for debug purpose: track request with an assigned id which is ranomly generated
-    request_id = str(uuid_module.uuid4())
-    logger.debug("Receiving request: %s", request_id)
+    # request_id is bound by RequestContextMiddleware and added to every log line
+    logger.debug("Receiving request")
 
     logger.info(
         """
@@ -258,10 +256,8 @@ async def get_data(
     compress = "gzip" in request.headers.get("Accept-Encoding", "")
 
     if sse:
-        # for debug purpose, we need the request id as well
-        logger.debug("SSE request started, request_id=%s", request_id)
+        logger.debug("SSE request started")
         return await sse_wrapper(
-            request_id,
             fetch_data,
             api_instance,
             uuid,
@@ -273,8 +269,7 @@ async def get_data(
             columns,
         )
     else:
-        # for debug purpose, we need the request id as well
-        logger.debug("Not a SSE request, request_id=%s", request_id)
+        logger.debug("Not a SSE request")
         # This handler must stay `async def` for the SSE branch above, so the
         # blocking read is pushed to the threadpool by hand - on the event loop
         # it would stall every other request, SSE heartbeats included.

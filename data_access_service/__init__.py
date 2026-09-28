@@ -31,6 +31,7 @@ set_matplotlib_backend_agg()
 
 from data_access_service.config.config import Config
 from data_access_service.core.api import API
+from data_access_service.utils.log_context import install_context_filter
 from data_access_service.utils.log_formatter import (
     TEXT_LOG_DATE_FORMAT,
     TEXT_LOG_FORMAT,
@@ -54,6 +55,11 @@ def init_log(config: Config):
         json_formatter = build_formatter()
         for handler in logging.getLogger().handlers:
             handler.setFormatter(json_formatter)
+
+    # request_id/job_id from bind_log_context; idempotent for the handler
+    # log_config.yaml already gave the ContextFilter.
+    for handler in logging.getLogger().handlers:
+        install_context_filter(handler)
 
     # If add new logger setting, please put in alphabetical order
     logging.getLogger("aiobotocore").setLevel(logging.WARNING)

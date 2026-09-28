@@ -5,26 +5,75 @@ from datetime import datetime, timezone
 from data_access_service.config.config import Config, EnvType
 
 JSON_LOG_PROFILES = (EnvType.EDGE, EnvType.STAGING, EnvType.PRODUCTION)
+SERVICE_NAME = "data-access-service"
 
 TEXT_LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 TEXT_LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
+# Standard LogRecord attributes. Anything else on a record came from a caller's
+# extra={...} or from ContextFilter (request_id/job_id) and is emitted as a
+# top-level JSON field.
+_RESERVED_RECORD_ATTRS = frozenset(
+    {
+        "args",
+        "asctime",
+        "created",
+        "exc_info",
+        "exc_text",
+        "filename",
+        "funcName",
+        "levelname",
+        "levelno",
+        "lineno",
+        "message",
+        "module",
+        "msecs",
+        "msg",
+        "name",
+        "pathname",
+        "process",
+        "processName",
+        "relativeCreated",
+        "stack_info",
+        "taskName",
+        "thread",
+        "threadName",
+        # uvicorn attaches an ANSI-coloured copy of some messages via extra=
+        "color_message",
+    }
+)
+
 
 class JsonLogFormatter(logging.Formatter):
+    """Field names match what es-indexer/ogcapi-java already emit via log4j2's
+    JsonTemplateLayout (instant/level/loggerName/message/service/threadId, plus
+    thrown on exceptions) so CloudWatch queries work across services."""
+
     def format(self, record: logging.LogRecord) -> str:
         payload = {
-            "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(
-                timespec="milliseconds"
-            ),
+            "instant": datetime.fromtimestamp(record.created, timezone.utc)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z"),
             "level": record.levelname,
-            "logger": record.name,
+            "loggerName": record.name,
             "message": record.getMessage(),
+            "service": SERVICE_NAME,
+            "threadId": record.thread,
         }
 
         if record.exc_info:
-            payload["exception"] = self.formatException(record.exc_info)
+            exc_type, exc_value, _ = record.exc_info
+            payload["thrown"] = {
+                "name": exc_type.__name__ if exc_type else None,
+                "message": str(exc_value) if exc_value else None,
+                "extendedStackTrace": self.formatException(record.exc_info),
+            }
         elif record.exc_text:
-            payload["exception"] = record.exc_text
+            payload["thrown"] = {"extendedStackTrace": record.exc_text}
+
+        for key, value in record.__dict__.items():
+            if key not in _RESERVED_RECORD_ATTRS and key not in payload:
+                payload[key] = value
 
         # default=str so a stray non-string value cannot kill the log line.
         return json.dumps(payload, default=str)

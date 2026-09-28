@@ -19,6 +19,7 @@ from data_access_service.batch.tiler.generator import (
     generate_tiler_parquet_for_all_products,
 )
 from data_access_service.config.config import DevConfig
+from data_access_service.utils.log_context import bind_log_context
 
 logger = init_log(Config.get_config())
 config = Config.get_config()
@@ -67,127 +68,142 @@ def _parse_local_job_parameters(raw: str | None) -> dict:
     return loaded
 
 
-if not isinstance(config, DevConfig):
-    # Get the index of the child job
-    job_index = os.getenv("AWS_BATCH_JOB_ARRAY_INDEX")
-    if job_index is not None:
-        logger.info(f"Job Index: { job_index }")
+def run_job() -> None:
+    if not isinstance(config, DevConfig):
+        # Get the index of the child job
+        job_index = os.getenv("AWS_BATCH_JOB_ARRAY_INDEX")
+        if job_index is not None:
+            logger.info(f"Job Index: { job_index }")
 
-    # Only needed to describe the real Batch job; a local DevConfig run never
-    # calls the Batch API, so skip requiring AWS region/credentials for it.
-    client = boto3.client("batch")
+        # Only needed to describe the real Batch job; a local DevConfig run never
+        # calls the Batch API, so skip requiring AWS region/credentials for it.
+        client = boto3.client("batch")
 
-    # Retrieve the job details
-    response = client.describe_jobs(jobs=[job_id])
+        # Retrieve the job details
+        response = client.describe_jobs(jobs=[job_id])
 
-    jobs = response.get("jobs", [])
-    if not jobs or len(jobs) == 0:
-        raise ValueError(f"No job found with ID: {job_id}")
+        jobs = response.get("jobs", [])
+        if not jobs or len(jobs) == 0:
+            raise ValueError(f"No job found with ID: {job_id}")
 
-    job = jobs[0]
+        job = jobs[0]
 
-    # Extract parameters from the job details
-    parameters = job.get("parameters")
-    logger.info(f"Parameters: {parameters}")
+        # Extract parameters from the job details
+        parameters = job.get("parameters")
+        logger.info(f"Parameters: {parameters}")
 
-    # Switch based on parameter call_type
-    call_type = parameters.get("type")
-else:
-    # For local debug run only
-    job_index = os.getenv("AWS_BATCH_JOB_ARRAY_INDEX", "1")
-    # LOCAL_JOBS_PARAM: JSON object of Batch job parameters, sample
-    # {
-    #   "type":"sub-setting-data-preparation",
-    #   "uuid":"<your-uuid>",
-    #   "start_date":"07-2010",
-    #   "end_date":"06-2011",
-    #   "recipient":"you@example.com",
-    #   "multi_polygon":"{\"type\":\"MultiPolygon\",\"coordinates\":[[[[38.22656250000031,55.578344672182],[60.02343749999969,55.578344672182],[60.02343749999969,61.77312286453116],[38.22656250000031,61.77312286453116],[38.22656250000031,55.578344672182]]]]}",
-    #   "date_ranges":"{\"13\": [\"2010-07-01 00:00:00.000000000\", \"2011-06-30 23:59:59.999999999\"]}",
-    #   "master_job_id":"local-debug",
-    #   "intermediate_output_folder":"/tmp/local-subset"
-    # }
-    raw = os.getenv("LOCAL_JOBS_PARAM") or os.getenv("LOCAL_JOB_PARAM")
-    parameters = _parse_local_job_parameters(raw)
-    call_type = parameters.get("type") or os.getenv("AWS_BATCH_CALL_TYPE")
-    logger.info(f"Job Index: {job_index}")
-    logger.info(f"Parameters: {parameters}")
-    if call_type in (
-        "sub-setting",
-        "sub-setting-data-preparation",
-        "sub-setting-data-collection",
-    ):
-        required = (
-            Parameters.UUID.value,
-            Parameters.START_DATE.value,
-            Parameters.END_DATE.value,
-            Parameters.RECIPIENT.value,
-            Parameters.MULTI_POLYGON.value,
-        )
-        missing = [key for key in required if key not in parameters]
-        if call_type != "sub-setting":
-            # A dataset without a time column is split by polygon_ranges instead
-            if (
-                Parameters.DATE_RANGES.value not in parameters
-                and Parameters.POLYGON_RANGES.value not in parameters
-            ):
-                missing.append(
-                    f"{Parameters.DATE_RANGES.value} or "
-                    f"{Parameters.POLYGON_RANGES.value}"
+        # Switch based on parameter call_type
+        call_type = parameters.get("type")
+    else:
+        # For local debug run only
+        job_index = os.getenv("AWS_BATCH_JOB_ARRAY_INDEX", "1")
+        # LOCAL_JOBS_PARAM: JSON object of Batch job parameters, sample
+        # {
+        #   "type":"sub-setting-data-preparation",
+        #   "uuid":"<your-uuid>",
+        #   "start_date":"07-2010",
+        #   "end_date":"06-2011",
+        #   "recipient":"you@example.com",
+        #   "multi_polygon":"{\"type\":\"MultiPolygon\",\"coordinates\":[[[[38.22656250000031,55.578344672182],[60.02343749999969,55.578344672182],[60.02343749999969,61.77312286453116],[38.22656250000031,61.77312286453116],[38.22656250000031,55.578344672182]]]]}",
+        #   "date_ranges":"{\"13\": [\"2010-07-01 00:00:00.000000000\", \"2011-06-30 23:59:59.999999999\"]}",
+        #   "master_job_id":"local-debug",
+        #   "intermediate_output_folder":"/tmp/local-subset"
+        # }
+        raw = os.getenv("LOCAL_JOBS_PARAM") or os.getenv("LOCAL_JOB_PARAM")
+        parameters = _parse_local_job_parameters(raw)
+        call_type = parameters.get("type") or os.getenv("AWS_BATCH_CALL_TYPE")
+        logger.info(f"Job Index: {job_index}")
+        logger.info(f"Parameters: {parameters}")
+        if call_type in (
+            "sub-setting",
+            "sub-setting-data-preparation",
+            "sub-setting-data-collection",
+        ):
+            required = (
+                Parameters.UUID.value,
+                Parameters.START_DATE.value,
+                Parameters.END_DATE.value,
+                Parameters.RECIPIENT.value,
+                Parameters.MULTI_POLYGON.value,
+            )
+            missing = [key for key in required if key not in parameters]
+            if call_type != "sub-setting":
+                # A dataset without a time column is split by polygon_ranges instead
+                if (
+                    Parameters.DATE_RANGES.value not in parameters
+                    and Parameters.POLYGON_RANGES.value not in parameters
+                ):
+                    missing.append(
+                        f"{Parameters.DATE_RANGES.value} or "
+                        f"{Parameters.POLYGON_RANGES.value}"
+                    )
+                for key in (
+                    Parameters.MASTER_JOB_ID.value,
+                    Parameters.INTERMEDIATE_OUTPUT_FOLDER.value,
+                ):
+                    if key not in parameters:
+                        missing.append(key)
+            if missing:
+                raise ValueError(
+                    "LOCAL_JOBS_PARAM is missing keys required by get_subset_request: "
+                    f"{missing}. Got keys: {sorted(parameters)}"
                 )
-            for key in (
-                Parameters.MASTER_JOB_ID.value,
-                Parameters.INTERMEDIATE_OUTPUT_FOLDER.value,
-            ):
-                if key not in parameters:
-                    missing.append(key)
-        if missing:
-            raise ValueError(
-                "LOCAL_JOBS_PARAM is missing keys required by get_subset_request: "
-                f"{missing}. Got keys: {sorted(parameters)}"
-            )
 
-match call_type:
-    case "sub-setting":
-        api = API()
-        api.initialize_metadata()
-        subsetting.init(api, job_id_of_init=job_id, parameters=parameters)
-    case "sub-setting-data-preparation":
-        """
-        Please take noted that the parameters in each call are different, the batch will call the
-        first job init, and init job will add some parameter before calling the prepare_data job
-        """
-        api = API()
-        api.initialize_metadata()
-        subsetting.prepare_data(api, job_index=job_index, parameters=parameters)
-    case "sub-setting-data-collection":
-        subsetting.collect_data(parameters=parameters)
-    case "generate-pmtiles-for-parquet":
-        api = API()
-        api.initialize_metadata()
-        # Optional single-UUID filter for local/debug (or Batch parameters).
-        # Env wins only when parameters omit uuid so Batch jobs stay explicit.
-        target_uuid = parameters.get("uuid") or os.getenv("PMTILES_TARGET_UUID")
-        if target_uuid:
-            logger.info("PMTiles generation restricted to uuid=%s", target_uuid)
-        generate_pmtiles_for_all_parquets(api=api, uuid=target_uuid or None)
-    case "generate-estimation-index-for-parquet":
-        api = API()
-        api.initialize_metadata()
-        target_uuid = parameters.get("uuid") or os.getenv("ESTIMATION_TARGET_UUID")
-        if target_uuid:
-            logger.info(
-                "Estimation index generation restricted to uuid=%s", target_uuid
+    match call_type:
+        case "sub-setting":
+            api = API()
+            api.initialize_metadata()
+            subsetting.init(api, job_id_of_init=job_id, parameters=parameters)
+        case "sub-setting-data-preparation":
+            """
+            Please take noted that the parameters in each call are different, the batch will call the
+            first job init, and init job will add some parameter before calling the prepare_data job
+            """
+            api = API()
+            api.initialize_metadata()
+            subsetting.prepare_data(api, job_index=job_index, parameters=parameters)
+        case "sub-setting-data-collection":
+            subsetting.collect_data(parameters=parameters)
+        case "generate-pmtiles-for-parquet":
+            api = API()
+            api.initialize_metadata()
+            # Optional single-UUID filter for local/debug (or Batch parameters).
+            # Env wins only when parameters omit uuid so Batch jobs stay explicit.
+            target_uuid = parameters.get("uuid") or os.getenv("PMTILES_TARGET_UUID")
+            if target_uuid:
+                logger.info("PMTiles generation restricted to uuid=%s", target_uuid)
+            generate_pmtiles_for_all_parquets(api=api, uuid=target_uuid or None)
+        case "generate-estimation-index-for-parquet":
+            api = API()
+            api.initialize_metadata()
+            target_uuid = parameters.get("uuid") or os.getenv("ESTIMATION_TARGET_UUID")
+            if target_uuid:
+                logger.info(
+                    "Estimation index generation restricted to uuid=%s", target_uuid
+                )
+            generate_estimation_index_for_all_parquets(
+                api=api, uuid=target_uuid or None
             )
-        generate_estimation_index_for_all_parquets(api=api, uuid=target_uuid or None)
-    case "generate-tiler-parquet":
-        api = API()
-        api.initialize_metadata()
-        target_uuid = parameters.get("uuid") or os.getenv("TILER_PARQUET_TARGET_UUID")
-        if target_uuid:
-            logger.info("Tiler parquet generation restricted to uuid=%s", target_uuid)
-        generate_tiler_parquet_for_all_products(api=api, uuid=target_uuid or None)
-    case "refresh-sites-parquet":
-        refresh_sites_parquet_snapshots()
-    case _:
-        logger.error("Unknow call type", call_type)
+        case "generate-tiler-parquet":
+            api = API()
+            api.initialize_metadata()
+            target_uuid = parameters.get("uuid") or os.getenv(
+                "TILER_PARQUET_TARGET_UUID"
+            )
+            if target_uuid:
+                logger.info(
+                    "Tiler parquet generation restricted to uuid=%s", target_uuid
+                )
+            generate_tiler_parquet_for_all_products(api=api, uuid=target_uuid or None)
+        case "refresh-sites-parquet":
+            refresh_sites_parquet_snapshots()
+        case _:
+            logger.error("Unknown call type: %s", call_type)
+
+
+# Every log line from here on, including batch/ submodules, carries job_id.
+# Threads outside asyncio (e.g. dask workers) start with an empty context and
+# will not; forked children (tiler generator) inherit it.
+with bind_log_context(**({"job_id": job_id} if job_id else {})):
+    logger.info("Job started")
+    run_job()
