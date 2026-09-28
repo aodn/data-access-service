@@ -103,3 +103,4 @@ def test_duckdb_out_of_memory_returns_503(client):
         )
     assert response.status_code == 503
     assert response.headers["retry-after"] == "5"
+    assert response.headers["cache-control"] == "no-store"
