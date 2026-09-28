@@ -84,7 +84,7 @@ class DuckDBClient(ABC):
         """Create a DuckDB S3 secret scoped to ``bucket`` from the AWS credential chain.
 
         ``REFRESH auto`` makes DuckDB fetch new credentials when a read fails
-        because they expired. 
+        because they expired.
         """
         boto_session = boto3.Session()
 
