@@ -30,6 +30,7 @@ CONFIGURED_LOGGERS = [
     "botocore",
     "s3fs",
     "aiobotocore",
+    "aodn.GetAodn",
 ]
 
 
@@ -459,3 +460,54 @@ def test_batch_entry_point_logs_json_with_job_id(profile):
     )
     assert submodule["job_id"] == "job-1234"
     assert by_message["Job started"]["job_id"] == "job-1234"
+
+
+# -- aodn_cloud_optimised's own logger ------------------------------------------
+
+
+@pytest.mark.parametrize("profile", ["edge", "staging", "prod"])
+def test_aodn_library_logger_emits_json_once(
+    profile, monkeypatch, capsys, clean_logging
+):
+    """The library's _get_or_create_logger would install its own text
+    StreamHandler (propagate=False); after init_log it must reuse our
+    NullHandler and propagate to root's JSON handler instead."""
+    from aodn_cloud_optimised.lib.DataQuery import _get_or_create_logger
+
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("PROFILE", profile)
+    logging.getLogger().handlers = []
+    logging.getLogger("aodn.GetAodn").handlers = []
+
+    init_log(SimpleNamespace(LOGLEVEL=logging.DEBUG))
+    # What GetAodn() does on construction, every time.
+    aodn_logger = _get_or_create_logger(level=logging.INFO)
+    aodn_logger.info("Retrieving metadata for some.parquet")
+    _get_or_create_logger(level=logging.INFO).info("second GetAodn instance")
+
+    lines = [line for line in capsys.readouterr().err.splitlines() if line.strip()]
+    assert [json.loads(line)["message"] for line in lines] == [
+        "Retrieving metadata for some.parquet",
+        "second GetAodn instance",
+    ]
+    assert json.loads(lines[0])["loggerName"] == "aodn.GetAodn"
+
+
+def test_aodn_library_logger_replaces_handler_installed_before_init_log(
+    monkeypatch, capsys, clean_logging
+):
+    """If a GetAodn() ran before init_log, its text handler is swapped out."""
+    from aodn_cloud_optimised.lib.DataQuery import _get_or_create_logger
+
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("PROFILE", "edge")
+    logging.getLogger().handlers = []
+    logging.getLogger("aodn.GetAodn").handlers = []
+    _get_or_create_logger(level=logging.INFO)  # library installs text handler
+
+    init_log(SimpleNamespace(LOGLEVEL=logging.DEBUG))
+    _get_or_create_logger(level=logging.INFO).warning("after init_log")
+
+    lines = [line for line in capsys.readouterr().err.splitlines() if line.strip()]
+    assert len(lines) == 1
+    assert json.loads(lines[0])["message"] == "after init_log"

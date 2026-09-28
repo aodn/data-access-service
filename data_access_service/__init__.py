@@ -61,6 +61,14 @@ def init_log(config: Config):
     for handler in logging.getLogger().handlers:
         install_context_filter(handler)
 
+    # aodn_cloud_optimised gives "aodn.GetAodn" its own plain-text
+    # StreamHandler with propagate=False, unless the logger already has a
+    # handler. Claim that slot with a NullHandler so its records propagate to
+    # root and come out in the active (JSON or text) format.
+    aodn_logger = logging.getLogger("aodn.GetAodn")
+    aodn_logger.handlers = [logging.NullHandler()]
+    aodn_logger.propagate = True
+
     # If add new logger setting, please put in alphabetical order
     logging.getLogger("aiobotocore").setLevel(logging.WARNING)
     logging.getLogger("asyncio").setLevel(logging.WARNING)
