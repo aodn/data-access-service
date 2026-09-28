@@ -462,6 +462,47 @@ def test_batch_entry_point_logs_json_with_job_id(profile):
     assert by_message["Job started"]["job_id"] == "job-1234"
 
 
+FAILING_BATCH_SNIPPET = BATCH_SNIPPET.replace(
+    'logging.getLogger(refresher.__name__).warning("refreshing from batch submodule")',
+    'raise RuntimeError("snapshot write failed")',
+)
+
+
+@pytest.mark.parametrize("profile", ["edge", "staging", "prod"])
+def test_batch_job_failure_is_logged_with_job_id(profile):
+    """A job that raises exits 1 and logs one JSON record carrying job_id and
+    the traceback - logged inside the bound context, so unlike the generic
+    uncaught-exception hook the record keeps job_id."""
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("PYTEST_CURRENT_TEST", "PROFILE")
+    }
+    env.update(PROFILE=profile, AWS_BATCH_JOB_ID="job-1234", AWS_DEFAULT_REGION="x")
+    result = subprocess.run(
+        [sys.executable, "-c", FAILING_BATCH_SNIPPET],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=LOG_CONFIG_PATH.parent,
+        timeout=120,
+    )
+
+    assert result.returncode == 1, result.stderr
+    # no raw traceback lines outside JSON records
+    assert not any(line.startswith("Traceback") for line in result.stderr.splitlines())
+    payloads = [
+        json.loads(line) for line in result.stderr.splitlines() if line.startswith("{")
+    ]
+    errors = [p for p in payloads if p["level"] in ("ERROR", "CRITICAL")]
+    assert len(errors) == 1, errors  # no second record from the uncaught hook
+    (failed,) = errors
+    assert failed["message"] == "Job failed"
+    assert failed["job_id"] == "job-1234"
+    assert failed["thrown"]["name"] == "RuntimeError"
+    assert failed["thrown"]["message"] == "snapshot write failed"
+
+
 # -- aodn_cloud_optimised's own logger ------------------------------------------
 
 

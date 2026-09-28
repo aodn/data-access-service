@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 
 import boto3
 
@@ -206,4 +207,10 @@ def run_job() -> None:
 # will not; forked children (tiler generator) inherit it.
 with bind_log_context(**({"job_id": job_id} if job_id else {})):
     logger.info("Job started")
-    run_job()
+    try:
+        run_job()
+    except Exception:
+        # Log here, while job_id is still bound - an uncaught exception would
+        # reach sys.excepthook after the context is reset and lose it.
+        logger.exception("Job failed")
+        sys.exit(1)
