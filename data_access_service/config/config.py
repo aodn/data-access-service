@@ -11,6 +11,7 @@ import yaml
 from botocore.client import BaseClient
 from dotenv import load_dotenv
 
+from data_access_service.models.cache_types import CacheConfig
 from data_access_service.models.co_datasource.csiro.csiro_types import CsiroConfig
 from data_access_service.models.duckdb_types import DuckDBTuningConfig
 from data_access_service.models.estimation_types import (
@@ -230,14 +231,30 @@ class Config:
             else None
         )
 
+    def get_cache_config(self) -> CacheConfig:
+        """The shared Redis/Valkey cache every container of this service uses.
+
+        ``CACHE_HOST`` is set only in the deployed environments, and that
+        endpoint is the only one requiring TLS, so it decides ``is_tls`` too.
+        """
+        cache_config = self.config.get("cache", {}) if self.config is not None else {}
+        host_env = os.getenv("CACHE_HOST")
+        return CacheConfig(
+            backend=cache_config["backend"],
+            host=host_env or cache_config["host"],
+            port=int(cache_config["port"]),
+            is_tls=host_env is not None,
+        )
+
     def get_csiro_config(self) -> CsiroConfig:
-        cconfig = self.config["csiro"] if self.config is not None else {}
+        csiro_config = self.config["csiro"] if self.config is not None else {}
         return CsiroConfig(
-            collection_url=cconfig["collection_url"],
-            key_request_url=cconfig["key_request_url"],
-            data_folder=cconfig["data_folder"],
-            request_timeout_seconds=int(cconfig["request_timeout_seconds"]),
-            datasets=cconfig.get("datasets", []),
+            collection_url=csiro_config["collection_url"],
+            key_request_url=csiro_config["key_request_url"],
+            data_folder=csiro_config["data_folder"],
+            request_timeout_seconds=int(csiro_config["request_timeout_seconds"]),
+            key_cache_ttl_seconds=int(csiro_config["key_cache_ttl_seconds"]),
+            datasets=csiro_config.get("datasets", []),
         )
 
     def get_api_key(self):
