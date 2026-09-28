@@ -36,6 +36,7 @@ from data_access_service.utils.log_formatter import (
     TEXT_LOG_DATE_FORMAT,
     TEXT_LOG_FORMAT,
     build_formatter,
+    install_exception_hooks,
     use_json_logs,
 )
 
@@ -55,6 +56,7 @@ def init_log(config: Config):
         json_formatter = build_formatter()
         for handler in logging.getLogger().handlers:
             handler.setFormatter(json_formatter)
+        install_exception_hooks()
 
     # request_id/job_id from bind_log_context; idempotent for the handler
     # log_config.yaml already gave the ContextFilter.

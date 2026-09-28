@@ -511,3 +511,80 @@ def test_aodn_library_logger_replaces_handler_installed_before_init_log(
     lines = [line for line in capsys.readouterr().err.splitlines() if line.strip()]
     assert len(lines) == 1
     assert json.loads(lines[0])["message"] == "after init_log"
+
+
+# -- uncaught exceptions ------------------------------------------------------------
+
+HOOK_PRELUDE = (
+    "import logging, threading, contextvars\n"
+    "from types import SimpleNamespace\n"
+    "from data_access_service import init_log\n"
+    "from data_access_service.utils.log_context import bind_log_context\n"
+    "init_log(SimpleNamespace(LOGLEVEL=logging.DEBUG))\n"
+)
+
+
+def _run_hook_snippet(profile, body):
+    env = {k: v for k, v in os.environ.items() if k != "PYTEST_CURRENT_TEST"}
+    env["PROFILE"] = profile
+    return subprocess.run(
+        [sys.executable, "-c", HOOK_PRELUDE + body],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=LOG_CONFIG_PATH.parent,
+        timeout=120,
+    )
+
+
+def _stderr_payloads(result):
+    lines = [line for line in result.stderr.splitlines() if line.strip()]
+    return [json.loads(line) for line in lines]  # raises on any non-JSON line
+
+
+@pytest.mark.parametrize("profile", ["edge", "staging", "prod"])
+def test_uncaught_main_thread_exception_is_one_json_record(profile):
+    result = _run_hook_snippet(
+        profile,
+        "with bind_log_context(job_id='job-9'):\n"
+        "    raise ValueError('boom in main')\n",
+    )
+
+    assert result.returncode == 1  # exit status unchanged by the hook
+    (payload,) = _stderr_payloads(result)
+    assert payload["level"] == "CRITICAL"
+    assert payload["loggerName"] == "uncaught"
+    assert payload["thrown"]["name"] == "ValueError"
+    assert payload["thrown"]["message"] == "boom in main"
+    assert "Traceback" in payload["thrown"]["extendedStackTrace"]
+
+
+@pytest.mark.parametrize("profile", ["edge", "staging", "prod"])
+def test_uncaught_thread_exception_is_one_json_record(profile):
+    result = _run_hook_snippet(
+        profile,
+        "def work():\n"
+        "    raise RuntimeError('boom in worker')\n"
+        "with bind_log_context(request_id='req-7'):\n"
+        "    t = threading.Thread(target=contextvars.copy_context().run,\n"
+        "                         args=(work,), name='fetch-worker')\n"
+        "    t.start(); t.join()\n",
+    )
+
+    assert result.returncode == 0  # a dying worker thread doesn't exit the process
+    (payload,) = _stderr_payloads(result)
+    assert payload["level"] == "ERROR"
+    assert payload["message"] == "Uncaught exception in thread fetch-worker"
+    assert payload["thrown"]["name"] == "RuntimeError"
+    # copy_context().run has returned before threading.excepthook runs, so the
+    # bound request_id is gone - see install_exception_hooks' docstring.
+    assert "request_id" not in payload
+
+
+@pytest.mark.parametrize("profile", ["dev", "testing"])
+def test_uncaught_exception_keeps_default_traceback_on_text_profiles(profile):
+    result = _run_hook_snippet(profile, "raise ValueError('boom in main')\n")
+
+    assert result.returncode == 1
+    assert result.stderr.splitlines()[0] == "Traceback (most recent call last):"
+    assert result.stderr.rstrip().endswith("ValueError: boom in main")
