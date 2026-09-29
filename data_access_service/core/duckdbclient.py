@@ -868,13 +868,15 @@ class TilerDuckDBClient(DuckDBClient):
     """Reads the batch's parquet files for the tiler API.
 
     Each :meth:`execute` runs on its own cursor, so request threads can read
-    in parallel. ``tiler_repository`` creates the S3 secret.
+    in parallel. ``tiler_repository`` creates the S3 secret. Removes its
+    spill directory on close.
     """
 
     def __init__(self, config: Optional[TilerDuckDBConfig] = None) -> None:
         self._config: TilerDuckDBConfig = (
             config or Config.get_config().get_tiler_api_config().duckdb
         )
+        self._temp_dir = TemporaryDirectory(prefix=self._config.duckdb_temp_dir)
         self._duckdb_client: Optional[duckdb.DuckDBPyConnection] = None
         self._active_cursors: set[Any] = set()
         self._cursors_lock = threading.Lock()
@@ -889,6 +891,7 @@ class TilerDuckDBClient(DuckDBClient):
                     db_config = {
                         "memory_limit": self._config.memory_limit,
                         "threads": str(int(self._config.threads)),
+                        "temp_directory": self._temp_dir.name,
                         "enable_external_file_cache": (
                             self._config.enable_external_file_cache
                         ),
@@ -937,6 +940,7 @@ class TilerDuckDBClient(DuckDBClient):
             with self._lock:
                 self._duckdb_client.close()
         self._duckdb_client = None
+        self._temp_dir.cleanup()
 
     def __enter__(self) -> TilerDuckDBClient:
         return self
@@ -954,7 +958,7 @@ class TilerBatchDuckDBClient(DuckDBClient):
     """
 
     def __init__(self, config: TilerBatchDuckDBConfig) -> None:
-        self._temp_dir = TemporaryDirectory(prefix=config.temp_dir_prefix)
+        self._temp_dir = TemporaryDirectory(prefix=config.duckdb_temp_dir)
         self._con: Optional[duckdb.DuckDBPyConnection] = duckdb.connect(
             database=":memory:",
             config={

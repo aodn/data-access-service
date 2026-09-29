@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 
+import duckdb
 import pytest
 from starlette.testclient import TestClient
 
@@ -78,3 +79,28 @@ def test_gzip_skips_image_tiles(client):
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
     assert response.headers.get("content-encoding") != "gzip"
+
+
+def test_duckdb_out_of_memory_returns_503(client):
+    # DuckDB hitting memory_limit is a load problem, so tell the client to retry.
+    with (
+        patch("data_access_service.core.tiler_routes.shared.load_slice"),
+        patch(
+            "data_access_service.core.tiler_routes.shared.resolve_timestamp",
+            return_value="raw-ts",
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.shared.is_store_available",
+            return_value=True,
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.visual_tiles.render_tile",
+            side_effect=duckdb.OutOfMemoryException("Out of Memory Error"),
+        ),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/5/0/0.png?date=2024-01-01T00:00:00Z",
+        )
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "3"
+    assert response.headers["cache-control"] == "no-store"

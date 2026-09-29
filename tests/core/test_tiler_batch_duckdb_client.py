@@ -9,7 +9,7 @@ from data_access_service.core.duckdbclient import TilerBatchDuckDBClient
 from data_access_service.models.tiler_types import TilerBatchDuckDBConfig
 
 CONFIG = TilerBatchDuckDBConfig(
-    memory_limit="128MB", threads=1, temp_dir_prefix="test_tiler_batch_"
+    memory_limit="128MB", threads=1, duckdb_temp_dir="test_tiler_batch_"
 )
 
 
