@@ -17,6 +17,8 @@ import xarray as xr
 
 from data_access_service.batch.tiler import parquet_generator as gen
 from data_access_service.batch.tiler.zarr_registry import close_all_stores
+from data_access_service.core.duckdbclient import TilerBatchDuckDBClient
+from data_access_service.models.tiler_types import TilerBatchDuckDBConfig
 
 
 class _FakeZarrSource:
@@ -323,12 +325,12 @@ def test_each_zarr_time_chunk_is_read_once(monkeypatch):
     env = _Env(monkeypatch)
     days = [f"2024-01-0{n}T00:00:00" for n in range(1, 8)]
     fetched = []
-    real_fetch = gen._fetch_batch
+    real_open = gen._open_batch
     monkeypatch.setattr(
         gen,
-        "_fetch_batch",
+        "_open_batch",
         lambda store, variables, ts: fetched.append(len(ts))
-        or real_fetch(store, variables, ts),
+        or real_open(store, variables, ts),
     )
 
     # Chunks of 3 over 7 days: [1-3] [4-6] [7]; the latest first, then
@@ -386,7 +388,7 @@ def test_all_empty_timestamp_is_recorded_and_not_read_again(monkeypatch):
     assert env.json[SIDECAR]["empty_timestamps"] == [_ts(2)]
 
     env.events.clear()
-    monkeypatch.setattr(gen, "_fetch_batch", MagicMock())
+    monkeypatch.setattr(gen, "_open_batch", MagicMock())
     written, _ = _sync(monkeypatch, ds)
     assert written == []
     assert env.events == []
@@ -416,3 +418,90 @@ def test_attr_change_alone_rewrites_the_sidecar(monkeypatch):
     assert written == []
     assert env.events == [("json", SIDECAR)]
     assert env.json[SIDECAR]["variables"]["v"]["attrs"]["units"] == "K"
+
+
+# --- reading in bands -----------------------------------------------------
+
+
+def test_band_rows_are_whole_lat_chunks_of_about_band_bytes(monkeypatch):
+    ds = _fake_dataset(DAYS)
+    ds["v"].encoding["chunks"] = (1, 1, 3)
+    row_bytes = 3 * 3 * 8  # 3 times x 3 lons x float64
+
+    monkeypatch.setattr(gen, "BAND_BYTES", row_bytes)
+    assert gen._band_rows(ds, ["v"]) == 1
+    monkeypatch.setattr(gen, "BAND_BYTES", 10 * row_bytes)
+    assert gen._band_rows(ds, ["v"]) == 2  # capped at the grid
+
+
+def test_whole_blocks_carries_rows_short_of_a_block(monkeypatch):
+    monkeypatch.setattr(gen, "BLOCK", 3)
+    grid = np.arange(7 * 2, dtype=np.float64).reshape(7, 2)
+
+    parts, carry = gen._whole_blocks(np.empty((0, 2)), grid[0:2], 0, last=False)
+    assert parts == [] and np.array_equal(carry, grid[0:2])
+
+    parts, carry = gen._whole_blocks(carry, grid[2:4], 2, last=False)
+    assert [start for start, _ in parts] == [0]
+    assert np.array_equal(parts[0][1], grid[0:3])
+    assert np.array_equal(carry, grid[3:4])
+
+    parts, carry = gen._whole_blocks(carry, grid[4:7], 4, last=True)
+    assert [start for start, _ in parts] == [3, 6]
+    assert np.array_equal(np.concatenate([a for _, a in parts]), grid[3:7])
+    assert carry.shape[0] == 0
+
+
+def _banded_dataset() -> xr.Dataset:
+    """3 days on a 7x5 grid with scattered NaNs and one all-NaN day."""
+    rng = np.random.default_rng(0)
+    v = rng.random((3, 7, 5))
+    v[rng.random(v.shape) < 0.3] = np.nan
+    v[1] = np.nan
+    ds = xr.Dataset(
+        {"v": xr.DataArray(v, dims=["time", "lat", "lon"])},
+        coords={
+            "time": pd.to_datetime(DAYS),
+            "lat": np.arange(7.0),
+            "lon": np.arange(5.0),
+        },
+    )
+    ds["v"].encoding["chunks"] = (3, 2, 5)
+    return ds
+
+
+def _sync_real_files(monkeypatch) -> dict[str, pd.DataFrame]:
+    env = _Env(monkeypatch)
+    uploaded: dict[str, pd.DataFrame] = {}
+    monkeypatch.setattr(
+        gen.storage,
+        "upload_file",
+        lambda aws, local, path: uploaded.__setitem__(path, pd.read_parquet(local)),
+    )
+    monkeypatch.setattr(gen, "TilerBatchDuckDBClient", TilerBatchDuckDBClient)
+    close_all_stores()
+    _patch_source(monkeypatch, _banded_dataset())
+    gen.sync_store(
+        "foo",
+        "uuid-123",
+        ["v"],
+        OUTPUT_DIR,
+        duckdb_config=TilerBatchDuckDBConfig(
+            memory_limit="128MB", threads=2, temp_dir_prefix="test_band_"
+        ),
+    )
+    assert env.json[SIDECAR]["empty_timestamps"] == [_ts(2)]
+    return uploaded
+
+
+@pytest.mark.parametrize("block", [1, 2, 3, 4, 8])
+def test_banded_files_match_reading_the_whole_grid(monkeypatch, block):
+    monkeypatch.setattr(gen, "BLOCK", block)
+    whole = _sync_real_files(monkeypatch)
+
+    monkeypatch.setattr(gen, "BAND_BYTES", 1)  # one 2-row lat chunk per band
+    banded = _sync_real_files(monkeypatch)
+
+    assert sorted(banded) == sorted(whole) and len(whole) == 2
+    for path, frame in whole.items():
+        pd.testing.assert_frame_equal(banded[path], frame)

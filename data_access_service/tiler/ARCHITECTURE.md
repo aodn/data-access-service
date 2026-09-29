@@ -47,9 +47,9 @@ flowchart TD
         OPEN["zarr_registry.open_store<br/>normalise TIME/LAT/LON,<br/>reject non-grid / no-time"]
         BUILD["build_metadata<br/>coords + attrs only"]
         DIFF["_missing_by_chunk<br/>skip converted + empty ts,<br/>newest zarr chunk first"]
-        FETCH["_fetch_batch<br/>read one zarr time chunk"]
+        FETCH["_write_pieces<br/>read one zarr time chunk,<br/>one band of lat rows at a time"]
         SPARSE["_sparse_rows_for_slice<br/>drop NaN, sort in BLOCK=256 order"]
-        WRITE["TilerBatchDuckDBClient.write_parquet"]
+        WRITE["TilerBatchDuckDBClient.write_parquet<br/>per band, then merge_parquet<br/>per timestamp"]
         SIDE["write_metadata after each chunk"]
         OPEN --> BUILD --> DIFF --> FETCH --> SPARSE --> WRITE --> SIDE
         SIDE -.next chunk.-> FETCH
@@ -68,6 +68,10 @@ Key properties:
   change restarts the store.
 - **One store in memory at a time.** Each store runs in a forked child that
   exits when done, so the parent's RSS doesn't accumulate.
+- **One band in memory at a time.** A zarr time chunk is read in bands of
+  whole zarr lat chunks (about `BAND_BYTES`, 1 GB), each written as local
+  parquet pieces, then joined per timestamp. The largest store's chunk is
+  5.2 GB, too big to hold whole in an 8 GB job.
 - **Block ordering.** Rows are sorted into 256×256 blocks so one parquet row
   group covers a small area and a bbox query skips row groups in both
   directions.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import suppress
 from dataclasses import replace
 from datetime import datetime, timezone
 from tempfile import TemporaryDirectory
@@ -164,8 +165,8 @@ def _missing_by_chunk(
     return [chunks[c] for c in sorted(chunks, reverse=True)]
 
 
-def _fetch_batch(store: str, variables: list[str], batch_raw_ts: list) -> xr.Dataset:
-    """Read ``batch_raw_ts`` from the zarr into memory."""
+def _open_batch(store: str, variables: list[str], batch_raw_ts: list) -> xr.Dataset:
+    """``batch_raw_ts`` from the zarr, not read yet."""
     ds = get_datasource(store).get_data(
         date_start=_ts_for_get_data(batch_raw_ts[0]),
         date_end=_ts_for_get_data(batch_raw_ts[-1]),
@@ -173,7 +174,94 @@ def _fetch_batch(store: str, variables: list[str], batch_raw_ts: list) -> xr.Dat
     ds = ds[variables]
     if "time" not in ds.dims:
         ds = ds.expand_dims("time")
-    return ds.compute() if hasattr(ds, "compute") else ds
+    return ds
+
+
+# About this much zarr data is read into memory at a time.
+BAND_BYTES = 1024**3
+
+
+def _band_rows(ds: xr.Dataset, variables: list[str]) -> int:
+    """Lat rows read at a time: whole zarr lat chunks, about ``BAND_BYTES``."""
+    row_bytes = sum(
+        ds.sizes["time"] * ds.sizes["lon"] * ds[v].dtype.itemsize for v in variables
+    )
+    lat_chunks = [
+        ds[v].encoding["chunks"][ds[v].dims.index("lat")]
+        for v in variables
+        if ds[v].encoding.get("chunks")
+    ]
+    lat_chunk = max(lat_chunks) if lat_chunks else 1
+    rows = max(1, BAND_BYTES // (row_bytes * lat_chunk)) * lat_chunk
+    return min(rows, ds.sizes["lat"])
+
+
+def _whole_blocks(
+    carry: np.ndarray, band: np.ndarray, band_start: int, last: bool
+) -> tuple[list[tuple[int, np.ndarray]], np.ndarray]:
+    """Split ``carry`` + ``band`` (rows from ``band_start``) into parts that
+    cover whole ``BLOCK`` rows, as ``(first row, rows)``. The rows left over
+    are returned to carry into the next band. ``carry`` starts on a
+    ``BLOCK`` row, so every part does too and keeps the block order."""
+    band_end = band_start + band.shape[0]
+    end = band_end if last else band_end // BLOCK * BLOCK
+    start = band_start - carry.shape[0]
+    if end <= band_start:
+        return [], np.concatenate([carry, band])
+    # Only the block row the carry falls in is copied; the rest are views.
+    head_end = min(-(-band_start // BLOCK) * BLOCK, end)
+    parts = []
+    if head_end > start:
+        parts.append((start, np.concatenate([carry, band[: head_end - band_start]])))
+    if end > head_end:
+        parts.append((head_end, band[head_end - band_start : end - band_start]))
+    return parts, band[end - band_start :].copy()
+
+
+def _write_pieces(
+    client: TilerBatchDuckDBClient,
+    ds: xr.Dataset,
+    variables: list[str],
+    steps: list[int],
+    piece_dir: str,
+) -> tuple[dict[tuple[int, str], list[str]], dict[int, int]]:
+    """Read ``ds`` one band of lat rows at a time and write each time step
+    and variable as local parquet pieces, in row order. Only one band is in
+    memory at once.
+
+    Returns ``(pieces by (step, variable), rows by step)``.
+    """
+    n_i = ds.sizes["lat"]
+    band_rows = _band_rows(ds, variables)
+    pieces: dict[tuple[int, str], list[str]] = {
+        (k, v): [] for k in steps for v in variables
+    }
+    rows = dict.fromkeys(steps, 0)
+    carry = {
+        (k, v): np.empty((0, ds.sizes["lon"]), dtype=ds[v].dtype)
+        for k in steps
+        for v in variables
+    }
+    for band_start in range(0, n_i, band_rows):
+        last = band_start + band_rows >= n_i
+        # Drop the last band before reading the next, or both are held at once.
+        band = None
+        band = ds.isel(lat=slice(band_start, band_start + band_rows)).compute()
+        for k in steps:
+            for v in variables:
+                parts, carry[k, v] = _whole_blocks(
+                    carry[k, v], band[v].isel(time=k).values, band_start, last
+                )
+                for first_row, arr in parts:
+                    frame = _sparse_rows_for_slice(arr)
+                    frame["i"] += first_row
+                    path = os.path.join(
+                        piece_dir, f"{k}_{v}_{len(pieces[k, v])}.parquet"
+                    )
+                    client.write_parquet(frame, path)
+                    pieces[k, v].append(path)
+                    rows[k] += len(frame)
+    return pieces, rows
 
 
 def sync_store(
@@ -243,36 +331,42 @@ def sync_store(
 
     aws = AWSHelper()
     with TilerBatchDuckDBClient(duckdb_config) as client, TemporaryDirectory() as tmp:
-        local_path = os.path.join(tmp, "slice.parquet")
         for n, batch_raw_ts in enumerate(batches, start=1):
-            changed = False
-            # Drop the last chunk before reading the next, or both are held at once.
-            ds = None
-            ds = _fetch_batch(store, variables, batch_raw_ts)
+            ds = _open_batch(store, variables, batch_raw_ts)
             batch_ts_set = {_ts_native(t) for t in batch_raw_ts}
+            # get_data can return instants outside the batch.
+            steps = {
+                k: ts
+                for k in range(ds.sizes["time"])
+                if (ts := _ts_native(ds["time"].values[k])) in batch_ts_set
+            }
+            changed = bool(steps)
 
-            for k in range(ds.sizes["time"]):
-                ts = _ts_native(ds["time"].values[k])
-                if ts not in batch_ts_set:
-                    # get_data can return instants outside the batch.
-                    continue
-                changed = True
-                frames = {
-                    v: _sparse_rows_for_slice(ds[v].isel(time=k).values)
-                    for v in variables
-                }
-                if all(f.empty for f in frames.values()):
-                    empty.add(ts)
-                    continue
-                for v, frame in frames.items():
-                    client.write_parquet(frame, local_path)
-                    storage.upload_file(
-                        aws,
-                        local_path,
-                        variable_parquet_path(tiler_root_dir, store, v, ts),
-                    )
-                converted.add(ts)
-                written.append(ts)
+            with TemporaryDirectory(dir=tmp) as piece_dir:
+                pieces, rows = _write_pieces(
+                    client, ds, variables, list(steps), piece_dir
+                )
+                for k, ts in steps.items():
+                    if rows[k] == 0:
+                        empty.add(ts)
+                        continue
+                    for v in variables:
+                        local_path = pieces[k, v][0]
+                        if len(pieces[k, v]) > 1:
+                            local_path = os.path.join(piece_dir, f"{k}_{v}.parquet")
+                            client.merge_parquet(pieces[k, v], local_path)
+                        storage.upload_file(
+                            aws,
+                            local_path,
+                            variable_parquet_path(tiler_root_dir, store, v, ts),
+                        )
+                        # Free the disk as we go; the pieces add up to the
+                        # whole chunk.
+                        for path in {local_path, *pieces[k, v]}:
+                            with suppress(FileNotFoundError):
+                                os.remove(path)
+                    converted.add(ts)
+                    written.append(ts)
 
             if changed:
                 write_metadata(aws, current(), tiler_root_dir, store)
