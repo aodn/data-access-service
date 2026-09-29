@@ -68,10 +68,14 @@ Key properties:
   change restarts the store.
 - **One store in memory at a time.** Each store runs in a forked child that
   exits when done, so the parent's RSS doesn't accumulate.
-- **One band in memory at a time.** A zarr time chunk is read in bands of
+- **Two bands in memory at most.** A zarr time chunk is read in bands of
   whole zarr lat chunks (about `BAND_BYTES`, 1 GB), each written as local
-  parquet pieces, then joined per timestamp. The largest store's chunk is
-  5.2 GB, too big to hold whole in an 8 GB job.
+  parquet pieces, then joined per timestamp. The next band is read while
+  one is written. The largest store's chunk is 5.2 GB, too big to hold whole
+  in an 8 GB job.
+- **Parallel uploads.** `UPLOAD_WORKERS` files upload at once, one S3
+  connection each; the sidecar waits for all of a chunk's uploads. Zarr reads
+  use up to 64 S3 connections.
 - **Block ordering.** Rows are sorted into 256×256 blocks so one parquet row
   group covers a small area and a bbox query skips row groups in both
   directions.

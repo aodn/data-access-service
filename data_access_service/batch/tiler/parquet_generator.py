@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -226,8 +227,8 @@ def _write_pieces(
     piece_dir: str,
 ) -> tuple[dict[tuple[int, str], list[str]], dict[int, int]]:
     """Read ``ds`` one band of lat rows at a time and write each time step
-    and variable as local parquet pieces, in row order. Only one band is in
-    memory at once.
+    and variable as local parquet pieces, in row order. The next band is read
+    while this one is written, so at most two bands are in memory.
 
     Returns ``(pieces by (step, variable), rows by step)``.
     """
@@ -242,26 +243,49 @@ def _write_pieces(
         for k in steps
         for v in variables
     }
-    for band_start in range(0, n_i, band_rows):
-        last = band_start + band_rows >= n_i
-        # Drop the last band before reading the next, or both are held at once.
-        band = None
-        band = ds.isel(lat=slice(band_start, band_start + band_rows)).compute()
-        for k in steps:
-            for v in variables:
-                parts, carry[k, v] = _whole_blocks(
-                    carry[k, v], band[v].isel(time=k).values, band_start, last
-                )
-                for first_row, arr in parts:
-                    frame = _sparse_rows_for_slice(arr)
-                    frame["i"] += first_row
-                    path = os.path.join(
-                        piece_dir, f"{k}_{v}_{len(pieces[k, v])}.parquet"
+
+    def read(band_start: int) -> xr.Dataset:
+        return ds.isel(lat=slice(band_start, band_start + band_rows)).compute()
+
+    with ThreadPoolExecutor(max_workers=1) as reader:
+        next_band = reader.submit(read, 0)
+        for band_start in range(0, n_i, band_rows):
+            last = band_start + band_rows >= n_i
+            # Drop the last band before taking the next, or three are held.
+            band = None
+            band = next_band.result()
+            if not last:
+                next_band = reader.submit(read, band_start + band_rows)
+            for k in steps:
+                for v in variables:
+                    parts, carry[k, v] = _whole_blocks(
+                        carry[k, v], band[v].isel(time=k).values, band_start, last
                     )
-                    client.write_parquet(frame, path)
-                    pieces[k, v].append(path)
-                    rows[k] += len(frame)
+                    for first_row, arr in parts:
+                        frame = _sparse_rows_for_slice(arr)
+                        frame["i"] += first_row
+                        path = os.path.join(
+                            piece_dir, f"{k}_{v}_{len(pieces[k, v])}.parquet"
+                        )
+                        client.write_parquet(frame, path)
+                        pieces[k, v].append(path)
+                        rows[k] += len(frame)
     return pieces, rows
+
+
+# Files uploaded at once, each on one connection (see storage.upload_file).
+UPLOAD_WORKERS = 8
+
+
+def _upload_and_remove(
+    aws: AWSHelper, local_path: str, path: str, remove: set[str]
+) -> None:
+    """Upload ``local_path`` to ``path``, then delete ``remove`` to free the
+    disk; a chunk's pieces add up to the whole chunk."""
+    storage.upload_file(aws, local_path, path)
+    for local in remove:
+        with suppress(FileNotFoundError):
+            os.remove(local)
 
 
 def sync_store(
@@ -330,7 +354,11 @@ def sync_store(
     metadata_path = store_metadata_path(tiler_root_dir, store)
 
     aws = AWSHelper()
-    with TilerBatchDuckDBClient(duckdb_config) as client, TemporaryDirectory() as tmp:
+    with (
+        TilerBatchDuckDBClient(duckdb_config) as client,
+        TemporaryDirectory() as tmp,
+        ThreadPoolExecutor(max_workers=UPLOAD_WORKERS) as uploader,
+    ):
         for n, batch_raw_ts in enumerate(batches, start=1):
             ds = _open_batch(store, variables, batch_raw_ts)
             batch_ts_set = {_ts_native(t) for t in batch_raw_ts}
@@ -346,6 +374,7 @@ def sync_store(
                 pieces, rows = _write_pieces(
                     client, ds, variables, list(steps), piece_dir
                 )
+                uploads = []
                 for k, ts in steps.items():
                     if rows[k] == 0:
                         empty.add(ts)
@@ -355,18 +384,20 @@ def sync_store(
                         if len(pieces[k, v]) > 1:
                             local_path = os.path.join(piece_dir, f"{k}_{v}.parquet")
                             client.merge_parquet(pieces[k, v], local_path)
-                        storage.upload_file(
-                            aws,
-                            local_path,
-                            variable_parquet_path(tiler_root_dir, store, v, ts),
+                        uploads.append(
+                            uploader.submit(
+                                _upload_and_remove,
+                                aws,
+                                local_path,
+                                variable_parquet_path(tiler_root_dir, store, v, ts),
+                                {local_path, *pieces[k, v]},
+                            )
                         )
-                        # Free the disk as we go; the pieces add up to the
-                        # whole chunk.
-                        for path in {local_path, *pieces[k, v]}:
-                            with suppress(FileNotFoundError):
-                                os.remove(path)
                     converted.add(ts)
                     written.append(ts)
+                # The sidecar lists these files, so they must be up first.
+                for upload in uploads:
+                    upload.result()
 
             if changed:
                 write_metadata(aws, current(), tiler_root_dir, store)

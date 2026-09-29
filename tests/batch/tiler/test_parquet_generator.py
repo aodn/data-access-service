@@ -8,6 +8,7 @@ sidecar updates) is tested with a stubbed TilerBatchDuckDBClient and an
 in-memory stand-in for the S3 JSON reads and writes.
 """
 
+import time
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -369,11 +370,41 @@ def test_parquet_is_written_locally_then_uploaded(monkeypatch):
     _sync(monkeypatch, _fake_dataset(DAYS))
 
     assert env.uploads
-    assert len(env.written_locally) == len(env.uploads)
-    for local_path, (uploaded_from, s3_path) in zip(env.written_locally, env.uploads):
+    # Uploads run in parallel, so compare without order.
+    assert sorted(local for local, _ in env.uploads) == sorted(env.written_locally)
+    for local_path, s3_path in env.uploads:
         assert not local_path.startswith("s3://")
-        assert uploaded_from == local_path
         assert s3_path.startswith(OUTPUT_DIR)
+
+
+def test_sidecar_waits_for_slow_uploads(monkeypatch):
+    env = _Env(monkeypatch)
+    upload = env._upload_file
+
+    def slow_upload(aws, local_path, path):
+        time.sleep(0.05)
+        upload(aws, local_path, path)
+
+    monkeypatch.setattr(gen.storage, "upload_file", slow_upload)
+
+    _sync(monkeypatch, _fake_dataset(DAYS), ("v", "flag"))
+
+    # One day per zarr time chunk: both variables' files, then the sidecar.
+    kinds = [kind for kind, _ in env.events]
+    assert kinds == ["parquet", "parquet", "json"] * 3
+
+
+def test_failed_upload_leaves_the_sidecar_unwritten(monkeypatch):
+    env = _Env(monkeypatch)
+
+    def failing_upload(aws, local_path, path):
+        raise OSError("upload failed")
+
+    monkeypatch.setattr(gen.storage, "upload_file", failing_upload)
+
+    with pytest.raises(OSError, match="upload failed"):
+        _sync(monkeypatch, _fake_dataset(DAYS))
+    assert SIDECAR not in env.json
 
 
 def test_all_empty_timestamp_is_recorded_and_not_read_again(monkeypatch):
