@@ -102,5 +102,5 @@ def test_duckdb_out_of_memory_returns_503(client):
             "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/5/0/0.png?date=2024-01-01T00:00:00Z",
         )
     assert response.status_code == 503
-    assert response.headers["retry-after"] == "5"
+    assert response.headers["retry-after"] == "3"
     assert response.headers["cache-control"] == "no-store"
