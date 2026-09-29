@@ -180,7 +180,7 @@ tiler:
       use_fork_process: True
       duckdb:
         duckdb_temp_dir: "tiler_batch_duckdb_tmp"
-        memory_limit: "4G"
+        memory_limit: "512MB"
         threads: 4
   catalog:
     blacklist:

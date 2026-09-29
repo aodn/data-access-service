@@ -991,6 +991,14 @@ class TilerBatchDuckDBClient(DuckDBClient):
         finally:
             con.unregister("_frame")
 
+    def merge_parquet(self, paths: Sequence[str], path: str) -> None:
+        """Join the parquet files ``paths``, rows in order, into one at ``path``."""
+        files = ", ".join(sql_literal(p) for p in paths)
+        self.get_instance().execute(
+            f"COPY (SELECT * FROM read_parquet([{files}])) "
+            f"TO {sql_literal(path)} (FORMAT PARQUET)"
+        )
+
     def close(self) -> None:
         if self._con is not None:
             self._con.close()

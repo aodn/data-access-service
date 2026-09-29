@@ -33,6 +33,25 @@ def test_write_parquet_round_trips(tmp_path):
     assert rows == [(1, "x"), (2, "y")]
 
 
+def test_merge_parquet_keeps_file_and_row_order(tmp_path):
+    config = TilerBatchDuckDBConfig(
+        memory_limit="128MB", threads=4, duckdb_temp_dir="test_tiler_batch_"
+    )
+    paths = []
+    with TilerBatchDuckDBClient(config) as client:
+        # Several row groups per file, so threads could reorder them.
+        for n in range(3):
+            path = str(tmp_path / f"piece_{n}.parquet")
+            client.write_parquet(
+                pd.DataFrame({"a": range(n * 300_000, (n + 1) * 300_000)}), path
+            )
+            paths.append(path)
+        out = str(tmp_path / "out.parquet")
+        client.merge_parquet(paths, out)
+
+    assert list(pd.read_parquet(out)["a"]) == list(range(900_000))
+
+
 def test_execute_binds_params():
     with TilerBatchDuckDBClient(CONFIG) as client:
         (value,) = client.execute("SELECT ? + ?", [1, 2]).fetchone()

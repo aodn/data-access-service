@@ -50,7 +50,7 @@ def clear_stores():
     close_all_stores()
 
 
-def test_resolve_zarr_source_passes_chunks_none(monkeypatch):
+def test_resolve_zarr_source_passes_chunks_none_and_pool_size(monkeypatch):
     """Tiler opens stores with chunks=None so dask graphs are not built at open."""
     from aodn_cloud_optimised.lib import DataQuery
 
@@ -64,12 +64,20 @@ def test_resolve_zarr_source_passes_chunks_none(monkeypatch):
             return source
 
     # isinstance check in _resolve_zarr_source uses DataQuery.ZarrDataSource
-    monkeypatch.setattr(DataQuery, "GetAodn", lambda: _FakeGetAodn())
+    def _get_aodn(s3_fs_opts=None):
+        captured["s3_fs_opts"] = s3_fs_opts
+        return _FakeGetAodn()
+
+    monkeypatch.setattr(DataQuery, "GetAodn", _get_aodn)
     monkeypatch.setattr(DataQuery, "ZarrDataSource", _FakeZarrSource)
 
     result = _resolve_zarr_source("foo")
     assert result is source
-    assert captured == {"key": "foo.zarr", "chunks": None}
+    assert captured == {
+        "key": "foo.zarr",
+        "chunks": None,
+        "s3_fs_opts": {"config_kwargs": {"max_pool_connections": 64}},
+    }
 
 
 def test_get_store_raises_when_lat_missing(monkeypatch):

@@ -30,11 +30,12 @@ def test_write_json_uploads_fileobj_to_s3():
     assert file_obj.read() == b'{"a": 1}'
 
 
-def test_upload_file_uploads_to_s3():
+def test_upload_file_uploads_to_s3_on_one_connection():
     helper = MagicMock()
 
     storage.upload_file(helper, "/tmp/slice.parquet", "s3://bucket/a/b.parquet")
 
-    helper.upload_file_to_s3.assert_called_once_with(
-        "/tmp/slice.parquet", "bucket", "a/b.parquet"
-    )
+    helper.s3.upload_file.assert_called_once()
+    args, kwargs = helper.s3.upload_file.call_args
+    assert args == ("/tmp/slice.parquet", "bucket", "a/b.parquet")
+    assert kwargs["Config"].use_threads is False

@@ -46,10 +46,16 @@ def _normalise_coords(ds: xr.Dataset, store: str) -> xr.Dataset:
     return ds.sortby("time")
 
 
+# A band reads many zarr chunks at once; s3fs allows only 10 connections by default.
+_S3_MAX_POOL_CONNECTIONS = 64
+
+
 def _resolve_zarr_source(store: str) -> ZarrDataSource:
     """Open ``{store}.zarr`` without dask."""
     key = f"{store}.zarr"
-    source = DataQuery.GetAodn().get_dataset(key, chunks=None)
+    source = DataQuery.GetAodn(
+        s3_fs_opts={"config_kwargs": {"max_pool_connections": _S3_MAX_POOL_CONNECTIONS}}
+    ).get_dataset(key, chunks=None)
     if not isinstance(source, DataQuery.ZarrDataSource):
         raise TypeError(
             f"Expected ZarrDataSource for {key!r}, got {type(source).__name__}"
