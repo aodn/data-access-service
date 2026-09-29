@@ -6,6 +6,7 @@ from typing import AsyncGenerator, Callable, Generator, Any
 
 from fastapi.responses import StreamingResponse
 from data_access_service.core.constants import STATUS, MESSAGE, DATA
+from data_access_service.utils.log_context import current_context
 
 # debugging purpose, will use application logger later.
 import logging
@@ -56,7 +57,6 @@ async def _collect_records(
 
 
 async def sse_wrapper(
-    request_id: str,
     async_function: Callable[..., AsyncGenerator[dict, None]],
     *function_args,
 ):
@@ -74,7 +74,6 @@ async def sse_wrapper(
     - Sends a final chunk with '/end' suffix so the caller knows all data
       has been delivered.
 
-    :param request_id: Unique ID for debug tracing
     :param async_function: Async generator function that produces data records
     :param function_args: Arguments to pass to async_function
     """
@@ -83,13 +82,13 @@ async def sse_wrapper(
         HEART_BEAT_INTERVAL  # Send processing message every 10 seconds
     )
     chunk_size: int = DEFAULT_CHUNK_SIZE * 2  # Number of records consume before chunks
+    # Also sent to the client in processing events
+    request_id = current_context().get("request_id")
 
     async def sse_stream():
         try:
             # debug the sse process
-            logger.debug(
-                "SSE started the initial processing, request_id=%s", request_id
-            )
+            logger.debug("SSE started the initial processing")
 
             # Send initial processing message
             yield format_sse(
@@ -129,7 +128,7 @@ async def sse_wrapper(
                         },
                         "processing",
                     )
-                    logger.debug("SSE heartbeat sent, request_id=%s", request_id)
+                    logger.debug("SSE heartbeat sent")
                     last_sent_sse = time.time()
                 # Small sleep to prevent busy-waiting while still checking task completion frequently enough.
                 await asyncio.sleep(0.1)
@@ -186,16 +185,14 @@ async def sse_wrapper(
                     },
                     "result",
                 )
-            logger.debug("SSE request completed, request_id=%s", request_id)
+            logger.debug("SSE request completed")
 
         except CancelledError:
-            logger.debug("SSE request cancelled, request_id=%s", request_id)
+            logger.debug("SSE request cancelled")
             raise
 
         except Exception as e:
-            logger.error(
-                "SSE request failed, request_id=%s, error=%s", request_id, str(e)
-            )
+            logger.exception("SSE request failed")
             yield format_sse({STATUS: "error", MESSAGE: str(e)}, "error")
 
     return StreamingResponse(

@@ -18,7 +18,10 @@ from data_access_service.core.estimation_index import (
 from data_access_service.core.estimation_index import (
     init_client as init_estimation_client,
 )
-from data_access_service.core.middleware import configure_gzip_middleware
+from data_access_service.core.middleware import (
+    configure_gzip_middleware,
+    configure_request_context_middleware,
+)
 from data_access_service.core.routes import router as api_router
 from data_access_service.core.scheduler import TaskScheduler
 from data_access_service.core.tiler_routes import router as tiler_router
@@ -127,6 +130,7 @@ async def lifespan(application: FastAPI):
 
 app = FastAPI(lifespan=lifespan, title="Data Access Service")
 configure_gzip_middleware(app)
+configure_request_context_middleware(app)
 
 app.include_router(api_router)
 app.include_router(tiler_router)
