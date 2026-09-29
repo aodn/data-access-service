@@ -181,7 +181,7 @@ tiler:
       regenerate_all: True
       use_fork_process: True
       duckdb:
-        temp_dir_prefix: "tiler_batch_duckdb_tmp"
+        duckdb_temp_dir: "tiler_batch_duckdb_tmp"
         memory_limit: "512MB"
         threads: 4
   catalog:

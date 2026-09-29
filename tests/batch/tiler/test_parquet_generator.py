@@ -518,7 +518,7 @@ def _sync_real_files(monkeypatch) -> dict[str, pd.DataFrame]:
         ["v"],
         OUTPUT_DIR,
         duckdb_config=TilerBatchDuckDBConfig(
-            memory_limit="128MB", threads=2, temp_dir_prefix="test_band_"
+            memory_limit="128MB", threads=2, duckdb_temp_dir="test_band_"
         ),
     )
     assert env.json[SIDECAR]["empty_timestamps"] == [_ts(2)]

@@ -35,7 +35,7 @@ def test_write_parquet_round_trips(tmp_path):
 
 def test_merge_parquet_keeps_file_and_row_order(tmp_path):
     config = TilerBatchDuckDBConfig(
-        memory_limit="128MB", threads=4, temp_dir_prefix="test_tiler_batch_"
+        memory_limit="128MB", threads=4, duckdb_temp_dir="test_tiler_batch_"
     )
     paths = []
     with TilerBatchDuckDBClient(config) as client:
