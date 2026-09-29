@@ -58,15 +58,11 @@ def init_log(config: Config):
             handler.setFormatter(json_formatter)
         install_exception_hooks()
 
-    # request_id/job_id from bind_log_context; idempotent for the handler
-    # log_config.yaml already gave the ContextFilter.
     for handler in logging.getLogger().handlers:
         install_context_filter(handler)
 
-    # aodn_cloud_optimised gives "aodn.GetAodn" its own plain-text
-    # StreamHandler with propagate=False, unless the logger already has a
-    # handler. Claim that slot with a NullHandler so its records propagate to
-    # root and come out in the active (JSON or text) format.
+    # aodn_cloud_optimised adds its own text handler (propagate=False) only if
+    # none exists; a NullHandler blocks that so records reach root's format.
     aodn_logger = logging.getLogger("aodn.GetAodn")
     aodn_logger.handlers = [logging.NullHandler()]
     aodn_logger.propagate = True

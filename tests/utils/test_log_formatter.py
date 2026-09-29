@@ -430,8 +430,9 @@ runpy.run_path("entry_point.py", run_name="__main__")
 @pytest.mark.parametrize("profile", ["edge", "staging", "prod"])
 def test_batch_entry_point_logs_json_with_job_id(profile):
     """Runs the real entry_point.py (Batch describe_jobs stubbed) in a clean
-    interpreter: every line is JSON and carries job_id, including the line
-    logged from a batch/ submodule."""
+    interpreter: every record from "Job started" on carries job_id, including
+    the one logged from a batch/ submodule. Records logged while modules
+    import (before the job is bound) cannot carry it."""
     env = {
         k: v
         for k, v in os.environ.items()
@@ -459,7 +460,10 @@ def test_batch_entry_point_logs_json_with_job_id(profile):
         "data_access_service.batch.sites_parquet.refresher"
     )
     assert submodule["job_id"] == "job-1234"
-    assert by_message["Job started"]["job_id"] == "job-1234"
+    started = next(i for i, p in enumerate(payloads) if p["message"] == "Job started")
+    assert all(p.get("job_id") == "job-1234" for p in payloads[started:])
+    # The old unbound "Job ID:..." line is gone; job_id lives in the field.
+    assert not any(p["message"].startswith("Job ID:") for p in payloads)
 
 
 FAILING_BATCH_SNIPPET = BATCH_SNIPPET.replace(

@@ -26,7 +26,6 @@ logger = init_log(Config.get_config())
 config = Config.get_config()
 # Get the job ID from the environment variable
 job_id = os.getenv("AWS_BATCH_JOB_ID")
-logger.info(f"Job ID:{job_id}")
 
 
 def _parse_local_job_parameters(raw: str | None) -> dict:
@@ -202,15 +201,12 @@ def run_job() -> None:
             logger.error("Unknown call type: %s", call_type)
 
 
-# Every log line from here on, including batch/ submodules, carries job_id.
-# Threads outside asyncio (e.g. dask workers) start with an empty context and
-# will not; forked children (tiler generator) inherit it.
+# Plain threads (e.g. dask workers) start with an empty context and lack job_id.
 with bind_log_context(**({"job_id": job_id} if job_id else {})):
     logger.info("Job started")
     try:
         run_job()
     except Exception:
-        # Log here, while job_id is still bound - an uncaught exception would
-        # reach sys.excepthook after the context is reset and lose it.
+        # Log while job_id is bound; sys.excepthook would run after reset.
         logger.exception("Job failed")
         sys.exit(1)

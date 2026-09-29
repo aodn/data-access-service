@@ -229,7 +229,6 @@ async def get_data(
     end_depth: float | None = Query(default=-1.0),
     f: str | None = Query(default="json"),
 ):
-    # request_id is bound by RequestContextMiddleware and added to every log line
     logger.debug("Receiving request")
 
     logger.info(

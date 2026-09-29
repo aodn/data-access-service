@@ -82,8 +82,7 @@ async def sse_wrapper(
         HEART_BEAT_INTERVAL  # Send processing message every 10 seconds
     )
     chunk_size: int = DEFAULT_CHUNK_SIZE * 2  # Number of records consume before chunks
-    # Bound by RequestContextMiddleware; logs get it automatically, but the
-    # client also receives it in the processing events.
+    # Also sent to the client in processing events
     request_id = current_context().get("request_id")
 
     async def sse_stream():
@@ -193,7 +192,7 @@ async def sse_wrapper(
             raise
 
         except Exception as e:
-            logger.error("SSE request failed, error=%s", str(e))
+            logger.exception("SSE request failed")
             yield format_sse({STATUS: "error", MESSAGE: str(e)}, "error")
 
     return StreamingResponse(

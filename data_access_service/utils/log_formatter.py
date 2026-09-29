@@ -12,9 +12,8 @@ SERVICE_NAME = "data-access-service"
 TEXT_LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 TEXT_LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
-# Standard LogRecord attributes. Anything else on a record came from a caller's
-# extra={...} or from ContextFilter (request_id/job_id) and is emitted as a
-# top-level JSON field.
+# Standard LogRecord attributes; anything else (extra=, ContextFilter) is
+# emitted as a top-level JSON field.
 _RESERVED_RECORD_ATTRS = frozenset(
     {
         "args",
@@ -47,9 +46,8 @@ _RESERVED_RECORD_ATTRS = frozenset(
 
 
 class JsonLogFormatter(logging.Formatter):
-    """Field names match what es-indexer/ogcapi-java already emit via log4j2's
-    JsonTemplateLayout (instant/level/loggerName/message/service/threadId, plus
-    thrown on exceptions) so CloudWatch queries work across services."""
+    """Field names match es-indexer/ogcapi-java's log4j2 JsonTemplateLayout so
+    CloudWatch queries work across services."""
 
     def format(self, record: logging.LogRecord) -> str:
         payload = {
@@ -97,14 +95,9 @@ def build_formatter(
 
 
 def install_exception_hooks() -> None:
-    """Log uncaught exceptions - on the main thread (sys.excepthook) and in
-    threading.Thread workers (threading.excepthook) - as one record with
-    thrown, instead of a raw multi-line traceback on stderr. Exit codes are
-    unchanged; KeyboardInterrupt keeps the default behaviour.
-
-    Bound request_id/job_id are usually absent from these records: by the
-    time a hook runs, the exception has already left bind_log_context /
-    copy_context().run and the context is reset."""
+    """Log uncaught exceptions (main and worker threads) as one JSON record
+    instead of a raw traceback. The bound context is already reset by then,
+    so request_id/job_id are usually absent."""
     logger = logging.getLogger("uncaught")
 
     def excepthook(exc_type, exc_value, exc_tb):

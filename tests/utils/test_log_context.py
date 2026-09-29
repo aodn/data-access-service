@@ -7,7 +7,7 @@ import threading
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
@@ -31,8 +31,7 @@ UUID4 = re.compile(
 
 
 class _ListHandler(logging.Handler):
-    """Collects formatted JSON lines, with ContextFilter attached like the real
-    handlers from log_config.yaml / init_log."""
+    """Collects formatted JSON lines, with ContextFilter like the real handlers."""
 
     def __init__(self):
         super().__init__(level=logging.DEBUG)
@@ -124,19 +123,17 @@ def test_bound_fields_are_top_level_json(captured):
     assert _by_message(captured, "bound line")[0]["request_id"] == "r-json"
 
 
-# -- Risk 1: propagation across asyncio.to_thread + a nested event loop --------
+# -- asyncio.to_thread + nested event loop ------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_context_survives_to_thread_plus_nested_event_loop(captured):
-    """The bare primitive sse_wrapper relies on: to_thread copies the context,
-    and the Task run_until_complete creates on the fresh loop copies it again."""
+    """to_thread copies the context, and the nested loop's Task copies it again."""
     log = logging.getLogger("das.test.nested")
 
     async def inner():
         await asyncio.sleep(0)
         log.info("inner coroutine")
-        # A task spawned inside the nested loop inherits it too.
         await asyncio.create_task(asyncio.sleep(0))
         log.info("after nested task")
 
@@ -158,9 +155,8 @@ async def test_context_survives_to_thread_plus_nested_event_loop(captured):
 
 @pytest.mark.asyncio
 async def test_sse_wrapper_propagates_request_id_into_fetch_generator(captured):
-    """Drives the real sse_wrapper: logs from inside the async generator it runs
-    on a worker thread + fresh event loop must carry the bound request_id, and
-    the SSE 'processing' event still returns it to the caller."""
+    """Real sse_wrapper: generator logs carry request_id, and the processing
+    event returns it to the client."""
     log = logging.getLogger("das.test.fetch")
 
     async def fake_fetch(n):
@@ -170,8 +166,7 @@ async def test_sse_wrapper_propagates_request_id_into_fetch_generator(captured):
             yield {"i": i}
         log.info("fetch finished")
 
-    # Starlette streams the body inside the request's context (the middleware
-    # task), so consume it inside the bind here too.
+    # Starlette streams the body inside the request's context
     with bind_log_context(request_id="sse-req-1"):
         response = await sse_wrapper(fake_fetch, 3)
         body = "".join([chunk async for chunk in response.body_iterator])
@@ -195,11 +190,28 @@ async def test_sse_wrapper_propagates_request_id_into_fetch_generator(captured):
 
 
 @pytest.mark.asyncio
+async def test_sse_wrapper_failure_is_logged_with_thrown_and_request_id(captured):
+    async def failing_fetch():
+        raise ValueError("bad column")
+        yield  # pragma: no cover - makes this an async generator
+
+    with bind_log_context(request_id="sse-fail-1"):
+        response = await sse_wrapper(failing_fetch)
+        body = "".join([chunk async for chunk in response.body_iterator])
+
+    assert "event: error" in body
+    assert '"message": "bad column"' in body  # client still gets str(e)
+    failed = _by_message(captured, "SSE request failed")[0]
+    assert failed["level"] == "ERROR"
+    assert failed["request_id"] == "sse-fail-1"
+    assert failed["thrown"]["name"] == "ValueError"
+    assert failed["thrown"]["message"] == "bad column"
+
+
+@pytest.mark.asyncio
 async def test_generator_body_runs_in_the_consumers_context(captured):
-    """An async generator does not capture the context it was created in; its
-    body sees whatever context iterates it. That is why RequestContextMiddleware
-    must cover the whole response, streaming included - binding only around the
-    handler call would not reach an SSE body."""
+    """An async generator sees the context that iterates it, not the one that
+    created it, so the middleware must cover the streamed body too."""
     log = logging.getLogger("das.test.gen")
 
     async def gen():
@@ -214,9 +226,7 @@ async def test_generator_body_runs_in_the_consumers_context(captured):
 
 
 def test_plain_thread_does_not_inherit_context_without_copy(captured):
-    """Negative control: why async_response_json wraps its thread target in
-    copy_context().run. If this starts failing, Python changed thread context
-    inheritance and that wrapper may be redundant."""
+    """Why async_response_json uses copy_context().run for its thread."""
     log = logging.getLogger("das.test.thread")
     with bind_log_context(request_id="lost"):
         t = threading.Thread(target=lambda: log.info("bare thread"))
@@ -292,7 +302,6 @@ def test_middleware_binds_one_request_id_per_request(captured):
     assert first != second
     assert _by_message(captured, "async handler")[0]["request_id"] == first
     assert _by_message(captured, "sync handler")[0]["request_id"] == second
-    # Nothing leaks back into the caller's context once the request is done.
     assert dict(current_context()) == {}
 
 
@@ -310,13 +319,36 @@ def test_middleware_request_id_reaches_streaming_body(captured):
     assert UUID4.match(ids.pop())
 
 
-def test_middleware_request_id_on_unhandled_exception_log(captured):
-    client = TestClient(_mini_app(), raise_server_exceptions=False)
-    assert client.get("/boom").status_code == 500
-    # Starlette's ServerErrorMiddleware sits outside user middleware, so its
-    # traceback log is outside the bound context; the middleware must not have
-    # swallowed the error or left the context bound.
+def test_middleware_logs_unhandled_exception_with_request_id(captured):
+    """Unhandled errors are logged once, with request_id and thrown."""
+    client = TestClient(_mini_app())  # raise_server_exceptions=True: nothing escapes
+
+    response = client.get("/boom")
+
+    assert response.status_code == 500
+    assert response.text == "Internal Server Error"
+    errors = [p for p in captured.payloads() if p["level"] == "ERROR"]
+    assert len(errors) == 1, errors
+    (error,) = errors
+    assert error["message"] == "Unhandled error processing GET /boom"
+    assert UUID4.match(error["request_id"])
+    assert error["thrown"]["name"] == "RuntimeError"
+    assert error["thrown"]["message"] == "handler failed"
     assert dict(current_context()) == {}
+
+
+def test_middleware_leaves_handled_errors_to_fastapi(captured):
+    """HTTPException is not logged as an unhandled error."""
+    app = _mini_app()
+
+    @app.get("/missing")
+    async def missing_route():
+        raise HTTPException(status_code=404, detail="nope")
+
+    response = TestClient(app).get("/missing")
+
+    assert response.status_code == 404
+    assert not [p for p in captured.payloads() if p["level"] == "ERROR"]
 
 
 def test_server_app_registers_request_context_middleware():
@@ -330,8 +362,7 @@ def test_server_app_registers_request_context_middleware():
 
 @pytest.fixture
 def data_client(monkeypatch):
-    """The real server app with auth/readiness stubbed and fetch_data replaced
-    by a generator that logs from 'deep' inside the fetch path."""
+    """Real server app with auth/readiness stubbed and a logging fetch_data."""
     from data_access_service.core.routes import data as data_routes
     from data_access_service.core.routes.auth import api_key_auth
     from data_access_service.core.routes.helpers import require_api_ready
@@ -347,7 +378,6 @@ def data_client(monkeypatch):
     monkeypatch.setattr(data_routes, "fetch_data", fake_fetch)
     app.dependency_overrides[api_key_auth] = lambda: "key"
     app.dependency_overrides[require_api_ready] = lambda: MagicMock()
-    # No lifespan: we only need routing + middleware.
     yield TestClient(app)
     app.dependency_overrides.clear()
 
