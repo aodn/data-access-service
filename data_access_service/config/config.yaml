@@ -186,6 +186,7 @@ tiler:
         threads: 4
   catalog:
     blacklist:
+      # curvilinear grids zarrs.
       - radar_Newcastle_velocity_hourly_averaged_delayed_qc
       - radar_Newcastle_velocity_hourly_averaged_realtime_nonqc
       - radar_TurquoiseCoast_velocity_hourly_averaged_realtime_nonqc
@@ -194,6 +195,7 @@ tiler:
       - radar_BonneyCoast_velocity_hourly_averaged_delayed_qc
       - radar_TurquoiseCoast_velocity_hourly_averaged_delayed_qc
       - radar_CoralCoast_velocity_hourly_averaged_delayed_qc
+      # particle visualisation only, no one used.
       - radar_CapricornBunkerGroup_velocity_hourly_averaged_delayed_qc
       - radar_CapricornBunkerGroup_velocity_hourly_averaged_realtime_nonqc
       - radar_CoffsHarbour_velocity_hourly_averaged_delayed_qc
