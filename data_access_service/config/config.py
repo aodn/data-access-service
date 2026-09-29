@@ -450,6 +450,7 @@ class Config:
             duckdb=TilerDuckDBConfig(
                 memory_limit=duckdb["memory_limit"],
                 threads=int(duckdb["threads"]),
+                duckdb_temp_dir=duckdb["duckdb_temp_dir"],
                 enable_external_file_cache=bool(duckdb["enable_external_file_cache"]),
                 parquet_metadata_cache=bool(duckdb["parquet_metadata_cache"]),
                 enable_http_metadata_cache=bool(duckdb["enable_http_metadata_cache"]),
@@ -468,7 +469,7 @@ class Config:
             duckdb=TilerBatchDuckDBConfig(
                 memory_limit=duckdb["memory_limit"],
                 threads=int(duckdb["threads"]),
-                temp_dir_prefix=duckdb["temp_dir_prefix"],
+                duckdb_temp_dir=duckdb["duckdb_temp_dir"],
             ),
         )
 

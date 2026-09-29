@@ -1,7 +1,11 @@
 import json
+import os
+import subprocess
 import logging
 import logging.config
 import re
+import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,8 +14,10 @@ import yaml
 
 from data_access_service import init_log
 from data_access_service.config.config import EnvType
+from data_access_service.utils.log_context import ContextFilter, bind_log_context
 from data_access_service.utils.log_formatter import (
     TEXT_LOG_DATE_FORMAT,
+    SERVICE_NAME,
     JsonLogFormatter,
     build_formatter,
     use_json_logs,
@@ -24,6 +30,7 @@ CONFIGURED_LOGGERS = [
     "botocore",
     "s3fs",
     "aiobotocore",
+    "aodn.GetAodn",
 ]
 
 
@@ -153,10 +160,30 @@ def test_json_formatter_produces_valid_json_with_required_fields():
     payload = json.loads(output)
 
     assert payload["level"] == "INFO"
-    assert payload["logger"] == "test.logger"
+    assert payload["loggerName"] == "test.logger"
     assert payload["message"] == "hello"
-    assert "timestamp" in payload
-    assert "exception" not in payload
+    assert payload["service"] == SERVICE_NAME == "data-access-service"
+    assert payload["threadId"] == threading.get_ident()
+    assert "thrown" not in payload
+    # Pre-alignment field names must be gone (CloudWatch queries match literally).
+    assert not {"timestamp", "logger", "exception"} & payload.keys()
+
+
+def test_json_formatter_instant_is_utc_millis_with_z_suffix():
+    record = _make_record()
+    record.created = 1_780_000_000.5249  # fixed point in time
+
+    instant = json.loads(JsonLogFormatter().format(record))["instant"]
+
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", instant)
+    assert instant == "2026-05-28T20:26:40.524Z"
+
+
+def test_json_formatter_interpolates_args():
+    record = _make_record(msg="value=%s count=%d")
+    record.args = ("x", 3)
+
+    assert json.loads(JsonLogFormatter().format(record))["message"] == "value=x count=3"
 
 
 def test_json_formatter_multiline_message_stays_one_json_line():
@@ -166,12 +193,10 @@ def test_json_formatter_multiline_message_stays_one_json_line():
     assert json.loads(output)["message"] == "line1\nline2"
 
 
-def test_json_formatter_captures_exception_from_exc_info():
+def test_json_formatter_captures_exception_as_thrown():
     try:
         raise ValueError("boom")
     except ValueError:
-        import sys
-
         record = _make_record(
             msg="failed", level=logging.ERROR, exc_info=sys.exc_info()
         )
@@ -180,7 +205,11 @@ def test_json_formatter_captures_exception_from_exc_info():
     payload = json.loads(output)
 
     assert "\n" not in output
-    assert "ValueError: boom" in payload["exception"]
+    assert payload["thrown"]["name"] == "ValueError"
+    assert payload["thrown"]["message"] == "boom"
+    assert payload["thrown"]["extendedStackTrace"].startswith("Traceback")
+    assert "ValueError: boom" in payload["thrown"]["extendedStackTrace"]
+    assert "exc_info" not in payload
 
 
 def test_json_formatter_uses_cached_exc_text_when_no_exc_info():
@@ -189,7 +218,67 @@ def test_json_formatter_uses_cached_exc_text_when_no_exc_info():
 
     payload = json.loads(JsonLogFormatter().format(record))
 
-    assert payload["exception"] == "Traceback (most recent call last):\ncached"
+    assert payload["thrown"] == {
+        "extendedStackTrace": "Traceback (most recent call last):\ncached"
+    }
+
+
+def test_json_formatter_flattens_extra_fields_to_top_level():
+    logger = logging.getLogger("das.test.extra")
+    records = []
+    handler = logging.Handler()
+    handler.emit = records.append
+    logger.addHandler(handler)
+    try:
+        logger.warning("with extra", extra={"dataset": "abc", "rows": 42})
+    finally:
+        logger.removeHandler(handler)
+
+    payload = json.loads(JsonLogFormatter().format(records[0]))
+
+    assert payload["dataset"] == "abc"
+    assert payload["rows"] == 42
+    # No standard LogRecord internals leak through.
+    assert not {"args", "msg", "pathname", "lineno", "levelno", "thread"} & (
+        payload.keys()
+    )
+
+
+def test_json_formatter_extra_cannot_override_core_fields():
+    record = _make_record(msg="core wins")
+    record.service = "spoofed"
+    record.instant = "spoofed"
+
+    payload = json.loads(JsonLogFormatter().format(record))
+
+    assert payload["service"] == "data-access-service"
+    assert payload["instant"] != "spoofed"
+
+
+def test_json_formatter_drops_uvicorn_color_message():
+    record = _make_record(msg="Started server process [%d]")
+    record.args = (1,)
+    record.color_message = "Started server process [\x1b[36m%d\x1b[0m]"
+
+    payload = json.loads(JsonLogFormatter().format(record))
+
+    assert "color_message" not in payload
+    assert payload["message"] == "Started server process [1]"
+
+
+def test_json_formatter_non_serializable_extra_does_not_raise():
+    class Opaque:
+        def __str__(self):
+            return "<opaque>"
+
+    record = _make_record(msg="odd value")
+    record.thing = Opaque()
+    record.raw = b"bytes"
+
+    payload = json.loads(JsonLogFormatter().format(record))
+
+    assert payload["thing"] == "<opaque>"
+    assert payload["raw"] == "b'bytes'"
 
 
 # -- log_config.yaml through dictConfig -----------------------------------------------------------
@@ -220,7 +309,9 @@ def test_yaml_config_emits_one_json_line_per_record_no_duplicates(
 
     for line in out_lines + err_lines:
         payload = json.loads(line)
-        assert {"timestamp", "level", "logger", "message"} <= payload.keys()
+        assert {"instant", "level", "loggerName", "message", "service"} <= (
+            payload.keys()
+        )
 
 
 # -- init_log -----------------------------------------------------------
@@ -277,3 +368,268 @@ def test_init_log_keeps_text_output_on_text_profiles(
     with pytest.raises(json.JSONDecodeError):
         json.loads(lines[0])
     assert "text profile line" in lines[0]
+
+
+# -- request/job context wiring -----------------------------------------------------------
+
+
+@pytest.mark.parametrize("profile", ["edge", "staging", "prod"])
+def test_yaml_handlers_carry_bound_request_id(
+    profile, monkeypatch, capsys, clean_logging
+):
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("PROFILE", profile)
+
+    with open(LOG_CONFIG_PATH) as f:
+        logging.config.dictConfig(yaml.safe_load(f))
+
+    with bind_log_context(request_id="req-yaml"):
+        logging.getLogger("uvicorn.access").info("GET /health 200")
+        logging.getLogger("das.module").warning("from root")
+
+    captured = capsys.readouterr()
+    access = json.loads(captured.out.strip())
+    root = json.loads(captured.err.strip())
+    assert access["request_id"] == root["request_id"] == "req-yaml"
+
+
+@pytest.mark.parametrize("profile", ["edge", "dev"])
+def test_init_log_installs_context_filter_once(
+    profile, monkeypatch, capsys, clean_logging
+):
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("PROFILE", profile)
+    logging.getLogger().handlers = []
+
+    init_log(SimpleNamespace(LOGLEVEL=logging.DEBUG))
+    init_log(SimpleNamespace(LOGLEVEL=logging.DEBUG))
+
+    (handler,) = logging.getLogger().handlers
+    assert sum(isinstance(f, ContextFilter) for f in handler.filters) == 1
+
+
+BATCH_SNIPPET = """
+import logging, runpy, sys
+from unittest.mock import MagicMock
+import boto3
+from data_access_service.batch.sites_parquet import refresher
+
+def fake_refresh():
+    logging.getLogger(refresher.__name__).warning("refreshing from batch submodule")
+
+refresher.refresh_sites_parquet_snapshots = fake_refresh
+batch = MagicMock()
+batch.describe_jobs.return_value = {
+    "jobs": [{"parameters": {"type": "refresh-sites-parquet"}}]
+}
+boto3.client = lambda *a, **k: batch
+runpy.run_path("entry_point.py", run_name="__main__")
+"""
+
+
+@pytest.mark.parametrize("profile", ["edge", "staging", "prod"])
+def test_batch_entry_point_logs_json_with_job_id(profile):
+    """Runs the real entry_point.py (Batch describe_jobs stubbed) in a clean
+    interpreter: every record from "Job started" on carries job_id, including
+    the one logged from a batch/ submodule. Records logged while modules
+    import (before the job is bound) cannot carry it."""
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("PYTEST_CURRENT_TEST", "PROFILE")
+    }
+    env.update(PROFILE=profile, AWS_BATCH_JOB_ID="job-1234", AWS_DEFAULT_REGION="x")
+    result = subprocess.run(
+        [sys.executable, "-c", BATCH_SNIPPET],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=LOG_CONFIG_PATH.parent,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+
+    payloads = []
+    for line in result.stderr.splitlines():
+        if line.startswith("{"):
+            payloads.append(json.loads(line))
+    by_message = {p["message"]: p for p in payloads}
+
+    submodule = by_message["refreshing from batch submodule"]
+    assert submodule["loggerName"] == (
+        "data_access_service.batch.sites_parquet.refresher"
+    )
+    assert submodule["job_id"] == "job-1234"
+    started = next(i for i, p in enumerate(payloads) if p["message"] == "Job started")
+    assert all(p.get("job_id") == "job-1234" for p in payloads[started:])
+    # The old unbound "Job ID:..." line is gone; job_id lives in the field.
+    assert not any(p["message"].startswith("Job ID:") for p in payloads)
+
+
+FAILING_BATCH_SNIPPET = BATCH_SNIPPET.replace(
+    'logging.getLogger(refresher.__name__).warning("refreshing from batch submodule")',
+    'raise RuntimeError("snapshot write failed")',
+)
+
+
+@pytest.mark.parametrize("profile", ["edge", "staging", "prod"])
+def test_batch_job_failure_is_logged_with_job_id(profile):
+    """A job that raises exits 1 and logs one JSON record carrying job_id and
+    the traceback - logged inside the bound context, so unlike the generic
+    uncaught-exception hook the record keeps job_id."""
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("PYTEST_CURRENT_TEST", "PROFILE")
+    }
+    env.update(PROFILE=profile, AWS_BATCH_JOB_ID="job-1234", AWS_DEFAULT_REGION="x")
+    result = subprocess.run(
+        [sys.executable, "-c", FAILING_BATCH_SNIPPET],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=LOG_CONFIG_PATH.parent,
+        timeout=120,
+    )
+
+    assert result.returncode == 1, result.stderr
+    # no raw traceback lines outside JSON records
+    assert not any(line.startswith("Traceback") for line in result.stderr.splitlines())
+    payloads = [
+        json.loads(line) for line in result.stderr.splitlines() if line.startswith("{")
+    ]
+    errors = [p for p in payloads if p["level"] in ("ERROR", "CRITICAL")]
+    assert len(errors) == 1, errors  # no second record from the uncaught hook
+    (failed,) = errors
+    assert failed["message"] == "Job failed"
+    assert failed["job_id"] == "job-1234"
+    assert failed["thrown"]["name"] == "RuntimeError"
+    assert failed["thrown"]["message"] == "snapshot write failed"
+
+
+# -- aodn_cloud_optimised's own logger ------------------------------------------
+
+
+@pytest.mark.parametrize("profile", ["edge", "staging", "prod"])
+def test_aodn_library_logger_emits_json_once(
+    profile, monkeypatch, capsys, clean_logging
+):
+    """The library's _get_or_create_logger would install its own text
+    StreamHandler (propagate=False); after init_log it must reuse our
+    NullHandler and propagate to root's JSON handler instead."""
+    from aodn_cloud_optimised.lib.DataQuery import _get_or_create_logger
+
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("PROFILE", profile)
+    logging.getLogger().handlers = []
+    logging.getLogger("aodn.GetAodn").handlers = []
+
+    init_log(SimpleNamespace(LOGLEVEL=logging.DEBUG))
+    # What GetAodn() does on construction, every time.
+    aodn_logger = _get_or_create_logger(level=logging.INFO)
+    aodn_logger.info("Retrieving metadata for some.parquet")
+    _get_or_create_logger(level=logging.INFO).info("second GetAodn instance")
+
+    lines = [line for line in capsys.readouterr().err.splitlines() if line.strip()]
+    assert [json.loads(line)["message"] for line in lines] == [
+        "Retrieving metadata for some.parquet",
+        "second GetAodn instance",
+    ]
+    assert json.loads(lines[0])["loggerName"] == "aodn.GetAodn"
+
+
+def test_aodn_library_logger_replaces_handler_installed_before_init_log(
+    monkeypatch, capsys, clean_logging
+):
+    """If a GetAodn() ran before init_log, its text handler is swapped out."""
+    from aodn_cloud_optimised.lib.DataQuery import _get_or_create_logger
+
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("PROFILE", "edge")
+    logging.getLogger().handlers = []
+    logging.getLogger("aodn.GetAodn").handlers = []
+    _get_or_create_logger(level=logging.INFO)  # library installs text handler
+
+    init_log(SimpleNamespace(LOGLEVEL=logging.DEBUG))
+    _get_or_create_logger(level=logging.INFO).warning("after init_log")
+
+    lines = [line for line in capsys.readouterr().err.splitlines() if line.strip()]
+    assert len(lines) == 1
+    assert json.loads(lines[0])["message"] == "after init_log"
+
+
+# -- uncaught exceptions ------------------------------------------------------------
+
+HOOK_PRELUDE = (
+    "import logging, threading, contextvars\n"
+    "from types import SimpleNamespace\n"
+    "from data_access_service import init_log\n"
+    "from data_access_service.utils.log_context import bind_log_context\n"
+    "init_log(SimpleNamespace(LOGLEVEL=logging.DEBUG))\n"
+)
+
+
+def _run_hook_snippet(profile, body):
+    env = {k: v for k, v in os.environ.items() if k != "PYTEST_CURRENT_TEST"}
+    env["PROFILE"] = profile
+    return subprocess.run(
+        [sys.executable, "-c", HOOK_PRELUDE + body],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=LOG_CONFIG_PATH.parent,
+        timeout=120,
+    )
+
+
+def _stderr_payloads(result):
+    lines = [line for line in result.stderr.splitlines() if line.strip()]
+    return [json.loads(line) for line in lines]  # raises on any non-JSON line
+
+
+@pytest.mark.parametrize("profile", ["edge", "staging", "prod"])
+def test_uncaught_main_thread_exception_is_one_json_record(profile):
+    result = _run_hook_snippet(
+        profile,
+        "with bind_log_context(job_id='job-9'):\n"
+        "    raise ValueError('boom in main')\n",
+    )
+
+    assert result.returncode == 1  # exit status unchanged by the hook
+    (payload,) = _stderr_payloads(result)
+    assert payload["level"] == "CRITICAL"
+    assert payload["loggerName"] == "uncaught"
+    assert payload["thrown"]["name"] == "ValueError"
+    assert payload["thrown"]["message"] == "boom in main"
+    assert "Traceback" in payload["thrown"]["extendedStackTrace"]
+
+
+@pytest.mark.parametrize("profile", ["edge", "staging", "prod"])
+def test_uncaught_thread_exception_is_one_json_record(profile):
+    result = _run_hook_snippet(
+        profile,
+        "def work():\n"
+        "    raise RuntimeError('boom in worker')\n"
+        "with bind_log_context(request_id='req-7'):\n"
+        "    t = threading.Thread(target=contextvars.copy_context().run,\n"
+        "                         args=(work,), name='fetch-worker')\n"
+        "    t.start(); t.join()\n",
+    )
+
+    assert result.returncode == 0  # a dying worker thread doesn't exit the process
+    (payload,) = _stderr_payloads(result)
+    assert payload["level"] == "ERROR"
+    assert payload["message"] == "Uncaught exception in thread fetch-worker"
+    assert payload["thrown"]["name"] == "RuntimeError"
+    # copy_context().run has returned before threading.excepthook runs, so the
+    # bound request_id is gone - see install_exception_hooks' docstring.
+    assert "request_id" not in payload
+
+
+@pytest.mark.parametrize("profile", ["dev", "testing"])
+def test_uncaught_exception_keeps_default_traceback_on_text_profiles(profile):
+    result = _run_hook_snippet(profile, "raise ValueError('boom in main')\n")
+
+    assert result.returncode == 1
+    assert result.stderr.splitlines()[0] == "Traceback (most recent call last):"
+    assert result.stderr.rstrip().endswith("ValueError: boom in main")

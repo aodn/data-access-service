@@ -9,13 +9,21 @@ formatters:
   access:
     "()": data_access_service.utils.log_formatter.build_formatter
     format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+filters:
+  # Adds request_id/job_id bound via data_access_service.utils.log_context
+  context:
+    "()": data_access_service.utils.log_context.ContextFilter
 handlers:
   default:
     formatter: default
+    filters:
+      - context
     class: logging.StreamHandler
     stream: ext://sys.stderr
   access:
     formatter: access
+    filters:
+      - context
     class: logging.StreamHandler
     stream: ext://sys.stdout
 loggers:

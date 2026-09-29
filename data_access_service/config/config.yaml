@@ -164,7 +164,8 @@ tiler:
       animation_workers: 2
       trim_threshold_mb: 2800
       duckdb:
-        memory_limit: "1GB"
+        duckdb_temp_dir: "tiler_api_duckdb_tmp"
+        memory_limit: "600MB"
         threads: 2
         # Same parquet is queried by many tiles, so all three caches
         # enabled go together, parquet footers, HTTP metadata, file bytes.
@@ -178,11 +179,12 @@ tiler:
       regenerate_all: True
       use_fork_process: True
       duckdb:
-        temp_dir_prefix: "tiler_batch_duckdb_tmp"
+        duckdb_temp_dir: "tiler_batch_duckdb_tmp"
         memory_limit: "4G"
         threads: 4
   catalog:
     blacklist:
+      # curvilinear grids zarrs.
       - radar_Newcastle_velocity_hourly_averaged_delayed_qc
       - radar_Newcastle_velocity_hourly_averaged_realtime_nonqc
       - radar_TurquoiseCoast_velocity_hourly_averaged_realtime_nonqc
@@ -191,6 +193,17 @@ tiler:
       - radar_BonneyCoast_velocity_hourly_averaged_delayed_qc
       - radar_TurquoiseCoast_velocity_hourly_averaged_delayed_qc
       - radar_CoralCoast_velocity_hourly_averaged_delayed_qc
+      # particle visualisation only, no one used.
+      - radar_CapricornBunkerGroup_velocity_hourly_averaged_delayed_qc
+      - radar_CapricornBunkerGroup_velocity_hourly_averaged_realtime_nonqc
+      - radar_CoffsHarbour_velocity_hourly_averaged_delayed_qc
+      - radar_CoffsHarbour_velocity_hourly_averaged_realtime_nonqc
+      - radar_NorthWestShelf_velocity_hourly_averaged_delayed_qc
+      - radar_NorthWestShelf_velocity_hourly_averaged_realtime_nonqc
+      - radar_RottnestShelf_velocity_hourly_averaged_delayed_qc
+      - radar_RottnestShelf_velocity_hourly_averaged_realtime_nonqc
+      - radar_SouthAustraliaGulfs_velocity_hourly_averaged_delayed_qc
+      - radar_SouthAustraliaGulfs_velocity_hourly_averaged_realtime_nonqc
     gridded_variables:
       - GSLA
       - [UCUR, VCUR]

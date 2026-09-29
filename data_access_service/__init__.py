@@ -31,10 +31,12 @@ set_matplotlib_backend_agg()
 
 from data_access_service.config.config import Config
 from data_access_service.core.api import API
+from data_access_service.utils.log_context import install_context_filter
 from data_access_service.utils.log_formatter import (
     TEXT_LOG_DATE_FORMAT,
     TEXT_LOG_FORMAT,
     build_formatter,
+    install_exception_hooks,
     use_json_logs,
 )
 
@@ -54,6 +56,16 @@ def init_log(config: Config):
         json_formatter = build_formatter()
         for handler in logging.getLogger().handlers:
             handler.setFormatter(json_formatter)
+        install_exception_hooks()
+
+    for handler in logging.getLogger().handlers:
+        install_context_filter(handler)
+
+    # aodn_cloud_optimised adds its own text handler (propagate=False) only if
+    # none exists; a NullHandler blocks that so records reach root's format.
+    aodn_logger = logging.getLogger("aodn.GetAodn")
+    aodn_logger.handlers = [logging.NullHandler()]
+    aodn_logger.propagate = True
 
     # If add new logger setting, please put in alphabetical order
     logging.getLogger("aiobotocore").setLevel(logging.WARNING)

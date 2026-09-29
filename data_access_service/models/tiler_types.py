@@ -8,6 +8,8 @@ class TilerDuckDBConfig:
 
     memory_limit: str
     threads: int
+    # Prefix of the spill directory the client creates and removes itself.
+    duckdb_temp_dir: str
     enable_external_file_cache: bool
     parquet_metadata_cache: bool
     enable_http_metadata_cache: bool
@@ -34,7 +36,7 @@ class TilerBatchDuckDBConfig:
     memory_limit: str
     threads: int
     # Prefix of the spill directory each client creates and removes itself.
-    temp_dir_prefix: str
+    duckdb_temp_dir: str
 
 
 @dataclass(frozen=True)
