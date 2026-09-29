@@ -1,15 +1,13 @@
 """Answer estimate_size for parquet keys from the pre-built index.
 
 The index (built by ``batch/estimation``) turns the row count into one small
-DuckDB query over a few-MB file, instead of listing the dataset and reading up
-to 256 parquet footers on S3. The sidecar next to it carries the numbers that
-are one per dataset: measured CSV bytes per row, measured zip ratio, and the
-date range the index covers.
+DuckDB query over a few-MB file. The sidecar next to it carries the numbers
+that are one per dataset: measured CSV bytes per row, measured zip ratio, and
+the date range the index covers.
 
-Everything here fails soft. When there is no index, when it is too old to
-trust, or when the query errors, the caller falls back to the live scan in
-``size_estimation._estimate_parquet_size`` - an estimate must never fail
-because of this optimisation.
+The index is the only parquet estimator. When it is missing, too old to trust,
+or cannot be read, the estimate fails with EstimationIndexUnavailableError and
+the index has to be (re)built for that key.
 """
 
 import json
@@ -58,10 +56,13 @@ _client_lock = threading.Lock()
 # Buckets a given client already has S3 credentials for.
 _secret_done: set[tuple[int, str]] = set()
 
-# Failures that mean this module is wrong, not that the index is missing or S3
-# is unhappy. They are logged at ERROR rather than folded into the ordinary
-# fail-soft WARNING, so a refactor cannot quietly turn the index off.
-_BUG_ERRORS = (ImportError, AttributeError, NameError, TypeError)
+
+class EstimationIndexUnavailableError(Exception):
+    """A parquet key has no usable pre-built index, so it cannot be estimated.
+
+    Not a ValueError: estimate_datasets_size skips a key on ValueError, but a
+    missing index must fail the request so the user sees why.
+    """
 
 
 ExtentProvider = Callable[
@@ -99,12 +100,19 @@ def read_index_estimate(
     :param requested_end_date: the end date the user actually asked for, before
         any trim. Days between the index's last covered day and this are
         extrapolated rather than dropped (see _extrapolate_tail)
-    :return: the same dict shape ``_estimate_parquet_size`` returns, or None
-        when the index cannot be used and the caller must do the live scan
+    :return: dict with uuid, key, format, estimated_uncompressed_bytes,
+        estimated_output_bytes and notes
+    :raises ValueError: if output_format is not csv (the only format the index
+        models)
+    :raises EstimationIndexUnavailableError: if the index is missing, stale or
+        cannot be read
     """
-    meta = usable_sidecar(api, uuid, key, output_format)
-    if meta is None:
-        return None
+    if output_format != OUTPUT_FORMAT_CSV:
+        raise ValueError(
+            f"'{output_format}' size estimate not possible for {key}: the "
+            "estimation index only models the zipped-CSV download"
+        )
+    meta = require_sidecar(api, uuid, key)
 
     try:
         client = _get_client()
@@ -115,30 +123,18 @@ def read_index_estimate(
         extra_rows, tail_note = _extrapolate_tail(
             client, path, meta, date_start, bboxes, requested_end_date
         )
-    except _BUG_ERRORS as e:
-        # Not a data or S3 problem - this module is broken. Still fall back
-        # (an estimate must never fail because of this optimisation), but say
-        # so at ERROR: the fallback is 50x slower, so a silent WARNING here is
-        # how a rename went unnoticed in production once already.
+    except Exception as e:
         log.error(
-            "estimation index is broken for %s/%s - falling back to the live "
-            "scan, which is far slower. This is a code fault, not a missing "
-            "index: %s",
+            "estimation index query failed for %s/%s: %s",
             uuid,
             key,
             e,
             exc_info=True,
         )
-        return None
-    except Exception as e:
-        log.warning(
-            "estimation index query failed for %s/%s; falling back to the live "
-            "scan: %s",
-            uuid,
-            key,
-            e,
-        )
-        return None
+        raise EstimationIndexUnavailableError(
+            f"No size estimate available for {key}: the estimation index "
+            "could not be read"
+        ) from e
 
     total_rows = rows + extra_rows
     total_uncompressed = int(
@@ -196,23 +192,26 @@ def read_index_estimate(
     }
 
 
-def sidecar_extent_provider(api) -> ExtentProvider:
+def sidecar_extent_provider(api, output_format: str) -> ExtentProvider:
     """A temporal-extent lookup backed by the index sidecar.
 
     Only the estimation path uses this. The download keeps calling
     ``api.get_temporal_extent`` (a real scan of the live data), because it
     produces the actual file and cannot be built from a weekly snapshot.
 
-    Falls back to the real scan for any key with no usable index.
+    Keys the index does not serve (non-parquet, or a format other than csv)
+    use the real scan. A parquet csv key with no usable index raises here.
     """
 
     def provider(
         uuid: str, key: str
     ) -> Tuple[Optional[pd.Timestamp], Optional[pd.Timestamp]]:
-        meta = usable_sidecar(api, uuid, key, OUTPUT_FORMAT_CSV)
+        if not key.endswith(".parquet") or output_format != OUTPUT_FORMAT_CSV:
+            return api.get_temporal_extent(uuid, key)
+        meta = require_sidecar(api, uuid, key)
         # A timeless dataset stores a synthetic day key, which says nothing
         # about the data's real extent.
-        if meta is None or not meta.has_time:
+        if not meta.has_time:
             return api.get_temporal_extent(uuid, key)
         try:
             return _sidecar_extent(meta)
@@ -228,52 +227,40 @@ def sidecar_extent_provider(api) -> ExtentProvider:
     return provider
 
 
-def usable_sidecar(
-    api, uuid: str, key: str, output_format: str
-) -> Optional[EstimationSidecarMetadata]:
-    """The sidecar for this key, or None when the index must not be used.
+def require_sidecar(api, uuid: str, key: str) -> EstimationSidecarMetadata:
+    """The sidecar for this key, checked that the index can be trusted.
 
-    Rejects (and logs the reason): the index switch off, a non-csv format, a
-    missing sidecar, a version this build does not know, and a column set that
-    changed since the build - which is what makes csv_bytes_per_row stale.
+    Rejects a missing sidecar, a version this build does not know, and a column
+    set that changed since the build - which is what makes csv_bytes_per_row
+    stale.
+
+    :raises EstimationIndexUnavailableError: with the reason, when rejected
     """
-    estimation_config = Config.get_config().get_estimation_config()
-    if not estimation_config.use_index_for_estimate:
-        return None
-    if output_format != OUTPUT_FORMAT_CSV:
-        # The index only models the zipped-CSV download.
-        return None
-    if not key.endswith(".parquet"):
-        return None
-
     meta = load_sidecar(uuid, key)
     if meta is None:
-        return None
-
-    if meta.version != ESTIMATION_INDEX_VERSION:
-        log.info(
-            "estimation index for %s/%s is version %s, this build reads %s; "
-            "using the live scan",
-            uuid,
-            key,
-            meta.version,
-            ESTIMATION_INDEX_VERSION,
+        reason = "the estimation index has not been built for this key"
+    elif meta.version != ESTIMATION_INDEX_VERSION:
+        reason = (
+            f"the estimation index is version {meta.version}, this server "
+            f"reads version {ESTIMATION_INDEX_VERSION}"
         )
-        return None
+    elif _schema_changed(api, uuid, key, meta):
+        reason = "the dataset's columns changed since the estimation index was built"
+    else:
+        return meta
 
+    log.warning("no usable estimation index for %s/%s: %s", uuid, key, reason)
+    raise EstimationIndexUnavailableError(
+        f"No size estimate available for {key}: {reason}"
+    )
+
+
+def _schema_changed(api, uuid: str, key: str, meta: EstimationSidecarMetadata) -> bool:
     live_fingerprint = _live_schema_fingerprint(api, uuid, key)
     # An empty fingerprint on either side means "cannot compare", not "differs".
-    if live_fingerprint and meta.schema_fingerprint:
-        if live_fingerprint != meta.schema_fingerprint:
-            log.info(
-                "estimation index for %s/%s was built for a different column "
-                "set; using the live scan",
-                uuid,
-                key,
-            )
-            return None
-
-    return meta
+    if not live_fingerprint or not meta.schema_fingerprint:
+        return False
+    return live_fingerprint != meta.schema_fingerprint
 
 
 def load_sidecar(uuid: str, key: str) -> Optional[EstimationSidecarMetadata]:
@@ -334,7 +321,7 @@ def _count_rows(
     """SUM(c) over the day range and the bbox(es), in one query.
 
     Several bboxes are one OR chain, so a cell inside two overlapping boxes is
-    counted once - the live scan has to dedupe fragments by path to get that.
+    counted once.
     """
     where, params = _where_clause(meta, date_start, date_end, bboxes)
     sql = f"SELECT COALESCE(SUM(c), 0)::BIGINT FROM read_parquet('{path}')"
@@ -502,8 +489,8 @@ def init_client() -> None:
 
     The server calls this from its lifespan. The point is not the few
     milliseconds it saves on the first estimate - it is that a refactor which
-    breaks this module surfaces as a failed deploy rather than as an estimate
-    that silently falls back to the live scan and gets 50x slower.
+    breaks this module surfaces as a failed deploy rather than as every parquet
+    estimate failing at request time.
     """
     _get_client()
 
