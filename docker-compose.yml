@@ -6,3 +6,10 @@ services:
       - .env
     ports:
       - "8000:8000"
+  # Local stand-in for ElastiCache Valkey - to match what AWS runs.
+  # config.yaml's cache.host/port already point here.
+  redis:
+    image: valkey/valkey:8
+    container_name: das-redis
+    ports:
+      - "6379:6379"

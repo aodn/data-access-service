@@ -1,22 +1,9 @@
-"""Cross-request dedup + caching for the L1 slice cache, plus backend selection.
+"""One cached value per key, shared by every container of this service.
 
-``CacheBackend`` is the shared contract; ``NullMemoizer`` and ``RedisMemoizer``
-are the current implementations (see ``create_memoizer`` below, chosen via
-``CACHE_BACKEND``). ``RedisMemoizer`` talks to a Redis-protocol store — in
-deployment that's an AWS ElastiCache for Valkey cluster, addressed via the
-``CACHE_HOST`` env var (see ``Config.get_tiler_config``); there's no local
-container in docker-compose.yml, so local runs need ``CACHE_HOST`` pointed at
-a reachable Redis/Valkey instance or ``CACHE_BACKEND=none`` to skip caching.
+``cache.backend`` in config.yaml picks ``NullMemoizer`` or ``RedisMemoizer``
+(Valkey in AWS, the docker-compose ``redis`` service locally).
 
-In-process dedup-only coalescing (``services.caching.deduper.Deduper``) is a
-separate, simpler concern that doesn't fit this module's cache-or-recompute
-contract — it never stores anything. Each ``Deduper`` instance lives with its
-one consumer (e.g. ``rendering.data_tiles._processed_dedup``,
-``store.slice_loader._slice_dedup``), not paired with a ``CacheBackend`` here.
-
-NOT a replacement for ``services.store.registry.StoreRegistry`` — that adds TTL +
-stale-while-revalidate + background refresh on top of the dedup pattern, which
-this module deliberately does not model.
+Any backend may compute the value itself, so treat caching as an optimisation.
 """
 
 import logging
@@ -49,7 +36,7 @@ class CacheBackend(ABC):
 
 class NullMemoizer(CacheBackend):
     """No caching, no dedup — every call runs ``factory()``. Explicit opt-out
-    backend for ``CACHE_BACKEND=none``; a stampede of concurrent identical
+    backend for ``cache.backend: none``; a stampede of concurrent identical
     requests will all recompute, which is the accepted cost of disabling
     caching entirely."""
 
@@ -69,8 +56,8 @@ end
 class RedisMemoizer(CacheBackend):
     """Distributed cache + cross-instance dedup backed by a Redis-protocol-
     compatible store (Redis or Valkey). Values are pickled — safe here because
-    the store is only reachable from this service's own instances, the same
-    trust boundary the in-process ``Deduper`` already relies on.
+    the store sits inside the VPC and only this service's own containers can
+    reach it. Nothing a viewer supplies is ever cached.
 
     Cross-instance stampede protection: the first caller for a cold key wins a
     short-lived ``SET NX EX`` lock and runs ``factory()``; other callers poll
@@ -79,19 +66,33 @@ class RedisMemoizer(CacheBackend):
     holder dies mid-compute).
 
     Any Redis error — connection refused, timeout, etc. — fails open: log a
-    warning and call ``factory()`` directly, matching the rest of the tiler's
-    bias toward availability over strict caching (``StoreRegistry``'s
-    stale-while-revalidate, ``Deduper`` as the load-bearing piece when
-    ``CACHE_BACKEND=none``).
+    warning and call ``factory()`` directly. Availability beats strict caching:
+    a caller must still work with the cache switched off.
+
+    ``lock_ttl_seconds`` and ``max_wait_seconds`` must both leave room for the
+    slowest ``factory()`` this instance is given. If the lock expires while its
+    holder is still working, every waiter computes too — the stampede this
+    class exists to prevent. The defaults suit a factory of a few seconds.
     """
 
-    _LOCK_TTL_SECONDS = 30
-    _MAX_WAIT_SECONDS = 20
+    DEFAULT_LOCK_TTL_SECONDS = 30
+    DEFAULT_MAX_WAIT_SECONDS = 20
+
     _POLL_INTERVAL_SECONDS = 0.1
 
-    def __init__(self, *, namespace: str, ttl_seconds: int, client: redis.Redis):
+    def __init__(
+        self,
+        *,
+        namespace: str,
+        ttl_seconds: int,
+        client: redis.Redis,
+        lock_ttl_seconds: int = DEFAULT_LOCK_TTL_SECONDS,
+        max_wait_seconds: int = DEFAULT_MAX_WAIT_SECONDS,
+    ):
         self._namespace = namespace
         self._ttl_seconds = ttl_seconds
+        self._lock_ttl_seconds = lock_ttl_seconds
+        self._max_wait_seconds = max_wait_seconds
         self._client = client
         self._unlock_script = client.register_script(_UNLOCK_SCRIPT)
         conn_kwargs = client.connection_pool.connection_kwargs
@@ -121,8 +122,8 @@ class RedisMemoizer(CacheBackend):
                 log.warning(
                     "Cannot connect to Redis/Valkey at %s during %s for key %s: %s. "
                     "%s. "
-                    "For local dev without a cache, set CACHE_BACKEND=none "
-                    "(or tiler.cache_backend: none in config.yaml). "
+                    "For local dev without a cache, set cache.backend: none "
+                    "in config.yaml. "
                     "To use caching, start Redis/Valkey on that host/port or set "
                     "CACHE_HOST to a reachable instance. Further connection "
                     "failures will be logged at DEBUG.",
@@ -174,7 +175,7 @@ class RedisMemoizer(CacheBackend):
         token = uuid.uuid4().hex
         try:
             acquired = self._client.set(
-                lock_key, token, nx=True, ex=self._LOCK_TTL_SECONDS
+                lock_key, token, nx=True, ex=self._lock_ttl_seconds
             )
         except redis.exceptions.RedisError as exc:
             self._log_redis_error(
@@ -220,7 +221,7 @@ class RedisMemoizer(CacheBackend):
         return self._wait_for_result(redis_key, factory)
 
     def _wait_for_result(self, redis_key: str, factory: Callable[[], T]) -> T:
-        deadline = time.monotonic() + self._MAX_WAIT_SECONDS
+        deadline = time.monotonic() + self._max_wait_seconds
         while time.monotonic() < deadline:
             time.sleep(self._POLL_INTERVAL_SECONDS)
             try:
@@ -247,27 +248,42 @@ class RedisMemoizer(CacheBackend):
         return factory()
 
 
-def create_memoizer(*, namespace: str, ttl_seconds: int) -> CacheBackend:
-    """Selects the L1 cache backend via the CACHE_BACKEND setting.
+def create_memoizer(
+    *,
+    namespace: str,
+    ttl_seconds: int,
+    lock_ttl_seconds: int = RedisMemoizer.DEFAULT_LOCK_TTL_SECONDS,
+    max_wait_seconds: int = RedisMemoizer.DEFAULT_MAX_WAIT_SECONDS,
+) -> CacheBackend:
+    """Builds the cache backend named by ``cache.backend`` in config.yaml.
 
-    - "none" (default): bypass caching entirely — every call recomputes.
-    - "redis": share cache + cross-instance dedup through a Redis-protocol
-      store, connected via ``tiler.redis_host``/``tiler.redis_port`` in
-      config.yaml.
+    - "none": bypass caching entirely — every call recomputes.
+    - "redis": share the value, and the work of computing it, with every other
+      container through the store at ``cache.host``/``cache.port`` (or
+      ``CACHE_HOST``).
+
+    ``namespace`` keeps one caller's keys apart from another's. Callers with a
+    slow factory pass their own lock/wait budget — see ``RedisMemoizer``.
     """
-    tiler_config = Config.get_config().get_tiler_config()
-    backend = tiler_config.cache_backend
+    cache_config = Config.get_config().get_cache_config()
+    backend = cache_config.backend
     if backend == "none":
         return NullMemoizer()
     if backend == "redis":
+        # Short socket timeouts on purpose: a slow cache must never hold up the
+        # caller, which can always compute the value itself.
         client = redis.Redis(
-            host=tiler_config.redis_host,
-            port=tiler_config.redis_port,
+            host=cache_config.host,
+            port=cache_config.port,
             socket_connect_timeout=1,
             socket_timeout=1,
-            ssl=tiler_config.is_tls,
+            ssl=cache_config.is_tls,
         )
         return RedisMemoizer(
-            namespace=namespace, ttl_seconds=ttl_seconds, client=client
+            namespace=namespace,
+            ttl_seconds=ttl_seconds,
+            client=client,
+            lock_ttl_seconds=lock_ttl_seconds,
+            max_wait_seconds=max_wait_seconds,
         )
-    raise ValueError(f"Unknown CACHE_BACKEND: {backend!r} (expected none or redis)")
+    raise ValueError(f"Unknown cache.backend: {backend!r} (expected none or redis)")

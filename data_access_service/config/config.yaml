@@ -166,7 +166,8 @@ tiler:
       animation_workers: 2
       trim_threshold_mb: 2800
       duckdb:
-        memory_limit: "1GB"
+        duckdb_temp_dir: "tiler_api_duckdb_tmp"
+        memory_limit: "600MB"
         threads: 2
         # Same parquet is queried by many tiles, so all three caches
         # enabled go together, parquet footers, HTTP metadata, file bytes.
@@ -185,6 +186,7 @@ tiler:
         threads: 4
   catalog:
     blacklist:
+      # curvilinear grids zarrs.
       - radar_Newcastle_velocity_hourly_averaged_delayed_qc
       - radar_Newcastle_velocity_hourly_averaged_realtime_nonqc
       - radar_TurquoiseCoast_velocity_hourly_averaged_realtime_nonqc
@@ -193,6 +195,17 @@ tiler:
       - radar_BonneyCoast_velocity_hourly_averaged_delayed_qc
       - radar_TurquoiseCoast_velocity_hourly_averaged_delayed_qc
       - radar_CoralCoast_velocity_hourly_averaged_delayed_qc
+      # particle visualisation only, no one used.
+      - radar_CapricornBunkerGroup_velocity_hourly_averaged_delayed_qc
+      - radar_CapricornBunkerGroup_velocity_hourly_averaged_realtime_nonqc
+      - radar_CoffsHarbour_velocity_hourly_averaged_delayed_qc
+      - radar_CoffsHarbour_velocity_hourly_averaged_realtime_nonqc
+      - radar_NorthWestShelf_velocity_hourly_averaged_delayed_qc
+      - radar_NorthWestShelf_velocity_hourly_averaged_realtime_nonqc
+      - radar_RottnestShelf_velocity_hourly_averaged_delayed_qc
+      - radar_RottnestShelf_velocity_hourly_averaged_realtime_nonqc
+      - radar_SouthAustraliaGulfs_velocity_hourly_averaged_delayed_qc
+      - radar_SouthAustraliaGulfs_velocity_hourly_averaged_realtime_nonqc
     gridded_variables:
       - GSLA
       - [UCUR, VCUR]
@@ -221,6 +234,14 @@ tiler:
           max_dist_px: 4
     - id: model_sea_level_anomaly_gridded_realtime:ucur+vcur
       ocean_masked: true
+# Shared Redis-protocol cache, used by every container of this service.
+# Deployed it is an ElastiCache for Valkey cluster whose endpoint comes
+# from the CACHE_HOST env var. The host/port below are for local dev only.
+# "none" turns caching off everywhere, which every user of it must survive.
+cache:
+  backend: "redis"
+  host: "localhost"
+  port: 6379
 csiro:
   # The collection id changes with every new data version, so it is resolved
   # from the permanent Fedora PID on each call, through these two URLs.
@@ -229,6 +250,7 @@ csiro:
   # Subfolder of the collection folder that holds the parquet.
   data_folder: data/
   request_timeout_seconds: 30
+  key_cache_ttl_seconds: 72000 # 20 hours
   datasets:
     - dataset_name: uwy_csiro.parquet
       fedora_pid: csiro:72626

@@ -6,6 +6,8 @@ did not exist before: the arity narrowing accepts every scalar, so without this
 check such a product would render a meaningless image instead of saying so.
 """
 
+import logging
+
 import pytest
 
 from data_access_service.tiler.services.product.product import Product
@@ -116,7 +118,9 @@ def test_products_listing_exposes_the_capability(client):
     assert "metadata_uuid" in by_id[NON_VISUAL_ID]
 
 
-def test_visual_capable_scalar_is_not_rejected_by_the_new_check(client, monkeypatch):
+def test_visual_capable_scalar_is_not_rejected_by_the_new_check(
+    client, monkeypatch, caplog
+):
     """Guard against the check being too eager: the default path must be
     unaffected, so failure here should come from rendering, never from 400."""
 
@@ -127,5 +131,11 @@ def test_visual_capable_scalar_is_not_rejected_by_the_new_check(client, monkeypa
         "data_access_service.core.tiler_routes.shared.load_slice", explode
     )
 
-    with pytest.raises(RuntimeError, match="reached rendering"):
-        client.get(f"{BASE}/{VISUAL_ID}/5/0/0.png?date=2024-01-01T00:00:00Z")
+    # RequestContextMiddleware logs unhandled errors and answers 500, so the
+    # sentinel shows up in the error log rather than escaping the client.
+    with caplog.at_level(logging.ERROR, logger="data_access_service.core.middleware"):
+        response = client.get(f"{BASE}/{VISUAL_ID}/5/0/0.png?date=2024-01-01T00:00:00Z")
+
+    assert response.status_code == 500
+    (record,) = [r for r in caplog.records if r.exc_info]
+    assert str(record.exc_info[1]) == "reached rendering"
