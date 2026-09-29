@@ -1295,7 +1295,8 @@ class API(BaseAPI):
 
         A key that cannot produce output_format (e.g. geotiff on non-gridded
         data, csv on a zarr key) is skipped and reported in the notes instead
-        of failing the whole request.
+        of failing the whole request. A parquet key with no usable pre-built
+        index is not skipped: it fails the request, so the user sees why.
 
         :param uuid:
         :param output_format:
@@ -1309,6 +1310,8 @@ class API(BaseAPI):
         :return: aggregated estimate dict, or None if no requested key exists
         :raises ValueError: if output_format is none or not supported, the
             dates are unparseable, or NO requested key can produce the format
+        :raises EstimationIndexUnavailableError: if a parquet key has no usable
+            pre-built index
         :raises ClientGoneError: if the client disconnected
         """
         if output_format is None or output_format not in SUPPORTED_OUTPUT_FORMATS:
@@ -1328,7 +1331,7 @@ class API(BaseAPI):
             # Estimation only: the dates may come from the pre-built index
             # sidecar. Every download caller of resolve_subset_request passes
             # no provider and keeps the live scan.
-            extent_provider=sidecar_extent_provider(self),
+            extent_provider=sidecar_extent_provider(self, output_format),
         )
 
         per_key: list[dict] = []

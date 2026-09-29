@@ -91,7 +91,7 @@ async def lifespan(application: FastAPI):
             # The estimate reads the index on its own :memory: connection, not
             # this one - so retuning sites cannot move the estimate. Built here
             # rather than on first use so a broken read path fails the deploy
-            # instead of silently degrading to the (50x slower) live scan.
+            # instead of failing every parquet estimate at request time.
             init_estimation_client()
             init_tiler_duckdb_client()
             application.state.sites_repositories = build_repositories(
