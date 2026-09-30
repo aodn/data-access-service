@@ -3,18 +3,24 @@ publish each one to ``root_metadata.json`` as it finishes.
 
 How a run goes:
 
-1. Stores run one at a time, by name, each in a forked worker (or
-   in-process when ``use_fork_process`` is off), so only one is in memory.
-2. In a store, only timestamps not yet converted are read (or all of them
+1. The scheduled ``generate-tiler-parquet`` job converts nothing itself: it
+   submits one ``generate-tiler-parquet-store`` job per store.
+2. Each store job converts its store in a forked worker (or in-process when
+   ``use_fork_process`` is off), so only one store is in memory.
+3. In a store, only timestamps not yet converted are read (or all of them
    with ``regenerate_all``), one zarr time chunk at a time, newest chunk first.
-3. Each timestamp and variable becomes one parquet file. All-NaN
+4. Each timestamp and variable becomes one parquet file. All-NaN
    timestamps are recorded as empty.
-4. The store's ``metadata.json`` is saved after each chunk, so a failed
+5. The store's ``metadata.json`` is saved after each chunk, so a failed
    run resumes where it stopped.
-5. Once a store is done, it is published to ``root_metadata.json``.
+6. Once a store is done, it is published to ``root_metadata.json``. Store
+   jobs run in parallel, so this is a conditional write that retries on
+   conflict.
 """
 
 import os
+import re
+import time
 from datetime import datetime, timezone
 
 from data_access_service import Config, init_log
@@ -32,7 +38,6 @@ from data_access_service.models.tiler_parquet_types import (
 )
 from data_access_service.models.tiler_types import TilerBatchConfig
 from data_access_service.utils.memory_utils import log_memory_usage
-from data_access_service.utils.s3_json import read_json
 
 config = Config.get_config()
 logger = init_log(config)
@@ -53,44 +58,57 @@ def _group_by_store(
     return {store: (uuid, sorted(vars_)) for store, (uuid, vars_) in grouped.items()}
 
 
-def generate_tiler_parquet_for_all_products(api: API, uuid: str | None = None) -> None:
-    """Convert every product's store, updating ``root_metadata.json`` after
-    each one. ``uuid`` limits the run to one metadata record."""
-    products = discover_products(api)
+def _job_name(store: str) -> str:
+    # Batch job names allow letters, numbers, hyphens and underscores, max 128.
+    return ("tiler-parquet-" + re.sub(r"[^A-Za-z0-9_-]", "-", store))[:128]
 
-    if uuid is not None:
-        products = {pid: p for pid, p in products.items() if p.metadata_uuid == uuid}
-        if not products:
-            logger.warning(
-                "No discovered product matches uuid=%s; nothing to generate", uuid
-            )
-            return
 
-    by_store = _group_by_store(products)
-    logger.info(
-        "Tiler parquet batch for %s: %d store(s) from %d discovered product(s)",
-        f"uuid={uuid}" if uuid else "all UUIDs",
-        len(by_store),
-        len(products),
-    )
+def submit_store_jobs(
+    api: API,
+    job_queue: str,
+    job_definition: str,
+) -> list[str]:
+    """Submit one ``generate-tiler-parquet-store`` job per store, so stores
+    convert in parallel. Returns the submitted job ids."""
+    stores = sorted({p.store for p in discover_products(api).values()})
+    logger.info("Submitting %d tiler parquet store job(s)", len(stores))
 
+    aws = AWSHelper()
+    return [
+        aws.submit_a_job(
+            job_name=_job_name(store),
+            job_queue=job_queue,
+            job_definition=job_definition,
+            parameters={"type": "generate-tiler-parquet-store", "store": store},
+        )
+        for store in stores
+    ]
+
+
+def generate_tiler_parquet_for_store(api: API, store: str) -> bool:
+    """Convert ``store``, then publish it if that worked. Returns False if it
+    failed."""
+    products = {pid: p for pid, p in discover_products(api).items() if p.store == store}
+    if not products:
+        logger.warning("No discovered product for store=%s; nothing to generate", store)
+        return True
+
+    store_uuid, variables = _group_by_store(products)[store]
     batch_config = config.get_tiler_batch_config()
-
     use_fork = batch_config.use_fork_process
     logger.info("Tiler parquet batch process isolation: use_fork_process=%s", use_fork)
-
-    for store, (store_uuid, variables) in sorted(by_store.items()):
-        if use_fork:
-            ok = _build_in_subprocess(store, store_uuid, variables, batch_config)
-            after_label = f"after child for {store}"
-        else:
-            ok = build_tiler_parquet(store, store_uuid, variables, batch_config)
-            after_label = f"after in-process run for {store}"
-        if ok:
-            _publish_store(store, products, batch_config.tiler_root_dir)
-        else:
-            logger.error("Tiler parquet worker failed for store=%s", store)
-        log_memory_usage(logger, after_label)
+    if use_fork:
+        ok = _build_in_subprocess(store, store_uuid, variables, batch_config)
+        after_label = f"after child for {store}"
+    else:
+        ok = build_tiler_parquet(store, store_uuid, variables, batch_config)
+        after_label = f"after in-process run for {store}"
+    if ok:
+        _publish_store(store, products, batch_config.tiler_root_dir)
+    else:
+        logger.error("Tiler parquet worker failed for store=%s", store)
+    log_memory_usage(logger, after_label)
+    return ok
 
 
 def _publish_store(
@@ -113,6 +131,9 @@ def _has_timestamps(tiler_root_dir: str, store: str) -> bool:
     return meta is not None and bool(meta.timestamps)
 
 
+_WRITE_MAX_ATTEMPTS = 10
+
+
 def write_root_metadata(
     stores: dict[str, list[ProductIdentity]], tiler_root_dir: str
 ) -> str:
@@ -120,11 +141,32 @@ def write_root_metadata(
     that store's products outright. A store mapped to no products is dropped
     from the file; stores not in this run (other uuids, failed ones) keep their
     entries. Skips the write when nothing changed.
+
+    Store jobs publish in parallel, so the write only lands if the file is
+    unchanged since it was read; otherwise it is read and merged again.
     """
     path = root_metadata_path(tiler_root_dir)
+    aws = AWSHelper()
+    for attempt in range(1, _WRITE_MAX_ATTEMPTS + 1):
+        try:
+            _upsert_root_metadata(aws, path, stores)
+            return path
+        except storage.WriteConflict:
+            if attempt == _WRITE_MAX_ATTEMPTS:
+                raise
+            logger.info(
+                "Root metadata changed while writing (attempt %d); retrying: %s",
+                attempt,
+                path,
+            )
+            time.sleep(0.5 * attempt)
 
+
+def _upsert_root_metadata(
+    aws: AWSHelper, path: str, stores: dict[str, list[ProductIdentity]]
+) -> None:
     existing: RootMetadata | None = None
-    existing_data = read_json(path, required=False)
+    existing_data, etag = storage.read_json_with_etag(aws, path)
     if existing_data is not None:
         candidate = RootMetadata.from_dict(existing_data)
         if candidate.version == ROOT_METADATA_VERSION:
@@ -146,7 +188,7 @@ def write_root_metadata(
     if not merged:
         # The tiler refuses an empty catalogue.
         logger.warning("No products to publish; not writing %s", path)
-        return path
+        return
 
     meta = RootMetadata(
         version=ROOT_METADATA_VERSION,
@@ -155,9 +197,9 @@ def write_root_metadata(
     )
     if existing is not None and existing.stores == meta.stores:
         logger.info("Root metadata unchanged: %s", path)
-        return path
+        return
 
-    storage.write_json(AWSHelper(), path, meta.to_dict())
+    storage.write_json_if_unchanged(aws, path, meta.to_dict(), etag)
     logger.info(
         "Wrote root metadata: %s (%d store(s), %d product(s) total, "
         "%d store(s) updated this run)",
@@ -166,7 +208,6 @@ def write_root_metadata(
         len(meta.products),
         len(stores),
     )
-    return path
 
 
 def _build_in_subprocess(

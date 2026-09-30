@@ -17,7 +17,8 @@ from data_access_service.batch.sites_parquet.refresher import (
 )
 from data_access_service.batch.subsetting.enums import Parameters
 from data_access_service.batch.tiler.generator import (
-    generate_tiler_parquet_for_all_products,
+    generate_tiler_parquet_for_store,
+    submit_store_jobs,
 )
 from data_access_service.config.config import DevConfig
 from data_access_service.utils.log_context import bind_log_context
@@ -69,6 +70,7 @@ def _parse_local_job_parameters(raw: str | None) -> dict:
 
 
 def run_job() -> None:
+    job = {}
     if not isinstance(config, DevConfig):
         # Get the index of the child job
         job_index = os.getenv("AWS_BATCH_JOB_ARRAY_INDEX")
@@ -185,16 +187,23 @@ def run_job() -> None:
                 api=api, uuid=target_uuid or None
             )
         case "generate-tiler-parquet":
+            # Only submits one generate-tiler-parquet-store job per store.
             api = API()
             api.initialize_metadata()
-            target_uuid = parameters.get("uuid") or os.getenv(
-                "TILER_PARQUET_TARGET_UUID"
+            # Store jobs go to this Batch job's queue and definition. A local
+            # run has no Batch job, so run generate-tiler-parquet-store instead.
+            submit_store_jobs(
+                api=api,
+                job_queue=job["jobQueue"],
+                job_definition=job["jobDefinition"],
             )
-            if target_uuid:
-                logger.info(
-                    "Tiler parquet generation restricted to uuid=%s", target_uuid
-                )
-            generate_tiler_parquet_for_all_products(api=api, uuid=target_uuid or None)
+        case "generate-tiler-parquet-store":
+            api = API()
+            api.initialize_metadata()
+            store = parameters["store"]
+            # Fail the job so Batch shows it and can retry it.
+            if not generate_tiler_parquet_for_store(api=api, store=store):
+                raise RuntimeError(f"Tiler parquet failed for store={store}")
         case "refresh-sites-parquet":
             refresh_sites_parquet_snapshots()
         case _:
