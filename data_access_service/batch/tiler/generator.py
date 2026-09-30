@@ -27,7 +27,11 @@ from data_access_service import Config, init_log
 from data_access_service.batch.tiler import storage
 from data_access_service.batch.tiler.discovery import discover_products
 from data_access_service.batch.tiler.parquet_generator import read_metadata, sync_store
-from data_access_service.batch.tiler.zarr_registry import close_store, open_store
+from data_access_service.batch.tiler.zarr_registry import (
+    close_store,
+    get_store,
+    open_store,
+)
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.api import API
 from data_access_service.models.tiler_parquet_types import (
@@ -63,15 +67,35 @@ def _job_name(store: str) -> str:
     return ("tiler-parquet-" + re.sub(r"[^A-Za-z0-9_-]", "-", store))[:128]
 
 
+def _store_size(store: str, n_variables: int) -> int:
+    """``time x lat x lon x variables`` of ``store``, or 0 if it can't be
+    opened. Reads zarr metadata only."""
+    try:
+        if open_store(store) is not None:
+            return 0
+        sizes = get_store(store).sizes
+        return sizes["time"] * sizes["lat"] * sizes["lon"] * n_variables
+    finally:
+        close_store(store)
+
+
 def submit_store_jobs(
     api: API,
     job_queue: str,
     job_definition: str,
 ) -> list[str]:
     """Submit one ``generate-tiler-parquet-store`` job per store, so stores
-    convert in parallel. Returns the submitted job ids."""
-    stores = sorted({p.store for p in discover_products(api).values()})
+    convert in parallel. Largest first: the queue is FIFO, so the longest
+    stores start first. Returns the submitted job ids."""
+    by_store = _group_by_store(discover_products(api))
+    sizes = {
+        store: _store_size(store, len(variables))
+        for store, (_, variables) in by_store.items()
+    }
+    stores = sorted(by_store, key=lambda s: (-sizes[s], s))
     logger.info("Submitting %d tiler parquet store job(s)", len(stores))
+    for store in stores:
+        logger.info("Store %s size=%d", store, sizes[store])
 
     aws = AWSHelper()
     return [

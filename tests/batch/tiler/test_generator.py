@@ -339,6 +339,7 @@ class TestSubmitStoreJobs:
             "p3": _product("p3", "y.v2", "v", uuid="uuid-b"),
         }
         monkeypatch.setattr(generator, "discover_products", lambda api: products)
+        monkeypatch.setattr(generator, "_store_size", lambda store, n: 0)
         aws = MagicMock()
         aws.submit_a_job.side_effect = lambda **kw: f"job-{kw['parameters']['store']}"
         monkeypatch.setattr(generator, "AWSHelper", lambda: aws)
@@ -373,6 +374,43 @@ class TestSubmitStoreJobs:
         ]
         # The dispatcher converts nothing itself.
         assert converted == []
+
+    def test_submits_largest_store_first(self, monkeypatch):
+        products = {
+            "p1": _product("p1", "small", "v"),
+            "p2": _product("p2", "big", "v"),
+            "p3": _product("p3", "big", "w"),
+            "p4": _product("p4", "unopenable", "v"),
+            "p5": _product("p5", "mid", "v"),
+        }
+        monkeypatch.setattr(generator, "discover_products", lambda api: products)
+        # (time, lat, lon) per store; big has 2 variables.
+        shapes = {"small": (1, 10, 10), "big": (10, 10, 10), "mid": (15, 10, 10)}
+        monkeypatch.setattr(
+            generator,
+            "open_store",
+            lambda store: None if store in shapes else FileNotFoundError(store),
+        )
+        monkeypatch.setattr(
+            generator,
+            "get_store",
+            lambda store: MagicMock(
+                sizes=dict(zip(("time", "lat", "lon"), shapes[store]))
+            ),
+        )
+        closed = []
+        monkeypatch.setattr(generator, "close_store", closed.append)
+        aws = MagicMock()
+        monkeypatch.setattr(generator, "AWSHelper", lambda: aws)
+
+        generator.submit_store_jobs(api=MagicMock(), job_queue="q", job_definition="d")
+
+        stores = [
+            c.kwargs["parameters"]["store"] for c in aws.submit_a_job.call_args_list
+        ]
+        # big 2000, mid 1500, small 100, unopenable 0.
+        assert stores == ["big", "mid", "small", "unopenable"]
+        assert sorted(closed) == ["big", "mid", "small", "unopenable"]
 
 
 class TestBuildTilerParquet:
