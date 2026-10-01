@@ -484,13 +484,20 @@ def test_whole_blocks_carries_rows_short_of_a_block(monkeypatch):
 
 
 def _banded_dataset() -> xr.Dataset:
-    """3 days on a 7x5 grid with scattered NaNs and one all-NaN day."""
+    """3 days on a 7x5 grid of two variables with scattered NaNs and one
+    all-NaN day."""
     rng = np.random.default_rng(0)
     v = rng.random((3, 7, 5))
     v[rng.random(v.shape) < 0.3] = np.nan
     v[1] = np.nan
+    w = rng.random((3, 7, 5)).astype(np.float32)
+    w[rng.random(w.shape) < 0.5] = np.nan
+    w[1] = np.nan
     ds = xr.Dataset(
-        {"v": xr.DataArray(v, dims=["time", "lat", "lon"])},
+        {
+            "v": xr.DataArray(v, dims=["time", "lat", "lon"]),
+            "w": xr.DataArray(w, dims=["time", "lat", "lon"]),
+        },
         coords={
             "time": pd.to_datetime(DAYS),
             "lat": np.arange(7.0),
@@ -498,6 +505,7 @@ def _banded_dataset() -> xr.Dataset:
         },
     )
     ds["v"].encoding["chunks"] = (3, 2, 5)
+    ds["w"].encoding["chunks"] = (3, 2, 5)
     return ds
 
 
@@ -515,7 +523,7 @@ def _sync_real_files(monkeypatch) -> dict[str, pd.DataFrame]:
     gen.sync_store(
         "foo",
         "uuid-123",
-        ["v"],
+        ["v", "w"],
         OUTPUT_DIR,
         duckdb_config=TilerBatchDuckDBConfig(
             memory_limit="128MB", threads=2, duckdb_temp_dir="test_band_"
@@ -533,6 +541,6 @@ def test_banded_files_match_reading_the_whole_grid(monkeypatch, block):
     monkeypatch.setattr(gen, "BAND_BYTES", 1)  # one 2-row lat chunk per band
     banded = _sync_real_files(monkeypatch)
 
-    assert sorted(banded) == sorted(whole) and len(whole) == 2
+    assert sorted(banded) == sorted(whole) and len(whole) == 4
     for path, frame in whole.items():
         pd.testing.assert_frame_equal(banded[path], frame)
