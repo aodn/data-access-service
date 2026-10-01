@@ -5,7 +5,7 @@ import pytest
 from data_access_service.batch.tiler import generator
 from data_access_service.batch.tiler.generator import (
     _group_by_store,
-    generate_tiler_parquet_for_all_products,
+    generate_tiler_parquet_for_store,
     write_root_metadata,
 )
 from data_access_service.models.tiler_parquet_types import (
@@ -54,16 +54,35 @@ def _batch_config(
     return TilerBatchConfig(**base)
 
 
-def _fake_s3_json_store(monkeypatch) -> dict[str, dict]:
-    """In-memory stand-in for S3 objects, keyed by path — patches
-    generator.read_json and storage.write_json so write_root_metadata's upsert
-    logic can be tested without real S3."""
-    store: dict[str, dict] = {}
-    monkeypatch.setattr(generator, "read_json", lambda path, **_: store.get(path))
+def _stub_s3(monkeypatch, existing: dict | None, on_write) -> None:
+    """Serve ``existing`` as root_metadata.json and pass each write to
+    ``on_write(path, data)``."""
     monkeypatch.setattr(
         generator.storage,
-        "write_json",
-        lambda aws, path, data: store.__setitem__(path, data),
+        "read_json_with_etag",
+        lambda aws, path: (existing, "etag" if existing is not None else None),
+    )
+    monkeypatch.setattr(
+        generator.storage,
+        "write_json_if_unchanged",
+        lambda aws, path, data, etag: on_write(path, data),
+    )
+
+
+def _fake_s3_json_store(monkeypatch) -> dict[str, dict]:
+    """In-memory stand-in for S3 objects, keyed by path — patches the
+    storage read/write so write_root_metadata's upsert logic can be tested
+    without real S3."""
+    store: dict[str, dict] = {}
+    monkeypatch.setattr(
+        generator.storage,
+        "read_json_with_etag",
+        lambda aws, path: (store.get(path), "etag" if path in store else None),
+    )
+    monkeypatch.setattr(
+        generator.storage,
+        "write_json_if_unchanged",
+        lambda aws, path, data, etag: store.__setitem__(path, data),
     )
     return store
 
@@ -83,18 +102,17 @@ class TestGroupByStore:
 
 
 class TestWriteRootMetadataToS3:
-    """No real S3 here — read_json/write_json are mocked, so this
+    """No real S3 here — the storage read/write are mocked, so this
     only checks write_root_metadata's own upsert logic against whatever
-    read_json returns."""
+    the read returns."""
 
     def test_upserts_onto_existing_s3_content(self, monkeypatch):
         existing = _root_metadata({"old": [_product("old", "old", "v", uuid="old")]})
-        monkeypatch.setattr(generator, "read_json", lambda path, **_: existing)
         written = {}
-        monkeypatch.setattr(
-            generator.storage,
-            "write_json",
-            lambda aws, path, data: written.update(path=path, data=data),
+        _stub_s3(
+            monkeypatch,
+            existing,
+            lambda path, data: written.update(path=path, data=data),
         )
 
         stores = {"new": [_product("new", "new", "v", uuid="uuid-new")]}
@@ -109,13 +127,8 @@ class TestWriteRootMetadataToS3:
         existing = _root_metadata(
             {"x": [_product("p1", "x", "v"), _product("p2", "x", "w")]}
         )
-        monkeypatch.setattr(generator, "read_json", lambda path, **_: existing)
         written = {}
-        monkeypatch.setattr(
-            generator.storage,
-            "write_json",
-            lambda aws, path, data: written.update(data=data),
-        )
+        _stub_s3(monkeypatch, existing, lambda path, data: written.update(data=data))
 
         write_root_metadata({"x": [_product("p1", "x", "v")]}, "s3://my-bucket/tiler")
 
@@ -124,11 +137,8 @@ class TestWriteRootMetadataToS3:
     def test_skips_the_write_when_nothing_changed(self, monkeypatch):
         stores = {"x": [_product("p1", "x", "v")]}
         existing = _root_metadata(stores)
-        monkeypatch.setattr(generator, "read_json", lambda path, **_: existing)
         writes = []
-        monkeypatch.setattr(
-            generator.storage, "write_json", lambda aws, path, data: writes.append(path)
-        )
+        _stub_s3(monkeypatch, existing, lambda path, data: writes.append(path))
 
         write_root_metadata(stores, "s3://my-bucket/tiler")
 
@@ -137,13 +147,8 @@ class TestWriteRootMetadataToS3:
     def test_a_file_at_another_version_is_rewritten_from_scratch(self, monkeypatch):
         existing = _root_metadata({"old": [_product("old", "old", "v")]})
         existing["version"] = ROOT_METADATA_VERSION + 1
-        monkeypatch.setattr(generator, "read_json", lambda path, **_: existing)
         written = {}
-        monkeypatch.setattr(
-            generator.storage,
-            "write_json",
-            lambda aws, path, data: written.update(data=data),
-        )
+        _stub_s3(monkeypatch, existing, lambda path, data: written.update(data=data))
 
         write_root_metadata({"x": [_product("p1", "x", "v")]}, "s3://my-bucket/tiler")
 
@@ -151,24 +156,16 @@ class TestWriteRootMetadataToS3:
         assert _published_ids(written["data"]) == ["p1"]
 
     def test_does_not_write_an_empty_catalogue(self, monkeypatch):
-        monkeypatch.setattr(generator, "read_json", lambda path, **_: None)
         writes = []
-        monkeypatch.setattr(
-            generator.storage, "write_json", lambda aws, path, data: writes.append(path)
-        )
+        _stub_s3(monkeypatch, None, lambda path, data: writes.append(path))
 
         write_root_metadata({}, "s3://my-bucket/tiler")
 
         assert writes == []
 
     def test_writes_fresh_manifest_when_nothing_exists_yet(self, monkeypatch):
-        monkeypatch.setattr(generator, "read_json", lambda path, **_: None)
         written = {}
-        monkeypatch.setattr(
-            generator.storage,
-            "write_json",
-            lambda aws, path, data: written.update(data=data),
-        )
+        _stub_s3(monkeypatch, None, lambda path, data: written.update(data=data))
 
         write_root_metadata({"x": [_product("p1", "x", "v")]}, "s3://my-bucket/tiler")
 
@@ -176,6 +173,33 @@ class TestWriteRootMetadataToS3:
         assert written["data"]["stores"]["x"]["products"] == [
             {"id": "p1", "variable": "v", "metadata_uuid": "uuid-a"}
         ]
+
+    def test_conflicting_write_rereads_and_keeps_the_other_jobs_store(
+        self, monkeypatch
+    ):
+        """Another store job published between our read and write."""
+        s3 = {"root": None}
+        other = _root_metadata({"other": [_product("o", "other", "v")]})
+        attempts = []
+
+        def read(aws, path):
+            return s3["root"], "etag" if s3["root"] else None
+
+        def write(aws, path, data, etag):
+            attempts.append(etag)
+            if len(attempts) == 1:
+                s3["root"] = other
+                raise generator.storage.WriteConflict(path)
+            s3["root"] = data
+
+        monkeypatch.setattr(generator.storage, "read_json_with_etag", read)
+        monkeypatch.setattr(generator.storage, "write_json_if_unchanged", write)
+        monkeypatch.setattr(generator.time, "sleep", lambda s: None)
+
+        write_root_metadata({"x": [_product("p1", "x", "v")]}, "s3://my-bucket/tiler")
+
+        assert attempts == [None, "etag"]
+        assert _published_ids(s3["root"]) == ["o", "p1"]
 
 
 @pytest.fixture(autouse=True)
@@ -199,225 +223,97 @@ def every_store_has_data(monkeypatch):
     )
 
 
-class TestGenerateForAllProducts:
-    def test_publishes_only_stores_that_succeeded(self, monkeypatch):
+class TestGenerateForStore:
+    ROOT = "s3://my-bucket/tiler/root_metadata.json"
+
+    def _setup(self, monkeypatch, build_ok=True, **config_overrides):
         s3_store = _fake_s3_json_store(monkeypatch)
-        products = {
-            "p1": _product("p1", "good", "v"),
-            "p2": _product("p2", "bad", "v", uuid="uuid-b"),
-        }
-        monkeypatch.setattr(generator, "discover_products", lambda api: products)
-
-        monkeypatch.setattr(
-            generator,
-            "config",
-            MagicMock(
-                get_tiler_batch_config=lambda: _batch_config(),
-            ),
-        )
-
-        calls = []
-        monkeypatch.setattr(
-            generator,
-            "_build_in_subprocess",
-            lambda store, uuid, variables, batch_config: calls.append(store)
-            or store == "good",
-        )
-
-        generate_tiler_parquet_for_all_products(api=MagicMock())
-
-        # Every store is attempted, one after another, in a stable order.
-        assert calls == ["bad", "good"]
-        # Only the successfully-converted store's product is published.
-        root = s3_store["s3://my-bucket/tiler/root_metadata.json"]
-        assert _published_ids(root) == ["p1"]
-
-    def test_each_store_is_published_before_the_next_runs(self, monkeypatch):
-        s3_store = _fake_s3_json_store(monkeypatch)
-        products = {
-            "p1": _product("p1", "a", "v"),
-            "p2": _product("p2", "b", "v", uuid="uuid-b"),
-        }
-        monkeypatch.setattr(generator, "discover_products", lambda api: products)
-        monkeypatch.setattr(
-            generator,
-            "config",
-            MagicMock(get_tiler_batch_config=lambda: _batch_config()),
-        )
-
-        published_before = {}
-
-        def build(store, uuid, variables, batch_config):
-            root = s3_store.get("s3://my-bucket/tiler/root_metadata.json")
-            published_before[store] = _published_ids(root) if root else []
-            return True
-
-        monkeypatch.setattr(generator, "_build_in_subprocess", build)
-
-        generate_tiler_parquet_for_all_products(api=MagicMock())
-
-        assert published_before == {"a": [], "b": ["p1"]}
-        root = s3_store["s3://my-bucket/tiler/root_metadata.json"]
-        assert _published_ids(root) == ["p1", "p2"]
-
-    def test_a_store_that_failed_this_run_keeps_its_previous_entry(self, monkeypatch):
-        """Its parquet from an earlier run is still on S3 and still serveable."""
-        s3_store = _fake_s3_json_store(monkeypatch)
-        s3_store["s3://my-bucket/tiler/root_metadata.json"] = _root_metadata(
-            {"good": [_product("p1", "good", "v")], "bad": [_product("p2", "bad", "v")]}
-        )
-        products = {
-            "p1": _product("p1", "good", "v"),
-            "p2": _product("p2", "bad", "v", uuid="uuid-b"),
-        }
-        monkeypatch.setattr(generator, "discover_products", lambda api: products)
-        monkeypatch.setattr(
-            generator,
-            "config",
-            MagicMock(get_tiler_batch_config=lambda: _batch_config()),
-        )
-        monkeypatch.setattr(
-            generator,
-            "_build_in_subprocess",
-            lambda store, uuid, variables, batch_config: store == "good",
-        )
-
-        generate_tiler_parquet_for_all_products(api=MagicMock())
-
-        root = s3_store["s3://my-bucket/tiler/root_metadata.json"]
-        assert _published_ids(root) == ["p1", "p2"]
-
-    def test_filters_by_uuid(self, monkeypatch):
-        _fake_s3_json_store(monkeypatch)
-        products = {
-            "p1": _product("p1", "x", "v", uuid="uuid-a"),
-            "p2": _product("p2", "y", "v", uuid="uuid-b"),
-        }
-        monkeypatch.setattr(generator, "discover_products", lambda api: products)
-
-        monkeypatch.setattr(
-            generator,
-            "config",
-            MagicMock(
-                get_tiler_batch_config=lambda: _batch_config(),
-            ),
-        )
-
-        calls = []
-        monkeypatch.setattr(
-            generator,
-            "_build_in_subprocess",
-            lambda store, uuid, variables, batch_config: calls.append(store) or True,
-        )
-
-        generate_tiler_parquet_for_all_products(api=MagicMock(), uuid="uuid-b")
-
-        assert calls == ["y"]
-
-    def test_root_metadata_upserts_without_dropping_other_uuids(self, monkeypatch):
-        """A uuid-scoped run must not wipe out other uuids already published."""
-        s3_store = _fake_s3_json_store(monkeypatch)
-        s3_store["s3://my-bucket/tiler/root_metadata.json"] = _root_metadata(
-            {"old": [_product("old", "old", "v", uuid="uuid-old")]}
-        )
-        products = {"p1": _product("p1", "new", "v", uuid="uuid-new")}
-        monkeypatch.setattr(generator, "discover_products", lambda api: products)
-
-        monkeypatch.setattr(
-            generator,
-            "config",
-            MagicMock(
-                get_tiler_batch_config=lambda: _batch_config(),
-            ),
-        )
-        monkeypatch.setattr(generator, "_build_in_subprocess", lambda *a, **k: True)
-
-        generate_tiler_parquet_for_all_products(api=MagicMock(), uuid="uuid-new")
-
-        root = s3_store["s3://my-bucket/tiler/root_metadata.json"]
-        assert _published_ids(root) == ["old", "p1"]
-
-    def test_forks_one_child_per_store(self, monkeypatch):
-        _fake_s3_json_store(monkeypatch)
         products = {
             "p1": _product("p1", "x", "v"),
-            "p2": _product("p2", "x", "w"),
-            "p3": _product("p3", "y", "v"),
+            "p2": _product("p2", "y", "v", uuid="uuid-b"),
+            "p3": _product("p3", "y", "w", uuid="uuid-b"),
         }
         monkeypatch.setattr(generator, "discover_products", lambda api: products)
-
         monkeypatch.setattr(
             generator,
             "config",
-            MagicMock(
-                get_tiler_batch_config=lambda: _batch_config(),
-            ),
+            MagicMock(get_tiler_batch_config=lambda: _batch_config(**config_overrides)),
         )
-
         calls = []
         monkeypatch.setattr(
             generator,
             "_build_in_subprocess",
-            lambda store, uuid, variables, batch_config: calls.append(store) or True,
+            lambda store, uuid, variables, batch_config: calls.append(
+                (store, uuid, variables)
+            )
+            or build_ok,
+        )
+        return s3_store, calls
+
+    def test_converts_and_publishes_only_that_store(self, monkeypatch):
+        s3_store, calls = self._setup(monkeypatch)
+
+        assert generate_tiler_parquet_for_store(MagicMock(), "y") is True
+
+        assert calls == [("y", "uuid-b", ["v", "w"])]
+        assert _published_ids(s3_store[self.ROOT]) == ["p2", "p3"]
+
+    def test_reports_failure_and_publishes_nothing(self, monkeypatch):
+        s3_store, _ = self._setup(monkeypatch, build_ok=False)
+
+        assert generate_tiler_parquet_for_store(MagicMock(), "y") is False
+        assert s3_store == {}
+
+    def test_a_failed_store_keeps_its_previous_entry(self, monkeypatch):
+        """Its parquet from an earlier run is still on S3 and still serveable."""
+        s3_store, _ = self._setup(monkeypatch, build_ok=False)
+        s3_store[self.ROOT] = _root_metadata({"y": [_product("p2", "y", "v")]})
+
+        generate_tiler_parquet_for_store(MagicMock(), "y")
+
+        assert _published_ids(s3_store[self.ROOT]) == ["p2"]
+
+    def test_publishing_keeps_other_stores(self, monkeypatch):
+        s3_store, _ = self._setup(monkeypatch)
+        s3_store[self.ROOT] = _root_metadata(
+            {"old": [_product("old", "old", "v", uuid="uuid-old")]}
         )
 
-        generate_tiler_parquet_for_all_products(api=MagicMock())
+        generate_tiler_parquet_for_store(MagicMock(), "y")
 
-        assert calls == ["x", "y"]
+        assert _published_ids(s3_store[self.ROOT]) == ["old", "p2", "p3"]
 
+    def test_unknown_store_does_nothing(self, monkeypatch):
+        _, calls = self._setup(monkeypatch)
 
-class TestPublishing:
-    def _run(self, monkeypatch, s3_store, products, sidecars):
-        """sidecars: {store: [timestamps]} as each store's sidecar reads back."""
-        monkeypatch.setattr(
-            generator,
-            "read_metadata",
-            lambda tiler_root_dir, store: (
-                MagicMock(timestamps=sidecars[store]) if store in sidecars else None
-            ),
-        )
-        monkeypatch.setattr(generator, "discover_products", lambda api: products)
-        monkeypatch.setattr(
-            generator,
-            "config",
-            MagicMock(get_tiler_batch_config=lambda: _batch_config()),
-        )
-        monkeypatch.setattr(generator, "_build_in_subprocess", lambda *a, **k: True)
-        generate_tiler_parquet_for_all_products(api=MagicMock())
-        return s3_store["s3://my-bucket/tiler/root_metadata.json"]
+        assert generate_tiler_parquet_for_store(MagicMock(), "z") is True
+        assert calls == []
 
     def test_store_with_no_timestamps_is_not_published(self, monkeypatch):
-        s3_store = _fake_s3_json_store(monkeypatch)
-        products = {"p1": _product("p1", "x", "v"), "p2": _product("p2", "y", "v")}
+        s3_store, _ = self._setup(monkeypatch)
+        monkeypatch.setattr(
+            generator, "read_metadata", lambda root, store: MagicMock(timestamps=[])
+        )
 
-        root = self._run(monkeypatch, s3_store, products, {"x": ["t1"], "y": []})
+        generate_tiler_parquet_for_store(MagicMock(), "y")
 
-        assert _published_ids(root) == ["p1"]
+        assert s3_store == {}
 
     def test_store_that_lost_its_data_is_removed(self, monkeypatch):
-        s3_store = _fake_s3_json_store(monkeypatch)
-        s3_store["s3://my-bucket/tiler/root_metadata.json"] = _root_metadata(
+        s3_store, _ = self._setup(monkeypatch)
+        s3_store[self.ROOT] = _root_metadata(
             {"x": [_product("p1", "x", "v")], "y": [_product("p2", "y", "v")]}
         )
-        products = {"p1": _product("p1", "x", "v"), "p2": _product("p2", "y", "v")}
-
-        root = self._run(monkeypatch, s3_store, products, {"x": ["t1"], "y": []})
-
-        assert _published_ids(root) == ["p1"]
-
-
-class TestInProcessMode:
-    def test_runs_each_store_in_process_without_forking(self, monkeypatch):
-        s3_store = _fake_s3_json_store(monkeypatch)
-        products = {"p1": _product("p1", "x", "v"), "p2": _product("p2", "y", "v")}
-        monkeypatch.setattr(generator, "discover_products", lambda api: products)
         monkeypatch.setattr(
-            generator,
-            "config",
-            MagicMock(
-                get_tiler_batch_config=lambda: _batch_config(use_fork_process=False)
-            ),
+            generator, "read_metadata", lambda root, store: MagicMock(timestamps=[])
         )
+
+        generate_tiler_parquet_for_store(MagicMock(), "y")
+
+        assert _published_ids(s3_store[self.ROOT]) == ["p1"]
+
+    def test_runs_in_process_without_forking(self, monkeypatch):
+        s3_store, _ = self._setup(monkeypatch, use_fork_process=False)
 
         def no_fork(*a, **k):
             raise AssertionError("must not fork")
@@ -430,11 +326,91 @@ class TestInProcessMode:
             lambda store, uuid, variables, batch_config: calls.append(store) or True,
         )
 
-        generate_tiler_parquet_for_all_products(api=MagicMock())
+        assert generate_tiler_parquet_for_store(MagicMock(), "y") is True
+        assert calls == ["y"]
+        assert _published_ids(s3_store[self.ROOT]) == ["p2", "p3"]
 
-        assert calls == ["x", "y"]
-        root = s3_store["s3://my-bucket/tiler/root_metadata.json"]
-        assert _published_ids(root) == ["p1", "p2"]
+
+class TestSubmitStoreJobs:
+    def test_submits_one_job_per_store(self, monkeypatch):
+        products = {
+            "p1": _product("p1", "x", "v"),
+            "p2": _product("p2", "x", "w"),
+            "p3": _product("p3", "y.v2", "v", uuid="uuid-b"),
+        }
+        monkeypatch.setattr(generator, "discover_products", lambda api: products)
+        monkeypatch.setattr(generator, "_store_size", lambda store, n: 0)
+        aws = MagicMock()
+        aws.submit_a_job.side_effect = lambda **kw: f"job-{kw['parameters']['store']}"
+        monkeypatch.setattr(generator, "AWSHelper", lambda: aws)
+        converted = []
+        monkeypatch.setattr(generator, "_build_in_subprocess", converted.append)
+
+        job_ids = generator.submit_store_jobs(
+            api=MagicMock(), job_queue="q", job_definition="d"
+        )
+
+        assert job_ids == ["job-x", "job-y.v2"]
+        submitted = [c.kwargs for c in aws.submit_a_job.call_args_list]
+        assert submitted == [
+            dict(
+                job_name="tiler-parquet-x",
+                job_queue="q",
+                job_definition="d",
+                parameters={
+                    "type": "generate-tiler-parquet-store",
+                    "store": "x",
+                },
+            ),
+            dict(
+                job_name="tiler-parquet-y-v2",
+                job_queue="q",
+                job_definition="d",
+                parameters={
+                    "type": "generate-tiler-parquet-store",
+                    "store": "y.v2",
+                },
+            ),
+        ]
+        # The dispatcher converts nothing itself.
+        assert converted == []
+
+    def test_submits_largest_store_first(self, monkeypatch):
+        products = {
+            "p1": _product("p1", "small", "v"),
+            "p2": _product("p2", "big", "v"),
+            "p3": _product("p3", "big", "w"),
+            "p4": _product("p4", "unopenable", "v"),
+            "p5": _product("p5", "mid", "v"),
+        }
+        monkeypatch.setattr(generator, "discover_products", lambda api: products)
+        # (time, lat, lon) per store; big has 2 variables.
+        shapes = {"small": (1, 10, 10), "big": (10, 10, 10), "mid": (15, 10, 10)}
+        monkeypatch.setattr(
+            generator,
+            "open_store",
+            lambda store: None if store in shapes else FileNotFoundError(store),
+        )
+        monkeypatch.setattr(
+            generator,
+            "get_store",
+            lambda store: MagicMock(
+                sizes=dict(zip(("time", "lat", "lon"), shapes[store]))
+            ),
+        )
+        closed = []
+        monkeypatch.setattr(generator, "close_store", closed.append)
+        aws = MagicMock()
+        monkeypatch.setattr(generator, "AWSHelper", lambda: aws)
+
+        generator.submit_store_jobs(api=MagicMock(), job_queue="q", job_definition="d")
+
+        stores = [
+            c.kwargs["parameters"]["store"] for c in aws.submit_a_job.call_args_list
+        ]
+        # big 2000, mid 1500, small 100, unopenable 0.
+        assert stores == ["big", "mid", "small", "unopenable"]
+        assert sorted(closed) == ["big", "mid", "small", "unopenable"]
 
 
 class TestBuildTilerParquet:

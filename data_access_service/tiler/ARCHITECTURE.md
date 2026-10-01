@@ -28,13 +28,14 @@ timestamp, so a run only adds files and never rewrites them.
 
 ```mermaid
 flowchart TD
-    EP["entry_point.py<br/>generate-tiler-parquet"] --> GEN
+    EP["entry_point.py<br/>generate-tiler-parquet"] --> SUBMIT["generator.submit_store_jobs<br/>one Batch job per store"]
+    SUBMIT --> EPS["entry_point.py<br/>generate-tiler-parquet-store"] --> GEN
 
-    subgraph GEN["generator.generate_tiler_parquet_for_all_products"]
+    subgraph GEN["generator.generate_tiler_parquet_for_store"]
         DISC["discovery.discover_products"]
-        GROUP["_group_by_store<br/>one conversion per store"]
-        FORK["fork one worker per store<br/>(use_fork_process)"]
-        ROOT["write_root_metadata<br/>upsert, drop empty stores"]
+        GROUP["_group_by_store<br/>variables of this store"]
+        FORK["fork one worker<br/>(use_fork_process)"]
+        ROOT["write_root_metadata<br/>conditional upsert, drop empty stores"]
         DISC --> GROUP --> FORK --> ROOT
     end
 

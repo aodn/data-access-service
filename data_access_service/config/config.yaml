@@ -181,7 +181,7 @@ tiler:
       duckdb:
         duckdb_temp_dir: "tiler_batch_duckdb_tmp"
         memory_limit: "512MB"
-        threads: 4
+        threads: 2
   catalog:
     blacklist:
       # curvilinear grids zarrs.
