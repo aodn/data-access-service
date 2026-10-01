@@ -226,14 +226,14 @@ def _write_pieces(
     steps: list[int],
     piece_dir: str,
 ) -> tuple[dict[tuple[int, str], list[str]], dict[int, int]]:
-    """Read ``ds`` one band of lat rows at a time and write each time step
-    and variable as local parquet pieces, in row order. The next band is read
-    while this one is written, so at most two bands are in memory.
+    """Read ``ds`` one variable and one band of lat rows at a time and write
+    each time step and variable as local parquet pieces, in row order. The
+    next band is read while this one is written, so at most two bands are in
+    memory.
 
     Returns ``(pieces by (step, variable), rows by step)``.
     """
     n_i = ds.sizes["lat"]
-    band_rows = _band_rows(ds, variables)
     pieces: dict[tuple[int, str], list[str]] = {
         (k, v): [] for k in steps for v in variables
     }
@@ -243,33 +243,42 @@ def _write_pieces(
         for k in steps
         for v in variables
     }
+    # One variable at a time: one lat chunk of all variables together can be
+    # well over BAND_BYTES (e.g. heatwave, 10 float64 variables).
+    reads = [
+        (v, band_start, band_rows)
+        for v in variables
+        for band_rows in [_band_rows(ds, [v])]
+        for band_start in range(0, n_i, band_rows)
+    ]
 
-    def read(band_start: int) -> xr.Dataset:
-        return ds.isel(lat=slice(band_start, band_start + band_rows)).compute()
+    def read(v: str, band_start: int, band_rows: int) -> xr.DataArray:
+        return ds[v].isel(lat=slice(band_start, band_start + band_rows)).compute()
 
+    if not reads:
+        return pieces, rows
     with ThreadPoolExecutor(max_workers=1) as reader:
-        next_band = reader.submit(read, 0)
-        for band_start in range(0, n_i, band_rows):
+        next_band = reader.submit(read, *reads[0])
+        for n, (v, band_start, band_rows) in enumerate(reads):
             last = band_start + band_rows >= n_i
             # Drop the last band before taking the next, or three are held.
             band = None
             band = next_band.result()
-            if not last:
-                next_band = reader.submit(read, band_start + band_rows)
+            if n + 1 < len(reads):
+                next_band = reader.submit(read, *reads[n + 1])
             for k in steps:
-                for v in variables:
-                    parts, carry[k, v] = _whole_blocks(
-                        carry[k, v], band[v].isel(time=k).values, band_start, last
+                parts, carry[k, v] = _whole_blocks(
+                    carry[k, v], band.isel(time=k).values, band_start, last
+                )
+                for first_row, arr in parts:
+                    frame = _sparse_rows_for_slice(arr)
+                    frame["i"] += first_row
+                    path = os.path.join(
+                        piece_dir, f"{k}_{v}_{len(pieces[k, v])}.parquet"
                     )
-                    for first_row, arr in parts:
-                        frame = _sparse_rows_for_slice(arr)
-                        frame["i"] += first_row
-                        path = os.path.join(
-                            piece_dir, f"{k}_{v}_{len(pieces[k, v])}.parquet"
-                        )
-                        client.write_parquet(frame, path)
-                        pieces[k, v].append(path)
-                        rows[k] += len(frame)
+                    client.write_parquet(frame, path)
+                    pieces[k, v].append(path)
+                    rows[k] += len(frame)
     return pieces, rows
 
 
