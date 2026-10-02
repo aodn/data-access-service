@@ -21,6 +21,10 @@ from data_access_service.batch.tiler.generator import (
     submit_store_jobs,
 )
 from data_access_service.config.config import DevConfig
+from data_access_service.models.co_datasource.csiro.csiro_data_src import (
+    accept_csiro_keys,
+    redact_job_parameters,
+)
 from data_access_service.utils.log_context import bind_log_context
 
 logger = init_log(Config.get_config())
@@ -92,7 +96,7 @@ def run_job() -> None:
 
         # Extract parameters from the job details
         parameters = job.get("parameters")
-        logger.info(f"Parameters: {parameters}")
+        logger.info("Parameters: %s", redact_job_parameters(parameters))
 
         # Switch based on parameter call_type
         call_type = parameters.get("type")
@@ -115,7 +119,7 @@ def run_job() -> None:
         parameters = _parse_local_job_parameters(raw)
         call_type = parameters.get("type") or os.getenv("AWS_BATCH_CALL_TYPE")
         logger.info(f"Job Index: {job_index}")
-        logger.info(f"Parameters: {parameters}")
+        logger.info("Parameters: %s", redact_job_parameters(parameters))
         if call_type in (
             "sub-setting",
             "sub-setting-data-preparation",
@@ -150,6 +154,8 @@ def run_job() -> None:
                     "LOCAL_JOBS_PARAM is missing keys required by get_subset_request: "
                     f"{missing}. Got keys: {sorted(parameters)}"
                 )
+
+    accept_csiro_keys(parameters.get(Parameters.CSIRO_KEYS.value))
 
     match call_type:
         case "sub-setting":

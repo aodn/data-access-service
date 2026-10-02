@@ -12,6 +12,9 @@ from data_access_service.utils.subset_request_resolver import (
     resolve_subset_request,
 )
 from data_access_service.models.subset_request import SubsetRequest
+from data_access_service.models.co_datasource.csiro.csiro_data_src import (
+    export_csiro_keys,
+)
 from data_access_service.utils.format_utils import (
     KEY_SUFFIX_ZARR,
     check_key_supports_format,
@@ -135,6 +138,12 @@ def init(api: API, job_id_of_init, parameters):
             job_id_of_init
         ),
     }
+    # Only export credentials fetched by this init process, never forward a stale handoff that happened to arrive in its own parameters.
+    preparation_parameters.pop(Parameters.CSIRO_KEYS.value, None)
+    csiro_keys = export_csiro_keys()
+    if csiro_keys is not None:
+        preparation_parameters[Parameters.CSIRO_KEYS.value] = csiro_keys
+
     data_preparation_job_id = aws_client.submit_a_job(
         job_name="prepare-data-for-job-" + job_id_of_init,
         job_queue=config.get_job_queue_name(),
@@ -146,7 +155,11 @@ def init(api: API, job_id_of_init, parameters):
 
     # submit data collection job
     collection_parameters = {
-        **preparation_parameters,
+        **{
+            key: value
+            for key, value in preparation_parameters.items()
+            if key != Parameters.CSIRO_KEYS.value
+        },
         Parameters.TYPE.value: "sub-setting-data-collection",
     }
 

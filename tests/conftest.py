@@ -21,6 +21,11 @@ def no_csiro_key_cache(monkeypatch):
     Tests about the cache build their own memoizer.
     """
     monkeypatch.setattr(csiro_data_src, "_key_memo", NullMemoizer())
+    csiro_data_src._fetched_here.clear()
+    csiro_data_src._handed_down.clear()
+    yield
+    csiro_data_src._fetched_here.clear()
+    csiro_data_src._handed_down.clear()
 
 
 @pytest.fixture(autouse=True)
