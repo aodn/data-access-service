@@ -11,8 +11,11 @@ Two very different readers need that access, so both live here:
   :class:`DatasetLocation`, which they turn into a DuckDB secret.
 """
 
+import json
 import logging
+import math
 import threading
+import time
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Optional
@@ -32,6 +35,13 @@ from data_access_service.utils.caching.memoizer import CacheBackend, create_memo
 from data_access_service.utils.retry_utils import log_retry_attempt
 
 log = logging.getLogger(__name__)
+
+
+# Temporary Batch key handoff until Secrets Manager replaces it
+# Keep keys fetched in this process separate from keys supplied by a parent: request_csiro_s3_access deliberately consults only _handed_down so the normal ECS/Valkey behaviour is unchanged.
+_fetched_here: dict[tuple[str, str], tuple["CsiroS3Access", float]] = {}
+_handed_down: dict[tuple[str, str], tuple["CsiroS3Access", float]] = {}
+_CSIRO_KEYS_PARAMETER = "csiro_keys"
 
 
 @dataclass(frozen=True)
@@ -200,6 +210,7 @@ def _request_csiro_s3_access(dataset_name: str, fedora_pid: str) -> CsiroS3Acces
         access.bucket,
         access.prefix,
     )
+    _fetched_here[(dataset_name, fedora_pid)] = (access, time.time())
     return access
 
 
@@ -245,10 +256,122 @@ def request_csiro_s3_access(dataset_name: str, fedora_pid: str) -> CsiroS3Access
     Caching is only an optimisation: with no cache reachable, or
     ``cache.backend: none``, this asks CSIRO directly.
     """
+    handed_down = _handed_down.get((dataset_name, fedora_pid))
+    if handed_down is not None:
+        access, fetched_at = handed_down
+        age_seconds = time.time() - fetched_at
+        if age_seconds < Config.get_config().get_csiro_config().key_cache_ttl_seconds:
+            log.info(
+                "using CSIRO key handed down from the parent job, age %.0f seconds",
+                age_seconds,
+            )
+            return access
+        _handed_down.pop((dataset_name, fedora_pid), None)
+
     return _key_memoizer().get_or_compute(
         (dataset_name, fedora_pid),
         lambda: _request_csiro_s3_access(dataset_name, fedora_pid),
     )
+
+
+def export_csiro_keys() -> Optional[str]:
+    """Serialize fresh keys fetched by this process for Batch child jobs."""
+    now = time.time()
+    ttl_seconds = Config.get_config().get_csiro_config().key_cache_ttl_seconds
+    entries = []
+    for (dataset_name, fedora_pid), (access, fetched_at) in _fetched_here.items():
+        if now - fetched_at >= ttl_seconds:
+            continue
+        entries.append(
+            {
+                "dataset_name": dataset_name,
+                "fedora_pid": fedora_pid,
+                "bucket": access.bucket,
+                "prefix": access.prefix,
+                "endpoint_url": access.endpoint_url,
+                "access_key": access.access_key,
+                "secret_access_key": access.secret_access_key,
+                "fetched_at": fetched_at,
+            }
+        )
+    if not entries:
+        return None
+    return json.dumps(entries, separators=(",", ":"))
+
+
+def accept_csiro_keys(raw: Optional[str]) -> None:
+    """Accept fresh parent-job keys, ignoring unusable input safely."""
+    _handed_down.clear()
+    if raw is None:
+        return
+
+    try:
+        entries = json.loads(raw)
+        if not isinstance(entries, list):
+            raise ValueError("CSIRO key handoff must be a list")
+
+        configured_pids = {
+            dataset["dataset_name"]: dataset["fedora_pid"]
+            for dataset in Config.get_config().get_csiro_config().datasets
+        }
+        ttl_seconds = Config.get_config().get_csiro_config().key_cache_ttl_seconds
+        now = time.time()
+        accepted = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise ValueError("CSIRO key handoff entries must be objects")
+            dataset_name = entry["dataset_name"]
+            fedora_pid = entry["fedora_pid"]
+            fetched_at = entry["fetched_at"]
+            string_fields = (
+                dataset_name,
+                fedora_pid,
+                entry["bucket"],
+                entry["prefix"],
+                entry["endpoint_url"],
+                entry["access_key"],
+                entry["secret_access_key"],
+            )
+            if not all(isinstance(value, str) for value in string_fields):
+                raise ValueError("CSIRO key handoff fields have invalid types")
+            if (
+                not isinstance(fetched_at, (int, float))
+                or isinstance(fetched_at, bool)
+                or not math.isfinite(fetched_at)
+            ):
+                raise ValueError("CSIRO key handoff timestamp is invalid")
+            if configured_pids.get(dataset_name) != fedora_pid:
+                continue
+            if now - fetched_at >= ttl_seconds:
+                continue
+            access = CsiroS3Access(
+                bucket=entry["bucket"],
+                prefix=entry["prefix"],
+                endpoint_url=entry["endpoint_url"],
+                access_key=entry["access_key"],
+                secret_access_key=entry["secret_access_key"],
+            )
+            accepted[(dataset_name, fedora_pid)] = (access, fetched_at)
+    except (
+        json.JSONDecodeError,
+        KeyError,
+        OverflowError,
+        RecursionError,
+        TypeError,
+        ValueError,
+    ):
+        log.warning("Ignoring malformed CSIRO key handoff parameter")
+        return
+
+    _handed_down.update(accepted)
+
+
+def redact_job_parameters(parameters: dict) -> dict:
+    """Return logging-safe Batch parameters without exposed CSIRO keys to logs."""
+    redacted = parameters.copy()
+    if _CSIRO_KEYS_PARAMETER in redacted:
+        redacted[_CSIRO_KEYS_PARAMETER] = "<redacted>"
+    return redacted
 
 
 class CsiroDataSrc(AbstractDataSrc):

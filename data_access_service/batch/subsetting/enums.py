@@ -19,3 +19,5 @@ class Parameters(Enum):
     FULL_METADATA_LINK = "full_metadata_link"
     SUGGESTED_CITATION = "suggested_citation"
     OUTPUT_FORMAT = "output_format"
+    # Temporary plain-text Batch handoff until Secrets Manager replaces it (#9423).
+    CSIRO_KEYS = "csiro_keys"
