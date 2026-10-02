@@ -1,6 +1,8 @@
 import pandas as pd
 import pytest
 import os
+import json
+import time
 
 from unittest.mock import patch, call, MagicMock
 
@@ -8,6 +10,9 @@ from data_access_service import API
 from data_access_service.batch.subsetting import init
 from data_access_service.config.config import EnvType, Config
 from data_access_service.core.AWSHelper import AWSHelper
+from data_access_service.batch.subsetting.enums import Parameters
+from data_access_service.models.co_datasource.csiro import csiro_data_src
+from data_access_service.models.co_datasource.csiro.csiro_data_src import CsiroS3Access
 from data_access_service.models.subset_request import NON_SPECIFIED
 from tests.batch.batch_test_consts import (
     INIT_JOB_ID,
@@ -16,6 +21,7 @@ from tests.batch.batch_test_consts import (
     COLLECTION_JOB_SUBMISSION_ARGS,
 )
 from tests.core.test_with_s3 import TestWithS3, REGION
+from tests.models.co_datasource.test_dataset_location import CSIRO_DATASET
 
 
 class TestInit(TestWithS3):
@@ -68,6 +74,40 @@ class TestInit(TestWithS3):
                 assert (
                     expected_call_2 == submit_a_job.call_args_list[1]
                 ), "call arg list 2"
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    @patch("data_access_service.models.co_datasource.co_data_registory.CsiroDataSrc")
+    def test_init_hands_csiro_keys_only_to_preparation(
+        self, mock_csiro_cls, upload_test_case_to_s3
+    ):
+        mock_csiro = MagicMock()
+        mock_csiro.get_name.return_value = "csiro"
+        mock_csiro.get_metadata_catalog.return_value = {}
+        mock_csiro_cls.return_value = mock_csiro
+        csiro_data_src._fetched_here[(CSIRO_DATASET, "csiro:72626")] = (
+            CsiroS3Access(
+                bucket="dapprd-mnf",
+                prefix="000072626v004/data/",
+                endpoint_url="https://s3.data.csiro.au",
+                access_key="csiro-key",
+                secret_access_key="csiro-secret",
+            ),
+            time.time(),
+        )
+
+        with patch.object(Config, "get_month_count_per_job", return_value=3):
+            with patch.object(
+                AWSHelper, "submit_a_job", return_value="test-job-id-returned"
+            ) as submit_a_job:
+                init(API(), INIT_JOB_ID, INIT_PARAMETERS)
+
+        preparation_parameters = submit_a_job.call_args_list[0].kwargs["parameters"]
+        collection_parameters = submit_a_job.call_args_list[1].kwargs["parameters"]
+        handed_down = json.loads(preparation_parameters[Parameters.CSIRO_KEYS.value])
+
+        assert handed_down[0]["dataset_name"] == CSIRO_DATASET
+        assert handed_down[0]["access_key"] == "csiro-key"
+        assert Parameters.CSIRO_KEYS.value not in collection_parameters
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     @patch("data_access_service.models.co_datasource.co_data_registory.CsiroDataSrc")
