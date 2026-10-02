@@ -231,3 +231,43 @@ def test_block_sums_of_an_empty_window_read_nothing(tiler_root_dir, repo):
 def test_a_missing_file_raises_file_not_found(tiler_root_dir, repo, read):
     with pytest.raises(FileNotFoundError, match="2024-01-16T000000"):
         read(repo, "2024-01-16T00:00:00.000000000Z")
+
+
+# --- expired S3 token -------------------------------------------------------
+
+EXPIRED = "HTTP 400 Bad Request\n\nExpiredToken: The provided token has expired."
+
+
+def _fail_first_execute(monkeypatch, client, error):
+    """Make the first ``execute`` raise ``error``, then run normally."""
+    real = client.execute
+    calls = {"n": 0}
+
+    def execute(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise error
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(client, "execute", execute)
+
+
+def test_expired_token_refreshes_and_retries(tiler_root_dir, repo, monkeypatch):
+    _write(tiler_root_dir, [(1, 2, 4.0)])
+    refreshed = []
+    monkeypatch.setattr(repo.session, "refresh_s3_secrets", lambda: refreshed.append(1))
+    _fail_first_execute(monkeypatch, repo.session, duckdb.HTTPException(EXPIRED))
+
+    assert repo.fetch_point("x", "v", TS, 1, 2) == 4.0
+    assert refreshed == [1]
+
+
+def test_other_http_errors_are_not_retried(tiler_root_dir, repo, monkeypatch):
+    _write(tiler_root_dir, [(1, 2, 4.0)])
+    refreshed = []
+    monkeypatch.setattr(repo.session, "refresh_s3_secrets", lambda: refreshed.append(1))
+    _fail_first_execute(monkeypatch, repo.session, duckdb.HTTPException("HTTP 500"))
+
+    with pytest.raises(duckdb.HTTPException):
+        repo.fetch_point("x", "v", TS, 1, 2)
+    assert refreshed == []
