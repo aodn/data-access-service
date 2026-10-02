@@ -42,6 +42,21 @@ _PROGRESS_LOG_INTERVAL_SECONDS = 60
 log = logging.getLogger(__name__)
 
 
+# S3 error codes meaning the session token needs new credentials.
+_EXPIRED_TOKEN_CODES = ("ExpiredToken", "TokenRefreshRequired")
+
+
+def is_expired_token(error: BaseException) -> bool:
+    """True if S3 rejected the request because the session token expired.
+
+    Matched on the S3 error code in the message. A failure while iterating
+    an Arrow reader comes back as pyarrow's OSError, not a DuckDB error.
+    """
+    return isinstance(error, (duckdb.Error, OSError)) and any(
+        code in str(error) for code in _EXPIRED_TOKEN_CODES
+    )
+
+
 def _sql_preview(sql: str) -> str:
     """Short one-line form of ``sql`` for the query logs.
 
@@ -872,6 +887,9 @@ class TilerDuckDBClient(DuckDBClient):
     spill directory on close.
     """
 
+    # Threads that hit an expired token together refresh once.
+    _MIN_REFRESH_INTERVAL_SECONDS = 5.0
+
     def __init__(self, config: Optional[TilerDuckDBConfig] = None) -> None:
         self._config: TilerDuckDBConfig = (
             config or Config.get_config().get_tiler_api_config().duckdb
@@ -881,7 +899,33 @@ class TilerDuckDBClient(DuckDBClient):
         self._active_cursors: set[Any] = set()
         self._cursors_lock = threading.Lock()
         self._lock = Lock()
+        self._s3_buckets: set[str] = set()
+        self._refresh_lock = Lock()
+        self._last_refresh = 0.0
         self._con = self.get_instance()
+
+    def create_s3_secret(self, bucket: str) -> None:
+        """Create the secret and remember ``bucket`` for :meth:`refresh_s3_secrets`."""
+        super().create_s3_secret(bucket)
+        self._s3_buckets.add(bucket)
+
+    def refresh_s3_secrets(self) -> None:
+        """Recreate the S3 secrets with fresh credentials.
+
+        Needed because ``REFRESH auto`` only runs when opening a file fails,
+        and with the HTTP metadata cache a cached file is opened without a
+        request, so an expired token only shows up on a later read.
+        """
+        with self._refresh_lock:
+            if (
+                time.monotonic() - self._last_refresh
+                < self._MIN_REFRESH_INTERVAL_SECONDS
+            ):
+                return
+            log.warning("S3 token expired; recreating tiler S3 secrets")
+            for bucket in self._s3_buckets:
+                super().create_s3_secret(bucket)
+            self._last_refresh = time.monotonic()
 
     def get_instance(self) -> duckdb.DuckDBPyConnection:
         """Open the connection on first use."""

@@ -7,6 +7,7 @@ request, not the grid. ``keep`` names a table of the ``(i, j)`` cells to
 count (the ocean mask); None counts every cell.
 """
 
+import functools
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -16,7 +17,7 @@ import numpy as np
 import pyarrow as pa
 
 from data_access_service.config.config import Config
-from data_access_service.core.duckdbclient import TilerDuckDBClient
+from data_access_service.core.duckdbclient import TilerDuckDBClient, is_expired_token
 from data_access_service.models.tiler_parquet_types import variable_parquet_path
 from data_access_service.utils.sql_utils import sql_literal
 
@@ -88,6 +89,24 @@ def _missing_as_file_not_found(path: str) -> Iterator[None]:
         raise
 
 
+def _retry_on_expired_token(method):
+    """Run ``method`` again once if the S3 token expired, after recreating
+    the secrets. Wraps the whole method, since a streamed read can fail
+    after ``execute`` returns."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return method(self, *args, **kwargs)
+        except Exception as e:
+            if not is_expired_token(e):
+                raise
+            self.session.refresh_s3_secrets()
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 def _index_table(name: str, index: np.ndarray, out: np.ndarray) -> pa.Table:
     """Source index -> output position, for joining onto the parquet rows."""
     return pa.table({name: index.astype(np.int32), "k": out.astype(np.int32)})
@@ -121,6 +140,7 @@ class TilerParquetRepository:
             },
         )
 
+    @_retry_on_expired_token
     def fetch_value_range(
         self, store: str, variable: str, raw_ts: str, keep: str | None = None
     ) -> tuple[float, float]:
@@ -155,6 +175,7 @@ class TilerParquetRepository:
             ).fetchone()
         return _as_float(lo), _as_float(hi)
 
+    @_retry_on_expired_token
     def fetch_point(
         self,
         store: str,
@@ -173,6 +194,7 @@ class TilerParquetRepository:
             ).fetchone()
         return np.nan if row is None else float(row[0])
 
+    @_retry_on_expired_token
     def fetch_gather(
         self,
         store: str,
@@ -215,6 +237,7 @@ class TilerParquetRepository:
                 out[r, c] = value
         return out
 
+    @_retry_on_expired_token
     def fetch_block_sums(
         self,
         store: str,
