@@ -12,6 +12,7 @@ class _Client(DuckDBClient):
     """A plain in-memory connection with httpfs loaded."""
 
     def __init__(self):
+        super().__init__()
         self._con = duckdb.connect()
         self._con.execute("INSTALL httpfs; LOAD httpfs;")
 
@@ -47,6 +48,12 @@ def test_secret_uses_credential_chain_with_auto_refresh(monkeypatch, not_int_tes
     assert name == "my-bucket_s3"
     assert provider == "credential_chain"
     assert scope == ["s3://my-bucket"]
+
+    client.create_s3_secret("my-bucket")
+    rows = client.execute(
+        "SELECT name FROM duckdb_secrets() WHERE name = 'my-bucket_s3'"
+    ).fetchall()
+    assert rows == [("my-bucket_s3",)]
     client.close()
 
 

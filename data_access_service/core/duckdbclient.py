@@ -55,6 +55,9 @@ def _sql_preview(sql: str) -> str:
 
 
 class DuckDBClient(ABC):
+    # Serializes lazy init of the per-instance secret cache below.
+    _chain_secret_init_lock = Lock()
+
     """Common interface over a DuckDB connection.
 
     Concrete clients own (or share) a DuckDB connection and expose a uniform
@@ -80,11 +83,22 @@ class DuckDBClient(ABC):
     def close(self) -> None:
         """Release the connection or cursor held by this client."""
 
+    def __init__(self) -> None:
+        # The handle ``execute`` runs on. Subclasses replace it when they open
+        # or drop their connection. The credential-chain secret cache is keyed
+        # by this object, because a new connection does not keep the old secret.
+        self._con: duckdb.DuckDBPyConnection | None = None
+        self._s3_chain_lock = Lock()
+        self._s3_chain_for: int | None = None
+        self._s3_chain_secrets: set[str] = set()
+
     def create_s3_secret(self, bucket: str) -> None:
         """Create a DuckDB S3 secret scoped to ``bucket`` from the AWS credential chain.
 
         ``REFRESH auto`` makes DuckDB fetch new credentials when a read fails
-        because they expired.
+        because they expired. A later call for the same connection does not
+        replace the secret: ``CREATE OR REPLACE`` would drop it while another
+        cursor of that connection is still reading.
         """
         boto_session = boto3.Session()
 
@@ -93,14 +107,27 @@ class DuckDBClient(ABC):
             Config.get_config(), IntTestConfig
         ):
             return
-        region = boto_session.region_name or "ap-southeast-2"
-        self.execute("INSTALL aws; LOAD aws;")
-        # No CHAIN: the default chain includes the ECS (Fargate) task role.
-        self.execute(
-            f"CREATE OR REPLACE SECRET {quote_ident(f'{bucket}_s3')} ("
-            "TYPE S3, PROVIDER credential_chain, REFRESH auto, "
-            f"REGION {sql_literal(region)}, SCOPE {sql_literal(f's3://{bucket}')})"
-        )
+        with self._s3_chain_lock:
+            # ``_con`` is the cursor or connection this client reads through.
+            # Replacing it (a new cursor, or a rebuilt database) misses the
+            # cache and creates the secret on that handle.
+            scope = id(self._con)
+            if self._s3_chain_for != scope:
+                self._s3_chain_for = scope
+                self._s3_chain_secrets = set()
+            if bucket in self._s3_chain_secrets:
+                return
+            region = boto_session.region_name or "ap-southeast-2"
+            self.execute("INSTALL aws; LOAD aws;")
+            # No CHAIN: the default chain includes the ECS (Fargate) task role.
+            # IF NOT EXISTS: a second caller must not drop a secret other
+            # cursors of this connection are already reading.
+            self.execute(
+                f"CREATE SECRET IF NOT EXISTS {quote_ident(f'{bucket}_s3')} ("
+                "TYPE S3, PROVIDER credential_chain, REFRESH auto, "
+                f"REGION {sql_literal(region)}, SCOPE {sql_literal(f's3://{bucket}')})"
+            )
+            self._s3_chain_secrets.add(bucket)
 
     def create_s3_secret_with_keys(
         self,
@@ -165,6 +192,7 @@ class PmTileDuckDBClient(DuckDBClient):
         Batch jobs pass their own object so one job's memory limit cannot move
         another's; see :class:`DuckDBTuningConfig`.
         """
+        super().__init__()
         self._config: DuckDBTuningConfig = (
             tuning or Config.get_config().get_pmtiles_duckdb_tuning()
         )
@@ -257,6 +285,9 @@ class PmTileDuckDBClient(DuckDBClient):
                     cursor.execute(f"SET enable_progress_bar = {show};")
                     cursor.execute(f"SET enable_progress_bar_print = {show};")
                     self._duckdb_client = cursor
+                    # Set before the secret: the cache keys on ``_con``, and
+                    # ``__init__`` only assigns it after ``get_instance`` returns.
+                    self._con = cursor
                     # Avoid NewRelic capture the log which is too huge and unless
                     self.create_s3_secret(self._config.co_bucket)
         return self._duckdb_client
@@ -726,6 +757,7 @@ class SitesDuckDBClient(DuckDBClient):
     """
 
     def __init__(self) -> None:
+        super().__init__()
         # All settings come from the config (tests override
         # ``Config.get_sites_config`` to point at an in-memory DB).
         self._config: SitesConfig = Config.get_config().get_sites_config()
@@ -799,6 +831,7 @@ class EstimationDuckDBClient(DuckDBClient):
     """Reads the pre-built estimation index, on a connection of its own."""
 
     def __init__(self, config: EstimationReadDuckDBConfig) -> None:
+        super().__init__()
         self._config = config
         self._duckdb_client: Optional[duckdb.DuckDBPyConnection] = None
         # Track active cursors so they can be interrupted on close.
@@ -873,6 +906,7 @@ class TilerDuckDBClient(DuckDBClient):
     """
 
     def __init__(self, config: Optional[TilerDuckDBConfig] = None) -> None:
+        super().__init__()
         self._config: TilerDuckDBConfig = (
             config or Config.get_config().get_tiler_api_config().duckdb
         )
@@ -958,8 +992,9 @@ class TilerBatchDuckDBClient(DuckDBClient):
     """
 
     def __init__(self, config: TilerBatchDuckDBConfig) -> None:
+        super().__init__()
         self._temp_dir = TemporaryDirectory(prefix=config.duckdb_temp_dir)
-        self._con: Optional[duckdb.DuckDBPyConnection] = duckdb.connect(
+        self._con = duckdb.connect(
             database=":memory:",
             config={
                 "memory_limit": config.memory_limit,
