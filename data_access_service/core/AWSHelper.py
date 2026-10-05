@@ -20,7 +20,6 @@ class AWSHelper:
     def __init__(self):
         self.config: Config = Config.get_config()
         self.log = init_log(self.config)
-        self.log.info("Init AWS class")
         self.s3 = self.config.get_s3_client()
         self.ses = self.config.get_ses_client()
         self.batch = self.config.get_batch_client()

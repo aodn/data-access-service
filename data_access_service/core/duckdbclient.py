@@ -55,6 +55,9 @@ def _sql_preview(sql: str) -> str:
 
 
 class DuckDBClient(ABC):
+    # Serializes lazy init of the per-instance secret cache below.
+    _chain_secret_init_lock = Lock()
+
     """Common interface over a DuckDB connection.
 
     Concrete clients own (or share) a DuckDB connection and expose a uniform
@@ -80,11 +83,28 @@ class DuckDBClient(ABC):
     def close(self) -> None:
         """Release the connection or cursor held by this client."""
 
+    def __init__(self) -> None:
+        # The handle ``execute`` runs on. Subclasses replace it when they open
+        # or drop their connection. The credential-chain secret cache is keyed
+        # by this object, because a new connection does not keep the old secret.
+        self._con: duckdb.DuckDBPyConnection | None = None
+        # RLock: create_s3_secret holds this while it calls execute, and a
+        # nested ExpiredToken refresh must be able to take it again.
+        self._s3_chain_lock = threading.RLock()
+        self._s3_chain_for: int | None = None
+        self._s3_chain_secrets: set[str] = set()
+        # Bumped when the task-role secret is replaced, so only the first
+        # failed read of a generation writes a new secret.
+        self._s3_secret_generation = 0
+
     def create_s3_secret(self, bucket: str) -> None:
         """Create a DuckDB S3 secret scoped to ``bucket`` from the AWS credential chain.
 
-        ``REFRESH auto`` makes DuckDB fetch new credentials when a read fails
-        because they expired.
+        ``REFRESH auto`` does not renew a token that S3 rejects with HTTP 400
+        ExpiredToken. A read that fails that way replaces the secret from
+        boto3 and retries once. A later call for the same connection does not
+        replace the secret: ``CREATE OR REPLACE`` would drop it while another
+        cursor of that connection is still reading.
         """
         boto_session = boto3.Session()
 
@@ -93,14 +113,75 @@ class DuckDBClient(ABC):
             Config.get_config(), IntTestConfig
         ):
             return
+        with self._s3_chain_lock:
+            # ``_con`` is the cursor or connection this client reads through.
+            # Replacing it (a new cursor, or a rebuilt database) misses the
+            # cache and creates the secret on that handle.
+            scope = id(self._con)
+            if self._s3_chain_for != scope:
+                self._s3_chain_for = scope
+                self._s3_chain_secrets = set()
+            if bucket in self._s3_chain_secrets:
+                return
+            region = boto_session.region_name or "ap-southeast-2"
+            self.execute("INSTALL aws; LOAD aws;")
+            # No CHAIN: the default chain includes the ECS (Fargate) task role.
+            # IF NOT EXISTS: a second caller must not drop a secret other
+            # cursors of this connection are already reading.
+            self.execute(
+                f"CREATE SECRET IF NOT EXISTS {quote_ident(f'{bucket}_s3')} ("
+                "TYPE S3, PROVIDER credential_chain, REFRESH auto, "
+                f"REGION {sql_literal(region)}, SCOPE {sql_literal(f's3://{bucket}')})"
+            )
+            self._s3_chain_secrets.add(bucket)
+
+    def _call_refreshing_s3(self, fn):
+        """Run ``fn``. On S3 ExpiredToken, replace the task-role secret and run it once more.
+
+        DuckDB 1.5 refreshes a credential_chain secret only after HTTP 401 or
+        403. ExpiredToken is HTTP 400, so the secret stays expired until boto3
+        mints a new task-role token and that token is written into the secret.
+        """
+        generation = self._s3_secret_generation
+        try:
+            return fn()
+        except duckdb.HTTPException as exc:
+            if "ExpiredToken" not in str(exc):
+                raise
+        self._refresh_expired_s3_secrets(generation)
+        return fn()
+
+    def _refresh_expired_s3_secrets(self, generation: int) -> None:
+        with self._s3_chain_lock:
+            if self._s3_secret_generation != generation:
+                return
+            self._replace_chain_secrets_from_boto()
+            self._s3_secret_generation += 1
+
+    def _replace_chain_secrets_from_boto(self) -> None:
+        """Write the current boto3 credentials over each credential-chain secret.
+
+        External-key secrets are not in ``_s3_chain_secrets`` and are left alone.
+        """
+        if not self._s3_chain_secrets or self._con is None:
+            return
+        boto_session = boto3.Session()
+        credentials = boto_session.get_credentials()
+        if credentials is None:
+            return
+        frozen = credentials.get_frozen_credentials()
         region = boto_session.region_name or "ap-southeast-2"
-        self.execute("INSTALL aws; LOAD aws;")
-        # No CHAIN: the default chain includes the ECS (Fargate) task role.
-        self.execute(
-            f"CREATE OR REPLACE SECRET {quote_ident(f'{bucket}_s3')} ("
-            "TYPE S3, PROVIDER credential_chain, REFRESH auto, "
-            f"REGION {sql_literal(region)}, SCOPE {sql_literal(f's3://{bucket}')})"
-        )
+        token = frozen.token or ""
+        for bucket in list(self._s3_chain_secrets):
+            self._con.execute(
+                f"CREATE OR REPLACE SECRET {quote_ident(f'{bucket}_s3')} ("
+                "TYPE S3, "
+                f"KEY_ID {sql_literal(frozen.access_key)}, "
+                f"SECRET {sql_literal(frozen.secret_key)}, "
+                f"SESSION_TOKEN {sql_literal(token)}, "
+                f"REGION {sql_literal(region)}, "
+                f"SCOPE {sql_literal(f's3://{bucket}')})"
+            )
 
     def create_s3_secret_with_keys(
         self,
@@ -165,6 +246,7 @@ class PmTileDuckDBClient(DuckDBClient):
         Batch jobs pass their own object so one job's memory limit cannot move
         another's; see :class:`DuckDBTuningConfig`.
         """
+        super().__init__()
         self._config: DuckDBTuningConfig = (
             tuning or Config.get_config().get_pmtiles_duckdb_tuning()
         )
@@ -257,6 +339,9 @@ class PmTileDuckDBClient(DuckDBClient):
                     cursor.execute(f"SET enable_progress_bar = {show};")
                     cursor.execute(f"SET enable_progress_bar_print = {show};")
                     self._duckdb_client = cursor
+                    # Set before the secret: the cache keys on ``_con``, and
+                    # ``__init__`` only assigns it after ``get_instance`` returns.
+                    self._con = cursor
                     # Avoid NewRelic capture the log which is too huge and unless
                     self.create_s3_secret(self._config.co_bucket)
         return self._duckdb_client
@@ -393,14 +478,15 @@ class PmTileDuckDBClient(DuckDBClient):
     def execute(
         self, sql: str, params: Sequence[Any] | None = None
     ) -> duckdb.DuckDBPyConnection:
+        def run():
+            if params is None:
+                return self._duckdb_client.execute(sql)
+            return self._duckdb_client.execute(sql, params)
+
         if not self._config.show_progress:
-            if params is None:
-                return self._duckdb_client.execute(sql)
-            return self._duckdb_client.execute(sql, params)
+            return self._call_refreshing_s3(run)
         with self._progress_logger(sql):
-            if params is None:
-                return self._duckdb_client.execute(sql)
-            return self._duckdb_client.execute(sql, params)
+            return self._call_refreshing_s3(run)
 
     @contextmanager
     def _progress_logger(self, sql: str) -> Iterator[None]:
@@ -726,6 +812,7 @@ class SitesDuckDBClient(DuckDBClient):
     """
 
     def __init__(self) -> None:
+        super().__init__()
         # All settings come from the config (tests override
         # ``Config.get_sites_config`` to point at an in-memory DB).
         self._config: SitesConfig = Config.get_config().get_sites_config()
@@ -763,16 +850,20 @@ class SitesDuckDBClient(DuckDBClient):
 
     def execute(self, sql: str, params: Sequence[Any] | None = None):
         """Run ``sql`` on a new cursor, so concurrent calls don't clash."""
-        cursor = self._con.cursor()
-        with self._cursors_lock:
-            self._active_cursors.add(cursor)
-        try:
-            if params is None:
-                return cursor.execute(sql)
-            return cursor.execute(sql, params)
-        finally:
+
+        def run():
+            cursor = self._con.cursor()
             with self._cursors_lock:
-                self._active_cursors.discard(cursor)
+                self._active_cursors.add(cursor)
+            try:
+                if params is None:
+                    return cursor.execute(sql)
+                return cursor.execute(sql, params)
+            finally:
+                with self._cursors_lock:
+                    self._active_cursors.discard(cursor)
+
+        return self._call_refreshing_s3(run)
 
     def close(self) -> None:
         """Cancel running queries, then close the connection."""
@@ -799,6 +890,7 @@ class EstimationDuckDBClient(DuckDBClient):
     """Reads the pre-built estimation index, on a connection of its own."""
 
     def __init__(self, config: EstimationReadDuckDBConfig) -> None:
+        super().__init__()
         self._config = config
         self._duckdb_client: Optional[duckdb.DuckDBPyConnection] = None
         # Track active cursors so they can be interrupted on close.
@@ -832,16 +924,20 @@ class EstimationDuckDBClient(DuckDBClient):
 
     def execute(self, sql: str, params: Sequence[Any] | None = None):
         """Run ``sql`` (optionally with bound ``params``) on a fresh cursor."""
-        cursor = self._con.cursor()
-        with self._cursors_lock:
-            self._active_cursors.add(cursor)
-        try:
-            if params is None:
-                return cursor.execute(sql)
-            return cursor.execute(sql, params)
-        finally:
+
+        def run():
+            cursor = self._con.cursor()
             with self._cursors_lock:
-                self._active_cursors.discard(cursor)
+                self._active_cursors.add(cursor)
+            try:
+                if params is None:
+                    return cursor.execute(sql)
+                return cursor.execute(sql, params)
+            finally:
+                with self._cursors_lock:
+                    self._active_cursors.discard(cursor)
+
+        return self._call_refreshing_s3(run)
 
     def close(self) -> None:
         """Cancel any in-flight queries, then close the connection."""
@@ -873,6 +969,7 @@ class TilerDuckDBClient(DuckDBClient):
     """
 
     def __init__(self, config: Optional[TilerDuckDBConfig] = None) -> None:
+        super().__init__()
         self._config: TilerDuckDBConfig = (
             config or Config.get_config().get_tiler_api_config().duckdb
         )
@@ -914,18 +1011,22 @@ class TilerDuckDBClient(DuckDBClient):
     ):
         """Run ``sql`` on a new cursor. ``tables`` are registered on that
         cursor only, so concurrent queries can reuse names."""
-        cursor = self._con.cursor()
-        with self._cursors_lock:
-            self._active_cursors.add(cursor)
-        try:
-            for name, table in (tables or {}).items():
-                cursor.register(name, table)
-            if params is None:
-                return cursor.execute(sql)
-            return cursor.execute(sql, params)
-        finally:
+
+        def run():
+            cursor = self._con.cursor()
             with self._cursors_lock:
-                self._active_cursors.discard(cursor)
+                self._active_cursors.add(cursor)
+            try:
+                for name, table in (tables or {}).items():
+                    cursor.register(name, table)
+                if params is None:
+                    return cursor.execute(sql)
+                return cursor.execute(sql, params)
+            finally:
+                with self._cursors_lock:
+                    self._active_cursors.discard(cursor)
+
+        return self._call_refreshing_s3(run)
 
     def close(self) -> None:
         """Cancel running queries, then close the connection."""
@@ -958,8 +1059,9 @@ class TilerBatchDuckDBClient(DuckDBClient):
     """
 
     def __init__(self, config: TilerBatchDuckDBConfig) -> None:
+        super().__init__()
         self._temp_dir = TemporaryDirectory(prefix=config.duckdb_temp_dir)
-        self._con: Optional[duckdb.DuckDBPyConnection] = duckdb.connect(
+        self._con = duckdb.connect(
             database=":memory:",
             config={
                 "memory_limit": config.memory_limit,
