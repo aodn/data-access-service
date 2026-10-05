@@ -66,6 +66,62 @@ def test_no_secret_without_credentials(not_int_test):
     client.execute.assert_not_called()
 
 
+def test_expired_token_replaces_secret_from_boto_and_retries(monkeypatch, not_int_test):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "key")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret")
+    monkeypatch.setenv("AWS_SESSION_TOKEN", "token")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "ap-southeast-2")
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    client = _Client()
+    client.create_s3_secret("my-bucket")
+    calls = {"n": 0}
+
+    def read():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise duckdb.HTTPException(
+                "HTTP 400 ExpiredToken: The provided token has expired."
+            )
+        return "ok"
+
+    frozen = MagicMock(
+        access_key="AKIAFRESH", secret_key="new-secret", token="new-token"
+    )
+    session = MagicMock()
+    session.region_name = "ap-southeast-2"
+    session.get_credentials.return_value.get_frozen_credentials.return_value = frozen
+    with patch("boto3.Session", return_value=session):
+        assert client._call_refreshing_s3(read) == "ok"
+
+    assert calls["n"] == 2
+    provider = client.execute(
+        "SELECT provider FROM duckdb_secrets() WHERE name = 'my-bucket_s3'"
+    ).fetchone()[0]
+    assert provider != "credential_chain"
+    client.close()
+
+
+def test_refresh_runs_once_per_generation():
+    client = _Client()
+    client._s3_chain_secrets.add("my-bucket")
+    client._s3_secret_generation = 1
+    with patch.object(client, "_replace_chain_secrets_from_boto") as replace:
+        client._refresh_expired_s3_secrets(0)
+    replace.assert_not_called()
+    client.close()
+
+
+def test_other_http_errors_are_not_retried():
+    client = _Client()
+
+    def read():
+        raise duckdb.HTTPException("HTTP 404 Not Found")
+
+    with pytest.raises(duckdb.HTTPException):
+        client._call_refreshing_s3(read)
+    client.close()
+
+
 def test_no_secret_in_int_tests():
     client = MagicMock(spec=DuckDBClient)
     with patch.object(Config, "get_config", return_value=MagicMock(spec=IntTestConfig)):

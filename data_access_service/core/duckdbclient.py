@@ -88,15 +88,21 @@ class DuckDBClient(ABC):
         # or drop their connection. The credential-chain secret cache is keyed
         # by this object, because a new connection does not keep the old secret.
         self._con: duckdb.DuckDBPyConnection | None = None
-        self._s3_chain_lock = Lock()
+        # RLock: create_s3_secret holds this while it calls execute, and a
+        # nested ExpiredToken refresh must be able to take it again.
+        self._s3_chain_lock = threading.RLock()
         self._s3_chain_for: int | None = None
         self._s3_chain_secrets: set[str] = set()
+        # Bumped when the task-role secret is replaced, so only the first
+        # failed read of a generation writes a new secret.
+        self._s3_secret_generation = 0
 
     def create_s3_secret(self, bucket: str) -> None:
         """Create a DuckDB S3 secret scoped to ``bucket`` from the AWS credential chain.
 
-        ``REFRESH auto`` makes DuckDB fetch new credentials when a read fails
-        because they expired. A later call for the same connection does not
+        ``REFRESH auto`` does not renew a token that S3 rejects with HTTP 400
+        ExpiredToken. A read that fails that way replaces the secret from
+        boto3 and retries once. A later call for the same connection does not
         replace the secret: ``CREATE OR REPLACE`` would drop it while another
         cursor of that connection is still reading.
         """
@@ -128,6 +134,54 @@ class DuckDBClient(ABC):
                 f"REGION {sql_literal(region)}, SCOPE {sql_literal(f's3://{bucket}')})"
             )
             self._s3_chain_secrets.add(bucket)
+
+    def _call_refreshing_s3(self, fn):
+        """Run ``fn``. On S3 ExpiredToken, replace the task-role secret and run it once more.
+
+        DuckDB 1.5 refreshes a credential_chain secret only after HTTP 401 or
+        403. ExpiredToken is HTTP 400, so the secret stays expired until boto3
+        mints a new task-role token and that token is written into the secret.
+        """
+        generation = self._s3_secret_generation
+        try:
+            return fn()
+        except duckdb.HTTPException as exc:
+            if "ExpiredToken" not in str(exc):
+                raise
+        self._refresh_expired_s3_secrets(generation)
+        return fn()
+
+    def _refresh_expired_s3_secrets(self, generation: int) -> None:
+        with self._s3_chain_lock:
+            if self._s3_secret_generation != generation:
+                return
+            self._replace_chain_secrets_from_boto()
+            self._s3_secret_generation += 1
+
+    def _replace_chain_secrets_from_boto(self) -> None:
+        """Write the current boto3 credentials over each credential-chain secret.
+
+        External-key secrets are not in ``_s3_chain_secrets`` and are left alone.
+        """
+        if not self._s3_chain_secrets or self._con is None:
+            return
+        boto_session = boto3.Session()
+        credentials = boto_session.get_credentials()
+        if credentials is None:
+            return
+        frozen = credentials.get_frozen_credentials()
+        region = boto_session.region_name or "ap-southeast-2"
+        token = frozen.token or ""
+        for bucket in list(self._s3_chain_secrets):
+            self._con.execute(
+                f"CREATE OR REPLACE SECRET {quote_ident(f'{bucket}_s3')} ("
+                "TYPE S3, "
+                f"KEY_ID {sql_literal(frozen.access_key)}, "
+                f"SECRET {sql_literal(frozen.secret_key)}, "
+                f"SESSION_TOKEN {sql_literal(token)}, "
+                f"REGION {sql_literal(region)}, "
+                f"SCOPE {sql_literal(f's3://{bucket}')})"
+            )
 
     def create_s3_secret_with_keys(
         self,
@@ -424,14 +478,15 @@ class PmTileDuckDBClient(DuckDBClient):
     def execute(
         self, sql: str, params: Sequence[Any] | None = None
     ) -> duckdb.DuckDBPyConnection:
+        def run():
+            if params is None:
+                return self._duckdb_client.execute(sql)
+            return self._duckdb_client.execute(sql, params)
+
         if not self._config.show_progress:
-            if params is None:
-                return self._duckdb_client.execute(sql)
-            return self._duckdb_client.execute(sql, params)
+            return self._call_refreshing_s3(run)
         with self._progress_logger(sql):
-            if params is None:
-                return self._duckdb_client.execute(sql)
-            return self._duckdb_client.execute(sql, params)
+            return self._call_refreshing_s3(run)
 
     @contextmanager
     def _progress_logger(self, sql: str) -> Iterator[None]:
@@ -795,16 +850,20 @@ class SitesDuckDBClient(DuckDBClient):
 
     def execute(self, sql: str, params: Sequence[Any] | None = None):
         """Run ``sql`` on a new cursor, so concurrent calls don't clash."""
-        cursor = self._con.cursor()
-        with self._cursors_lock:
-            self._active_cursors.add(cursor)
-        try:
-            if params is None:
-                return cursor.execute(sql)
-            return cursor.execute(sql, params)
-        finally:
+
+        def run():
+            cursor = self._con.cursor()
             with self._cursors_lock:
-                self._active_cursors.discard(cursor)
+                self._active_cursors.add(cursor)
+            try:
+                if params is None:
+                    return cursor.execute(sql)
+                return cursor.execute(sql, params)
+            finally:
+                with self._cursors_lock:
+                    self._active_cursors.discard(cursor)
+
+        return self._call_refreshing_s3(run)
 
     def close(self) -> None:
         """Cancel running queries, then close the connection."""
@@ -865,16 +924,20 @@ class EstimationDuckDBClient(DuckDBClient):
 
     def execute(self, sql: str, params: Sequence[Any] | None = None):
         """Run ``sql`` (optionally with bound ``params``) on a fresh cursor."""
-        cursor = self._con.cursor()
-        with self._cursors_lock:
-            self._active_cursors.add(cursor)
-        try:
-            if params is None:
-                return cursor.execute(sql)
-            return cursor.execute(sql, params)
-        finally:
+
+        def run():
+            cursor = self._con.cursor()
             with self._cursors_lock:
-                self._active_cursors.discard(cursor)
+                self._active_cursors.add(cursor)
+            try:
+                if params is None:
+                    return cursor.execute(sql)
+                return cursor.execute(sql, params)
+            finally:
+                with self._cursors_lock:
+                    self._active_cursors.discard(cursor)
+
+        return self._call_refreshing_s3(run)
 
     def close(self) -> None:
         """Cancel any in-flight queries, then close the connection."""
@@ -948,18 +1011,22 @@ class TilerDuckDBClient(DuckDBClient):
     ):
         """Run ``sql`` on a new cursor. ``tables`` are registered on that
         cursor only, so concurrent queries can reuse names."""
-        cursor = self._con.cursor()
-        with self._cursors_lock:
-            self._active_cursors.add(cursor)
-        try:
-            for name, table in (tables or {}).items():
-                cursor.register(name, table)
-            if params is None:
-                return cursor.execute(sql)
-            return cursor.execute(sql, params)
-        finally:
+
+        def run():
+            cursor = self._con.cursor()
             with self._cursors_lock:
-                self._active_cursors.discard(cursor)
+                self._active_cursors.add(cursor)
+            try:
+                for name, table in (tables or {}).items():
+                    cursor.register(name, table)
+                if params is None:
+                    return cursor.execute(sql)
+                return cursor.execute(sql, params)
+            finally:
+                with self._cursors_lock:
+                    self._active_cursors.discard(cursor)
+
+        return self._call_refreshing_s3(run)
 
     def close(self) -> None:
         """Cancel running queries, then close the connection."""
