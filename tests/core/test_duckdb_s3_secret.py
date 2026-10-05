@@ -32,7 +32,9 @@ def not_int_test():
         yield
 
 
-def test_secret_uses_credential_chain_with_auto_refresh(monkeypatch, not_int_test):
+def test_secret_uses_credential_chain_without_in_query_refresh(
+    monkeypatch, not_int_test
+):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "key")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret")
     monkeypatch.setenv("AWS_SESSION_TOKEN", "token")
@@ -42,12 +44,13 @@ def test_secret_uses_credential_chain_with_auto_refresh(monkeypatch, not_int_tes
 
     client.create_s3_secret("my-bucket")
 
-    name, provider, scope = client.execute(
-        "SELECT name, provider, scope FROM duckdb_secrets()"
+    name, provider, scope, secret_string = client.execute(
+        "SELECT name, provider, scope, secret_string FROM duckdb_secrets()"
     ).fetchone()
     assert name == "my-bucket_s3"
     assert provider == "credential_chain"
     assert scope == ["s3://my-bucket"]
+    assert "refresh=auto" not in secret_string
 
     client.create_s3_secret("my-bucket")
     rows = client.execute(
@@ -108,6 +111,24 @@ def test_refresh_runs_once_per_generation():
     with patch.object(client, "_replace_chain_secrets_from_boto") as replace:
         client._refresh_expired_s3_secrets(0)
     replace.assert_not_called()
+    client.close()
+
+
+def test_http_403_replaces_secret_once_and_retries():
+    client = _Client()
+    client._s3_chain_secrets.add("my-bucket")
+    calls = {"n": 0}
+
+    def read():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise duckdb.HTTPException("HTTP Error: HTTP 403 Forbidden")
+        return "ok"
+
+    with patch.object(client, "_replace_chain_secrets_from_boto") as replace:
+        assert client._call_refreshing_s3(read) == "ok"
+    assert calls["n"] == 2
+    replace.assert_called_once()
     client.close()
 
 

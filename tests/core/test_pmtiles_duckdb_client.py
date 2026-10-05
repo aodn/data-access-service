@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 import duckdb
 import pytest
 
-from data_access_service.core.duckdbclient import PmTileDuckDBClient, _sql_preview
+from data_access_service.core.duckdbclient import DuckDBClient, PmTileDuckDBClient
 
 
 @pytest.fixture(autouse=True)
@@ -443,13 +443,15 @@ def test_secret_sql_is_not_written_to_the_query_log():
         )
         """
 
-    preview = _sql_preview(sql)
+    preview = DuckDBClient._sql_preview(sql)
 
     assert "a-key-id" not in preview
     assert "a-secret" not in preview
 
 
 def test_ordinary_sql_still_shows_in_the_query_log():
-    preview = _sql_preview("SELECT count(*)\n  FROM read_parquet('s3://b/x/*.parquet')")
+    preview = DuckDBClient._sql_preview(
+        "SELECT count(*)\n  FROM read_parquet('s3://b/x/*.parquet')"
+    )
 
     assert preview == "SELECT count(*) FROM read_parquet('s3://b/x/*.parquet')"

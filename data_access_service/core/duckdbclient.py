@@ -39,19 +39,13 @@ from data_access_service.utils.sql_utils import quote_ident, sql_literal
 # How often to emit a progress log line while a long query is running.
 _PROGRESS_LOG_INTERVAL_SECONDS = 60
 
+
+def _is_s3_auth_failure(exc: BaseException) -> bool:
+    text = str(exc)
+    return "ExpiredToken" in text or "HTTP 401" in text or "HTTP 403" in text
+
+
 log = logging.getLogger(__name__)
-
-
-def _sql_preview(sql: str) -> str:
-    """Short one-line form of ``sql`` for the query logs.
-
-    CREATE SECRET carries live access keys in its text, so it is named rather
-    than quoted — the logs go to CloudWatch and New Relic.
-    """
-    flat = " ".join(sql.split())
-    if flat.upper().startswith(("CREATE SECRET", "CREATE OR REPLACE SECRET")):
-        return "<CREATE SECRET, redacted>"
-    return flat[:120]
 
 
 class DuckDBClient(ABC):
@@ -83,6 +77,48 @@ class DuckDBClient(ABC):
     def close(self) -> None:
         """Release the connection or cursor held by this client."""
 
+    @staticmethod
+    def _sql_preview(sql: str) -> str:
+        """Short one-line form of ``sql`` for the query logs.
+
+        CREATE SECRET carries live access keys in its text, so it is named rather
+        than quoted — the logs go to CloudWatch and New Relic.
+        """
+        flat = " ".join(sql.split())
+        if flat.upper().startswith(("CREATE SECRET", "CREATE OR REPLACE SECRET")):
+            return "<CREATE SECRET, redacted>"
+        return flat[:120]
+
+    @staticmethod
+    def _connect(database: str = ":memory:", config: dict | None = None):
+        """Open a DuckDB database and set the timezone on that connection.
+
+        GLOBAL, not session: queries run on cursor() children, which do not
+        inherit session-scope settings.
+        """
+        db = duckdb.connect(database=database, config=config)
+        db.execute("INSTALL httpfs; LOAD httpfs;")
+        db.execute("SET GLOBAL TimeZone = 'UTC';")
+        return db
+
+    @staticmethod
+    def _credential_chain_secret_sql(
+        bucket: str, region: str, *, if_not_exists: bool = False
+    ) -> str:
+        """Credential-chain secret with no in-query refresh.
+
+        ``REFRESH auto`` alters the secret inside the query. Cursors of one
+        connection share that catalog row, so concurrent tile reads raise
+        ``Catalog write-write conflict on alter``. Auth failures replace the
+        secret once, outside the query, under ``_s3_chain_lock``.
+        """
+        exists = "IF NOT EXISTS " if if_not_exists else ""
+        return (
+            f"CREATE SECRET {exists}{quote_ident(f'{bucket}_s3')} ("
+            "TYPE S3, PROVIDER credential_chain, "
+            f"REGION {sql_literal(region)}, SCOPE {sql_literal(f's3://{bucket}')})"
+        )
+
     def __init__(self) -> None:
         # The handle ``execute`` runs on. Subclasses replace it when they open
         # or drop their connection. The credential-chain secret cache is keyed
@@ -100,11 +136,13 @@ class DuckDBClient(ABC):
     def create_s3_secret(self, bucket: str) -> None:
         """Create a DuckDB S3 secret scoped to ``bucket`` from the AWS credential chain.
 
-        ``REFRESH auto`` does not renew a token that S3 rejects with HTTP 400
-        ExpiredToken. A read that fails that way replaces the secret from
-        boto3 and retries once. A later call for the same connection does not
-        replace the secret: ``CREATE OR REPLACE`` would drop it while another
-        cursor of that connection is still reading.
+        The secret is NOT created with ``REFRESH auto``. That setting alters
+        the secret during the query in the concurrent cursors of this
+        connection then hit a catalog write-write conflict. A read that fails
+        with ExpiredToken, HTTP 401, or HTTP 403 replaces the secret from
+        boto3 once and retries. A later call for the same connection does not
+        replace the secret on its own: ``CREATE OR REPLACE`` would drop it
+        while another cursor is still reading.
         """
         boto_session = boto3.Session()
 
@@ -129,24 +167,25 @@ class DuckDBClient(ABC):
             # IF NOT EXISTS: a second caller must not drop a secret other
             # cursors of this connection are already reading.
             self.execute(
-                f"CREATE SECRET IF NOT EXISTS {quote_ident(f'{bucket}_s3')} ("
-                "TYPE S3, PROVIDER credential_chain, REFRESH auto, "
-                f"REGION {sql_literal(region)}, SCOPE {sql_literal(f's3://{bucket}')})"
+                DuckDBClient._credential_chain_secret_sql(
+                    bucket, region, if_not_exists=True
+                )
             )
             self._s3_chain_secrets.add(bucket)
 
     def _call_refreshing_s3(self, fn):
-        """Run ``fn``. On S3 ExpiredToken, replace the task-role secret and run it once more.
+        """Run ``fn``. On an S3 auth failure, replace the task-role secret and run it once more.
 
-        DuckDB 1.5 refreshes a credential_chain secret only after HTTP 401 or
-        403. ExpiredToken is HTTP 400, so the secret stays expired until boto3
-        mints a new task-role token and that token is written into the secret.
+        The secret has no ``REFRESH auto``, so DuckDB does not alter it during
+        the query. ExpiredToken (HTTP 400) and HTTP 401 or 403 stay failed
+        until boto3 mints a new task-role token and that token is written
+        into the secret. One caller per generation does that write.
         """
         generation = self._s3_secret_generation
         try:
             return fn()
         except duckdb.HTTPException as exc:
-            if "ExpiredToken" not in str(exc):
+            if not _is_s3_auth_failure(exc):
                 raise
         self._refresh_expired_s3_secrets(generation)
         return fn()
@@ -308,20 +347,16 @@ class PmTileDuckDBClient(DuckDBClient):
 
                     # Establish the primary process-global connection
                     if self._config.duckdb_database == ":memory:":
-                        db = duckdb.connect(
+                        db = self._connect(
                             self._config.duckdb_database, config=db_config
                         )
                     else:
                         target_database = os.path.join(
                             temp_path, self._config.duckdb_database
                         )
-                        db = duckdb.connect(target_database, config=db_config)
+                        db = self._connect(target_database, config=db_config)
 
-                    db.execute("INSTALL httpfs; LOAD httpfs;")
                     db.execute("INSTALL h3 FROM community; LOAD h3;")
-                    # GLOBAL, not session: queries run on cursor() children,
-                    # which do not inherit session-scope settings.
-                    db.execute("SET GLOBAL TimeZone = 'UTC';")
 
                     PmTileDuckDBClient._global_db_connection = db
                     PmTileDuckDBClient._global_tuning = self._config
@@ -498,7 +533,7 @@ class PmTileDuckDBClient(DuckDBClient):
         """
         stop = threading.Event()
         started = time.monotonic()
-        sql_preview = _sql_preview(sql)
+        sql_preview = DuckDBClient._sql_preview(sql)
         connection = self._duckdb_client
 
         def _poll() -> None:
@@ -840,11 +875,9 @@ class SitesDuckDBClient(DuckDBClient):
                     if self._database != ":memory:":
                         os.makedirs(self._config.duckdb_temp_dir, exist_ok=True)
                         db_config["temp_directory"] = self._config.duckdb_temp_dir
-                    db = duckdb.connect(database=self._database, config=db_config)
-                    db.execute("INSTALL httpfs; LOAD httpfs;")
+                    db = self._connect(database=self._database, config=db_config)
                     db.execute("INSTALL json; LOAD json;")
                     db.execute(f"SET GLOBAL s3_region = '{self._region}';")
-                    db.execute("SET GLOBAL TimeZone = 'UTC';")
                     self._duckdb_client = db
         return self._duckdb_client
 
@@ -909,16 +942,14 @@ class EstimationDuckDBClient(DuckDBClient):
         if self._duckdb_client is None:
             with self._lock:
                 if self._duckdb_client is None:
-                    db = duckdb.connect(
+                    db = self._connect(
                         database=":memory:",
                         config={
                             "memory_limit": self._config.memory_limit,
                             "threads": str(int(self._config.threads)),
                         },
                     )
-                    db.execute("INSTALL httpfs; LOAD httpfs;")
                     db.execute(f"SET GLOBAL s3_region = '{self._config.region}';")
-                    db.execute("SET GLOBAL TimeZone = 'UTC';")
                     self._duckdb_client = db
         return self._duckdb_client
 
@@ -997,8 +1028,7 @@ class TilerDuckDBClient(DuckDBClient):
                             self._config.enable_http_metadata_cache
                         ),
                     }
-                    db = duckdb.connect(database=":memory:", config=db_config)
-                    db.execute("INSTALL httpfs; LOAD httpfs;")
+                    db = self._connect(database=":memory:", config=db_config)
                     db.execute("SET GLOBAL s3_region = 'ap-southeast-2';")
                     self._duckdb_client = db
         return self._duckdb_client
@@ -1061,7 +1091,7 @@ class TilerBatchDuckDBClient(DuckDBClient):
     def __init__(self, config: TilerBatchDuckDBConfig) -> None:
         super().__init__()
         self._temp_dir = TemporaryDirectory(prefix=config.duckdb_temp_dir)
-        self._con = duckdb.connect(
+        self._con = self._connect(
             database=":memory:",
             config={
                 "memory_limit": config.memory_limit,
