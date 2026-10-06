@@ -47,19 +47,30 @@ def variable_parquet_path(
 
 @dataclass(frozen=True)
 class TilerVariableMetadata:
-    """Per-variable facts the sparse value parquet does not carry."""
+    """Per-variable facts the sparse value parquet does not carry.
+
+    ``timestamps`` lists instants whose parquet for this variable was uploaded.
+    It is separate from the store ``timestamps`` list. An older sidecar with
+    no such list loads as empty.
+    """
 
     dtype: str
     attrs: dict[str, Any]
+    timestamps: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"dtype": self.dtype, "attrs": self.attrs}
+        return {
+            "dtype": self.dtype,
+            "attrs": self.attrs,
+            "timestamps": self.timestamps,
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TilerVariableMetadata":
         return cls(
             dtype=str(data["dtype"]),
             attrs=dict(data.get("attrs") or {}),
+            timestamps=list(data.get("timestamps") or []),
         )
 
 
@@ -67,9 +78,10 @@ class TilerVariableMetadata:
 class TilerParquetMetadata:
     """One store's sidecar (``metadata.json``). ``dataset`` is ``{store}.zarr``.
 
-    ``timestamps`` lists only instants whose parquet is already written - batch
-    saves it after the files. ``empty_timestamps`` are instants with no data at
-    all: no files, never read again.
+    ``timestamps`` lists instants with at least one variable's parquet written.
+    Each variable's own ``timestamps`` lists the instants that variable's file
+    was uploaded. ``empty_timestamps`` are instants with no data at all: no
+    files, never read again.
     """
 
     uuid: str

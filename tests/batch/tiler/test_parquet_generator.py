@@ -8,6 +8,7 @@ sidecar updates) is tested with a stubbed TilerBatchDuckDBClient and an
 in-memory stand-in for the S3 JSON reads and writes.
 """
 
+import logging
 import time
 from unittest.mock import MagicMock
 
@@ -98,6 +99,25 @@ def test_build_metadata_grid_and_provenance(monkeypatch):
     assert meta.lat == [-40.0, -39.5]
     assert meta.lon == [110.0, 110.5, 111.0]
     assert meta.timestamps == ["2024-01-01T00:00:00.000000000Z"]
+
+
+def test_variable_timestamps_default_empty_when_the_sidecar_omits_them():
+    meta = gen.TilerParquetMetadata.from_dict(
+        {
+            "uuid": "uuid-123",
+            "dataset": "foo.zarr",
+            "n_i": 1,
+            "n_j": 1,
+            "lat": [0.0],
+            "lon": [0.0],
+            "timestamps": [_ts(1)],
+            "variables": {"v": {"dtype": "float32", "attrs": {}}},
+            "generated_at": "",
+        }
+    )
+
+    assert meta.timestamps == [_ts(1)]
+    assert meta.variables["v"].timestamps == []
 
 
 def test_build_metadata_variable_dtype_and_attrs(monkeypatch):
@@ -245,6 +265,9 @@ def test_first_run_writes_one_file_per_variable_per_timestamp(monkeypatch):
     )
     assert len(env.parquet_paths()) == 2 * 3
     assert env.sidecar_timestamps() == [_ts(1), _ts(2), _ts(3)]
+    variables = env.json[SIDECAR]["variables"]
+    assert variables["v"]["timestamps"] == [_ts(1), _ts(2), _ts(3)]
+    assert variables["flag"]["timestamps"] == [_ts(1), _ts(2), _ts(3)]
     assert env.client.__exit__.called
 
 
@@ -271,6 +294,11 @@ def test_new_timestamps_are_appended_without_rewriting_old_ones(monkeypatch):
         f"{OUTPUT_DIR}/foo/v/2024-01-03T000000.000000000Z.parquet"
     ]
     assert env.sidecar_timestamps() == [_ts(1), _ts(2), _ts(3)]
+    assert env.json[SIDECAR]["variables"]["v"]["timestamps"] == [
+        _ts(1),
+        _ts(2),
+        _ts(3),
+    ]
 
 
 def test_max_chunks_per_run_caps_a_run_newest_first(monkeypatch):
@@ -342,6 +370,24 @@ def test_each_zarr_time_chunk_is_read_once(monkeypatch):
     assert len(env.sidecar_timestamps()) == 7
 
 
+def test_logs_how_long_each_zarr_time_chunk_read_took(monkeypatch, caplog):
+    _Env(monkeypatch)
+
+    with caplog.at_level(logging.INFO):
+        _sync(monkeypatch, _chunked(_fake_dataset(DAYS), 2))
+
+    reads = [r.getMessage() for r in caplog.records if "read took" in r.getMessage()]
+    bands = [
+        r.getMessage() for r in caplog.records if "[_read_band] took" in r.getMessage()
+    ]
+
+    # Chunks of 2 over 3 days: one band of "v" per chunk.
+    assert reads[0].startswith("Tiler parquet sync for foo: chunk 1/2 read took ")
+    assert reads[1].startswith("Tiler parquet sync for foo: chunk 2/2 read took ")
+    assert all(message.endswith(" seconds") for message in reads)
+    assert len(bands) == 2
+
+
 def test_time_chunk_size_takes_the_smallest_across_variables():
     ds = _chunked(_fake_dataset(DAYS), 3)
     ds["flag"].encoding["chunks"] = (2, 2, 3)
@@ -405,6 +451,48 @@ def test_failed_upload_leaves_the_sidecar_unwritten(monkeypatch):
     with pytest.raises(OSError, match="upload failed"):
         _sync(monkeypatch, _fake_dataset(DAYS))
     assert SIDECAR not in env.json
+
+
+def test_skip_empty_variable_is_not_uploaded(monkeypatch):
+    """An all-empty grid for a skip_empty variable is not uploaded. The
+    timestamp stays off timestamps when no variable had values."""
+    env = _Env(monkeypatch)
+    ds = _fake_dataset(DAYS)
+    ds["v"][1] = np.nan
+    day2 = _ts(2).replace(":", "")
+
+    written, _ = _sync(monkeypatch, ds, skip_empty_variables={"v"})
+
+    assert written == [_ts(3), _ts(1)]
+    assert env.sidecar_timestamps() == [_ts(1), _ts(3)]
+    assert env.json[SIDECAR]["empty_timestamps"] == [_ts(2)]
+    assert not any(path.endswith(f"/v/{day2}.parquet") for path in env.parquet_paths())
+    assert any(
+        path.endswith(f"/v/{_ts(1).replace(':', '')}.parquet")
+        for path in env.parquet_paths()
+    )
+
+
+def test_skip_empty_leaves_the_date_when_another_variable_has_values(monkeypatch):
+    """An empty configured variable is skipped. A variable with values is
+    uploaded, and the timestamp stays in the sidecar for that file."""
+    env = _Env(monkeypatch)
+    ds = _fake_dataset(DAYS)
+    ds["v"][1] = np.nan
+    day2 = _ts(2).replace(":", "")
+
+    written, _ = _sync(monkeypatch, ds, ("v", "flag"), skip_empty_variables={"v"})
+
+    assert _ts(2) in written
+    assert _ts(2) in env.sidecar_timestamps()
+    assert _ts(2) not in env.json[SIDECAR]["empty_timestamps"]
+    paths = env.parquet_paths()
+    assert not any(path.endswith(f"/v/{day2}.parquet") for path in paths)
+    assert any(path.endswith(f"/flag/{day2}.parquet") for path in paths)
+    variables = env.json[SIDECAR]["variables"]
+    assert _ts(2) not in variables["v"]["timestamps"]
+    assert variables["flag"]["timestamps"] == [_ts(1), _ts(2), _ts(3)]
+    assert variables["v"]["timestamps"] == [_ts(1), _ts(3)]
 
 
 def test_all_empty_timestamp_is_recorded_and_not_read_again(monkeypatch):

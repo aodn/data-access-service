@@ -17,6 +17,9 @@ estimation:
       threads: 12
 tiler:
   config:
+    api:
+      duckdb:
+        memory_limit: "2G"
     batch:
       use_fork_process: False
-      max_chunks_per_run: 2
+      max_chunks_per_run: 20
