@@ -6,11 +6,10 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING
-
 import xarray as xr
-from aodn_cloud_optimised.lib import DataQuery
 
+from aodn_cloud_optimised.lib import DataQuery
+from typing import TYPE_CHECKING
 from data_access_service.config.tiler.constants import COORD_NAMES
 
 if TYPE_CHECKING:
