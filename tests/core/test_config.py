@@ -6,6 +6,7 @@ import pytest
 
 from data_access_service.config.config import Config, EnvType
 from data_access_service.models.cache_types import CacheConfig
+from data_access_service.models.tiler_types import TilerBatchVariableCustomisation
 from data_access_service.models.co_datasource.csiro.csiro_types import CsiroConfig
 
 
@@ -33,6 +34,37 @@ def test_tiler_root_dir_follows_the_configured_prefix(monkeypatch):
     config = Config.get_config(EnvType.TESTING)
     _with_tiler(monkeypatch, config, lambda t: t["config"].update(root_prefix="x/y"))
     assert config.get_tiler_root_dir() == "s3://test-site-snapshot-bucket/x/y"
+
+
+def test_tiler_batch_products_customisation_from_yaml():
+    customisation = Config.get_config(
+        EnvType.TESTING
+    ).get_tiler_batch_products_customisation()
+    assert customisation["satellite_austemp_heatwave_14day"] == (
+        TilerBatchVariableCustomisation(name="dhd", skip_empty_output=True),
+    )
+    assert (
+        Config.get_config(EnvType.TESTING)
+        .get_tiler_batch_config()
+        .products_customisation
+        == customisation
+    )
+
+
+def test_tiler_batch_skip_empty_output_defaults_false(monkeypatch):
+    config = Config.get_config(EnvType.TESTING)
+
+    def drop(tiler):
+        entry = tiler["config"]["batch"]["products_customisation"][
+            "satellite_austemp_heatwave_14day"
+        ][0]
+        del entry["skip_empty_output"]
+
+    _with_tiler(monkeypatch, config, drop)
+    customisation = config.get_tiler_batch_products_customisation()
+    assert customisation["satellite_austemp_heatwave_14day"] == (
+        TilerBatchVariableCustomisation(name="dhd"),
+    )
 
 
 def test_tiler_batch_max_chunks_null_means_no_limit(monkeypatch):
@@ -77,11 +109,18 @@ def _leaf_paths(tree: dict, prefix: tuple = ()) -> list[tuple]:
 
 _TILER_SECTION = Config.get_config(EnvType.TESTING).config["tiler"]["config"]
 
+# Store names under this map are data, not a fixed schema.
+_BATCH_SCHEMA = {
+    key: value
+    for key, value in _TILER_SECTION["batch"].items()
+    if key != "products_customisation"
+}
+
 
 @pytest.mark.parametrize(
     "section, path",
     [("api", p) for p in _leaf_paths(_TILER_SECTION["api"])]
-    + [("batch", p) for p in _leaf_paths(_TILER_SECTION["batch"])],
+    + [("batch", p) for p in _leaf_paths(_BATCH_SCHEMA)],
     ids=lambda v: ".".join(v) if isinstance(v, tuple) else v,
 )
 def test_tiler_config_raises_on_missing_yaml_key(monkeypatch, section, path):
