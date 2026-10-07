@@ -2,7 +2,7 @@
 
 from http import HTTPStatus
 
-import anyio
+from anyio.to_thread import run_sync
 from fastapi import APIRouter, HTTPException
 
 from data_access_service.core.tiler_routes.startup import (
@@ -23,7 +23,7 @@ router = APIRouter()
 )
 async def refresh():
     try:
-        products, outcomes = await anyio.to_thread.run_sync(refresh_tiler)
+        products, outcomes = await run_sync(refresh_tiler)
     except RefreshInProgressError as e:
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
     return {

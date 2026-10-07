@@ -2,7 +2,7 @@ import functools
 import logging
 import math
 
-import anyio
+from anyio.to_thread import run_sync
 import numpy as np
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Path, Query, Response
@@ -168,7 +168,7 @@ async def get_point(
     ts = parse_date_or_422(date)
     resolve_timestamp_or_404(product, ts)
 
-    result = await anyio.to_thread.run_sync(
+    result = await run_sync(
         functools.partial(_load_point, product, ts, lat, lon),
         limiter=TILE_THREAD_LIMITER,
     )
