@@ -2,6 +2,7 @@ import asyncio
 import functools
 
 import anyio
+from anyio.to_thread import run_sync
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from fastapi.openapi.models import Example
@@ -113,7 +114,7 @@ async def get_legend(
     resolve_colormap_or_error(name, status_code=404)
     rescale_range = parse_rescale(rescale)
     try:
-        png = await anyio.to_thread.run_sync(
+        png = await run_sync(
             functools.partial(
                 render_legend, name, rescale_range, width, height, orientation
             ),
@@ -580,7 +581,7 @@ async def get_animation(
     variable = single_variable_or_400(product, context="animation")
 
     # In a thread: may read store metadata from S3.
-    bbox_tuple, bounds_crs, dst_crs = await anyio.to_thread.run_sync(
+    bbox_tuple, bounds_crs, dst_crs = await run_sync(
         _parse_bbox_and_crs,
         bbox,
         crs,
@@ -591,8 +592,11 @@ async def get_animation(
     rescale_range = parse_rescale(rescale)
     # Categorical checks happen in render_bbox_animation (ValueError -> 400).
 
-    available = await anyio.to_thread.run_sync(
-        get_available_dates, product.store, limiter=TILE_THREAD_LIMITER
+    available = await run_sync(
+        get_available_dates,
+        product.store,
+        product.variables,
+        limiter=TILE_THREAD_LIMITER,
     )
     if not available:
         raise HTTPException(
@@ -627,20 +631,22 @@ async def get_animation(
             ),
         )
 
-    resolved_w, resolved_h = await anyio.to_thread.run_sync(
-        _resolve_resolution,
-        product.store,
-        bbox_tuple,
-        bounds_crs,
-        width,
-        height,
+    resolved_w, resolved_h = await run_sync(
+        functools.partial(
+            _resolve_resolution,
+            product.store,
+            bbox_tuple,
+            bounds_crs,
+            width,
+            height,
+        ),
         limiter=TILE_THREAD_LIMITER,
     )
 
     # Load frames in parallel; gather keeps them in date order.
     cut_frames = await asyncio.gather(
         *(
-            anyio.to_thread.run_sync(
+            run_sync(
                 _load_frame,
                 product,
                 ts,
@@ -656,7 +662,7 @@ async def get_animation(
     )
 
     try:
-        body = await anyio.to_thread.run_sync(
+        body = await run_sync(
             functools.partial(
                 render_bbox_animation,
                 cut_frames,

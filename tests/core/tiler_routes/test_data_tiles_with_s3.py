@@ -29,6 +29,7 @@ from tests.core.test_with_s3 import REGION, TestWithS3
 
 CANNED = Path(__file__).resolve().parents[2] / "canned" / "s3_tiler_sample1"
 STORE = "model_sea_level_anomaly_gridded_delayed"
+GSL = f"{STORE}:gsl"
 GSLA = f"{STORE}:gsla"
 CURRENTS = f"{STORE}:ucur+vcur"
 DATE = "1993-01-01T00:00:00Z"
@@ -178,3 +179,27 @@ class TestDataTilesWithS3(TestWithS3):
             [-1.8807318210601807, 1.5303740501403809]
         )
         assert "valueRange" not in body
+
+    def test_gsl_date_range_extends_past_the_other_variables(
+        self, client, upload_test_case_to_s3
+    ):
+        """GSL lists one extra instant, so its range is wider than GSLA."""
+        response = client.get("/api/v1/das/tiler/data_tiles/manifest")
+        assert response.status_code == 200
+        products = response.json()["products"]
+        assert products[GSL]["full_date_range"] == {
+            "start": "1993-01-01T00:00:00Z",
+            "end": "1993-01-02T00:00:00Z",
+        }
+        assert products[GSL]["available_dates"] == [
+            "1993-01-01T00:00:00Z",
+            "1993-01-02T00:00:00Z",
+        ]
+        assert products[GSLA]["full_date_range"] == {
+            "start": "1993-01-01T00:00:00Z",
+            "end": "1993-01-01T00:00:00Z",
+        }
+        assert products[CURRENTS]["full_date_range"] == {
+            "start": "1993-01-01T00:00:00Z",
+            "end": "1993-01-01T00:00:00Z",
+        }

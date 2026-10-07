@@ -126,7 +126,7 @@ async def get_products_availability(
         if not is_store_available(product.store):
             continue
 
-        all_dates = get_available_dates(product.store)
+        all_dates = get_available_dates(product.store, product.variables)
         if not all_dates:
             continue
         # full_date_range ignores from/to; available_dates doesn't.

@@ -1,7 +1,7 @@
 """Read JSON files from S3."""
 
 import json
-from typing import Any
+from typing import Any, Literal, overload
 
 from data_access_service.core.AWSHelper import AWSHelper
 
@@ -9,6 +9,14 @@ from data_access_service.core.AWSHelper import AWSHelper
 def split_s3(s3_url: str) -> tuple[str, str]:
     bucket, _, key = s3_url.removeprefix("s3://").partition("/")
     return bucket, key
+
+
+@overload
+def read_json(path: str, required: Literal[True] = True) -> dict[str, Any]: ...
+
+
+@overload
+def read_json(path: str, required: Literal[False]) -> dict[str, Any] | None: ...
 
 
 def read_json(path: str, required: bool = True) -> dict[str, Any] | None:

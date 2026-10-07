@@ -44,6 +44,7 @@ def _meta(
     lat = lat if lat is not None else list(range(n_i))
     lon = lon if lon is not None else list(range(n_j))
     times = times if times is not None else ["2024-01-15T13:00:00"]
+    stamps = [f"{t}.000000000Z" for t in times]
     return TilerParquetMetadata(
         uuid="u",
         dataset="foo.zarr",
@@ -51,8 +52,8 @@ def _meta(
         n_j=n_j,
         lat=[float(x) for x in lat],
         lon=[float(x) for x in lon],
-        timestamps=[f"{t}.000000000Z" for t in times],
-        variables=variables or {"v": TilerVariableMetadata(dtype="float32", attrs={})},
+        variables=variables
+        or {"v": TilerVariableMetadata(dtype="float32", attrs={}, timestamps=stamps)},
         generated_at="",
     )
 
@@ -121,7 +122,7 @@ def test_resolve_timestamp_returns_native_string_for_known_date(tiler_root_dir):
     _write_metadata(tiler_root_dir, "foo", _meta(times=["2024-01-15T13:00:00"]))
     import pandas as pd
 
-    raw = resolve_timestamp(STORE, pd.Timestamp("2024-01-15T13:00:00"))
+    raw = resolve_timestamp(STORE, pd.Timestamp("2024-01-15T13:00:00"), ["v"])
     assert raw == "2024-01-15T13:00:00.000000000Z"
 
 
@@ -129,7 +130,7 @@ def test_resolve_timestamp_returns_none_for_unknown_date(tiler_root_dir):
     _write_metadata(tiler_root_dir, "foo", _meta(times=["2024-01-15T13:00:00"]))
     import pandas as pd
 
-    assert resolve_timestamp(STORE, pd.Timestamp("1999-01-01")) is None
+    assert resolve_timestamp(STORE, pd.Timestamp("1999-01-01"), ["v"]) is None
 
 
 def test_get_available_dates_reflects_every_timestamp(tiler_root_dir):
@@ -138,7 +139,7 @@ def test_get_available_dates_reflects_every_timestamp(tiler_root_dir):
         "foo",
         _meta(times=["2024-01-15T13:00:00", "2024-01-16T13:00:00"]),
     )
-    dates = get_available_dates(STORE)
+    dates = get_available_dates(STORE, ["v"])
     assert len(dates) == 2
     assert dates[0][0] == "2024-01-15T13:00:00Z"
 
@@ -149,8 +150,8 @@ def test_unavailable_date_message_hints_latest_date(tiler_root_dir):
 
     # Real callers always resolve_timestamp (which loads the sidecar) first,
     # and only reach for the message when that returns None.
-    resolve_timestamp(STORE, pd.Timestamp("1999-01-01"))
-    msg = unavailable_date_message(STORE, pd.Timestamp("1999-01-01"))
+    resolve_timestamp(STORE, pd.Timestamp("1999-01-01"), ["v"])
+    msg = unavailable_date_message(STORE, pd.Timestamp("1999-01-01"), ["v"])
     assert "Latest available date is '2024-01-15T13:00:00Z'" in msg
 
 

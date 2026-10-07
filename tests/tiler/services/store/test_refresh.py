@@ -54,8 +54,13 @@ def _meta(n_i: int) -> TilerParquetMetadata:
         n_j=1,
         lat=[float(x) for x in range(n_i)],
         lon=[0.0],
-        timestamps=["2024-01-15T13:00:00.000000000Z"],
-        variables={"v": TilerVariableMetadata(dtype="float32", attrs={})},
+        variables={
+            "v": TilerVariableMetadata(
+                dtype="float32",
+                attrs={},
+                timestamps=["2024-01-15T13:00:00.000000000Z"],
+            )
+        },
         generated_at="",
     )
 
