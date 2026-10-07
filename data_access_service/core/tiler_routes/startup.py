@@ -5,8 +5,10 @@ store's ``metadata.json``, then mark the tiler ready.
 import asyncio
 import logging
 import threading
+from datetime import timedelta
 
-import anyio
+from anyio.to_thread import run_sync
+from tenacity import retry, wait_exponential
 
 from data_access_service.config.config import Config
 from data_access_service.core.tiler_routes.shared import (
@@ -28,9 +30,15 @@ from data_access_service.tiler.services.store.registry import (
     refresh_stores,
     retain_stores,
 )
+from data_access_service.utils.retry_utils import log_retry_attempt
 from data_access_service.utils.s3_json import read_json
 
 logger = logging.getLogger(__name__)
+
+# Catalogue reads hit S3 at process start. Retry until one succeeds; the
+# ready flag stays false, and tiler routes stay 503, across the waits.
+_CATALOG_MIN_WAIT = timedelta(seconds=2)
+_CATALOG_MAX_WAIT = timedelta(minutes=60)
 
 
 def _load_catalog() -> dict[str, Product]:
@@ -49,7 +57,31 @@ def refresh_catalog() -> tuple[dict[str, Product], dict[str, BaseException | Non
     stores = {product.store for product in products.values()}
     retain_stores(stores)
     outcomes = load_stores(sorted(stores))
-    load_products(products)
+    # A store job writes metadata.json only after it converts. Until then the
+    # sidecar is missing; leave those products out instead of advertising them.
+    missing = {
+        store
+        for store, error in outcomes.items()
+        if isinstance(error, FileNotFoundError)
+    }
+    if missing:
+        skipped = sorted(
+            pid for pid, product in products.items() if product.store in missing
+        )
+        logger.warning(
+            "Skipping %d product(s) with no metadata.json: %s",
+            len(skipped),
+            skipped,
+        )
+        products = {
+            pid: product
+            for pid, product in products.items()
+            if product.store not in missing
+        }
+    if products:
+        load_products(products)
+    else:
+        logger.warning("No products left to publish; catalogue unchanged")
     return products, outcomes
 
 
@@ -71,24 +103,41 @@ def refresh_tiler() -> tuple[dict[str, Product], dict[str, BaseException | None]
         _refresh_lock.release()
 
 
-async def run_tiler_warmup() -> None:
-    try:
-        products, outcomes = await anyio.to_thread.run_sync(
-            refresh_catalog, limiter=TILE_THREAD_LIMITER
-        )
-        load_colormaps()
-        await anyio.to_thread.run_sync(warmup_kernels, limiter=TILE_THREAD_LIMITER)
-        await anyio.to_thread.run_sync(warmup_visual, limiter=TILE_THREAD_LIMITER)
+# Bug in tenacity, the type check always fail but function ok
+# noinspection PyCallingNonCallable
+@retry(
+    wait=wait_exponential(multiplier=1, min=_CATALOG_MIN_WAIT, max=_CATALOG_MAX_WAIT),
+    before_sleep=log_retry_attempt("Tiler catalogue load", logger),
+    reraise=True,
+)
+async def _refresh_catalog_with_retry() -> (
+    tuple[dict[str, Product], dict[str, BaseException | None]]
+):
+    """Load the catalogue off the event loop, retrying until it succeeds."""
+    return await run_sync(refresh_catalog, limiter=TILE_THREAD_LIMITER)
 
-        failed = sum(error is not None for error in outcomes.values())
-        mark_tiler_ready()
-        logger.info(
-            "Tiler ready: %d products from %d stores (%d store(s) failed to load)",
-            len(products),
-            len(outcomes),
-            failed,
-        )
+
+async def run_tiler_warmup() -> None:
+    """Publish the catalogue, open tiler routes, then warm the render path.
+
+    Catalogue reads retry until one succeeds. Colormap loading and kernel
+    warmup run once after that, so a numba or GDAL failure cannot put the
+    routes back to 503.
+    """
+    products, outcomes = await _refresh_catalog_with_retry()
+    failed = sum(error is not None for error in outcomes.values())
+    mark_tiler_ready()
+    logger.info(
+        "Tiler ready: %d products from %d stores (%d store(s) failed to load)",
+        len(products),
+        len(outcomes),
+        failed,
+    )
+    try:
+        load_colormaps()
+        await run_sync(warmup_kernels, limiter=TILE_THREAD_LIMITER)
+        await run_sync(warmup_visual, limiter=TILE_THREAD_LIMITER)
     except asyncio.CancelledError:
         raise  # shutdown
     except Exception:
-        logger.critical("Tiler warmup failed; tiler remains unready", exc_info=True)
+        logger.exception("Tiler render warmup failed")

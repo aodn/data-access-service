@@ -1,7 +1,7 @@
 """Tiler warmup sequencing and readiness.
 
-The shape being defended: every product in ``root_metadata.json`` is
-published after its store's metadata is loaded, even when that load fails,
+The shape being defended: products whose ``metadata.json`` is missing are
+left unpublished, any other store-load failure still publishes the product,
 and a store failing to load never keeps the tiler unready.
 """
 
@@ -9,12 +9,19 @@ import asyncio
 import threading
 
 import pytest
+from tenacity import wait_none
 
 from data_access_service.core.tiler_routes import shared, startup
 from data_access_service.core.tiler_routes.startup import run_tiler_warmup
 from data_access_service.tiler.services.product.product import Product
 
 # --- warmup sequencing ------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def no_catalog_retry_wait(monkeypatch):
+    """Keep the catalogue retries, drop their backoff, so failure tests stay fast."""
+    monkeypatch.setattr(startup._refresh_catalog_with_retry.retry, "wait", wait_none())
 
 
 @pytest.fixture
@@ -74,25 +81,36 @@ async def test_happy_path_loads_stores_then_publishes_then_marks_ready(warmup_en
     assert calls.index("load_catalog") < calls.index("load_stores")
     assert calls.index("load_stores") < calls.index("publish")
     assert calls.index("publish") < calls.index("mark_ready")
+    # Render warmup follows readiness, so a kernel failure cannot hold routes at 503.
+    assert calls.index("mark_ready") < calls.index("colormaps")
 
 
 @pytest.mark.asyncio
-async def test_missing_root_metadata_leaves_the_tiler_unready(
+async def test_catalogue_load_retries_until_it_succeeds(
     warmup_env, monkeypatch, caplog
 ):
     calls, state = warmup_env
+    attempts = {"n": 0}
 
-    def boom():
-        raise FileNotFoundError("root_metadata.json not found")
+    def flaky():
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise FileNotFoundError("root_metadata.json not found")
+        calls.append("load_catalog")
+        return state["candidates"]
 
-    monkeypatch.setattr(startup, "_load_catalog", boom)
+    monkeypatch.setattr(startup, "_load_catalog", flaky)
 
-    with caplog.at_level("CRITICAL"):
+    with caplog.at_level("WARNING"):
         await run_tiler_warmup()
 
-    assert state["ready"] is False
-    assert "publish" not in calls
-    assert any(r.levelname == "CRITICAL" for r in caplog.records)
+    assert attempts["n"] == 3
+    assert state["ready"] is True
+    assert state["published"] == state["candidates"]
+    assert calls.count("colormaps") == 1
+    assert any(
+        "[Retry] Tiler catalogue load failed" in r.message for r in caplog.records
+    )
 
 
 @pytest.mark.asyncio
@@ -138,6 +156,37 @@ async def test_every_store_failing_still_reaches_ready(warmup_env):
 
 
 @pytest.mark.asyncio
+async def test_missing_metadata_json_skips_that_product(warmup_env, caplog):
+    """A batch store job has not written metadata.json yet. Publish the
+    stores that have one, and leave the others out of the catalogue."""
+    calls, state = warmup_env
+    state["candidates"] = {
+        "a:v": Product(id="a:v", store="a", variable="v"),
+        "b:v": Product(id="b:v", store="b", variable="v"),
+    }
+    state["outcomes"] = {"a": None, "b": FileNotFoundError("metadata.json not found")}
+
+    with caplog.at_level("WARNING"):
+        await run_tiler_warmup()
+
+    assert state["ready"] is True
+    assert state["published"] == {"a:v": state["candidates"]["a:v"]}
+    assert any("Skipping" in r.message and "b:v" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_every_metadata_json_missing_stays_ready_without_publishing(warmup_env):
+    calls, state = warmup_env
+    state["outcomes"] = {"a": FileNotFoundError("metadata.json not found")}
+
+    await run_tiler_warmup()
+
+    assert state["ready"] is True
+    assert state["published"] is None
+    assert "publish" not in calls
+
+
+@pytest.mark.asyncio
 async def test_a_partial_store_failure_still_reaches_ready(warmup_env):
     calls, state = warmup_env
     state["candidates"] = {
@@ -153,28 +202,22 @@ async def test_a_partial_store_failure_still_reaches_ready(warmup_env):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "failing_step",
-    [
-        "_load_catalog",
-        "load_products",
-    ],
-)
-async def test_any_fatal_step_leaves_readiness_false(
-    warmup_env, failing_step, monkeypatch, caplog
-):
+async def test_render_warmup_failure_stays_ready(warmup_env, monkeypatch, caplog):
+    """numba or GDAL failing must not un-publish a catalogue that already loaded."""
     calls, state = warmup_env
 
-    def boom(*args, **kwargs):
-        raise RuntimeError(f"{failing_step} exploded")
+    def boom():
+        calls.append("kernels")
+        raise RuntimeError("numba exploded")
 
-    monkeypatch.setattr(startup, failing_step, boom)
+    monkeypatch.setattr(startup, "warmup_kernels", boom)
 
-    with caplog.at_level("CRITICAL"):
+    with caplog.at_level("ERROR"):
         await run_tiler_warmup()
 
-    assert state["ready"] is False
-    assert any(r.levelname == "CRITICAL" for r in caplog.records)
+    assert state["ready"] is True
+    assert calls.count("load_catalog") == 1
+    assert any("Tiler render warmup failed" in r.message for r in caplog.records)
 
 
 @pytest.mark.asyncio
@@ -194,7 +237,24 @@ async def test_cancellation_is_re_raised_not_logged_as_failure(
         with pytest.raises(asyncio.CancelledError):
             await run_tiler_warmup()
 
-    assert not any("Tiler warmup failed" in r.message for r in caplog.records)
+    assert not any("Tiler render warmup failed" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_catalogue_cancellation_is_not_retried(warmup_env, monkeypatch, caplog):
+    calls, state = warmup_env
+
+    def cancelled():
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(startup, "_load_catalog", cancelled)
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(asyncio.CancelledError):
+            await run_tiler_warmup()
+
+    assert state["ready"] is False
+    assert not any("[Retry]" in r.message for r in caplog.records)
 
 
 @pytest.fixture(autouse=True)
