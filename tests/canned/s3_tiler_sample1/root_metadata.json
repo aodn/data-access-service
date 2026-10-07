@@ -1,0 +1,673 @@
+{
+  "version": 2,
+  "generated_at": "2026-10-03T16:49:11.982364+00:00",
+  "stores": {
+    "model_sea_level_anomaly_gridded_delayed": {
+      "products": [
+        {
+          "id": "model_sea_level_anomaly_gridded_delayed:gsl",
+          "variable": "GSL",
+          "metadata_uuid": "663be14d-bb88-4e84-a34c-6c84a0196e2e"
+        },
+        {
+          "id": "model_sea_level_anomaly_gridded_delayed:gsla",
+          "variable": "GSLA",
+          "metadata_uuid": "663be14d-bb88-4e84-a34c-6c84a0196e2e"
+        },
+        {
+          "id": "model_sea_level_anomaly_gridded_delayed:ucur+vcur",
+          "variable": [
+            "UCUR",
+            "VCUR"
+          ],
+          "metadata_uuid": "663be14d-bb88-4e84-a34c-6c84a0196e2e"
+        }
+      ]
+    },
+    "model_sea_level_anomaly_gridded_realtime": {
+      "products": [
+        {
+          "id": "model_sea_level_anomaly_gridded_realtime:gsl",
+          "variable": "GSL",
+          "metadata_uuid": "0c9eb39c-9cbe-4c6a-8a10-5867087e703a"
+        },
+        {
+          "id": "model_sea_level_anomaly_gridded_realtime:gsla",
+          "variable": "GSLA",
+          "metadata_uuid": "0c9eb39c-9cbe-4c6a-8a10-5867087e703a"
+        },
+        {
+          "id": "model_sea_level_anomaly_gridded_realtime:ucur+vcur",
+          "variable": [
+            "UCUR",
+            "VCUR"
+          ],
+          "metadata_uuid": "0c9eb39c-9cbe-4c6a-8a10-5867087e703a"
+        }
+      ]
+    },
+    "radar_CapricornBunkerGroup_velocity_hourly_averaged_delayed_qc": {
+      "products": [
+        {
+          "id": "radar_CapricornBunkerGroup_velocity_hourly_averaged_delayed_qc:ucur+vcur",
+          "variable": [
+            "UCUR",
+            "VCUR"
+          ],
+          "metadata_uuid": "8a2d2824-0557-4110-a561-01ec35a9583d"
+        }
+      ]
+    },
+    "radar_CapricornBunkerGroup_velocity_hourly_averaged_realtime_nonqc": {
+      "products": [
+        {
+          "id": "radar_CapricornBunkerGroup_velocity_hourly_averaged_realtime_nonqc:ucur+vcur",
+          "variable": [
+            "UCUR",
+            "VCUR"
+          ],
+          "metadata_uuid": "422db51d-596c-4d1c-86a0-b89413c5187e"
+        }
+      ]
+    },
+    "radar_CoffsHarbour_velocity_hourly_averaged_delayed_qc": {
+      "products": [
+        {
+          "id": "radar_CoffsHarbour_velocity_hourly_averaged_delayed_qc:ucur+vcur",
+          "variable": [
+            "UCUR",
+            "VCUR"
+          ],
+          "metadata_uuid": "85da1645-2c63-45fa-97b5-4125165b999d"
+        }
+      ]
+    },
+    "radar_CoffsHarbour_velocity_hourly_averaged_realtime_nonqc": {
+      "products": [
+        {
+          "id": "radar_CoffsHarbour_velocity_hourly_averaged_realtime_nonqc:ucur+vcur",
+          "variable": [
+            "UCUR",
+            "VCUR"
+          ],
+          "metadata_uuid": "82bc6673-c9cb-4afc-8b5d-0e65b097bfdc"
+        }
+      ]
+    },
+    "radar_NorthWestShelf_velocity_hourly_averaged_delayed_qc": {
+      "products": [
+        {
+          "id": "radar_NorthWestShelf_velocity_hourly_averaged_delayed_qc:ucur+vcur",
+          "variable": [
+            "UCUR",
+            "VCUR"
+          ],
+          "metadata_uuid": "23c27e4f-c982-44e9-9ab7-71094d297549"
+        }
+      ]
+    },
+    "radar_NorthWestShelf_velocity_hourly_averaged_realtime_nonqc": {
+      "products": [
+        {
+          "id": "radar_NorthWestShelf_velocity_hourly_averaged_realtime_nonqc:ucur+vcur",
+          "variable": [
+            "UCUR",
+            "VCUR"
+          ],
+          "metadata_uuid": "ba9110f1-072c-4d15-8328-2091be983991"
+        }
+      ]
+    },
+    "radar_RottnestShelf_velocity_hourly_averaged_delayed_qc": {
+      "products": [
+        {
+          "id": "radar_RottnestShelf_velocity_hourly_averaged_delayed_qc:ucur+vcur",
+          "variable": [
+            "UCUR",
+            "VCUR"
+          ],
+          "metadata_uuid": "028b9801-279f-427c-964b-0ffcdf310b59"
+        }
+      ]
+    },
+    "radar_RottnestShelf_velocity_hourly_averaged_realtime_nonqc": {
+      "products": [
+        {
+          "id": "radar_RottnestShelf_velocity_hourly_averaged_realtime_nonqc:ucur+vcur",
+          "variable": [
+            "UCUR",
+            "VCUR"
+          ],
+          "metadata_uuid": "8b469535-eb48-4f1f-9612-bdf2e83cdce8"
+        }
+      ]
+    },
+    "radar_SouthAustraliaGulfs_velocity_hourly_averaged_delayed_qc": {
+      "products": [
+        {
+          "id": "radar_SouthAustraliaGulfs_velocity_hourly_averaged_delayed_qc:ucur+vcur",
+          "variable": [
+            "UCUR",
+            "VCUR"
+          ],
+          "metadata_uuid": "cb2e22b5-ebb9-460b-8cff-b446fe14ea2f"
+        }
+      ]
+    },
+    "radar_SouthAustraliaGulfs_velocity_hourly_averaged_realtime_nonqc": {
+      "products": [
+        {
+          "id": "radar_SouthAustraliaGulfs_velocity_hourly_averaged_realtime_nonqc:ucur+vcur",
+          "variable": [
+            "UCUR",
+            "VCUR"
+          ],
+          "metadata_uuid": "d83ef640-827e-4990-8c35-7c1a1aa587a9"
+        }
+      ]
+    },
+    "satellite_austemp_degree-heating-day_australia": {
+      "products": [
+        {
+          "id": "satellite_austemp_degree-heating-day_australia:dhd",
+          "variable": "dhd",
+          "metadata_uuid": "e1f2476a-b801-4a1f-9fbe-727b4f76f726"
+        },
+        {
+          "id": "satellite_austemp_degree-heating-day_australia:dhd_count_mosaic",
+          "variable": "dhd_count_mosaic",
+          "metadata_uuid": "e1f2476a-b801-4a1f-9fbe-727b4f76f726"
+        },
+        {
+          "id": "satellite_austemp_degree-heating-day_australia:dhd_mosaic",
+          "variable": "dhd_mosaic",
+          "metadata_uuid": "e1f2476a-b801-4a1f-9fbe-727b4f76f726"
+        },
+        {
+          "id": "satellite_austemp_degree-heating-day_australia:mpsa_mosaic",
+          "variable": "mpsa_mosaic",
+          "metadata_uuid": "e1f2476a-b801-4a1f-9fbe-727b4f76f726"
+        }
+      ]
+    },
+    "satellite_austemp_dhd_14day": {
+      "products": [
+        {
+          "id": "satellite_austemp_dhd_14day:dhd",
+          "variable": "dhd",
+          "metadata_uuid": "e1f2476a-b801-4a1f-9fbe-727b4f76f726"
+        },
+        {
+          "id": "satellite_austemp_dhd_14day:dhd_count_mosaic",
+          "variable": "dhd_count_mosaic",
+          "metadata_uuid": "e1f2476a-b801-4a1f-9fbe-727b4f76f726"
+        },
+        {
+          "id": "satellite_austemp_dhd_14day:dhd_mosaic",
+          "variable": "dhd_mosaic",
+          "metadata_uuid": "e1f2476a-b801-4a1f-9fbe-727b4f76f726"
+        },
+        {
+          "id": "satellite_austemp_dhd_14day:mpsa_mosaic",
+          "variable": "mpsa_mosaic",
+          "metadata_uuid": "e1f2476a-b801-4a1f-9fbe-727b4f76f726"
+        }
+      ]
+    },
+    "satellite_austemp_heatwave_14day": {
+      "products": [
+        {
+          "id": "satellite_austemp_heatwave_14day:dhd",
+          "variable": "dhd",
+          "metadata_uuid": "2ffccdad-1197-4e41-b412-a9033517cfb2"
+        },
+        {
+          "id": "satellite_austemp_heatwave_14day:dhd_mosaic",
+          "variable": "dhd_mosaic",
+          "metadata_uuid": "2ffccdad-1197-4e41-b412-a9033517cfb2"
+        },
+        {
+          "id": "satellite_austemp_heatwave_14day:dhdc_mosaic",
+          "variable": "dhdc_mosaic",
+          "metadata_uuid": "2ffccdad-1197-4e41-b412-a9033517cfb2"
+        },
+        {
+          "id": "satellite_austemp_heatwave_14day:mcs_category",
+          "variable": "MCS_category",
+          "metadata_uuid": "2ffccdad-1197-4e41-b412-a9033517cfb2"
+        },
+        {
+          "id": "satellite_austemp_heatwave_14day:mcs_category_mosaic",
+          "variable": "MCS_category_mosaic",
+          "metadata_uuid": "2ffccdad-1197-4e41-b412-a9033517cfb2"
+        },
+        {
+          "id": "satellite_austemp_heatwave_14day:mhw_category_mosaic",
+          "variable": "MHW_category_mosaic",
+          "metadata_uuid": "2ffccdad-1197-4e41-b412-a9033517cfb2"
+        },
+        {
+          "id": "satellite_austemp_heatwave_14day:sst",
+          "variable": "sst",
+          "metadata_uuid": "2ffccdad-1197-4e41-b412-a9033517cfb2"
+        },
+        {
+          "id": "satellite_austemp_heatwave_14day:sst_mosaic",
+          "variable": "sst_mosaic",
+          "metadata_uuid": "2ffccdad-1197-4e41-b412-a9033517cfb2"
+        },
+        {
+          "id": "satellite_austemp_heatwave_14day:ssta",
+          "variable": "ssta",
+          "metadata_uuid": "2ffccdad-1197-4e41-b412-a9033517cfb2"
+        },
+        {
+          "id": "satellite_austemp_heatwave_14day:ssta_mosaic",
+          "variable": "ssta_mosaic",
+          "metadata_uuid": "2ffccdad-1197-4e41-b412-a9033517cfb2"
+        }
+      ]
+    },
+    "satellite_austemp_sst-anomaly_australia": {
+      "products": [
+        {
+          "id": "satellite_austemp_sst-anomaly_australia:sst",
+          "variable": "sst",
+          "metadata_uuid": "62f6b449-90dc-45bf-8acb-ae52e8a58c5c"
+        },
+        {
+          "id": "satellite_austemp_sst-anomaly_australia:sst_anom_mosaic",
+          "variable": "sst_anom_mosaic",
+          "metadata_uuid": "62f6b449-90dc-45bf-8acb-ae52e8a58c5c"
+        },
+        {
+          "id": "satellite_austemp_sst-anomaly_australia:sst_mosaic",
+          "variable": "sst_mosaic",
+          "metadata_uuid": "62f6b449-90dc-45bf-8acb-ae52e8a58c5c"
+        }
+      ]
+    },
+    "satellite_austemp_sst_14day": {
+      "products": [
+        {
+          "id": "satellite_austemp_sst_14day:sst",
+          "variable": "sst",
+          "metadata_uuid": "62f6b449-90dc-45bf-8acb-ae52e8a58c5c"
+        },
+        {
+          "id": "satellite_austemp_sst_14day:sst_anom_mosaic",
+          "variable": "sst_anom_mosaic",
+          "metadata_uuid": "62f6b449-90dc-45bf-8acb-ae52e8a58c5c"
+        },
+        {
+          "id": "satellite_austemp_sst_14day:sst_mosaic",
+          "variable": "sst_mosaic",
+          "metadata_uuid": "62f6b449-90dc-45bf-8acb-ae52e8a58c5c"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3c_1day_daytime_noaa19_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3c_1day_daytime_noaa19_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "e6782131-821c-4237-b2a9-27c6aaa8608c"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3c_1day_daytime_noaa19_southern_ocean": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3c_1day_daytime_noaa19_southern_ocean:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "be9103bd-dbbb-42a8-949d-92e8543a4d92"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3c_1day_daytime_snpp_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3c_1day_daytime_snpp_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "bcf6a870-2591-492e-b340-931f38de5975"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3c_1day_nighttime_himawari8": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3c_1day_nighttime_himawari8:sea_ice_fraction",
+          "variable": "sea_ice_fraction",
+          "metadata_uuid": "72b65fb8-84e1-4a56-b32c-7f15970903d2"
+        },
+        {
+          "id": "satellite_ghrsst_l3c_1day_nighttime_himawari8:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "72b65fb8-84e1-4a56-b32c-7f15970903d2"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3c_1day_nighttime_noaa19_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3c_1day_nighttime_noaa19_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "46ebc1a9-c503-4435-b85c-11fe16176c8d"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3c_1day_nighttime_noaa19_southern_ocean": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3c_1day_nighttime_noaa19_southern_ocean:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "91495e9a-6590-4fb9-bb63-0901a8a4b7b1"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3c_1day_nighttime_snpp_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3c_1day_nighttime_snpp_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "a05817da-fdab-483a-a965-b26fe364ad7c"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3c_4hour_himawari8": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3c_4hour_himawari8:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "06d2fff4-8e2c-4bd7-b98f-cd98e588df6f"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_1day_daynighttime_multi_sensor_southernocean": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_1day_daynighttime_multi_sensor_southernocean:sea_ice_fraction",
+          "variable": "sea_ice_fraction",
+          "metadata_uuid": "4a136fc6-3ac7-4af1-870f-f5827d6dfcb4"
+        },
+        {
+          "id": "satellite_ghrsst_l3s_1day_daynighttime_multi_sensor_southernocean:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "4a136fc6-3ac7-4af1-870f-f5827d6dfcb4"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_1day_daynighttime_single_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_1day_daynighttime_single_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "a136eee7-a990-4c06-a4f6-915657a2464e"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_1day_daynighttime_single_sensor_southernocean": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_1day_daynighttime_single_sensor_southernocean:sea_ice_fraction",
+          "variable": "sea_ice_fraction",
+          "metadata_uuid": "165a23d7-5ef3-4cab-9e02-90c8adb941dd"
+        },
+        {
+          "id": "satellite_ghrsst_l3s_1day_daynighttime_single_sensor_southernocean:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "165a23d7-5ef3-4cab-9e02-90c8adb941dd"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_1day_daytime_multi_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_1day_daytime_multi_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "52ad55a5-b537-4e10-8a81-22d9317c81f2"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_1day_daytime_single_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_1day_daytime_single_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "8bd3fe33-fd98-4307-ad23-424ad9a2907b"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_1day_nighttime_geopolar_multi_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_1day_nighttime_geopolar_multi_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "7d8d046b-6002-4897-b781-04e7324d6af8"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_1day_nighttime_multi_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_1day_nighttime_multi_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "d3e3bce3-adb4-433a-a192-93abc91899d3"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_1day_nighttime_single_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_1day_nighttime_single_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "aaad092c-c3af-42e6-87e0-bdaef945f522"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_1month_daynighttime_multi_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_1month_daynighttime_multi_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "73e6608c-cbf5-4a01-9c95-1f137de6cbac"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_1month_daynighttime_multi_sensor_southernocean": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_1month_daynighttime_multi_sensor_southernocean:sea_ice_fraction",
+          "variable": "sea_ice_fraction",
+          "metadata_uuid": "579fc1ac-6ee5-40e2-9170-6a857e9b40da"
+        },
+        {
+          "id": "satellite_ghrsst_l3s_1month_daynighttime_multi_sensor_southernocean:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "579fc1ac-6ee5-40e2-9170-6a857e9b40da"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_1month_daynighttime_single_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_1month_daynighttime_single_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "d6f49c4a-8b75-4d05-acd4-b9c085bf4de0"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_1month_daynighttime_single_sensor_southernocean": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_1month_daynighttime_single_sensor_southernocean:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "a05d8ceb-ab0c-4bad-8126-d16d535e73c1"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_1month_daytime_multi_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_1month_daytime_multi_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "e3b2531b-a662-43de-9a8b-8e2b385267b3"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_1month_daytime_single_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_1month_daytime_single_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "b8e9f613-9611-4692-a958-07f100d2c763"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_1month_nighttime_multi_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_1month_nighttime_multi_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "1aa787da-a9ba-494a-ae22-0c3eee2491e1"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_1month_nighttime_single_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_1month_nighttime_single_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "d9618fb2-1a71-4afd-b1c8-56a6871b224a"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_3day_daynighttime_multi_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_3day_daynighttime_multi_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "4cbb9eeb-9ed3-4079-a180-2293a2c219b9"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_3day_daytime_multi_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_3day_daytime_multi_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "08e04227-4da1-479b-bec1-06ee27a69a40"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_3day_nighttime_multi_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_3day_nighttime_multi_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "b28ab00c-06f9-4cef-9053-4ff3bf537bb7"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_6day_daynighttime_multi_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_6day_daynighttime_multi_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "95b81267-bad2-4939-8559-45b0d0c6f2e9"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_6day_daynighttime_single_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_6day_daynighttime_single_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "023ae12a-8c0c-4abc-997a-7884f9fec9cd"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_6day_daytime_multi_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_6day_daytime_multi_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "f07c3d3f-547b-4818-9d2f-12e872c7e158"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_6day_daytime_single_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_6day_daytime_single_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "a5cad244-c33e-4083-b8a9-09ef59500b3d"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_6day_nighttime_multi_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_6day_nighttime_multi_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "e1908591-b3cf-42aa-a32f-424322b28165"
+        }
+      ]
+    },
+    "satellite_ghrsst_l3s_6day_nighttime_single_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l3s_6day_nighttime_single_sensor_australia:sea_surface_temperature",
+          "variable": "sea_surface_temperature",
+          "metadata_uuid": "f9d6616a-f359-4418-979a-e7b89b5b9086"
+        }
+      ]
+    },
+    "satellite_ghrsst_l4_gamssa_1day_multi_sensor_world": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l4_gamssa_1day_multi_sensor_world:analysed_sst",
+          "variable": "analysed_sst",
+          "metadata_uuid": "2d496463-600c-465a-84a1-8a4ab76bd505"
+        },
+        {
+          "id": "satellite_ghrsst_l4_gamssa_1day_multi_sensor_world:sea_ice_fraction",
+          "variable": "sea_ice_fraction",
+          "metadata_uuid": "2d496463-600c-465a-84a1-8a4ab76bd505"
+        }
+      ]
+    },
+    "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia": {
+      "products": [
+        {
+          "id": "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia:analysed_sst",
+          "variable": "analysed_sst",
+          "metadata_uuid": "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
+        },
+        {
+          "id": "satellite_ghrsst_l4_ramssa_1day_multi_sensor_australia:sea_ice_fraction",
+          "variable": "sea_ice_fraction",
+          "metadata_uuid": "a4170ca8-0942-4d13-bdb8-ad4718ce14bb"
+        }
+      ]
+    },
+    "satellite_sst_1day_aqua": {
+      "products": [
+        {
+          "id": "satellite_sst_1day_aqua:sst",
+          "variable": "sst",
+          "metadata_uuid": "468f550b-bbd8-42b1-91b5-313d5898d9e6"
+        }
+      ]
+    },
+    "satellite_sst_1day_snpp": {
+      "products": [
+        {
+          "id": "satellite_sst_1day_snpp:sst",
+          "variable": "sst",
+          "metadata_uuid": "8e00907f-716d-4080-b212-534fcd78a602"
+        }
+      ]
+    }
+  }
+}
