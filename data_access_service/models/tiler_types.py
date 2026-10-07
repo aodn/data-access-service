@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -40,6 +40,19 @@ class TilerBatchDuckDBConfig:
 
 
 @dataclass(frozen=True)
+class TilerBatchVariableCustomisation:
+    """One variable under ``tiler.config.batch.products_customisation``.
+
+    Keyed by store name in that section. ``name`` is the gridded variable.
+    """
+
+    name: str
+    # Drop a converted time step when the variable grid is entirely empty.
+    # Omitted in yaml means keep the output.
+    skip_empty_output: bool = False
+
+
+@dataclass(frozen=True)
 class TilerBatchConfig:
     """The batch zarr -> parquet job (``tiler.config.batch``)."""
 
@@ -55,3 +68,7 @@ class TilerBatchConfig:
     # forked after the parent touched the network stack segfaults.
     use_fork_process: bool
     duckdb: TilerBatchDuckDBConfig
+    # Store name -> variable overrides. Empty when the yaml map is empty.
+    products_customisation: dict[str, tuple[TilerBatchVariableCustomisation, ...]] = (
+        field(default_factory=dict)
+    )

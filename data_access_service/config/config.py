@@ -27,6 +27,7 @@ from data_access_service.models.sites_types import SitesConfig
 from data_access_service.models.tiler_types import (
     TilerApiConfig,
     TilerBatchConfig,
+    TilerBatchVariableCustomisation,
     TilerBatchDuckDBConfig,
     TilerDuckDBConfig,
 )
@@ -457,6 +458,26 @@ class Config:
             ),
         )
 
+    def get_tiler_batch_products_customisation(
+        self,
+    ) -> dict[str, tuple[TilerBatchVariableCustomisation, ...]]:
+        """Per-store variable overrides for the batch job
+        (``tiler.config.batch.products_customisation``).
+
+        The map key is the store name. Each entry names one gridded variable.
+        """
+        raw = self._tiler()["config"]["batch"]["products_customisation"]
+        return {
+            store: tuple(
+                TilerBatchVariableCustomisation(
+                    name=entry["name"],
+                    skip_empty_output=bool(entry.get("skip_empty_output", False)),
+                )
+                for entry in entries
+            )
+            for store, entries in raw.items()
+        }
+
     def get_tiler_batch_config(self) -> TilerBatchConfig:
         batch = self._tiler()["config"]["batch"]
         duckdb = batch["duckdb"]
@@ -471,6 +492,7 @@ class Config:
                 threads=int(duckdb["threads"]),
                 duckdb_temp_dir=duckdb["duckdb_temp_dir"],
             ),
+            products_customisation=self.get_tiler_batch_products_customisation(),
         )
 
     def get_tiler_blacklist(self) -> list[str]:

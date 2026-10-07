@@ -298,6 +298,11 @@ def _sync_one(
             max_chunks_per_run=batch_config.max_chunks_per_run,
             duckdb_config=batch_config.duckdb,
             regenerate_all=batch_config.regenerate_all,
+            skip_empty_variables={
+                entry.name
+                for entry in batch_config.products_customisation.get(store, ())
+                if entry.skip_empty_output
+            },
         )
         logger.info(
             "Tiler parquet for store=%s synced: %d new timestamp(s), sidecar=%s",

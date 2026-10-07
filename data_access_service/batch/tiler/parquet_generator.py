@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import replace
@@ -23,6 +24,7 @@ from data_access_service.models.tiler_parquet_types import (
     variable_parquet_path,
 )
 from data_access_service.models.tiler_types import TilerBatchDuckDBConfig
+from data_access_service.utils.date_time_utils import time_it
 from data_access_service.utils.s3_json import read_json
 
 logger = logging.getLogger(__name__)
@@ -219,25 +221,40 @@ def _whole_blocks(
     return parts, band[end - band_start :].copy()
 
 
+@time_it
+def _read_band(
+    ds: xr.Dataset, variable: str, band_start: int, band_rows: int
+) -> xr.DataArray:
+    """Read one latitude band of ``variable`` from the open zarr time chunk."""
+    return ds[variable].isel(lat=slice(band_start, band_start + band_rows)).compute()
+
+
 def _write_pieces(
     client: TilerBatchDuckDBClient,
     ds: xr.Dataset,
     variables: list[str],
     steps: list[int],
     piece_dir: str,
-) -> tuple[dict[tuple[int, str], list[str]], dict[int, int]]:
+) -> tuple[
+    dict[tuple[int, str], list[str]],
+    dict[int, int],
+    dict[tuple[int, str], int],
+    float,
+]:
     """Read ``ds`` one variable and one band of lat rows at a time and write
     each time step and variable as local parquet pieces, in row order. The
     next band is read while this one is written, so at most two bands are in
     memory.
 
-    Returns ``(pieces by (step, variable), rows by step)``.
+    Returns ``(pieces by (step, variable), rows by step, rows by (step,
+    variable), seconds spent reading bands)``.
     """
     n_i = ds.sizes["lat"]
     pieces: dict[tuple[int, str], list[str]] = {
         (k, v): [] for k in steps for v in variables
     }
     rows = dict.fromkeys(steps, 0)
+    var_rows = {(k, v): 0 for k in steps for v in variables}
     carry = {
         (k, v): np.empty((0, ds.sizes["lon"]), dtype=ds[v].dtype)
         for k in steps
@@ -252,11 +269,18 @@ def _write_pieces(
         for band_start in range(0, n_i, band_rows)
     ]
 
+    read_seconds = 0.0
+
     def read(v: str, band_start: int, band_rows: int) -> xr.DataArray:
-        return ds[v].isel(lat=slice(band_start, band_start + band_rows)).compute()
+        # One reader thread, and the caller waits for it, so this add is safe.
+        nonlocal read_seconds
+        started = time.perf_counter()
+        band = _read_band(ds, v, band_start, band_rows)
+        read_seconds += time.perf_counter() - started
+        return band
 
     if not reads:
-        return pieces, rows
+        return pieces, rows, var_rows, read_seconds
     with ThreadPoolExecutor(max_workers=1) as reader:
         next_band = reader.submit(read, *reads[0])
         for n, (v, band_start, band_rows) in enumerate(reads):
@@ -279,7 +303,8 @@ def _write_pieces(
                     client.write_parquet(frame, path)
                     pieces[k, v].append(path)
                     rows[k] += len(frame)
-    return pieces, rows
+                    var_rows[k, v] += len(frame)
+    return pieces, rows, var_rows, read_seconds
 
 
 # Files uploaded at once, each on one connection (see storage.upload_file).
@@ -305,6 +330,7 @@ def sync_store(
     max_chunks_per_run: int | None = None,
     duckdb_config: TilerBatchDuckDBConfig | None = None,
     regenerate_all: bool = False,
+    skip_empty_variables: set[str] | None = None,
 ) -> tuple[list[str], str]:
     """Convert every zarr timestamp that has no parquet yet, one zarr time
     chunk at a time.
@@ -313,6 +339,10 @@ def sync_store(
     - Existing files are never rewritten; a grid or variable change starts
       the store over.
     - All-NaN timestamps are recorded as empty and not read again.
+    - A variable in ``skip_empty_variables`` whose grid is all empty is not
+      uploaded. The store timestamp is listed only when some file for it was
+      uploaded. That variable's own timestamp list gains the instant only
+      when its file was uploaded.
     - The sidecar is saved after each chunk, after its files.
     - ``regenerate_all`` ignores what is already in the bucket and converts
       every timestamp, overwriting existing files.
@@ -321,15 +351,21 @@ def sync_store(
     """
     if duckdb_config is None:
         raise ValueError("duckdb_config is required")
+    skip_empty = skip_empty_variables or set()
 
     fresh = build_metadata(store, uuid, variables, timestamps=[])
     existing = read_metadata(tiler_root_dir, store)
     converted: set[str] = set()
     empty: set[str] = set()
+    # Instants whose file for that variable was uploaded. Independent of the
+    # store timestamps list: a skipped variable does not gain the instant.
+    variable_times: dict[str, set[str]] = {v: set() for v in variables}
     if existing is not None and not regenerate_all:
         if _same_layout(existing, fresh):
             converted = set(existing.timestamps)
             empty = set(existing.empty_timestamps)
+            for name, meta in existing.variables.items():
+                variable_times[name] = set(meta.timestamps)
         else:
             logger.warning(
                 "Grid or variables of %s changed since the last run; "
@@ -354,8 +390,15 @@ def sync_store(
     )
 
     def current() -> TilerParquetMetadata:
+        variable_meta = {
+            name: replace(meta, timestamps=sorted(variable_times.get(name, set())))
+            for name, meta in fresh.variables.items()
+        }
         return replace(
-            fresh, timestamps=sorted(converted), empty_timestamps=sorted(empty)
+            fresh,
+            timestamps=sorted(converted),
+            empty_timestamps=sorted(empty),
+            variables=variable_meta,
         )
 
     written: list[str] = []
@@ -380,8 +423,15 @@ def sync_store(
             changed = bool(steps)
 
             with TemporaryDirectory(dir=tmp) as piece_dir:
-                pieces, rows = _write_pieces(
+                pieces, rows, var_rows, read_seconds = _write_pieces(
                     client, ds, variables, list(steps), piece_dir
+                )
+                logger.info(
+                    "Tiler parquet sync for %s: chunk %d/%d read took %.6f seconds",
+                    store,
+                    n,
+                    len(batches),
+                    read_seconds,
                 )
                 uploads = []
                 for k, ts in steps.items():
@@ -389,6 +439,8 @@ def sync_store(
                         empty.add(ts)
                         continue
                     for v in variables:
+                        if var_rows[k, v] == 0 and v in skip_empty:
+                            continue
                         local_path = pieces[k, v][0]
                         if len(pieces[k, v]) > 1:
                             local_path = os.path.join(piece_dir, f"{k}_{v}.parquet")
@@ -402,6 +454,7 @@ def sync_store(
                                 {local_path, *pieces[k, v]},
                             )
                         )
+                        variable_times[v].add(ts)
                     converted.add(ts)
                     written.append(ts)
                 # The sidecar lists these files, so they must be up first.

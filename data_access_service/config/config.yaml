@@ -182,6 +182,10 @@ tiler:
         duckdb_temp_dir: "tiler_batch_duckdb_tmp"
         memory_limit: "512MB"
         threads: 2
+      products_customisation:
+        satellite_austemp_heatwave_14day:
+          - name: dhd
+            skip_empty_output: True
   catalog:
     blacklist:
       # curvilinear grids zarrs.
