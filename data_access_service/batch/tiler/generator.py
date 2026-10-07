@@ -152,7 +152,7 @@ def _publish_store(
 
 def _has_timestamps(tiler_root_dir: str, store: str) -> bool:
     meta = read_metadata(tiler_root_dir, store)
-    return meta is not None and bool(meta.timestamps)
+    return meta is not None and any(v.timestamps for v in meta.variables.values())
 
 
 _WRITE_MAX_ATTEMPTS = 10

@@ -111,9 +111,10 @@ def stores(data, monkeypatch):
                 n_j=len(lon),
                 lat=lat.tolist(),
                 lon=lon.tolist(),
-                timestamps=[T0, T1],
                 variables={
-                    v: TilerVariableMetadata(dtype="float32", attrs=a)
+                    v: TilerVariableMetadata(
+                        dtype="float32", attrs=a, timestamps=[T0, T1]
+                    )
                     for v, a in attrs.items()
                 },
                 generated_at="",

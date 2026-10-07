@@ -64,6 +64,7 @@ def _seed_metadata(
     variables: dict[str, dict] | None = None,
 ) -> None:
     variables = variables or {"v": {"dtype": "float32", "attrs": {}}}
+    stamps = [f"{t}.000000000Z" for t in times]
     meta = TilerParquetMetadata(
         uuid="u",
         dataset="x.zarr",
@@ -71,9 +72,10 @@ def _seed_metadata(
         n_j=len(lon),
         lat=lat,
         lon=lon,
-        timestamps=[f"{t}.000000000Z" for t in times],
         variables={
-            k: TilerVariableMetadata(dtype=v["dtype"], attrs=v["attrs"])
+            k: TilerVariableMetadata(
+                dtype=v["dtype"], attrs=v["attrs"], timestamps=stamps
+            )
             for k, v in variables.items()
         },
         generated_at="",

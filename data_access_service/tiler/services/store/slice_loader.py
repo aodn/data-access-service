@@ -45,9 +45,9 @@ def load_slice(
             f"(available: {sorted(meta.variables)})"
         )
 
-    raw_ts = resolve_timestamp(store, ts)
+    raw_ts = resolve_timestamp(store, ts, variables)
     if raw_ts is None:
-        raise FileNotFoundError(unavailable_date_message(store, ts))
+        raise FileNotFoundError(unavailable_date_message(store, ts, variables))
 
     keep = _ocean_table(store) if ocean_masked else None
     grids = {

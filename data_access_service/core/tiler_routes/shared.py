@@ -1,10 +1,13 @@
 """Helpers shared by the tiler routers."""
 
+import functools
 from collections.abc import Callable
 from http import HTTPStatus
 from typing import TypeVar
 
 import anyio
+from anyio.abc import TaskGroup
+from anyio.to_thread import run_sync
 import pandas as pd
 from fastapi import HTTPException, Request
 from fastapi.openapi.models import Example
@@ -50,23 +53,25 @@ async def run_cancellable(request: Request, fn: Callable[[], T]) -> T:
         trim_if_over_threshold()
         return fn()
 
-    async def _runner(tg: anyio.abc.TaskGroup) -> None:
+    async def _runner(taskgroup: TaskGroup) -> None:
         outcome.append(
-            await anyio.to_thread.run_sync(
-                _trim_then_run, abandon_on_cancel=True, limiter=TILE_THREAD_LIMITER
+            await run_sync(
+                functools.partial(_trim_then_run),
+                abandon_on_cancel=True,
+                limiter=TILE_THREAD_LIMITER,
             )
         )
-        tg.cancel_scope.cancel()
+        taskgroup.cancel_scope.cancel()
 
-    async def _watch_disconnect(tg: anyio.abc.TaskGroup) -> None:
+    async def _watch_disconnect(taskgroup: TaskGroup) -> None:
         while not await request.is_disconnected():
             await anyio.sleep(_DISCONNECT_POLL_INTERVAL)
-        tg.cancel_scope.cancel()
+        taskgroup.cancel_scope.cancel()
 
     try:
         async with anyio.create_task_group() as tg:
-            tg.start_soon(_runner, tg)
-            tg.start_soon(_watch_disconnect, tg)
+            tg.start_soon(functools.partial(_runner, tg))
+            tg.start_soon(functools.partial(_watch_disconnect, tg))
     except* Exception as eg:
         raise eg.exceptions[0] from None
 
@@ -135,11 +140,11 @@ def parse_date_or_422(date: str) -> pd.Timestamp:
 
 
 def resolve_timestamp_or_404(product: Product, ts: pd.Timestamp) -> None:
-    """404 early if ``ts`` isn't one of the store's timestamps."""
-    if resolve_timestamp(product.store, ts) is None:
+    """404 early if ``ts`` isn't on every variable of ``product``."""
+    if resolve_timestamp(product.store, ts, product.variables) is None:
         raise HTTPException(
             status_code=404,
-            detail=unavailable_date_message(product.store, ts),
+            detail=unavailable_date_message(product.store, ts, product.variables),
         )
 
 

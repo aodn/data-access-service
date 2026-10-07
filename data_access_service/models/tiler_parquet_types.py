@@ -50,8 +50,7 @@ class TilerVariableMetadata:
     """Per-variable facts the sparse value parquet does not carry.
 
     ``timestamps`` lists instants whose parquet for this variable was uploaded.
-    It is separate from the store ``timestamps`` list. An older sidecar with
-    no such list loads as empty.
+    An older sidecar with no such list loads as empty.
     """
 
     dtype: str
@@ -78,10 +77,10 @@ class TilerVariableMetadata:
 class TilerParquetMetadata:
     """One store's sidecar (``metadata.json``). ``dataset`` is ``{store}.zarr``.
 
-    ``timestamps`` lists instants with at least one variable's parquet written.
-    Each variable's own ``timestamps`` lists the instants that variable's file
-    was uploaded. ``empty_timestamps`` are instants with no data at all: no
-    files, never read again.
+    Each variable's ``timestamps`` lists the instants that variable's parquet
+    was uploaded. A root ``timestamps`` list on an older file is ignored.
+    ``empty_timestamps`` are instants with no data at all: no files, never
+    read again.
     """
 
     uuid: str
@@ -90,7 +89,6 @@ class TilerParquetMetadata:
     n_j: int
     lat: list[float]
     lon: list[float]
-    timestamps: list[str]
     variables: dict[str, TilerVariableMetadata]
     generated_at: str
     empty_timestamps: list[str] = field(default_factory=list)
@@ -103,7 +101,6 @@ class TilerParquetMetadata:
             "n_j": self.n_j,
             "lat": self.lat,
             "lon": self.lon,
-            "timestamps": self.timestamps,
             "empty_timestamps": self.empty_timestamps,
             "variables": {k: v.to_dict() for k, v in self.variables.items()},
             "generated_at": self.generated_at,
@@ -118,7 +115,6 @@ class TilerParquetMetadata:
             n_j=int(data["n_j"]),
             lat=[float(x) for x in data["lat"]],
             lon=[float(x) for x in data["lon"]],
-            timestamps=list(data["timestamps"]),
             empty_timestamps=list(data.get("empty_timestamps", [])),
             variables={
                 k: TilerVariableMetadata.from_dict(v)

@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -219,7 +220,9 @@ def every_store_has_data(monkeypatch):
     monkeypatch.setattr(
         generator,
         "read_metadata",
-        lambda tiler_root_dir, store: MagicMock(timestamps=["t"]),
+        lambda tiler_root_dir, store: SimpleNamespace(
+            variables={"v": SimpleNamespace(timestamps=["t"])}
+        ),
     )
 
 
@@ -292,7 +295,11 @@ class TestGenerateForStore:
     def test_store_with_no_timestamps_is_not_published(self, monkeypatch):
         s3_store, _ = self._setup(monkeypatch)
         monkeypatch.setattr(
-            generator, "read_metadata", lambda root, store: MagicMock(timestamps=[])
+            generator,
+            "read_metadata",
+            lambda root, store: SimpleNamespace(
+                variables={"v": SimpleNamespace(timestamps=[])}
+            ),
         )
 
         generate_tiler_parquet_for_store(MagicMock(), "y")
@@ -305,7 +312,11 @@ class TestGenerateForStore:
             {"x": [_product("p1", "x", "v")], "y": [_product("p2", "y", "v")]}
         )
         monkeypatch.setattr(
-            generator, "read_metadata", lambda root, store: MagicMock(timestamps=[])
+            generator,
+            "read_metadata",
+            lambda root, store: SimpleNamespace(
+                variables={"v": SimpleNamespace(timestamps=[])}
+            ),
         )
 
         generate_tiler_parquet_for_store(MagicMock(), "y")

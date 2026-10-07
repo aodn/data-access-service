@@ -88,9 +88,7 @@ def _fake_dataset(times: list[str]) -> xr.Dataset:
 def test_build_metadata_grid_and_provenance(monkeypatch):
     _patch_source(monkeypatch, _fake_dataset(["2024-01-01T00:00:00"]))
 
-    meta = gen.build_metadata(
-        "foo", "uuid-123", ["v", "flag"], ["2024-01-01T00:00:00.000000000Z"]
-    )
+    meta = gen.build_metadata("foo", "uuid-123", ["v", "flag"])
 
     assert meta.uuid == "uuid-123"
     assert meta.dataset == "foo.zarr"
@@ -98,10 +96,11 @@ def test_build_metadata_grid_and_provenance(monkeypatch):
     assert meta.n_j == 3
     assert meta.lat == [-40.0, -39.5]
     assert meta.lon == [110.0, 110.5, 111.0]
-    assert meta.timestamps == ["2024-01-01T00:00:00.000000000Z"]
+    assert "timestamps" not in meta.to_dict()
+    assert meta.variables["v"].timestamps == []
 
 
-def test_variable_timestamps_default_empty_when_the_sidecar_omits_them():
+def test_root_timestamps_are_ignored_when_the_sidecar_still_has_them():
     meta = gen.TilerParquetMetadata.from_dict(
         {
             "uuid": "uuid-123",
@@ -116,14 +115,14 @@ def test_variable_timestamps_default_empty_when_the_sidecar_omits_them():
         }
     )
 
-    assert meta.timestamps == [_ts(1)]
+    assert "timestamps" not in meta.to_dict()
     assert meta.variables["v"].timestamps == []
 
 
 def test_build_metadata_variable_dtype_and_attrs(monkeypatch):
     _patch_source(monkeypatch, _fake_dataset(["2024-01-01T00:00:00"]))
 
-    meta = gen.build_metadata("foo", "uuid-123", ["v", "flag"], [])
+    meta = gen.build_metadata("foo", "uuid-123", ["v", "flag"])
 
     # dtype describes the parquet's value column (always float32), not the
     # source zarr variable's dtype (float64 for "v", int32 for "flag").
@@ -140,7 +139,7 @@ def test_build_metadata_raises_for_unknown_variable(monkeypatch):
     _patch_source(monkeypatch, _fake_dataset(["2024-01-01T00:00:00"]))
 
     with pytest.raises(FileNotFoundError, match="NOT_A_REAL_VAR"):
-        gen.build_metadata("foo", "uuid-123", ["NOT_A_REAL_VAR"], [])
+        gen.build_metadata("foo", "uuid-123", ["NOT_A_REAL_VAR"])
 
 
 # --- _sparse_rows_for_slice -----------------------------------------------
@@ -222,7 +221,11 @@ class _Env:
         return [p for kind, p in self.events if kind == "parquet"]
 
     def sidecar_timestamps(self) -> list[str]:
-        return self.json[SIDECAR]["timestamps"]
+        data = self.json[SIDECAR]
+        assert "timestamps" not in data
+        return sorted(
+            set().union(*(v["timestamps"] for v in data["variables"].values()))
+        )
 
 
 def _sync(monkeypatch, ds, variables=("v",), **kwargs):

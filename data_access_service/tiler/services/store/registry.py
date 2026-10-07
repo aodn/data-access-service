@@ -28,9 +28,31 @@ def _load_metadata(store: str) -> TilerParquetMetadata:
     return TilerParquetMetadata.from_dict(read_json(_metadata_path(store)))
 
 
-def _build_time_index(meta: TilerParquetMetadata) -> dict[pd.Timestamp, str]:
-    """``{naive-UTC timestamp: raw timestamp string}``."""
-    return {pd.Timestamp(raw.rstrip("Z")): raw for raw in meta.timestamps}
+def _build_time_index(
+    meta: TilerParquetMetadata,
+) -> dict[str, dict[pd.Timestamp, str]]:
+    """``{variable: {naive-UTC timestamp: raw timestamp string}}``."""
+    return {
+        name: {pd.Timestamp(raw.rstrip("Z")): raw for raw in var.timestamps}
+        for name, var in meta.variables.items()
+    }
+
+
+def dates_for_variables(
+    indexes: dict[str, dict[pd.Timestamp, str]], variables: list[str]
+) -> dict[pd.Timestamp, str]:
+    """Instants present on every variable, keyed by naive UTC timestamp.
+
+    The raw string is taken from the first variable. A missing variable or an
+    empty list yields no dates.
+    """
+    selected = [indexes.get(name) for name in variables]
+    if not selected or any(idx is None for idx in selected):
+        return {}
+    common = set(selected[0])
+    for idx in selected[1:]:
+        common &= idx.keys()
+    return {ts: selected[0][ts] for ts in common}
 
 
 class StoreRegistry:
@@ -38,7 +60,7 @@ class StoreRegistry:
 
     def __init__(self) -> None:
         self._metadata: dict[str, TilerParquetMetadata] = {}
-        self._time_index: dict[str, dict[pd.Timestamp, str]] = {}
+        self._time_index: dict[str, dict[str, dict[pd.Timestamp, str]]] = {}
         self._lock = threading.Lock()
 
     def _publish(self, store: str, meta: TilerParquetMetadata) -> None:
@@ -59,13 +81,15 @@ class StoreRegistry:
     def get_metadata(self, store: str) -> TilerParquetMetadata:
         return self._ensure_loaded(store)
 
-    def time_index(self, store: str) -> dict[pd.Timestamp, str]:
+    def time_index(self, store: str) -> dict[str, dict[pd.Timestamp, str]]:
         with self._lock:
             return self._time_index.get(store, {})
 
-    def resolve_timestamp(self, store: str, ts: pd.Timestamp) -> str | None:
-        """The store's raw timestamp string for ``ts``, or None."""
-        return self.time_index(store).get(ts)
+    def resolve_timestamp(
+        self, store: str, ts: pd.Timestamp, variables: list[str]
+    ) -> str | None:
+        """Raw timestamp string for ``ts`` when every variable has it."""
+        return dates_for_variables(self.time_index(store), variables).get(ts)
 
     def is_available(self, store: str) -> bool:
         """Whether ``store``'s metadata is loaded. Every catalogue store is
@@ -129,21 +153,23 @@ def is_store_available(store: str) -> bool:
     return store_registry.is_available(store)
 
 
-def get_available_dates(store: str) -> list[tuple[str, pd.Timestamp]]:
-    """``[(iso_string, timestamp)]`` for ``store``, sorted."""
+def get_available_dates(
+    store: str, variables: list[str]
+) -> list[tuple[str, pd.Timestamp]]:
+    """``[(iso_string, timestamp)]`` present on every variable, sorted."""
     get_store_metadata(store)  # loads the time index
-    index = store_registry.time_index(store)
-    return [(ts_to_utc_iso(ts), ts) for ts in index]
+    index = dates_for_variables(store_registry.time_index(store), variables)
+    return [(ts_to_utc_iso(ts), ts) for ts in sorted(index)]
 
 
-def resolve_timestamp(store: str, ts: pd.Timestamp) -> str | None:
+def resolve_timestamp(store: str, ts: pd.Timestamp, variables: list[str]) -> str | None:
     get_store_metadata(store)  # loads the time index
-    return store_registry.resolve_timestamp(store, ts)
+    return store_registry.resolve_timestamp(store, ts, variables)
 
 
-def unavailable_date_message(store: str, ts: pd.Timestamp) -> str:
+def unavailable_date_message(store: str, ts: pd.Timestamp, variables: list[str]) -> str:
     """ "No data for date ..." with the latest available date."""
-    index = store_registry.time_index(store)
+    index = dates_for_variables(store_registry.time_index(store), variables)
     latest = ts_to_utc_iso(max(index)) if index else None
     hint = (
         f" Latest available date is {latest!r}."

@@ -52,11 +52,9 @@ def _ts_for_get_data(ts) -> str:
     return pd.Timestamp(ts).isoformat()
 
 
-def build_metadata(
-    store: str, uuid: str, variables: list[str], timestamps: list[str]
-) -> TilerParquetMetadata:
-    """The sidecar for ``store``: grid, variable attrs and ``timestamps``.
-    Reads coords and attrs only."""
+def build_metadata(store: str, uuid: str, variables: list[str]) -> TilerParquetMetadata:
+    """The sidecar for ``store``: grid and variable attrs. Reads coords and
+    attrs only. Timestamps are filled in per variable as files are uploaded."""
     ds = get_store(store)
 
     missing = [v for v in variables if v not in ds.data_vars]
@@ -88,7 +86,6 @@ def build_metadata(
         n_j=int(lon.shape[0]),
         lat=[float(x) for x in lat],
         lon=[float(x) for x in lon],
-        timestamps=timestamps,
         variables=variable_meta,
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
@@ -340,9 +337,8 @@ def sync_store(
       the store over.
     - All-NaN timestamps are recorded as empty and not read again.
     - A variable in ``skip_empty_variables`` whose grid is all empty is not
-      uploaded. The store timestamp is listed only when some file for it was
-      uploaded. That variable's own timestamp list gains the instant only
-      when its file was uploaded.
+      uploaded and does not gain that instant. A timestamp is done once any
+      variable uploaded a file for it, or every variable was empty.
     - The sidecar is saved after each chunk, after its files.
     - ``regenerate_all`` ignores what is already in the bucket and converts
       every timestamp, overwriting existing files.
@@ -353,19 +349,20 @@ def sync_store(
         raise ValueError("duckdb_config is required")
     skip_empty = skip_empty_variables or set()
 
-    fresh = build_metadata(store, uuid, variables, timestamps=[])
+    fresh = build_metadata(store, uuid, variables)
     existing = read_metadata(tiler_root_dir, store)
     converted: set[str] = set()
     empty: set[str] = set()
-    # Instants whose file for that variable was uploaded. Independent of the
-    # store timestamps list: a skipped variable does not gain the instant.
+    # Instants whose file for that variable was uploaded. A skipped variable
+    # does not gain the instant. ``converted`` is the union of those lists.
     variable_times: dict[str, set[str]] = {v: set() for v in variables}
     if existing is not None and not regenerate_all:
         if _same_layout(existing, fresh):
-            converted = set(existing.timestamps)
             empty = set(existing.empty_timestamps)
             for name, meta in existing.variables.items():
-                variable_times[name] = set(meta.timestamps)
+                if name in variable_times:
+                    variable_times[name] = set(meta.timestamps)
+                    converted |= variable_times[name]
         else:
             logger.warning(
                 "Grid or variables of %s changed since the last run; "
@@ -396,7 +393,6 @@ def sync_store(
         }
         return replace(
             fresh,
-            timestamps=sorted(converted),
             empty_timestamps=sorted(empty),
             variables=variable_meta,
         )
