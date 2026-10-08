@@ -186,14 +186,10 @@ class ZarrProcessor:
         zarr_store = self.api._instance.get_dataset(key).zarr_store
         zarr_store = prepare(zarr_store, key)  # format-specific prep, no `if format`
 
-        # Chunk once by time for memory-safe lazy processing. The store is the
-        # same for every bbox, so re-chunking per bbox would just repeat this.
-        time_dim = self.api.map_column_names(
-            uuid=self.uuid, key=key, columns=[STR_TIME_UPPER_CASE]
-        )[0]
-        time_per_chunk = get_time_steps_per_chunk(zarr_store, time_dim, self.log)
-        self.log.info("Chunking dataset with %d time steps per chunk", time_per_chunk)
-        zarr_store = zarr_store.chunk({time_dim: time_per_chunk})
+        # Do not rechunk the store here. satellite_ghrsst_l3s is ~15 TB and
+        # .chunk() builds a Dask graph over every stored chunk before any
+        # subset is applied. The NetCDF writer computes one time block, and
+        # that block is sized from the subset, not from the whole store.
 
         # Apply ALL bboxes in one pass, then blank what falls outside the drawn
         # polygons. subset_zarr is the single owner of the slicing, shared with
