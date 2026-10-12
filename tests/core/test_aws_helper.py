@@ -339,6 +339,28 @@ class TestAWSHelper(TestWithS3):
             expected_url = f"https://{bucket}.s3.us-east-1.amazonaws.com/{key}"
             assert url == expected_url
 
+    def test_submit_a_job_sends_share_identifier_only_when_given(
+        self, setup, aws_clients, localstack, mock_boto3_client
+    ):
+        helper = AWSHelper()
+        helper.batch = MagicMock()
+        helper.batch.submit_job.return_value = {"jobId": "job-1"}
+
+        helper.submit_a_job(
+            job_name="j", job_queue="q", job_definition="d", parameters={}
+        )
+        # A FIFO queue rejects shareIdentifier, so it must be absent by default
+        assert "shareIdentifier" not in helper.batch.submit_job.call_args.kwargs
+
+        helper.submit_a_job(
+            job_name="j",
+            job_queue="q",
+            job_definition="d",
+            parameters={},
+            share_identifier="small",
+        )
+        assert helper.batch.submit_job.call_args.kwargs["shareIdentifier"] == "small"
+
 
 def has_invalid_unicode(s: str) -> bool:
     return any(0xD800 <= ord(ch) <= 0xDFFF for ch in s)
