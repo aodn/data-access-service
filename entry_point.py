@@ -161,7 +161,15 @@ def run_job() -> None:
         case "sub-setting":
             api = API()
             api.initialize_metadata()
-            subsetting.init(api, job_id_of_init=job_id, parameters=parameters)
+            # Set by ogcapi only when the queue has a fair-share policy; a local run has no job.
+            share_identifier = job.get("shareIdentifier")
+            logger.info("Share identifier: %s", share_identifier)
+            subsetting.init(
+                api,
+                job_id_of_init=job_id,
+                parameters=parameters,
+                share_identifier=share_identifier,
+            )
         case "sub-setting-data-preparation":
             """
             Please take noted that the parameters in each call are different, the batch will call the

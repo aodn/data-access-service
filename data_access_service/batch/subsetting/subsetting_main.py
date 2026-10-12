@@ -45,7 +45,7 @@ from data_access_service.utils.email_templates.no_data_email import (
 
 # The only purpose is to create suitable number of child job, we can fine tune the value
 # on what is optimal value later
-def init(api: API, job_id_of_init, parameters):
+def init(api: API, job_id_of_init, parameters, share_identifier: str | None = None):
     # Must be here, this give change for test to init properly before calling get_config()
     config = Config.get_config()
 
@@ -144,6 +144,8 @@ def init(api: API, job_id_of_init, parameters):
     if csiro_keys is not None:
         preparation_parameters[Parameters.CSIRO_KEYS.value] = csiro_keys
 
+    # The children run in the same fair-share as the init job, so the whole download counts
+    # against one share. None when the init job had no share, i.e. on a FIFO queue.
     data_preparation_job_id = aws_client.submit_a_job(
         job_name="prepare-data-for-job-" + job_id_of_init,
         job_queue=config.get_job_queue_name(),
@@ -151,6 +153,7 @@ def init(api: API, job_id_of_init, parameters):
         parameters=preparation_parameters,
         array_size=len(ranges),
         dependency_job_id=job_id_of_init,
+        share_identifier=share_identifier,
     )
 
     # submit data collection job
@@ -169,6 +172,7 @@ def init(api: API, job_id_of_init, parameters):
         job_definition=config.get_job_definition_name(),
         parameters=collection_parameters,
         dependency_job_id=data_preparation_job_id,
+        share_identifier=share_identifier,
     )
 
 

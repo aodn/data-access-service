@@ -309,6 +309,7 @@ class AWSHelper:
         parameters: dict,
         array_size: int = 1,
         dependency_job_id: str = None,
+        share_identifier: str | None = None,
     ) -> str:
         """
         Submit a job to AWS Batch.
@@ -320,6 +321,8 @@ class AWSHelper:
             parameters: Parameters for the job.
             array_size: Size of the array job (default is 0, which means no array job).
             dependency_job_id: Job ID of the job this job depends on (default is None).
+            share_identifier: Fair-share identifier (default is None). AWS requires it on a
+                queue with a fair-share scheduling policy and rejects it on a FIFO queue.
 
         Returns:
             The response from the AWS Batch service.
@@ -336,6 +339,9 @@ class AWSHelper:
 
         if dependency_job_id:
             request["dependsOn"] = [{"jobId": dependency_job_id}]
+
+        if share_identifier:
+            request["shareIdentifier"] = share_identifier
         response = self.batch.submit_job(**request)
 
         self.log.info(f"Job submitted: {response['jobId']}")
