@@ -53,6 +53,7 @@ class TestInit(TestWithS3):
                     parameters=PREPARATION_JOB_SUBMISSION_ARGS["parameters"],
                     array_size=PREPARATION_JOB_SUBMISSION_ARGS["array_size"],
                     dependency_job_id=INIT_JOB_ID,
+                    share_identifier=None,
                 )
 
                 expected_call_2 = call(
@@ -63,6 +64,7 @@ class TestInit(TestWithS3):
                     dependency_job_id=COLLECTION_JOB_SUBMISSION_ARGS[
                         "dependency_job_id"
                     ],
+                    share_identifier=None,
                 )
 
                 # Assert that submit_a_job was called twice
@@ -111,6 +113,27 @@ class TestInit(TestWithS3):
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     @patch("data_access_service.models.co_datasource.co_data_registory.CsiroDataSrc")
+    def test_init_hands_share_identifier_to_preparation_and_collection(
+        self, mock_csiro_cls, upload_test_case_to_s3
+    ):
+        mock_csiro = MagicMock()
+        mock_csiro.get_name.return_value = "csiro"
+        mock_csiro.get_metadata_catalog.return_value = {}
+        mock_csiro_cls.return_value = mock_csiro
+
+        with patch.object(Config, "get_month_count_per_job", return_value=3):
+            with patch.object(
+                AWSHelper, "submit_a_job", return_value="test-job-id-returned"
+            ) as submit_a_job:
+                init(API(), INIT_JOB_ID, INIT_PARAMETERS, share_identifier="large")
+
+        assert submit_a_job.call_count == 2
+        # Both children must land in the init job's fair-share, or AWS rejects them
+        for submitted in submit_a_job.call_args_list:
+            assert submitted.kwargs["share_identifier"] == "large"
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    @patch("data_access_service.models.co_datasource.co_data_registory.CsiroDataSrc")
     def test_init_with_very_narrow_date_range(
         self, mock_csiro_cls, upload_test_case_to_s3
     ):
@@ -146,6 +169,7 @@ class TestInit(TestWithS3):
                         },
                         array_size=1,
                         dependency_job_id=INIT_JOB_ID,
+                        share_identifier=None,
                     )
 
                     expected_call_2 = call(
@@ -159,6 +183,7 @@ class TestInit(TestWithS3):
                         dependency_job_id=COLLECTION_JOB_SUBMISSION_ARGS[
                             "dependency_job_id"
                         ],
+                        share_identifier=None,
                     )
 
                     # Assert that submit_a_job was called twice
@@ -230,6 +255,7 @@ class TestInit(TestWithS3):
                         },
                         array_size=1,
                         dependency_job_id=INIT_JOB_ID,
+                        share_identifier=None,
                     )
 
                     expected_call_2 = call(
@@ -246,6 +272,7 @@ class TestInit(TestWithS3):
                         dependency_job_id=COLLECTION_JOB_SUBMISSION_ARGS[
                             "dependency_job_id"
                         ],
+                        share_identifier=None,
                     )
 
                     # Assert that submit_a_job was called twice
