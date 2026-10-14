@@ -401,8 +401,12 @@ class CsiroDataSrc(AbstractDataSrc):
     def get_metadata_catalog(self) -> dict:
         return self.__metadata_catalog
 
-    def get_dataset(self, dataset_name_with_ext: str) -> DataSource:
-        return super().get_dataset(dataset_name_with_ext=dataset_name_with_ext)
+    def get_dataset(
+        self, dataset_name_with_ext: str, chunks: str | None = "auto"
+    ) -> DataSource:
+        return super().get_dataset(
+            dataset_name_with_ext=dataset_name_with_ext, chunks=chunks
+        )
 
     def get_name(self) -> str:
         return self.name

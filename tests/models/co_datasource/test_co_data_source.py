@@ -433,6 +433,19 @@ class TestCODataRegistry:
         with pytest.raises(Exception, match="Conflicted dataset names"):
             registry.get_metadata()
 
+    def test_chunks_none_is_not_cached(self):
+        registry, mock_aodn_src, _ = _make_registry(
+            aodn_catalog={"satellite.zarr": {}},
+        )
+        opened = MagicMock()
+        mock_aodn_src.get_dataset.return_value = opened
+
+        assert registry.get_dataset("satellite.zarr", chunks=None) is opened
+        assert registry.get_dataset("satellite.zarr", chunks=None) is opened
+        assert mock_aodn_src.get_dataset.call_count == 2
+        mock_aodn_src.get_dataset.assert_called_with("satellite.zarr", chunks=None)
+        assert "satellite.zarr" not in registry._datasets
+
     def test_get_dataset_returns_from_first_matching_source(self):
         registry, mock_aodn_src, _ = _make_registry()
         expected = MagicMock()

@@ -48,6 +48,99 @@ from data_access_service.utils.subset_request_resolver import (
 log = logging.getLogger(__name__)
 
 
+def zarr_extent_for_estimate(api, uuid: str, key: str):
+    """Min/max time of a zarr key, without caching a dask-backed open.
+
+    Same day-alignment and future-date clamp as ``API.get_temporal_extent``.
+    The store is closed before this returns.
+    """
+    ds = api._instance.get_dataset(key, chunks=None)
+    try:
+        try:
+            start_date, end_date = ds.get_temporal_extent()
+        except ValueError:
+            return None, None
+        return _clamp_extent(start_date, end_date)
+    finally:
+        _close_zarr(ds)
+
+
+def _clamp_extent(start_date, end_date):
+    """Match ``API.get_temporal_extent`` so an estimate trims the same days."""
+    if start_date is not None:
+        start_date = start_date.replace(
+            hour=0, minute=0, second=0, microsecond=0, nanosecond=0
+        )
+    if end_date is not None:
+        if end_date.tzinfo is None:
+            now_compare = pd.Timestamp.now()
+        else:
+            now_compare = pd.Timestamp.now(tz="UTC")
+            end_date = end_date.tz_convert("UTC")
+        end_date = end_date.replace(
+            hour=23, minute=59, second=59, microsecond=999999, nanosecond=999
+        )
+        if end_date > now_compare:
+            end_date = now_compare
+    return start_date, end_date
+
+
+def _close_zarr(ds) -> None:
+    store = getattr(ds, "zarr_store", None)
+    if store is not None:
+        store.close()
+
+
+def _estimate_zarr_key(
+    api,
+    uuid: str,
+    key: str,
+    resolved_subset_request: ResolvedSubsetRequest,
+    output_format: str,
+    cancellation: Optional[Cancellation],
+) -> Optional[dict]:
+    """Size one zarr key from a chunks=None open that is not cached."""
+    ds = api._instance.get_dataset(key, chunks=None)
+    try:
+        check_datasource_supports_format(api, ds, uuid, key, output_format)
+        if not resolved_subset_request.has_data:
+            return _empty_estimate(uuid, key, output_format)
+        raise_if_client_gone(cancellation)
+
+        def _extent(_uuid: str, _key: str):
+            try:
+                start_date, end_date = ds.get_temporal_extent()
+            except ValueError:
+                return None, None
+            return _clamp_extent(start_date, end_date)
+
+        date_start, date_end = trim_date_range_for_keys(
+            api,
+            uuid,
+            [key],
+            resolved_subset_request.start_date,
+            resolved_subset_request.end_date,
+            extent_provider=_extent,
+        )
+        if date_start is None or date_end is None:
+            return _empty_estimate(uuid, key, output_format)
+        return _estimate_zarr_size(
+            api,
+            ds.zarr_store,
+            uuid,
+            key,
+            date_start,
+            date_end,
+            resolved_subset_request.bboxes,
+            resolved_subset_request.columns,
+            output_format,
+            resolved_subset_request.geometry,
+            cancellation,
+        )
+    finally:
+        _close_zarr(ds)
+
+
 def _bytes_to_mb(num_bytes: int) -> float:
     """Bytes -> decimal MB (1 MB = 1,000,000 bytes), the way browsers report
     file sizes. Rounded to 1 decimal place."""
@@ -78,6 +171,14 @@ def estimate_single_key_size(
     :raises ClientGoneError: if the client disconnected
     """
     uuid = resolved_subset_request.uuid
+    if key.endswith(".zarr"):
+        # Do not use get_datasource. That caches a chunks="auto" open, and
+        # the dask graph for a fine-grained satellite store is multiple GB.
+        # Downloads keep that open; only this estimate uses chunks=None.
+        return _estimate_zarr_key(
+            api, uuid, key, resolved_subset_request, output_format, cancellation
+        )
+
     ds = api.get_datasource(uuid, key)
     if ds is None:
         return None

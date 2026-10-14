@@ -109,19 +109,29 @@ class CODataRegistry(ABC):
         before_sleep=log_retry_attempt("get_dataset", log),
         reraise=True,
     )
-    def get_dataset(self, dataset_name_with_ext: str) -> DataSource | None:
-        with self._datasets_lock:
-            cached = self._datasets.get(dataset_name_with_ext)
-            if cached is not None:
-                log.info("Reusing cached %s dataset", dataset_name_with_ext)
-                return cached
+    def get_dataset(
+        self, dataset_name_with_ext: str, chunks: str | None = "auto"
+    ) -> DataSource | None:
+        # Only the default dask open is cached. A chunks=None open is the
+        # size estimate: it must not replace the chunks="auto" store that
+        # downloads reuse, and it must not be kept after the estimate.
+        use_cache = chunks == "auto"
+        if use_cache:
+            with self._datasets_lock:
+                cached = self._datasets.get(dataset_name_with_ext)
+                if cached is not None:
+                    log.info("Reusing cached %s dataset", dataset_name_with_ext)
+                    return cached
 
         for data_src in self.data_source_list:
             try:
                 log.info(
                     f"Getting {dataset_name_with_ext} dataset from {data_src.get_name()}..."
                 )
-                dataset = data_src.get_dataset(dataset_name_with_ext)
+                if chunks == "auto":
+                    dataset = data_src.get_dataset(dataset_name_with_ext)
+                else:
+                    dataset = data_src.get_dataset(dataset_name_with_ext, chunks=chunks)
             except DatasetNotFoundError:
                 # log the exception and continue to try the next data source
                 log.info(
@@ -131,6 +141,8 @@ class CODataRegistry(ABC):
             # Load happened outside the lock so a 4-minute S3 listing does
             # not block other datasets. setdefault keeps the first stored
             # instance if two threads both missed.
+            if not use_cache:
+                return dataset
             with self._datasets_lock:
                 return self._datasets.setdefault(dataset_name_with_ext, dataset)
 

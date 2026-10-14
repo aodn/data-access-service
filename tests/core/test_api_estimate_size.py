@@ -121,6 +121,38 @@ def _api_with_zarr(dataset: xr.Dataset) -> tuple[API, MagicMock]:
     return api, mock_ds
 
 
+def test_zarr_suffix_does_not_use_the_cached_dask_open(monkeypatch):
+    """A real .zarr key is sized from chunks=None and that open is closed."""
+    from data_access_service.core import size_estimation
+
+    dataset = _make_dataset()
+    opened = MagicMock(spec=ZarrDataSource)
+    opened.zarr_store = dataset
+    opened.get_temporal_extent.return_value = (
+        pd.Timestamp("2020-01-01"),
+        pd.Timestamp("2020-01-05"),
+    )
+    closed = []
+    monkeypatch.setattr(size_estimation, "_close_zarr", lambda ds: closed.append(ds))
+    api = MagicMock()
+    api.resolve_dim_names.return_value = ("LATITUDE", "LONGITUDE", "TIME")
+    api.map_column_names = MagicMock(side_effect=_identity_map)
+    api._instance.get_dataset.return_value = opened
+    api.get_datasource.side_effect = AssertionError("cached chunks=auto open")
+
+    result = estimate_single_key_size(
+        api,
+        "satellite.zarr",
+        _resolved(keys=["satellite.zarr"]),
+        output_format="netcdf",
+    )
+
+    assert result["estimated_uncompressed_bytes"] == dataset.nbytes
+    api.get_datasource.assert_not_called()
+    api._instance.get_dataset.assert_called_with("satellite.zarr", chunks=None)
+    assert closed == [opened]
+
+
 def test_zarr_estimate_basic():
     dataset = _make_dataset()
     api, _ = _api_with_zarr(dataset)

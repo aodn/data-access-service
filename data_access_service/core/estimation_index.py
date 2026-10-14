@@ -206,6 +206,15 @@ def sidecar_extent_provider(api, output_format: str) -> ExtentProvider:
     def provider(
         uuid: str, key: str
     ) -> Tuple[Optional[pd.Timestamp], Optional[pd.Timestamp]]:
+        if key.endswith(".zarr"):
+            # A zarr extent must not go through get_temporal_extent: that
+            # caches a chunks="auto" open and builds the dask graph the
+            # estimate is trying to avoid.
+            from data_access_service.core.size_estimation import (
+                zarr_extent_for_estimate,
+            )
+
+            return zarr_extent_for_estimate(api, uuid, key)
         if not key.endswith(".parquet") or output_format != OUTPUT_FORMAT_CSV:
             return api.get_temporal_extent(uuid, key)
         meta = require_sidecar(api, uuid, key)
