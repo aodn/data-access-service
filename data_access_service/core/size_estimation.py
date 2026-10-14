@@ -78,7 +78,10 @@ def estimate_single_key_size(
     :raises ClientGoneError: if the client disconnected
     """
     uuid = resolved_subset_request.uuid
-    ds = api.get_datasource(uuid, key)
+
+    # We do not want to load dask as it is slow and of no need for this case, we only need to
+    # scan a few entries here
+    ds = api.get_datasource(uuid, key, chunks=None)
     if ds is None:
         return None
 

@@ -109,7 +109,9 @@ class CODataRegistry(ABC):
         before_sleep=log_retry_attempt("get_dataset", log),
         reraise=True,
     )
-    def get_dataset(self, dataset_name_with_ext: str) -> DataSource | None:
+    def get_dataset(
+        self, dataset_name_with_ext: str, chunks: dict | str | int | None = "auto"
+    ) -> DataSource | None:
         with self._datasets_lock:
             cached = self._datasets.get(dataset_name_with_ext)
             if cached is not None:
@@ -121,7 +123,7 @@ class CODataRegistry(ABC):
                 log.info(
                     f"Getting {dataset_name_with_ext} dataset from {data_src.get_name()}..."
                 )
-                dataset = data_src.get_dataset(dataset_name_with_ext)
+                dataset = data_src.get_dataset(dataset_name_with_ext, chunks)
             except DatasetNotFoundError:
                 # log the exception and continue to try the next data source
                 log.info(

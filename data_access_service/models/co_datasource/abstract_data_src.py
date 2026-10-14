@@ -29,13 +29,15 @@ class AbstractDataSrc(ABC):
         return frozenset(self.get_metadata_catalog())
 
     @abstractmethod
-    def get_dataset(self, dataset_name_with_ext: str) -> DataSource:
+    def get_dataset(
+        self, dataset_name_with_ext: str, chunks: dict | str | int | None = "auto"
+    ) -> DataSource:
         if dataset_name_with_ext not in self.get_dataset_names():
             raise DatasetNotFoundError(
                 dataset_name=dataset_name_with_ext, data_source_name=self.get_name()
             )
 
-        return self.get_data_src().get_dataset(dataset_name_with_ext)
+        return self.get_data_src().get_dataset(dataset_name_with_ext, chunks)
 
     @abstractmethod
     def get_name(self) -> str:

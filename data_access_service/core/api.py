@@ -934,15 +934,17 @@ class API(BaseAPI):
 
         return output
 
-    def get_datasource(self, uuid: str, key: str) -> Optional[DataQuery.DataSource]:
+    def get_datasource(
+        self, uuid: str, key: str, chunks: dict | str | int | None = "auto"
+    ) -> Optional[DataQuery.DataSource] | None:
         mds: Dict[str, Descriptor] | None = self._cached_metadata.get(uuid)
         if mds is not None and key in mds:
             md = mds[key]
             if md is not None:
-                ds: DataQuery.DataSource = self._instance.get_dataset(md.dname)
+                ds: DataQuery.DataSource | None = self._instance.get_dataset(
+                    md.dname, chunks
+                )
                 return ds
-            else:
-                return None
         else:
             return None
 
