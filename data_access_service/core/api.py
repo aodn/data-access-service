@@ -833,7 +833,11 @@ class API(BaseAPI):
     ) -> Tuple[pd.Timestamp | None, pd.Timestamp | None]:
         md: Dict[str, Descriptor] | None = self._cached_metadata.get(uuid)
         if md is not None:
-            ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname)
+            # Zarr only needs the time coordinate here. chunks="auto" builds a
+            # dask graph over every stored chunk of the store (about 45s for
+            # satellite_ghrsst_l3s) before that coordinate can be read.
+            chunks = None if key.endswith(".zarr") else "auto"
+            ds: DataQuery.DataSource = self._instance.get_dataset(md[key].dname, chunks)
             try:
                 start_date, end_date = self._source_temporal_extent(ds, uuid, key)
 

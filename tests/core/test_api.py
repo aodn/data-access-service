@@ -528,6 +528,14 @@ class TestApi(unittest.TestCase):
         self.assertIsNone(start_res)
         self.assertIsNone(end_res)
 
+        # A zarr extent read must not build a dask graph. Parquet keeps "auto".
+        api._instance.get_dataset.assert_called_with("test-dname", "auto")
+        zarr_key = "test.zarr"
+        api._cached_metadata = {uuid: {zarr_key: mock_descriptor}}
+        mock_ds.get_temporal_extent.return_value = (start_naive, past_naive)
+        api.get_temporal_extent(uuid, zarr_key)
+        api._instance.get_dataset.assert_called_with("test-dname", None)
+
     def test_get_temporal_extent_passes_mapped_time_varname_for_parquet(self):
         api = API()
         uuid = "test-uuid"
