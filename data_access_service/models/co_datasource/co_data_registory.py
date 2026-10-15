@@ -39,6 +39,27 @@ log = logging.getLogger(__name__)
 _DATA_SOURCES: list[type[AbstractDataSrc]] = [AodnDataSrc, CsiroDataSrc]
 
 
+def _freeze_chunks(chunks: dict | str | int | None):
+    """A hashable form of ``chunks`` so equal settings share one cache entry.
+
+    Dict key order does not matter. Nested dicts and sequences are frozen the
+    same way, because xarray accepts those as chunk sizes.
+    """
+    if isinstance(chunks, dict):
+        return tuple(
+            sorted((str(key), _freeze_chunks(value)) for key, value in chunks.items())
+        )
+    if isinstance(chunks, (list, tuple)):
+        return tuple(_freeze_chunks(value) for value in chunks)
+    return chunks
+
+
+def _dataset_cache_key(
+    dataset_name_with_ext: str, chunks: dict | str | int | None
+) -> tuple:
+    return dataset_name_with_ext, _freeze_chunks(chunks)
+
+
 def resolve_dataset_location(dataset_name: str) -> DatasetLocation:
     """Where ``dataset_name`` lives, falling back to the AODN bucket.
 
@@ -64,9 +85,10 @@ class CODataRegistry(ABC):
         log.info("Initializing all Cloud Optimized data sources...")
         self.data_source_list: list[AbstractDataSrc] = [AodnDataSrc(), CsiroDataSrc()]
         # ParquetDataSource.dataset lists the hive tree on first access
-        # (argo.parquet is ~300k files). One instance per name so
-        # get_temporal_extent and get_datasource share that listing.
-        self._datasets: dict[str, DataSource] = {}
+        # (argo.parquet is ~300k files). One instance per name and chunks
+        # setting, so get_temporal_extent and get_datasource share that
+        # listing without mixing a chunks=None open with chunks="auto".
+        self._datasets: dict[tuple, DataSource] = {}
         self._datasets_lock = threading.Lock()
         log.info("All Cloud Optimized data sources initialized")
 
@@ -109,9 +131,12 @@ class CODataRegistry(ABC):
         before_sleep=log_retry_attempt("get_dataset", log),
         reraise=True,
     )
-    def get_dataset(self, dataset_name_with_ext: str) -> DataSource | None:
+    def get_dataset(
+        self, dataset_name_with_ext: str, chunks: dict | str | int | None = "auto"
+    ) -> DataSource | None:
+        cache_key = _dataset_cache_key(dataset_name_with_ext, chunks)
         with self._datasets_lock:
-            cached = self._datasets.get(dataset_name_with_ext)
+            cached = self._datasets.get(cache_key)
             if cached is not None:
                 log.info("Reusing cached %s dataset", dataset_name_with_ext)
                 return cached
@@ -121,7 +146,7 @@ class CODataRegistry(ABC):
                 log.info(
                     f"Getting {dataset_name_with_ext} dataset from {data_src.get_name()}..."
                 )
-                dataset = data_src.get_dataset(dataset_name_with_ext)
+                dataset = data_src.get_dataset(dataset_name_with_ext, chunks)
             except DatasetNotFoundError:
                 # log the exception and continue to try the next data source
                 log.info(
@@ -132,6 +157,6 @@ class CODataRegistry(ABC):
             # not block other datasets. setdefault keeps the first stored
             # instance if two threads both missed.
             with self._datasets_lock:
-                return self._datasets.setdefault(dataset_name_with_ext, dataset)
+                return self._datasets.setdefault(cache_key, dataset)
 
         raise Exception(f"Dataset {dataset_name_with_ext} not found in any data source")

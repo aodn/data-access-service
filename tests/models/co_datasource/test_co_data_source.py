@@ -94,7 +94,7 @@ class TestAbstractDataSrc:
         src = _ConcreteDataSrc(catalog={KNOWN_DATASET: {}}, data_src=mock_data_src)
         result = src.get_dataset(KNOWN_DATASET)
 
-        mock_data_src.get_dataset.assert_called_once_with(KNOWN_DATASET)
+        mock_data_src.get_dataset.assert_called_once_with(KNOWN_DATASET, "auto")
         assert result is expected
 
     def test_dataset_not_found_error_carries_dataset_name(self):
@@ -135,7 +135,7 @@ class TestAodnDataSrc:
     def test_get_dataset_returns_dataset_for_known_key(self):
         src, mock_aodn = self._make_src()
         result = src.get_dataset(KNOWN_DATASET)
-        mock_aodn.get_dataset.assert_called_once_with(KNOWN_DATASET)
+        mock_aodn.get_dataset.assert_called_once_with(KNOWN_DATASET, "auto")
         assert result is mock_aodn.get_dataset.return_value
 
     def test_get_dataset_raises_for_unknown_key(self):
@@ -450,11 +450,39 @@ class TestCODataRegistry:
         second = registry.get_dataset("aodn_dataset.parquet")
 
         assert first is second is expected
-        mock_aodn_src.get_dataset.assert_called_once_with("aodn_dataset.parquet")
+        mock_aodn_src.get_dataset.assert_called_once_with(
+            "aodn_dataset.parquet", "auto"
+        )
+
+    def test_get_dataset_cache_is_separate_per_chunks(self):
+        registry, mock_aodn_src, _ = _make_registry()
+        opened = {}
+
+        def open_dataset(_name, chunks="auto"):
+            key = "dict" if isinstance(chunks, dict) else chunks
+            return opened.setdefault(key, MagicMock())
+
+        mock_aodn_src.get_dataset.side_effect = open_dataset
+
+        assert registry.get_dataset("aodn_dataset.parquet") is opened["auto"]
+        assert registry.get_dataset("aodn_dataset.parquet", chunks=None) is opened[None]
+        # Same chunks value is reused, including a dict written in another order.
+        assert registry.get_dataset("aodn_dataset.parquet") is opened["auto"]
+        by_time = registry.get_dataset(
+            "aodn_dataset.parquet", chunks={"time": 1, "lat": 2}
+        )
+        by_lat = registry.get_dataset(
+            "aodn_dataset.parquet", chunks={"lat": 2, "time": 1}
+        )
+        assert by_time is by_lat is opened["dict"]
+        assert opened["dict"] is not opened["auto"]
+        assert mock_aodn_src.get_dataset.call_count == 3
 
     def test_get_dataset_concurrent_calls_return_same_instance(self):
         registry, mock_aodn_src, _ = _make_registry()
-        mock_aodn_src.get_dataset.side_effect = lambda _name: MagicMock()
+        mock_aodn_src.get_dataset.side_effect = (
+            lambda _name, _chunks="auto": MagicMock()
+        )
         results = [None] * 8
 
         def worker(index):
