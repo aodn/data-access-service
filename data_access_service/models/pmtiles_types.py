@@ -99,6 +99,8 @@ class PmtilesGenerationConfig:
     duckdb_database: str
     memory_limit: str
     bucket_name: str
+    # S3 folder the portal reads pmtiles from, sibling of the estimation index
+    s3_prefix: str
     threads: int
     fetch_size: int
     show_progress: bool
