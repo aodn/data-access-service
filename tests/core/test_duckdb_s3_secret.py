@@ -5,7 +5,7 @@ import pytest
 
 from data_access_service import Config
 from data_access_service.config.config import IntTestConfig
-from data_access_service.core.duckdbclients.duckdbclient import DuckDBClient
+from data_access_service.core.duckdbclients.basedbclient import DuckDBClient
 
 
 class _Client(DuckDBClient):
