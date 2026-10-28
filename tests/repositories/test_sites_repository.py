@@ -13,7 +13,8 @@ from data_access_service.sites.sites_repository import (
     ParquetRepository,
     quote_ident,
 )
-from data_access_service.core.duckdbclient import SitesDuckDBClient, DuckDBClient
+from data_access_service.core.duckdbclients.basedbclient import DuckDBClient
+from data_access_service.core.duckdbclients.sitedbclient import SitesDuckDBClient
 
 
 class _GroupedRepo(ParquetRepository):

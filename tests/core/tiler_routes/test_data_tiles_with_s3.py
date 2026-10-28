@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from data_access_service.config.config import Config
-from data_access_service.core.duckdbclient import TilerDuckDBClient
+from data_access_service.core.duckdbclients.tilerclient import TilerDuckDBClient
 from data_access_service.models.tiler_parquet_types import RootMetadata
 from data_access_service.tiler.services.product.catalog import build_catalog
 from data_access_service.tiler.services.product.product import Product

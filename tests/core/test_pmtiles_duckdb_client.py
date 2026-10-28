@@ -16,7 +16,8 @@ from unittest.mock import MagicMock, patch
 import duckdb
 import pytest
 
-from data_access_service.core.duckdbclient import DuckDBClient, PmTileDuckDBClient
+from data_access_service.core.duckdbclients.basedbclient import DuckDBClient
+from data_access_service.core.duckdbclients.pmtilesclient import PmTileDuckDBClient
 
 
 @pytest.fixture(autouse=True)

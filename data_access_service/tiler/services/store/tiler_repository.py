@@ -16,7 +16,7 @@ import numpy as np
 import pyarrow as pa
 
 from data_access_service.config.config import Config
-from data_access_service.core.duckdbclient import TilerDuckDBClient
+from data_access_service.core.duckdbclients.tilerclient import TilerDuckDBClient
 from data_access_service.models.tiler_parquet_types import variable_parquet_path
 from data_access_service.utils.sql_utils import sql_literal
 

@@ -20,7 +20,9 @@ from typing import Callable, List, Optional, Tuple
 import pandas as pd
 
 from data_access_service.config.config import Config
-from data_access_service.core.duckdbclient import EstimationDuckDBClient
+from data_access_service.core.duckdbclients.estimationclient import (
+    EstimationDuckDBClient,
+)
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.models.estimation_types import (
     ESTIMATION_INDEX_VERSION,

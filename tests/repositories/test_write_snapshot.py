@@ -10,7 +10,8 @@ import pandas as pd
 import pyarrow.parquet as pq
 import pytest
 
-from data_access_service.core.duckdbclient import DuckDBClient, SitesDuckDBClient
+from data_access_service.core.duckdbclients.basedbclient import DuckDBClient
+from data_access_service.core.duckdbclients.sitedbclient import SitesDuckDBClient
 from data_access_service.sites.sites_repository import ParquetRepository, quote_ident
 
 

@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from data_access_service import Config
 from data_access_service.config.config import IntTestConfig
 from data_access_service.core.api import API
-from data_access_service.core.duckdbclient import SitesDuckDBClient
+from data_access_service.core.duckdbclients.sitedbclient import SitesDuckDBClient
 from data_access_service.core.estimation_index import (
     close_client as close_estimation_client,
 )

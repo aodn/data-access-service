@@ -19,7 +19,9 @@ import xarray as xr
 
 from data_access_service.batch.tiler import parquet_generator as gen
 from data_access_service.batch.tiler.zarr_registry import close_all_stores
-from data_access_service.core.duckdbclient import TilerBatchDuckDBClient
+from data_access_service.core.duckdbclients.tilerbatchclient import (
+    TilerBatchDuckDBClient,
+)
 from data_access_service.models.tiler_types import TilerBatchDuckDBConfig
 
 

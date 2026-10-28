@@ -6,7 +6,7 @@ no S3/httpfs setup to skip, so no config fixture is needed.
 
 import pytest
 
-from data_access_service.core.duckdbclient import TilerDuckDBClient
+from data_access_service.core.duckdbclients.tilerclient import TilerDuckDBClient
 
 
 def test_execute_returns_relation():

@@ -5,7 +5,9 @@ import os
 import pandas as pd
 import pytest
 
-from data_access_service.core.duckdbclient import TilerBatchDuckDBClient
+from data_access_service.core.duckdbclients.tilerbatchclient import (
+    TilerBatchDuckDBClient,
+)
 from data_access_service.models.tiler_types import TilerBatchDuckDBConfig
 
 CONFIG = TilerBatchDuckDBConfig(

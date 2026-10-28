@@ -1,6 +1,6 @@
 """Per-job DuckDB session settings.
 
-Batch jobs share :class:`~data_access_service.core.duckdbclient.PmTileDuckDBClient`
+Batch jobs share :class:`~data_access_service.core.duckdbclients.pmtilesclient.PmTileDuckDBClient`
 but not its tuning: pmtiles has to leave room for the tippecanoe subprocess,
 the estimation index does not. Each job builds its own instance of this and
 passes it to the client, so changing one job's limits cannot move the other's.

@@ -8,7 +8,7 @@ but that's a no-op once cached locally.
 
 import pytest
 
-from data_access_service.core.duckdbclient import SitesDuckDBClient
+from data_access_service.core.duckdbclients.sitedbclient import SitesDuckDBClient
 
 
 def test_execute_returns_relation():
