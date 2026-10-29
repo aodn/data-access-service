@@ -81,17 +81,17 @@ def test_shutdown_continues_temp_cleanup_if_connection_close_raises():
 def test_close_nulls_cursor_even_if_cursor_close_raises():
     client = PmTileDuckDBClient.__new__(PmTileDuckDBClient)
     client._lock = threading.Lock()
-    client._logger = MagicMock()
     bad_cursor = MagicMock()
     bad_cursor.close.side_effect = RuntimeError("cursor already closed")
     client._duckdb_client = bad_cursor
     client._con = bad_cursor
 
-    client.close()
+    with patch.object(PmTileDuckDBClient, "_logger") as logger:
+        client.close()
 
     assert client._duckdb_client is None
     assert client._con is None
-    client._logger.exception.assert_called()
+    logger.exception.assert_called()
 
 
 def _run_h3_staging_like_workload(client: PmTileDuckDBClient, work_dir: Path) -> None:
