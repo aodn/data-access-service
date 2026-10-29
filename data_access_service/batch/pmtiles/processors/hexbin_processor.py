@@ -8,7 +8,7 @@ from data_access_service.batch.pmtiles.helpers.features_help import build_hex_fe
 from data_access_service.batch.pmtiles.processors.abstract_processor import (
     AbstractProcessor,
 )
-from data_access_service.core.duckdbclient import PmTileDuckDBClient
+from data_access_service.core.duckdbclients.pmtilesclient import PmTileDuckDBClient
 
 from data_access_service.models.pmtiles_types import (
     HexLayerSpec,

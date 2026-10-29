@@ -24,7 +24,7 @@ from tenacity import (
 
 from data_access_service.config.config import Config
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.core.duckdbclient import SitesDuckDBClient
+from data_access_service.core.duckdbclients.sitedbclient import SitesDuckDBClient
 from data_access_service.utils.retry_utils import log_retry_attempt
 from data_access_service.utils.sql_utils import quote_ident
 

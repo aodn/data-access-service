@@ -16,7 +16,9 @@ import xarray as xr
 from data_access_service.batch.tiler import storage
 from data_access_service.batch.tiler.zarr_registry import get_datasource, get_store
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.core.duckdbclient import TilerBatchDuckDBClient
+from data_access_service.core.duckdbclients.tilerbatchclient import (
+    TilerBatchDuckDBClient,
+)
 from data_access_service.models.tiler_parquet_types import (
     TilerParquetMetadata,
     TilerVariableMetadata,

@@ -8,7 +8,7 @@ S3 as the snapshot the API process reloads. See
 """
 
 from data_access_service import Config, init_log
-from data_access_service.core.duckdbclient import SitesDuckDBClient
+from data_access_service.core.duckdbclients.sitedbclient import SitesDuckDBClient
 from data_access_service.sites.sites_repository import (
     ParquetRepository,
     build_repositories,

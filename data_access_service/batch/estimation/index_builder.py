@@ -25,7 +25,7 @@ from typing import List, Optional, Tuple
 
 from data_access_service import Config
 from data_access_service.batch.common.dataset_scan import DatasetScanBase
-from data_access_service.core.duckdbclient import PmTileDuckDBClient
+from data_access_service.core.duckdbclients.pmtilesclient import PmTileDuckDBClient
 from data_access_service.models.estimation_types import (
     ESTIMATION_INDEX_VERSION,
     EstimationIndexConfig,

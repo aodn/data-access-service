@@ -13,7 +13,7 @@ import pyarrow as pa
 import pytest
 
 import data_access_service.tiler.services.store.tiler_repository as repo_module
-from data_access_service.core.duckdbclient import TilerDuckDBClient
+from data_access_service.core.duckdbclients.tilerclient import TilerDuckDBClient
 from data_access_service.models.tiler_parquet_types import variable_parquet_path
 from data_access_service.tiler.services.rendering.kernels import _block_edges
 from data_access_service.tiler.services.store.sparse_grid import (

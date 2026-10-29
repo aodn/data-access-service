@@ -9,7 +9,7 @@ from data_access_service.core.constants import (
     STR_LONGITUDE_UPPER_CASE,
     STR_TIME_UPPER_CASE,
 )
-from data_access_service.core.duckdbclient import PmTileDuckDBClient
+from data_access_service.core.duckdbclients.pmtilesclient import PmTileDuckDBClient
 from data_access_service.models.co_datasource.co_data_registory import (
     resolve_dataset_location,
 )

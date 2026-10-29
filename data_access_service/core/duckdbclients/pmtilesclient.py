@@ -1,265 +1,27 @@
-from __future__ import annotations
-
-import logging
-import os
-import threading
-import time
-from abc import ABC, abstractmethod
-from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
-from datetime import timedelta
-from tempfile import TemporaryDirectory
+from data_access_service.core.duckdbclients.basedbclient import (
+    DuckDBClient,
+    _PROGRESS_LOG_INTERVAL_SECONDS,
+)
 from threading import Lock
-from typing import TYPE_CHECKING, Any, Optional
-
-import boto3
-import duckdb
+from datetime import timedelta
+from data_access_service.models.duckdb_types import DuckDBTuningConfig
+from typing import Any, Optional
+from data_access_service import Config
+from tempfile import TemporaryDirectory
 from tenacity import (
     retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
 )
-
-from data_access_service import Config
-from data_access_service.config.config import IntTestConfig
-from data_access_service.models.duckdb_types import DuckDBTuningConfig
-from data_access_service.models.estimation_types import EstimationReadDuckDBConfig
-from data_access_service.models.sites_types import SitesConfig
-from data_access_service.models.tiler_types import (
-    TilerBatchDuckDBConfig,
-    TilerDuckDBConfig,
-)
-
-if TYPE_CHECKING:
-    import pandas as pd
 from data_access_service.utils.retry_utils import log_retry_attempt
-from data_access_service.utils.sql_utils import quote_ident, sql_literal
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 
-# How often to emit a progress log line while a long query is running.
-_PROGRESS_LOG_INTERVAL_SECONDS = 60
-
-
-def _is_s3_auth_failure(exc: BaseException) -> bool:
-    text = str(exc)
-    return "ExpiredToken" in text or "HTTP 401" in text or "HTTP 403" in text
-
-
-log = logging.getLogger(__name__)
-
-
-class DuckDBClient(ABC):
-    # Serializes lazy init of the per-instance secret cache below.
-    _chain_secret_init_lock = Lock()
-
-    """Common interface over a DuckDB connection.
-
-    Concrete clients own (or share) a DuckDB connection and expose a uniform
-    contract: :meth:`get_instance` to obtain/lazily initialize the underlying
-    handle, :meth:`execute` to run SQL, and :meth:`close` to release resources.
-    Subclasses decide the connection's lifetime and concurrency model — e.g.
-    :class:`PmTileDuckDBClient` shares one process-global connection, while
-    :class:`SitesDuckDBClient` owns one connection and runs each call on its
-    own cursor.
-    """
-
-    @abstractmethod
-    def get_instance(self):
-        """Return the underlying DuckDB handle, initializing it if needed."""
-
-    @abstractmethod
-    def execute(
-        self, sql: str, params: Sequence[Any] | None = None
-    ) -> duckdb.DuckDBPyConnection:
-        """Run ``sql`` (optionally with bound ``params``) and return the relation."""
-
-    @abstractmethod
-    def close(self) -> None:
-        """Release the connection or cursor held by this client."""
-
-    @staticmethod
-    def _sql_preview(sql: str) -> str:
-        """Short one-line form of ``sql`` for the query logs.
-
-        CREATE SECRET carries live access keys in its text, so it is named rather
-        than quoted — the logs go to CloudWatch and New Relic.
-        """
-        flat = " ".join(sql.split())
-        if flat.upper().startswith(("CREATE SECRET", "CREATE OR REPLACE SECRET")):
-            return "<CREATE SECRET, redacted>"
-        return flat[:120]
-
-    @staticmethod
-    def _connect(database: str = ":memory:", config: dict | None = None):
-        """Open a DuckDB database and set the timezone on that connection.
-
-        GLOBAL, not session: queries run on cursor() children, which do not
-        inherit session-scope settings.
-        """
-        db = duckdb.connect(database=database, config=config)
-        db.execute("INSTALL httpfs; LOAD httpfs;")
-        db.execute("SET GLOBAL TimeZone = 'UTC';")
-        return db
-
-    @staticmethod
-    def _credential_chain_secret_sql(
-        bucket: str, region: str, *, if_not_exists: bool = False
-    ) -> str:
-        """Credential-chain secret with no in-query refresh.
-
-        ``REFRESH auto`` alters the secret inside the query. Cursors of one
-        connection share that catalog row, so concurrent tile reads raise
-        ``Catalog write-write conflict on alter``. Auth failures replace the
-        secret once, outside the query, under ``_s3_chain_lock``.
-        """
-        exists = "IF NOT EXISTS " if if_not_exists else ""
-        return (
-            f"CREATE SECRET {exists}{quote_ident(f'{bucket}_s3')} ("
-            "TYPE S3, PROVIDER credential_chain, "
-            f"REGION {sql_literal(region)}, SCOPE {sql_literal(f's3://{bucket}')})"
-        )
-
-    def __init__(self) -> None:
-        # The handle ``execute`` runs on. Subclasses replace it when they open
-        # or drop their connection. The credential-chain secret cache is keyed
-        # by this object, because a new connection does not keep the old secret.
-        self._con: duckdb.DuckDBPyConnection | None = None
-        # RLock: create_s3_secret holds this while it calls execute, and a
-        # nested ExpiredToken refresh must be able to take it again.
-        self._s3_chain_lock = threading.RLock()
-        self._s3_chain_for: int | None = None
-        self._s3_chain_secrets: set[str] = set()
-        # Bumped when the task-role secret is replaced, so only the first
-        # failed read of a generation writes a new secret.
-        self._s3_secret_generation = 0
-
-    def create_s3_secret(self, bucket: str) -> None:
-        """Create a DuckDB S3 secret scoped to ``bucket`` from the AWS credential chain.
-
-        The secret is NOT created with ``REFRESH auto``. That setting alters
-        the secret during the query in the concurrent cursors of this
-        connection then hit a catalog write-write conflict. A read that fails
-        with ExpiredToken, HTTP 401, or HTTP 403 replaces the secret from
-        boto3 once and retries. A later call for the same connection does not
-        replace the secret on its own: ``CREATE OR REPLACE`` would drop it
-        while another cursor is still reading.
-        """
-        boto_session = boto3.Session()
-
-        # Not useful in testing
-        if boto_session.get_credentials() is None or isinstance(
-            Config.get_config(), IntTestConfig
-        ):
-            return
-        with self._s3_chain_lock:
-            # ``_con`` is the cursor or connection this client reads through.
-            # Replacing it (a new cursor, or a rebuilt database) misses the
-            # cache and creates the secret on that handle.
-            scope = id(self._con)
-            if self._s3_chain_for != scope:
-                self._s3_chain_for = scope
-                self._s3_chain_secrets = set()
-            if bucket in self._s3_chain_secrets:
-                return
-            region = boto_session.region_name or "ap-southeast-2"
-            self.execute("INSTALL aws; LOAD aws;")
-            # No CHAIN: the default chain includes the ECS (Fargate) task role.
-            # IF NOT EXISTS: a second caller must not drop a secret other
-            # cursors of this connection are already reading.
-            self.execute(
-                DuckDBClient._credential_chain_secret_sql(
-                    bucket, region, if_not_exists=True
-                )
-            )
-            self._s3_chain_secrets.add(bucket)
-
-    def _call_refreshing_s3(self, fn):
-        """Run ``fn``. On an S3 auth failure, replace the task-role secret and run it once more.
-
-        The secret has no ``REFRESH auto``, so DuckDB does not alter it during
-        the query. ExpiredToken (HTTP 400) and HTTP 401 or 403 stay failed
-        until boto3 mints a new task-role token and that token is written
-        into the secret. One caller per generation does that write.
-        """
-        generation = self._s3_secret_generation
-        try:
-            return fn()
-        except duckdb.HTTPException as exc:
-            if not _is_s3_auth_failure(exc):
-                raise
-        self._refresh_expired_s3_secrets(generation)
-        return fn()
-
-    def _refresh_expired_s3_secrets(self, generation: int) -> None:
-        with self._s3_chain_lock:
-            if self._s3_secret_generation != generation:
-                return
-            self._replace_chain_secrets_from_boto()
-            self._s3_secret_generation += 1
-
-    def _replace_chain_secrets_from_boto(self) -> None:
-        """Write the current boto3 credentials over each credential-chain secret.
-
-        External-key secrets are not in ``_s3_chain_secrets`` and are left alone.
-        """
-        if not self._s3_chain_secrets or self._con is None:
-            return
-        boto_session = boto3.Session()
-        credentials = boto_session.get_credentials()
-        if credentials is None:
-            return
-        frozen = credentials.get_frozen_credentials()
-        region = boto_session.region_name or "ap-southeast-2"
-        token = frozen.token or ""
-        for bucket in list(self._s3_chain_secrets):
-            self._con.execute(
-                f"CREATE OR REPLACE SECRET {quote_ident(f'{bucket}_s3')} ("
-                "TYPE S3, "
-                f"KEY_ID {sql_literal(frozen.access_key)}, "
-                f"SECRET {sql_literal(frozen.secret_key)}, "
-                f"SESSION_TOKEN {sql_literal(token)}, "
-                f"REGION {sql_literal(region)}, "
-                f"SCOPE {sql_literal(f's3://{bucket}')})"
-            )
-
-    def create_s3_secret_with_keys(
-        self,
-        bucket: str,
-        access_key: str,
-        secret_access_key: str,
-        endpoint: Optional[str] = None,
-        use_ssl: bool = True,
-        region: str = "us-east-1",
-    ) -> None:
-        """Create a secret for a bucket the job's own role cannot read.
-
-        For data hosted outside AODN: the keys come from the other
-        organisation, and ``endpoint`` points DuckDB at their S3 service
-        instead of AWS. Secrets are scoped per bucket, so this one sits
-        alongside the AODN secret rather than replacing it.
-        """
-        clauses = [
-            "TYPE S3",
-            f"KEY_ID {sql_literal(access_key)}",
-            f"SECRET {sql_literal(secret_access_key)}",
-            # These keys are long-lived enough not to be STS session keys.
-            f"SESSION_TOKEN {sql_literal('')}",
-            f"REGION {sql_literal(region)}",
-        ]
-        if endpoint is not None:
-            clauses += [
-                f"ENDPOINT {sql_literal(endpoint)}",
-                # Path style: an S3-compatible service usually cannot serve
-                # the bucket as a subdomain of its own host.
-                "URL_STYLE 'path'",
-                f"USE_SSL {str(use_ssl).lower()}",
-            ]
-        clauses.append(f"SCOPE {sql_literal(f's3://{bucket}')}")
-
-        self.execute(
-            f"CREATE OR REPLACE SECRET {quote_ident(f'{bucket}_s3')} "
-            f"({', '.join(clauses)})"
-        )
+import os
+import duckdb
+import threading
+import time
 
 
 class PmTileDuckDBClient(DuckDBClient):
@@ -289,7 +51,6 @@ class PmTileDuckDBClient(DuckDBClient):
         self._config: DuckDBTuningConfig = (
             tuning or Config.get_config().get_pmtiles_duckdb_tuning()
         )
-        self._logger = logging.getLogger(__name__)
         self._duckdb_client = None
         self._con = self.get_instance()
         self._lock = Lock()
@@ -305,7 +66,7 @@ class PmTileDuckDBClient(DuckDBClient):
             PmTileDuckDBClient._global_db_connection is not None
             and PmTileDuckDBClient._global_tuning != self._config
         ):
-            self._logger.info(
+            PmTileDuckDBClient._logger.info(
                 "DuckDB connection was opened with different tuning (%s); "
                 "rebuilding it for %s",
                 PmTileDuckDBClient._global_tuning,
@@ -391,7 +152,7 @@ class PmTileDuckDBClient(DuckDBClient):
                 try:
                     cursor.close()
                 except Exception:
-                    self._logger.exception(
+                    PmTileDuckDBClient._logger.exception(
                         "Failed to close PmTileDuckDBClient cursor; continuing shutdown"
                     )
 
@@ -410,7 +171,9 @@ class PmTileDuckDBClient(DuckDBClient):
             try:
                 connection.execute(sql)
             except Exception:
-                log.debug("Pre-close DuckDB setting failed: %s", sql, exc_info=True)
+                PmTileDuckDBClient._logger.debug(
+                    "Pre-close DuckDB setting failed: %s", sql, exc_info=True
+                )
 
     @classmethod
     def reset_after_fork(cls) -> None:
@@ -448,7 +211,9 @@ class PmTileDuckDBClient(DuckDBClient):
         try:
             temp_dir.cleanup()
         except Exception:
-            log.debug("Discarding DuckDB temp directory failed", exc_info=True)
+            PmTileDuckDBClient._logger.debug(
+                "Discarding DuckDB temp directory failed", exc_info=True
+            )
 
     @classmethod
     def shutdown(cls) -> None:
@@ -483,23 +248,29 @@ class PmTileDuckDBClient(DuckDBClient):
         # another thread that only needs to observe "already shut down".
         try:
             if connection is not None:
-                log.info("DuckDB shutdown: shrinking buffer pool")
+                PmTileDuckDBClient._logger.info(
+                    "DuckDB shutdown: shrinking buffer pool"
+                )
                 cls._shrink_connection_memory(connection)
-                log.info("DuckDB shutdown: closing connection")
+                PmTileDuckDBClient._logger.info("DuckDB shutdown: closing connection")
                 try:
                     connection.close()
                 except Exception:
-                    log.exception(
+                    PmTileDuckDBClient._logger.exception(
                         "DuckDB connection.close() failed; continuing temp cleanup"
                     )
-                log.info("DuckDB shutdown: connection closed")
+                PmTileDuckDBClient._logger.info("DuckDB shutdown: connection closed")
         finally:
             if temp_dir is not None:
                 try:
-                    log.info("DuckDB shutdown: cleaning temp directory")
+                    PmTileDuckDBClient._logger.info(
+                        "DuckDB shutdown: cleaning temp directory"
+                    )
                     temp_dir.cleanup()
                 except Exception:
-                    log.exception("DuckDB temp directory cleanup failed")
+                    PmTileDuckDBClient._logger.exception(
+                        "DuckDB temp directory cleanup failed"
+                    )
 
     # Bug in tenacity, the type check always fail but function ok
     # noinspection PyCallingNonCallable
@@ -507,7 +278,7 @@ class PmTileDuckDBClient(DuckDBClient):
         stop=stop_after_attempt(READ_MAX_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=READ_MIN_WAIT, max=READ_MAX_WAIT),
         retry=retry_if_exception_type(duckdb.IOException),
-        before_sleep=log_retry_attempt("DuckDB S3 read", log),
+        before_sleep=log_retry_attempt("DuckDB S3 read", DuckDBClient._logger),
         reraise=True,
     )
     def execute(
@@ -544,14 +315,14 @@ class PmTileDuckDBClient(DuckDBClient):
                 except Exception:
                     pct = -1.0
                 if pct is not None and pct >= 0:
-                    self._logger.info(
+                    PmTileDuckDBClient._logger.info(
                         "DuckDB query progress: %.1f%% (%.0fs elapsed) — %s",
                         pct,
                         elapsed,
                         sql_preview,
                     )
                 else:
-                    self._logger.info(
+                    PmTileDuckDBClient._logger.info(
                         "DuckDB query still running (%.0fs elapsed) — %s",
                         elapsed,
                         sql_preview,
@@ -559,13 +330,13 @@ class PmTileDuckDBClient(DuckDBClient):
 
         poller = threading.Thread(target=_poll, name="duckdb-progress", daemon=True)
         poller.start()
-        self._logger.info("DuckDB query started — %s", sql_preview)
+        PmTileDuckDBClient._logger.info("DuckDB query started — %s", sql_preview)
         try:
             yield
         finally:
             stop.set()
             poller.join(timeout=1.0)
-            self._logger.info(
+            PmTileDuckDBClient._logger.info(
                 "DuckDB query finished (%.1fs) — %s",
                 time.monotonic() - started,
                 sql_preview,
@@ -640,7 +411,7 @@ class PmTileDuckDBClient(DuckDBClient):
         if metadata_sql is not None:
             col_type = self._describe_column_type(metadata_sql, time_col, col_quoted)
             if col_type is None:
-                self._logger.info(
+                PmTileDuckDBClient._logger.info(
                     "detect_time_type: %s is not in %s (Hive key only?); reading "
                     "the schema from the dataset itself",
                     time_col,
@@ -651,7 +422,7 @@ class PmTileDuckDBClient(DuckDBClient):
             col_type = self._describe_column_type(source_sql, time_col, col_quoted)
 
         if col_type is None:
-            self._logger.warning(
+            PmTileDuckDBClient._logger.warning(
                 "detect_time_type: could not read the type of %s in %s; "
                 "defaulting to timestamp",
                 time_col,
@@ -662,7 +433,7 @@ class PmTileDuckDBClient(DuckDBClient):
         base_type = col_type.split("(", 1)[0].strip()
 
         if base_type in self._TIMESTAMP_SQL_TYPES or base_type.startswith("TIMESTAMP"):
-            self._logger.info(
+            PmTileDuckDBClient._logger.info(
                 "detect_time_type: column=%s sql_type=%s -> timestamp",
                 time_col,
                 col_type,
@@ -671,7 +442,7 @@ class PmTileDuckDBClient(DuckDBClient):
 
         if base_type in self._NUMERIC_SQL_TYPES:
             time_type = self._detect_epoch_unit(source_sql, col_quoted)
-            self._logger.info(
+            PmTileDuckDBClient._logger.info(
                 "detect_time_type: column=%s sql_type=%s -> %s",
                 time_col,
                 col_type,
@@ -679,7 +450,7 @@ class PmTileDuckDBClient(DuckDBClient):
             )
             return time_type
 
-        self._logger.info(
+        PmTileDuckDBClient._logger.info(
             "detect_time_type: column=%s sql_type=%s (unhandled) -> timestamp",
             time_col,
             col_type,
@@ -747,7 +518,7 @@ class PmTileDuckDBClient(DuckDBClient):
             try:
                 self._con.execute(f"DESCRIBE SELECT * FROM {sql} LIMIT 0").fetchall()
             except Exception:
-                self._logger.info(
+                PmTileDuckDBClient._logger.info(
                     "No readable %s under %s; queries keep union_by_name=true",
                     self._COMMON_METADATA,
                     root,
@@ -765,7 +536,7 @@ class PmTileDuckDBClient(DuckDBClient):
                 f"DESCRIBE SELECT {col_quoted} FROM {source_sql} LIMIT 0"
             ).fetchall()
         except Exception:
-            self._logger.debug(
+            PmTileDuckDBClient._logger.debug(
                 "DESCRIBE %s in %s failed", time_col, source_sql, exc_info=True
             )
             return None
@@ -792,7 +563,7 @@ class PmTileDuckDBClient(DuckDBClient):
                 """
             ).fetchone()[0]
         except Exception:
-            self._logger.warning(
+            PmTileDuckDBClient._logger.warning(
                 "detect_time_type: failed to sample numeric values; defaulting to epoch_s",
                 exc_info=True,
             )
@@ -837,308 +608,3 @@ class PmTileDuckDBClient(DuckDBClient):
     def build_year_key_expression(time_col: str, time_type: str) -> str:
         ts = PmTileDuckDBClient._timestamp_sql(time_col, time_type)
         return f"CAST(strftime({ts}, '%Y') AS INTEGER)"
-
-
-class SitesDuckDBClient(DuckDBClient):
-    """DuckDB connection for the sites repositories, used by the API and batch.
-
-    Each :meth:`execute` runs on its own cursor, so API threads can read in
-    parallel. Each repository creates the S3 secrets for its own buckets.
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        # All settings come from the config (tests override
-        # ``Config.get_sites_config`` to point at an in-memory DB).
-        self._config: SitesConfig = Config.get_config().get_sites_config()
-        self._database = self._config.duckdb_database
-        self._region = self._config.region
-        self._duckdb_client = None
-        # Track active cursors so they can be interrupted on close.
-        self._active_cursors: set[Any] = set()
-        self._cursors_lock = threading.Lock()
-        self._lock = Lock()
-        self._con = self.get_instance()
-
-    def get_instance(self) -> duckdb.DuckDBPyConnection:
-        """Open the connection on first use.
-
-        The spill directory is only set for an on-disk database.
-        """
-        if self._duckdb_client is None:
-            with self._lock:
-                if self._duckdb_client is None:
-                    db_config = {
-                        "memory_limit": self._config.memory_limit,
-                        "threads": str(int(self._config.threads)),
-                    }
-                    if self._database != ":memory:":
-                        os.makedirs(self._config.duckdb_temp_dir, exist_ok=True)
-                        db_config["temp_directory"] = self._config.duckdb_temp_dir
-                    db = self._connect(database=self._database, config=db_config)
-                    db.execute("INSTALL json; LOAD json;")
-                    db.execute(f"SET GLOBAL s3_region = '{self._region}';")
-                    self._duckdb_client = db
-        return self._duckdb_client
-
-    def execute(self, sql: str, params: Sequence[Any] | None = None):
-        """Run ``sql`` on a new cursor, so concurrent calls don't clash."""
-
-        def run():
-            cursor = self._con.cursor()
-            with self._cursors_lock:
-                self._active_cursors.add(cursor)
-            try:
-                if params is None:
-                    return cursor.execute(sql)
-                return cursor.execute(sql, params)
-            finally:
-                with self._cursors_lock:
-                    self._active_cursors.discard(cursor)
-
-        return self._call_refreshing_s3(run)
-
-    def close(self) -> None:
-        """Cancel running queries, then close the connection."""
-        with self._cursors_lock:
-            cursors = list(self._active_cursors)
-        for cursor in cursors:
-            try:
-                cursor.interrupt()
-            except Exception:
-                pass
-        if self._duckdb_client is not None:
-            with self._lock:
-                self._duckdb_client.close()
-        self._duckdb_client = None
-
-    def __enter__(self) -> SitesDuckDBClient:
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self.close()
-
-
-class EstimationDuckDBClient(DuckDBClient):
-    """Reads the pre-built estimation index, on a connection of its own."""
-
-    def __init__(self, config: EstimationReadDuckDBConfig) -> None:
-        super().__init__()
-        self._config = config
-        self._duckdb_client: Optional[duckdb.DuckDBPyConnection] = None
-        # Track active cursors so they can be interrupted on close.
-        self._active_cursors: set[Any] = set()
-        self._cursors_lock = threading.Lock()
-        self._lock = Lock()
-        self._con = self.get_instance()
-
-    def get_instance(self) -> duckdb.DuckDBPyConnection | None:
-        """Initialize this client's owned in-memory connection if it does not exist.
-
-        Only httpfs is loaded: the index parquet is read from S3, and the JSON
-        sidecar beside it is fetched with boto3 (see
-        ``estimation_index.load_sidecar``), not by DuckDB.
-        """
-        if self._duckdb_client is None:
-            with self._lock:
-                if self._duckdb_client is None:
-                    db = self._connect(
-                        database=":memory:",
-                        config={
-                            "memory_limit": self._config.memory_limit,
-                            "threads": str(int(self._config.threads)),
-                        },
-                    )
-                    db.execute(f"SET GLOBAL s3_region = '{self._config.region}';")
-                    self._duckdb_client = db
-        return self._duckdb_client
-
-    def execute(self, sql: str, params: Sequence[Any] | None = None):
-        """Run ``sql`` (optionally with bound ``params``) on a fresh cursor."""
-
-        def run():
-            cursor = self._con.cursor()
-            with self._cursors_lock:
-                self._active_cursors.add(cursor)
-            try:
-                if params is None:
-                    return cursor.execute(sql)
-                return cursor.execute(sql, params)
-            finally:
-                with self._cursors_lock:
-                    self._active_cursors.discard(cursor)
-
-        return self._call_refreshing_s3(run)
-
-    def close(self) -> None:
-        """Cancel any in-flight queries, then close the connection."""
-        with self._cursors_lock:
-            cursors = list(self._active_cursors)
-        for cursor in cursors:
-            try:
-                cursor.interrupt()
-            except Exception:
-                pass
-        if self._duckdb_client is not None:
-            with self._lock:
-                self._duckdb_client.close()
-        self._duckdb_client = None
-
-    def __enter__(self) -> EstimationDuckDBClient:
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self.close()
-
-
-class TilerDuckDBClient(DuckDBClient):
-    """Reads the batch's parquet files for the tiler API.
-
-    Each :meth:`execute` runs on its own cursor, so request threads can read
-    in parallel. ``tiler_repository`` creates the S3 secret. Removes its
-    spill directory on close.
-    """
-
-    def __init__(self, config: Optional[TilerDuckDBConfig] = None) -> None:
-        super().__init__()
-        self._config: TilerDuckDBConfig = (
-            config or Config.get_config().get_tiler_api_config().duckdb
-        )
-        self._temp_dir = TemporaryDirectory(prefix=self._config.duckdb_temp_dir)
-        self._duckdb_client: Optional[duckdb.DuckDBPyConnection] = None
-        self._active_cursors: set[Any] = set()
-        self._cursors_lock = threading.Lock()
-        self._lock = Lock()
-        self._con = self.get_instance()
-
-    def get_instance(self) -> duckdb.DuckDBPyConnection:
-        """Open the connection on first use."""
-        if self._duckdb_client is None:
-            with self._lock:
-                if self._duckdb_client is None:
-                    db_config = {
-                        "memory_limit": self._config.memory_limit,
-                        "threads": str(int(self._config.threads)),
-                        "temp_directory": self._temp_dir.name,
-                        "enable_external_file_cache": (
-                            self._config.enable_external_file_cache
-                        ),
-                        "parquet_metadata_cache": self._config.parquet_metadata_cache,
-                        "enable_http_metadata_cache": (
-                            self._config.enable_http_metadata_cache
-                        ),
-                    }
-                    db = self._connect(database=":memory:", config=db_config)
-                    db.execute("SET GLOBAL s3_region = 'ap-southeast-2';")
-                    self._duckdb_client = db
-        return self._duckdb_client
-
-    def execute(
-        self,
-        sql: str,
-        params: Sequence[Any] | None = None,
-        tables: Mapping[str, Any] | None = None,
-    ):
-        """Run ``sql`` on a new cursor. ``tables`` are registered on that
-        cursor only, so concurrent queries can reuse names."""
-
-        def run():
-            cursor = self._con.cursor()
-            with self._cursors_lock:
-                self._active_cursors.add(cursor)
-            try:
-                for name, table in (tables or {}).items():
-                    cursor.register(name, table)
-                if params is None:
-                    return cursor.execute(sql)
-                return cursor.execute(sql, params)
-            finally:
-                with self._cursors_lock:
-                    self._active_cursors.discard(cursor)
-
-        return self._call_refreshing_s3(run)
-
-    def close(self) -> None:
-        """Cancel running queries, then close the connection."""
-        with self._cursors_lock:
-            cursors = list(self._active_cursors)
-        for cursor in cursors:
-            try:
-                cursor.interrupt()
-            except Exception:
-                pass
-        if self._duckdb_client is not None:
-            with self._lock:
-                self._duckdb_client.close()
-        self._duckdb_client = None
-        self._temp_dir.cleanup()
-
-    def __enter__(self) -> TilerDuckDBClient:
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self.close()
-
-
-class TilerBatchDuckDBClient(DuckDBClient):
-    """Writes local parquet files for the tiler batch job.
-
-    One per store, used from one thread, so SQL runs on the connection
-    directly. Removes its spill directory on close. ``parquet_generator``
-    uploads the files with boto3.
-    """
-
-    def __init__(self, config: TilerBatchDuckDBConfig) -> None:
-        super().__init__()
-        self._temp_dir = TemporaryDirectory(prefix=config.duckdb_temp_dir)
-        self._con = self._connect(
-            database=":memory:",
-            config={
-                "memory_limit": config.memory_limit,
-                "threads": str(int(config.threads)),
-                "temp_directory": self._temp_dir.name,
-            },
-        )
-
-    def get_instance(self) -> duckdb.DuckDBPyConnection:
-        if self._con is None:
-            raise RuntimeError("TilerBatchDuckDBClient is closed")
-        return self._con
-
-    def execute(self, sql: str, params: Sequence[Any] | None = None):
-        con = self.get_instance()
-        if params is None:
-            return con.execute(sql)
-        return con.execute(sql, params)
-
-    def write_parquet(self, frame: pd.DataFrame, path: str) -> None:
-        """Write ``frame`` to one local parquet file at ``path``."""
-        con = self.get_instance()
-        con.register("_frame", frame)
-        try:
-            # COPY ... TO takes no bound parameter for the path.
-            con.execute(
-                f"COPY (SELECT * FROM _frame) TO {sql_literal(path)} (FORMAT PARQUET)"
-            )
-        finally:
-            con.unregister("_frame")
-
-    def merge_parquet(self, paths: Sequence[str], path: str) -> None:
-        """Join the parquet files ``paths``, rows in order, into one at ``path``."""
-        files = ", ".join(sql_literal(p) for p in paths)
-        self.get_instance().execute(
-            f"COPY (SELECT * FROM read_parquet([{files}])) "
-            f"TO {sql_literal(path)} (FORMAT PARQUET)"
-        )
-
-    def close(self) -> None:
-        if self._con is not None:
-            self._con.close()
-            self._con = None
-        self._temp_dir.cleanup()
-
-    def __enter__(self) -> TilerBatchDuckDBClient:
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self.close()

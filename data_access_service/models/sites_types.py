@@ -6,7 +6,7 @@ class SitesConfig:
     """DuckDB tuning for the sites API's on-disk Parquet client.
 
     Carries everything
-    :class:`~data_access_service.core.duckdbclient.SitesDuckDBClient` needs to
+    :class:`~data_access_service.core.duckdbclients.sitedbclient.SitesDuckDBClient` needs to
     build its connection — database path, memory limit, thread count, spill
     (temp) directory, and S3 region — so the client takes no constructor
     arguments (tests override this config instead).

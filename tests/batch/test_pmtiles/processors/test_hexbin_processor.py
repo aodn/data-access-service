@@ -17,7 +17,7 @@ from data_access_service import Config, API
 from data_access_service.batch.pmtiles.processors.hexbin_processor import (
     HexbinProcessor,
 )
-from data_access_service.core.duckdbclient import PmTileDuckDBClient
+from data_access_service.core.duckdbclients.pmtilesclient import PmTileDuckDBClient
 from data_access_service.batch.pmtiles.helpers.features_help import (
     build_counts_tree_from_days,
     build_counts_tree_from_months,
@@ -805,7 +805,7 @@ def test_sidecar_metadata_has_time_roundtrip():
 
 
 def test_build_time_key_expressions():
-    from data_access_service.core.duckdbclient import PmTileDuckDBClient
+    from data_access_service.core.duckdbclients.pmtilesclient import PmTileDuckDBClient
 
     ym = PmTileDuckDBClient.build_ym_expression("TIMESTAMP", "timestamp")
     assert "%Y%m" in ym
