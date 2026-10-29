@@ -51,6 +51,18 @@ sites:
     threads: 2
     region: "ap-southeast-2"
     reload_interval_hours: 2
+# S3 Tables bucket "data-index", namespace collection_mapping, table live.
+# https://ap-southeast-2.console.aws.amazon.com/s3/table-buckets/bucket/data-index/namespace/collection_mapping/table/live
+data_index:
+  config:
+    region: "ap-southeast-2"
+    table_bucket: "data-index"
+    namespace: "collection_mapping"
+    table_name: "live"
+    table_bucket_arn: "arn:aws:s3tables:ap-southeast-2:704910415367:bucket/data-index"
+    catalog_name: "data_index"
+    memory_limit: "256MB"
+    threads: 2
 subsetting:
   config:
     # 8GB Fargate task: leave ~2GB so peak stays around 6GB (zlib/dask copies

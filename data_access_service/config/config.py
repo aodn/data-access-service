@@ -23,6 +23,7 @@ from data_access_service.models.pmtiles_types import (
     PmtilesGenerationConfig,
     TimeGroupBy,
 )
+from data_access_service.models.data_index_types import DataIndexConfig
 from data_access_service.models.sites_types import SitesConfig
 from data_access_service.models.tiler_types import (
     TilerApiConfig,
@@ -410,6 +411,20 @@ class Config:
             threads=threads,
             duckdb_temp_dir=str(temp_dir),
             region=sconfig["region"],
+        )
+
+    def get_data_index_config(self) -> DataIndexConfig:
+        """S3 Tables location of the live collection-mapping table."""
+        section = self.config.get("data_index", {}).get("config", {})
+        return DataIndexConfig(
+            region=section["region"],
+            table_bucket=section["table_bucket"],
+            namespace=section["namespace"],
+            table_name=section["table_name"],
+            table_bucket_arn=section["table_bucket_arn"],
+            catalog_name=section.get("catalog_name", "data_index"),
+            memory_limit=section.get("memory_limit", "256MB"),
+            threads=int(section.get("threads", 2)),
         )
 
     def get_sites_reload_interval_hours(self) -> int:
