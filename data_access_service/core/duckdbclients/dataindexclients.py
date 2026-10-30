@@ -110,6 +110,14 @@ class DataIndexDuckDBClient(DuckDBClient):
             f"REGION {sql_literal(self._config.region)})"
         )
 
+    def read(self, uuid: str):
+        """Rows in the live table whose ``metadata_uuid`` equals ``uuid``."""
+        sql = (
+            f"SELECT * FROM {self.qualified_table} "
+            f"WHERE {quote_ident('metadata_uuid')} = ?"
+        )
+        return self.execute(sql, [uuid])
+
     def execute(self, sql: str, params: Sequence[Any] | None = None):
         """Run ``sql`` on a new cursor so concurrent reads do not share one cursor."""
 
