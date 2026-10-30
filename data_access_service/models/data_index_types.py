@@ -1,4 +1,19 @@
 from dataclasses import dataclass
+from datetime import datetime
+
+
+@dataclass(frozen=True)
+class OriginalNetcdf:
+    """One original NetCDF file that matches the user's request."""
+
+    bucket: str
+    key: str
+    time_coverage_start: datetime
+    time_coverage_end: datetime
+    lat_min: float | None
+    lat_max: float | None
+    lon_min: float | None
+    lon_max: float | None
 
 
 @dataclass(frozen=True)

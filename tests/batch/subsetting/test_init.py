@@ -8,6 +8,7 @@ from unittest.mock import patch, call, MagicMock
 
 from data_access_service import API
 from data_access_service.batch.subsetting import init
+from data_access_service.batch.subsetting import subsetting_main
 from data_access_service.config.config import EnvType, Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.batch.subsetting.enums import Parameters
@@ -25,6 +26,14 @@ from tests.models.co_datasource.test_dataset_location import CSIRO_DATASET
 
 
 class TestInit(TestWithS3):
+
+    @pytest.fixture(autouse=True)
+    def has_cloud_optimised_data(self, monkeypatch):
+        # API() here has no catalog loaded, so the uuid would look like it has
+        # no cloud-optimised data. These tests are about the cloud-optimised path.
+        monkeypatch.setattr(
+            subsetting_main, "has_cloud_optimised_data", lambda api, uuid: True
+        )
 
     @pytest.fixture(scope="function")
     def upload_test_case_to_s3(self, aws_clients, setup_resources, mock_boto3_client):

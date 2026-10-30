@@ -10,6 +10,7 @@ from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.subset_request_resolver import (
     collection_has_multi_datasets,
+    has_cloud_optimised_data,
     normalize_request,
     resolve_bboxes,
     resolve_date_range,
@@ -281,3 +282,18 @@ class TestCollectionDatasetCount:
 
         assert normalized.collection_has_multi_datasets is True
         assert normalized.download_base_name("a.zarr") == "Test_Collection-a"
+
+
+class TestHasCloudOptimisedData:
+    """Decides if a download uses the cloud-optimised data or the list of the
+    original NetCDF files"""
+
+    def test_known_dataset(self):
+        assert has_cloud_optimised_data(_mock_api(["a.zarr"]), UUID) is True
+
+    def test_unknown_uuid_sentinel(self):
+        # API.get_mapped_meta_data answers an unknown uuid with "not_exist".
+        assert has_cloud_optimised_data(_mock_api(["not_exist"]), UUID) is False
+
+    def test_no_datasets(self):
+        assert has_cloud_optimised_data(_mock_api([]), UUID) is False

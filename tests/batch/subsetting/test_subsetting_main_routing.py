@@ -1,4 +1,4 @@
-"""Unit tests for the Step 5/6 routing in subsetting_main.init.
+"""Unit tests for the routing in subsetting_main.init.
 
 The requested format decides the workflow, because it implies the storage type:
 csv is produced from parquet keys (legacy workflow), netcdf/geotiff from zarr
@@ -6,6 +6,9 @@ keys (ZarrProcessor). A key that cannot produce the requested format is
 rejected before any child job is submitted, the same pairing the size estimate
 rejects - the legacy workflow's zarr-writing code that used to absorb the
 mismatch has been removed.
+
+A collection with no cloud-optimised data skips all of that and gets the list
+of its original NetCDF files.
 """
 
 import pandas as pd
@@ -43,12 +46,15 @@ def _resolved(keys: list[str]) -> ResolvedSubsetRequest:
 
 
 def _run_init(monkeypatch, keys: list[str], output_format: str) -> MagicMock:
-    """Drive init() to the Step 5/6 routing with the request parsing stubbed
+    """Drive init() to the Step 6/7 routing with the request parsing stubbed
     out, and return the mocked run_zarr_subset so the caller can assert which
     workflow ran."""
     request = _subset_request(keys, output_format)
     monkeypatch.setattr(
         subsetting_main, "get_subset_request", MagicMock(return_value=request)
+    )
+    monkeypatch.setattr(
+        subsetting_main, "has_cloud_optimised_data", lambda api, uuid: True
     )
     monkeypatch.setattr(
         subsetting_main, "normalize_request", MagicMock(return_value=request)
@@ -112,3 +118,25 @@ def test_key_of_unknown_storage_type_is_not_rejected(monkeypatch):
     run_zarr_subset = _run_init(monkeypatch, ["not_exist"], "netcdf")
 
     run_zarr_subset.assert_not_called()
+
+
+def test_collection_without_cloud_optimised_data_gets_original_netcdfs(monkeypatch):
+    request = _subset_request(["*"], "netcdf")
+    monkeypatch.setattr(
+        subsetting_main, "get_subset_request", MagicMock(return_value=request)
+    )
+    monkeypatch.setattr(
+        subsetting_main, "has_cloud_optimised_data", lambda api, uuid: False
+    )
+    run_original_netcdf_download = MagicMock()
+    monkeypatch.setattr(
+        subsetting_main, "run_original_netcdf_download", run_original_netcdf_download
+    )
+    # The steps after the branch read the cloud-optimised catalog.
+    normalize_request = MagicMock()
+    monkeypatch.setattr(subsetting_main, "normalize_request", normalize_request)
+
+    subsetting_main.init(api=MagicMock(), job_id_of_init="job-1", parameters={})
+
+    run_original_netcdf_download.assert_called_once_with("job-1", request)
+    normalize_request.assert_not_called()

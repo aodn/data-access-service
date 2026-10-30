@@ -79,6 +79,9 @@ class FakeApi:
         self.partitions = frozenset(partitions)
         self.get_dataset_calls = []
 
+    def get_mapped_meta_data(self, uuid):
+        return {KEY: MagicMock()}
+
     def resolve_dim_names(self, uuid, key):
         return "latitude", "longitude", self.time_column
 
