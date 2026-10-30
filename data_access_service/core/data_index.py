@@ -25,6 +25,7 @@ from shapely.geometry.base import BaseGeometry
 from data_access_service.core.duckdbclients.dataindexclients import (
     DataIndexDuckDBClient,
 )
+from data_access_service.models.pmtiles_types import TimeExtent
 
 log = logging.getLogger(__name__)
 
@@ -138,3 +139,48 @@ def query_collection_mapping(
     rel = client.execute(sql, params)
     result_cols = [d[0] for d in rel.description]
     return [dict(zip(result_cols, row)) for row in rel.fetchall()]
+
+
+def _day_key(ts: pd.Timestamp) -> int:
+    """UTC ``YYYYMMDD`` integer, the same day-key form the pmtiles/estimation
+    artefacts use, so the data-index time extent lines up with them."""
+    ts = ts.tz_convert("UTC") if ts.tz is not None else ts.tz_localize("UTC")
+    return ts.year * 10000 + ts.month * 100 + ts.day
+
+
+def get_time_extent_for_uuid(uuid: str) -> TimeExtent:
+    """Temporal extent of a metadata uuid across the collection-mapping table.
+
+    ``min_date`` is the earliest ``time_coverage_start`` and ``max_date`` the
+    latest ``time_coverage_end`` over every row for ``uuid``, each as a
+    ``YYYYMMDD`` integer day key. When the uuid has no rows (or every
+    ``time_coverage_*`` value is null/unparseable) there is no real time, so a
+    timeless extent is returned: ``has_time=False`` with both bounds set to the
+    synthetic stand-in day (never null), matching the pmtiles sidecar contract.
+    """
+    client = _get_client()
+    table = client.qualified_table
+
+    # try_cast so one malformed stored string drops that row rather than
+    # failing the aggregate. min/max ignore the resulting nulls.
+    sql = (
+        "SELECT "
+        "min(try_cast(time_coverage_start AS TIMESTAMPTZ)) AS min_start, "
+        "max(try_cast(time_coverage_end AS TIMESTAMPTZ)) AS max_end "
+        f"FROM {table} WHERE metadata_uuid = ?"
+    )
+    row = client.execute(sql, [uuid]).fetchone()
+
+    min_start = row[0] if row is not None else None
+    max_end = row[1] if row is not None else None
+
+    # has_time means both bounds are present; a null on either side means the
+    # uuid carries no filterable time.
+    if min_start is None or max_end is None:
+        return TimeExtent.timeless()
+
+    return TimeExtent(
+        min_date=_day_key(pd.Timestamp(min_start)),
+        max_date=_day_key(pd.Timestamp(max_end)),
+        has_time=True,
+    )

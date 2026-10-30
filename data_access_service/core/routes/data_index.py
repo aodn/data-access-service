@@ -22,7 +22,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from data_access_service.core.data_index import query_collection_mapping
+from data_access_service.core.data_index import (
+    get_time_extent_for_uuid,
+    query_collection_mapping,
+)
 from data_access_service.core.routes.auth import api_key_auth
 from data_access_service.core.routes.helpers import verify_datatime_param
 from data_access_service.utils.multi_polygon_helper import (
@@ -169,3 +172,33 @@ async def query_collection_mapping_post(body: CollectionMappingQuery):
     """Same query as the GET, with the polygon in a JSON body for large areas."""
     geometry = _resolve_geometry(body.polygon)
     return await _run_query(geometry, body.start_time, body.end_time, body.limit)
+
+
+@router.get(
+    "/data-index/collection-mapping/{uuid}/time-extent",
+    dependencies=[Depends(api_key_auth)],
+)
+async def get_collection_mapping_time_extent(uuid: str):
+    """Temporal extent of a metadata uuid across the collection-mapping table.
+
+    Returns the same ``min_date`` / ``max_date`` / ``has_time`` shape the PMTiles
+    sidecar uses (``min_date``/``max_date`` are ``YYYYMMDD`` integer day keys).
+    ``min_date`` is the earliest ``time_coverage_start`` for the uuid and
+    ``max_date`` the latest ``time_coverage_end``. ``has_time`` is False when the
+    uuid has no rows or no parseable times; both bounds are then the synthetic
+    stand-in day (never null) so the UI knows the dates are not real.
+    """
+    try:
+        extent = await run_in_threadpool(get_time_extent_for_uuid, uuid)
+    except Exception as exc:  # pragma: no cover - surfaced as 500 with context
+        logger.error(
+            "collection-mapping time-extent query failed for uuid=%s: %s",
+            uuid,
+            exc,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to query the collection-mapping table.",
+        )
+    return extent.to_dict()
