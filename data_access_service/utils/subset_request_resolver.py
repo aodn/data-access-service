@@ -166,6 +166,15 @@ def resolve_keys(api, uuid: str, keys: Optional[List[str]]) -> List[str]:
     return list(keys)
 
 
+def has_cloud_optimised_data(api, uuid: str) -> bool:
+    """True when the collection has at least one cloud-optimised dataset.
+
+    The api answers an unknown uuid with the {"not_exist": ...} sentinel.
+    """
+    metadata = api.get_mapped_meta_data(uuid) or {}
+    return bool(metadata) and "not_exist" not in metadata
+
+
 def collection_has_multi_datasets(api, uuid: str) -> bool:
     """True when the collection holds more than one dataset.
 
