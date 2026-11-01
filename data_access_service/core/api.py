@@ -931,11 +931,12 @@ class API(BaseAPI):
                     else:
                         # None of the mapped candidates exists as a real column. For an
                         # optional axis like TIME this is legitimate (timeless dataset),
-                        # so log at debug, not error.
-                        log.warning(
-                            f"Column {column} is mapped to {candidates} but not in the metadata. "
-                            f"Please check this dataset (uuid: {uuid}) if it is correct."
-                        )
+                        # so log ignore this error.
+                        if column != "TIME":
+                            log.error(
+                                f"Column {column} is mapped to {candidates} but not in the metadata. "
+                                f"Please check this dataset (uuid: {uuid}) if it is correct."
+                            )
             else:
                 output.append(column)
 
