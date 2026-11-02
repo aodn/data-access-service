@@ -25,6 +25,7 @@ from shapely.geometry.base import BaseGeometry
 from data_access_service.core.duckdbclients.dataindexclients import (
     DataIndexDuckDBClient,
 )
+from data_access_service.core import original_netcdf_index
 from data_access_service.models.pmtiles_types import TimeExtent
 
 log = logging.getLogger(__name__)
@@ -184,3 +185,8 @@ def get_time_extent_for_uuid(uuid: str) -> TimeExtent:
         max_date=_day_key(pd.Timestamp(max_end)),
         has_time=True,
     )
+
+
+def has_original_netcdfs(uuid: str) -> bool:
+    """True when ``uuid`` has original NetCDF files in the index."""
+    return original_netcdf_index.has_original_netcdfs(_get_client(), uuid)

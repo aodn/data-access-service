@@ -1,4 +1,4 @@
-"""find_original_netcdfs on a local table shaped like the data-index S3 Table."""
+"""find_original_netcdfs on local tables shaped like the data-index S3 Tables."""
 
 import logging
 
@@ -9,7 +9,10 @@ from data_access_service.config.config import Config
 from data_access_service.core.duckdbclients.dataindexclients import (
     DataIndexDuckDBClient,
 )
-from data_access_service.core.original_netcdf_index import find_original_netcdfs
+from data_access_service.core.original_netcdf_index import (
+    find_original_netcdfs,
+    has_original_netcdfs,
+)
 from data_access_service.models.bounding_box import BoundingBox
 
 UUID = "uuid-1"
@@ -23,16 +26,22 @@ AREA = [BoundingBox(min_lon=145, min_lat=-35, max_lon=155, max_lat=-25)]
 def client():
     cfg = Config.get_config().get_data_index_config()
     with DataIndexDuckDBClient() as c:
-        # Under IntTestConfig the client does not attach the S3 Table, so a
-        # local table takes its name.
+        # Under IntTestConfig the client does not attach the S3 Tables, so
+        # local tables take their names.
         c.execute(f"ATTACH ':memory:' AS {cfg.catalog_name}")
         c.execute(f"CREATE SCHEMA {cfg.catalog_name}.{cfg.namespace}")
+        c.execute(f"CREATE SCHEMA {cfg.catalog_name}.{cfg.s3_metadata_namespace}")
         c.execute(
             f"""CREATE TABLE {c.qualified_table} (
-                metadata_uuid VARCHAR, bucket VARCHAR, key VARCHAR, format VARCHAR,
+                metadata_uuid VARCHAR, bucket VARCHAR, key VARCHAR,
+                version_id VARCHAR, format VARCHAR,
                 time_coverage_start VARCHAR, time_coverage_end VARCHAR,
                 geospatial_lat_min DOUBLE, geospatial_lat_max DOUBLE,
                 geospatial_lon_min DOUBLE, geospatial_lon_max DOUBLE)"""
+        )
+        c.execute(
+            f"""CREATE TABLE {c.qualified_s3_metadata_table} (
+                bucket VARCHAR, key VARCHAR, version_id VARCHAR)"""
         )
         yield c
 
@@ -46,11 +55,20 @@ def _insert(
     lon=(140.0, 150.0),
     uuid=UUID,
     file_format="nc",
+    version="v1",
+    live=True,
 ):
+    """Add a file to the mapping table, and to the live inventory when ``live``."""
     client.execute(
-        f"INSERT INTO {client.qualified_table} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [uuid, "imos-data", key, file_format, start, end, *lat, *lon],
+        f"INSERT INTO {client.qualified_table}"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [uuid, "imos-data", key, version, file_format, start, end, *lat, *lon],
     )
+    if live:
+        client.execute(
+            f"INSERT INTO {client.qualified_s3_metadata_table} VALUES (?, ?, ?)",
+            ["imos-data", key, version],
+        )
 
 
 def _keys(files):
@@ -124,4 +142,25 @@ def test_files_without_time_are_left_out_and_counted(client, caplog):
         files = find_original_netcdfs(client, UUID, START, END, AREA)
 
     assert _keys(files) == ["inside.nc"]
-    assert "2 files skipped" in caplog.text
+    assert "2 rows skipped" in caplog.text
+
+
+def test_leaves_out_old_versions_and_deleted_files(client):
+    # The mapping table keeps them; the live inventory does not.
+    _insert(client, "updated.nc", version="v1", live=False)
+    _insert(client, "updated.nc", version="v2")
+    _insert(client, "deleted.nc", live=False)
+
+    files = find_original_netcdfs(client, UUID, START, END, AREA)
+
+    # One row per current file, so no link twice.
+    assert _keys(files) == ["updated.nc"]
+
+
+def test_has_original_netcdfs(client):
+    _insert(client, "a.nc")
+    _insert(client, "b.csv", uuid="uuid-2", file_format="csv")
+
+    assert has_original_netcdfs(client, UUID)
+    assert not has_original_netcdfs(client, "uuid-2")
+    assert not has_original_netcdfs(client, "unknown")

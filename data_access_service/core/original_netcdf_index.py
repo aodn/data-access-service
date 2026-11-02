@@ -1,8 +1,13 @@
-"""Find the original NetCDF files of a collection in the data-index S3 Table.
+"""Find the original NetCDF files of a collection in the data-index S3 Tables.
 
-The table has one row per live file, with its collection uuid, time range and
-bounding box. We pick whole files that overlap the request; the files are not
-cut.
+The collection-mapping table has one row per file version, with its collection
+uuid, time range and bounding box. It also keeps old versions and deleted
+files, so we join the live file inventory to keep the current files only.
+We pick whole files that overlap the request; the files are not cut.
+
+A collection has one key for its original NetCDF files: ORIGINAL_NETCDF_KEY.
+The table's physical_dataset_id is not used: the data team says it is a
+system placeholder (always __DEFAULT__), not meant for users.
 """
 
 import logging
@@ -21,6 +26,10 @@ logger = logging.getLogger(__name__)
 # Value of the table's ``format`` column for a NetCDF file.
 NETCDF_FORMAT = "nc"
 
+# The one key of a collection's original NetCDF files, like the dataset
+# name of a cloud-optimised collection.
+ORIGINAL_NETCDF_KEY = "original_netcdf"
+
 
 def _time_sql(column: str) -> str:
     """Parse the time text. It comes in several formats, so try two parsers.
@@ -33,22 +42,30 @@ def _time_sql(column: str) -> str:
     )
 
 
-def _files_sql(table: str) -> str:
+def _files_sql(table: str, live_table: Optional[str] = None) -> str:
     """CTE ``f``: the NetCDF rows of one uuid, with parsed times.
 
+    With ``live_table``, an inner join drops old versions and deleted files.
     Binds the uuid and the format. Column order matches OriginalNetcdf.
     """
+    join = (
+        f"JOIN {live_table} s ON s.bucket = m.bucket AND s.key = m.key"
+        " AND s.version_id = m.version_id"
+        if live_table
+        else ""
+    )
     return f"""
         WITH f AS (
-            SELECT bucket, key,
-                   {_time_sql("time_coverage_start")} AS t_start,
-                   {_time_sql("time_coverage_end")} AS t_end,
-                   geospatial_lat_min AS lat_min,
-                   geospatial_lat_max AS lat_max,
-                   geospatial_lon_min AS lon_min,
-                   geospatial_lon_max AS lon_max
-            FROM {table}
-            WHERE metadata_uuid = ? AND format = ?
+            SELECT m.bucket, m.key,
+                   {_time_sql("m.time_coverage_start")} AS t_start,
+                   {_time_sql("m.time_coverage_end")} AS t_end,
+                   m.geospatial_lat_min AS lat_min,
+                   m.geospatial_lat_max AS lat_max,
+                   m.geospatial_lon_min AS lon_min,
+                   m.geospatial_lon_max AS lon_max
+            FROM {table} m
+            {join}
+            WHERE m.metadata_uuid = ? AND m.format = ?
         )
     """
 
@@ -77,6 +94,19 @@ def _bbox_sql(bboxes: List[BoundingBox], params: List[Any]) -> str:
     return "(" + " OR ".join(groups) + ")"
 
 
+def has_original_netcdfs(client: DataIndexDuckDBClient, uuid: str) -> bool:
+    """True when ``uuid`` has NetCDF files in the index.
+
+    A quick check for the metadata endpoint, so no join with the live inventory.
+    """
+    row = client.execute(
+        f"SELECT 1 FROM {client.qualified_table}"
+        " WHERE metadata_uuid = ? AND format = ? LIMIT 1",
+        [uuid, NETCDF_FORMAT],
+    ).fetchone()
+    return row is not None
+
+
 def find_original_netcdfs(
     client: DataIndexDuckDBClient,
     uuid: str,
@@ -84,14 +114,13 @@ def find_original_netcdfs(
     end: pd.Timestamp,
     bboxes: Optional[List[BoundingBox]] = None,
 ) -> List[OriginalNetcdf]:
-    """The files of ``uuid`` that overlap ``start..end`` and any of ``bboxes``.
+    """The current files of ``uuid`` that overlap ``start..end`` and any of ``bboxes``.
 
     A file with no time (or no bbox, when an area is given) cannot be matched,
-    so it is left out. The count of those files is logged.
+    so it is left out. The count of those rows is logged.
 
     :param bboxes: the request area; empty or None means no area filter
     """
-    files_sql = _files_sql(client.qualified_table)
     params: List[Any] = [uuid, NETCDF_FORMAT, end, start]
     where = ["t_start <= ?", "t_end >= ?"]
     missing = ["t_start IS NULL", "t_end IS NULL"]
@@ -102,18 +131,22 @@ def find_original_netcdfs(
             for column in ("lat_min", "lat_max", "lon_min", "lon_max")
         ]
 
+    files_sql = _files_sql(client.qualified_table, client.qualified_s3_metadata_table)
     rows = client.execute(
         f"{files_sql} SELECT * FROM f WHERE {' AND '.join(where)} ORDER BY key",
         params,
     ).fetchall()
 
+    # Only for the log, so no join: it scans the whole live inventory again.
+    # Old versions are counted too.
     skipped = client.execute(
-        f"{files_sql} SELECT count(*) FROM f WHERE {' OR '.join(missing)}",
+        f"{_files_sql(client.qualified_table)} SELECT count(*) FROM f"
+        f" WHERE {' OR '.join(missing)}",
         [uuid, NETCDF_FORMAT],
     ).fetchone()[0]
     if skipped:
         logger.warning(
-            "uuid=%s: %d files skipped, no time or bbox in the data index",
+            "uuid=%s: %d rows skipped, no time or bbox in the data index",
             uuid,
             skipped,
         )
