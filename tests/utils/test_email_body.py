@@ -28,6 +28,51 @@ def visible_to_email_clients(html: str) -> str:
 
 class TestEmailBodies(unittest.TestCase):
 
+    def test_emails_have_no_hardcoded_mooring_constraints(self):
+        """Guard #9241 for completion formats and the shared no-data body."""
+        for output_format in ("csv", "netcdf", "geotiff"):
+            request = SubsetRequest(
+                uuid="test-uuid",
+                keys=["test-dataset"],
+                start_date="2024-01-01",
+                end_date="2024-01-31",
+                recipient="test@example.com",
+                output_format=output_format,
+                multi_polygon=None,
+                full_metadata_link="https://example.com/metadata",
+                suggested_citation="Cite this dataset as X.",
+            )
+            bodies = {
+                "completed": get_download_email_html_body(
+                    request, ["https://example.com/result"]
+                ),
+                "no_data": get_no_data_email_html_body(request),
+                "empty_urls": get_download_email_html_body(request, []),
+            }
+            for kind, html in bodies.items():
+                with self.subTest(output_format=output_format, kind=kind):
+                    for marker in (
+                        "TAN100",
+                        "ORS065",
+                        "Ningaloo",
+                        "Sydney Water Corporation",
+                        "If using data from",
+                    ):
+                        self.assertNotIn(marker, html)
+                    self.assertIn(
+                        "Any users of IMOS data are required to clearly acknowledge",
+                        html,
+                    )
+                    self.assertIn(
+                        'Data, products and services from IMOS are provided "as is" '
+                        'without any warranty',
+                        html,
+                    )
+                    self.assertIn("Cite this dataset as X.", html)
+                    self.assertIn("https://example.com/metadata", html)
+                    if kind == "completed":
+                        self.assertIn("https://example.com/result", html)
+
     def test_no_data_email_contains_all_shared_sections(self):
         request = SubsetRequest(
             uuid="test-uuid-1234",
