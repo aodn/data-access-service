@@ -65,7 +65,7 @@ class TestEmailBodies(unittest.TestCase):
                     )
                     self.assertIn(
                         'Data, products and services from IMOS are provided "as is" '
-                        'without any warranty',
+                        "without any warranty",
                         html,
                     )
                     self.assertIn("Cite this dataset as X.", html)
