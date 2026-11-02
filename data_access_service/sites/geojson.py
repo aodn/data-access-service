@@ -45,6 +45,12 @@ def _native(value: Any) -> Any:
     return value.item() if hasattr(value, "item") else value
 
 
+def _group_key(value: Any) -> Any:
+    """Group value for a properties key; floats rounded so float32 0.9 isn't 0.8999999761581421."""
+    value = _native(value)
+    return round(value, 3) if isinstance(value, float) else value
+
+
 def _iso(value: Any) -> str:
     """Render a timestamp as an ISO 8601 string with an explicit UTC marker.
 
@@ -174,7 +180,9 @@ def site_details_feature_collection(
         # rows arrive ordered by group then time, so each group is already
         # time-sorted.
         properties = {
-            f"{group_column}_{_native(key)}": _series(group, value_columns, time_column)
+            f"{group_column}_{_group_key(key)}": _series(
+                group, value_columns, time_column
+            )
             for key, group in rows.groupby(group_column, sort=True)
         }
     else:

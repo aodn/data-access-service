@@ -420,10 +420,53 @@ class WaveBuoyRepository(ParquetRepository):
     longitude_column: ClassVar[str] = "LONGITUDE"
 
 
+class MooringEstuarineWaterQualityRepository(ParquetRepository):
+    """Reads over the estuarine/coastal water-quality mooring realtime-QC dataset."""
+
+    config: Config = Config.get_config()
+
+    table: ClassVar[str] = (
+        "mooring_estuarine_coastal_water_quality_monitoring_realtime_qc"
+    )
+    bucket: ClassVar[str] = config.get_sites_config().co_bucket
+    snapshot_bucket: ClassVar[str] = config.get_datavis_data_bucket_name()
+    dataset: ClassVar[str] = f"s3://{bucket}/{table}.parquet"
+    snapshot_dataset: ClassVar[str] = (
+        f"s3://{snapshot_bucket}/imoslive/MOORING_ESTUARINE_WATER_QUALITY/{table}.parquet"
+    )
+    value_columns: ClassVar[tuple[str, ...]] = (
+        "TEMP",
+        "PSAL",
+        "CPHL",
+        "DOXS",
+        "FDOM",
+        "PHYCO",
+        "TURB",
+        "FLUSI",
+    )
+    # QARTOD flags: 1 pass, 2 not evaluated, 3 questionable, 4 bad, 9 missing
+    value_columns_quality_control_columns: ClassVar[tuple[str, ...]] = (
+        "TEMP_quality_control",
+        "PSAL_quality_control",
+        "CPHL_quality_control",
+        "DOXS_quality_control",
+        "FDOM_quality_control",
+        "PHYCO_quality_control",
+        "TURB_quality_control",
+        "FLUSI_quality_control",
+    )
+    group_column: ClassVar[str] = "NOMINAL_DEPTH"
+    time_column: ClassVar[str] = "TIME"
+    site_column: ClassVar[str] = "site_code"
+    latitude_column: ClassVar[str] = "LATITUDE"
+    longitude_column: ClassVar[str] = "LONGITUDE"
+
+
 # Instantiated once at startup in data_access_service.server
 REPOSITORY_CLASSES: dict[str, type[ParquetRepository]] = {
     "mooring": MooringRepository,
     "wave-buoy": WaveBuoyRepository,
+    "mooring-estuarine-water-quality": MooringEstuarineWaterQualityRepository,
 }
 
 
