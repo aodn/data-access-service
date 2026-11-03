@@ -66,6 +66,19 @@ class DataIndexDuckDBClient(DuckDBClient):
             for part in (cfg.catalog_name, cfg.namespace, cfg.table_name)
         )
 
+    @property
+    def qualified_s3_metadata_table(self) -> str:
+        """``catalog.namespace.table`` for the live file inventory table."""
+        cfg = self._config
+        return ".".join(
+            quote_ident(part)
+            for part in (
+                cfg.catalog_name,
+                cfg.s3_metadata_namespace,
+                cfg.s3_metadata_table_name,
+            )
+        )
+
     def _ensure_secret(self) -> None:
         """Unscoped S3 secret from the current boto3 credentials.
 

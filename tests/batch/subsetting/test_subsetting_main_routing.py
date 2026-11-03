@@ -8,7 +8,7 @@ rejects - the legacy workflow's zarr-writing code that used to absorb the
 mismatch has been removed.
 
 A collection with no cloud-optimised data skips all of that and gets the list
-of its original NetCDF files.
+of its data-index files.
 """
 
 import pandas as pd
@@ -120,7 +120,7 @@ def test_key_of_unknown_storage_type_is_not_rejected(monkeypatch):
     run_zarr_subset.assert_not_called()
 
 
-def test_collection_without_cloud_optimised_data_gets_original_netcdfs(monkeypatch):
+def test_collection_without_cloud_optimised_data_gets_data_index_files(monkeypatch):
     request = _subset_request(["*"], "netcdf")
     monkeypatch.setattr(
         subsetting_main, "get_subset_request", MagicMock(return_value=request)
@@ -128,9 +128,9 @@ def test_collection_without_cloud_optimised_data_gets_original_netcdfs(monkeypat
     monkeypatch.setattr(
         subsetting_main, "has_cloud_optimised_data", lambda api, uuid: False
     )
-    run_original_netcdf_download = MagicMock()
+    run_data_index_download = MagicMock()
     monkeypatch.setattr(
-        subsetting_main, "run_original_netcdf_download", run_original_netcdf_download
+        subsetting_main, "run_data_index_download", run_data_index_download
     )
     # The steps after the branch read the cloud-optimised catalog.
     normalize_request = MagicMock()
@@ -138,5 +138,5 @@ def test_collection_without_cloud_optimised_data_gets_original_netcdfs(monkeypat
 
     subsetting_main.init(api=MagicMock(), job_id_of_init="job-1", parameters={})
 
-    run_original_netcdf_download.assert_called_once_with("job-1", request)
+    run_data_index_download.assert_called_once_with("job-1", request)
     normalize_request.assert_not_called()

@@ -59,6 +59,8 @@ data_index:
     table_bucket: "data-index"
     namespace: "collection_mapping"
     table_name: "live"
+    s3_metadata_namespace: "s3_metadata"
+    s3_metadata_table_name: "live"
     table_bucket_arn: "arn:aws:s3tables:ap-southeast-2:704910415367:bucket/data-index"
     catalog_name: "data_index"
     memory_limit: "256MB"
