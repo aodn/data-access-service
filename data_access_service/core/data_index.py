@@ -25,7 +25,7 @@ from shapely.geometry.base import BaseGeometry
 from data_access_service.core.duckdbclients.dataindexclients import (
     DataIndexDuckDBClient,
 )
-from data_access_service.core import original_netcdf_index
+from data_access_service.core import data_index_files
 from data_access_service.models.pmtiles_types import TimeExtent
 
 log = logging.getLogger(__name__)
@@ -49,6 +49,8 @@ RESULT_COLUMNS = (
 _client: Optional[DataIndexDuckDBClient] = None
 _client_lock = threading.Lock()
 _spatial_loaded = False
+# The data-index uuids (uuids with original NetCDF files in the data index)
+_data_index_uuids: Optional[frozenset[str]] = None
 
 
 def _get_client() -> DataIndexDuckDBClient:
@@ -187,6 +189,18 @@ def get_time_extent_for_uuid(uuid: str) -> TimeExtent:
     )
 
 
-def has_original_netcdfs(uuid: str) -> bool:
-    """True when ``uuid`` has original NetCDF files in the index."""
-    return original_netcdf_index.has_original_netcdfs(_get_client(), uuid)
+def load_data_index_uuids() -> None:
+    """Read the data-index uuids into memory."""
+    global _data_index_uuids
+    uuids = data_index_files.list_data_index_uuids(_get_client())
+    _data_index_uuids = uuids
+    log.info("Loaded %d data-index uuids", len(uuids))
+
+
+def is_data_index_uuid(uuid: str) -> bool:
+    """True when ``uuid`` is a data-index uuid.
+
+    A lookup in memory, no S3 read. False until the load is done.
+    """
+    uuids = _data_index_uuids
+    return uuids is not None and uuid in uuids

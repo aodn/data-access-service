@@ -1,6 +1,6 @@
 """Download for a collection with no cloud-optimised data.
 
-The user gets a list of the collection's original NetCDF files that match the
+The user gets a list of the collection's data-index files that match the
 request (a zipped CSV, one row and one link per file), not the files themselves.
 The collection has one key here: ORIGINAL_NETCDF_KEY.
 """
@@ -19,11 +19,11 @@ from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.duckdbclients.dataindexclients import (
     DataIndexDuckDBClient,
 )
-from data_access_service.core.original_netcdf_index import (
+from data_access_service.core.data_index_files import (
     ORIGINAL_NETCDF_KEY,
-    find_original_netcdfs,
+    find_data_index_files,
 )
-from data_access_service.models.data_index_types import OriginalNetcdf
+from data_access_service.models.data_index_types import DataIndexFile
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.date_time_utils import (
     resolve_non_specified_dates,
@@ -49,7 +49,7 @@ FILE_LIST_COLUMNS = [
 ]
 
 
-class OriginalNetcdfProcessor:
+class DataIndexProcessor:
     def __init__(self, job_id: str, subset_request: SubsetRequest):
         self.aws = AWSHelper()
         self.config = Config.get_config()
@@ -69,7 +69,7 @@ class OriginalNetcdfProcessor:
 
     def process(self) -> None:
         self.log.info(
-            f"Start original NetCDF download for uuid: {self.uuid}, job id: {self.job_id}"
+            f"Start data-index download for uuid: {self.uuid}, job id: {self.job_id}"
         )
         keys = self.subset_request.keys
         if "*" in keys or ORIGINAL_NETCDF_KEY in keys:
@@ -107,29 +107,27 @@ class OriginalNetcdfProcessor:
             ),
         )
 
-    def __find_files(self) -> List[OriginalNetcdf]:
+    def __find_files(self) -> List[DataIndexFile]:
         start, end = to_utc_bounds(
             *resolve_non_specified_dates(
                 self.subset_request.start_date, self.subset_request.end_date
             )
         )
         with DataIndexDuckDBClient() as client:
-            files = find_original_netcdfs(
+            files = find_data_index_files(
                 client,
                 uuid=self.uuid,
                 start=start,
                 end=end,
                 bboxes=self.subset_request.bboxes,
             )
-        self.log.info(
-            "Found %d original NetCDF files for uuid %s", len(files), self.uuid
-        )
+        self.log.info("Found %d data-index files for uuid %s", len(files), self.uuid)
         return files
 
-    def __file_url(self, file: OriginalNetcdf) -> str:
+    def __file_url(self, file: DataIndexFile) -> str:
         return f"https://{file.bucket}.s3.{self.region}.amazonaws.com/{quote(file.key)}"
 
-    def __upload_file_list(self, files: List[OriginalNetcdf]) -> str:
+    def __upload_file_list(self, files: List[DataIndexFile]) -> str:
         """Write the file list as a zipped CSV, upload it, return its link."""
         # Named after the collection title, or the uuid when there is no title.
         base_name = f"{self.subset_request.download_base_name(self.uuid)}-file-list"

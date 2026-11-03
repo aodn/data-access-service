@@ -3,8 +3,8 @@ from datetime import datetime
 
 
 @dataclass(frozen=True)
-class OriginalNetcdf:
-    """One original NetCDF file that matches the user's request."""
+class DataIndexFile:
+    """One data-index file that matches the user's request."""
 
     bucket: str
     key: str

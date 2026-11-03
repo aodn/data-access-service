@@ -1,11 +1,11 @@
-"""Find the original NetCDF files of a collection in the data-index S3 Tables.
+"""Find the data-index files of a collection in the data-index S3 Tables.
 
 The collection-mapping table has one row per file version, with its collection
 uuid, time range and bounding box. It also keeps old versions and deleted
 files, so we join the live file inventory to keep the current files only.
 We pick whole files that overlap the request; the files are not cut.
 
-A collection has one key for its original NetCDF files: ORIGINAL_NETCDF_KEY.
+A collection has one key for its data-index files: ORIGINAL_NETCDF_KEY.
 The table's physical_dataset_id is not used: the data team says it is a
 system placeholder (always __DEFAULT__), not meant for users.
 """
@@ -19,16 +19,16 @@ from data_access_service.core.duckdbclients.dataindexclients import (
     DataIndexDuckDBClient,
 )
 from data_access_service.models.bounding_box import BoundingBox
-from data_access_service.models.data_index_types import OriginalNetcdf
+from data_access_service.models.data_index_types import DataIndexFile
 
 logger = logging.getLogger(__name__)
 
 # Value of the table's ``format`` column for a NetCDF file.
 NETCDF_FORMAT = "nc"
 
-# The one key of a collection's original NetCDF files, like the dataset
+# The one key of a collection's data-index files, like the dataset
 # name of a cloud-optimised collection.
-ORIGINAL_NETCDF_KEY = "original_netcdf"
+ORIGINAL_NETCDF_KEY = "original_netcdfs"
 
 
 def _time_sql(column: str) -> str:
@@ -46,7 +46,7 @@ def _files_sql(table: str, live_table: Optional[str] = None) -> str:
     """CTE ``f``: the NetCDF rows of one uuid, with parsed times.
 
     With ``live_table``, an inner join drops old versions and deleted files.
-    Binds the uuid and the format. Column order matches OriginalNetcdf.
+    Binds the uuid and the format. Column order matches DataIndexFile.
     """
     join = (
         f"JOIN {live_table} s ON s.bucket = m.bucket AND s.key = m.key"
@@ -94,26 +94,26 @@ def _bbox_sql(bboxes: List[BoundingBox], params: List[Any]) -> str:
     return "(" + " OR ".join(groups) + ")"
 
 
-def has_original_netcdfs(client: DataIndexDuckDBClient, uuid: str) -> bool:
-    """True when ``uuid`` has NetCDF files in the index.
+def list_data_index_uuids(client: DataIndexDuckDBClient) -> frozenset[str]:
+    """The data-index uuids: the uuids that have NetCDF files in the data index.
 
-    A quick check for the metadata endpoint, so no join with the live inventory.
+    For the metadata endpoint, so no join with the live inventory.
     """
-    row = client.execute(
-        f"SELECT 1 FROM {client.qualified_table}"
-        " WHERE metadata_uuid = ? AND format = ? LIMIT 1",
-        [uuid, NETCDF_FORMAT],
-    ).fetchone()
-    return row is not None
+    rows = client.execute(
+        f"SELECT DISTINCT metadata_uuid FROM {client.qualified_table}"
+        " WHERE format = ? AND metadata_uuid IS NOT NULL",
+        [NETCDF_FORMAT],
+    ).fetchall()
+    return frozenset(row[0] for row in rows)
 
 
-def find_original_netcdfs(
+def find_data_index_files(
     client: DataIndexDuckDBClient,
     uuid: str,
     start: pd.Timestamp,
     end: pd.Timestamp,
     bboxes: Optional[List[BoundingBox]] = None,
-) -> List[OriginalNetcdf]:
+) -> List[DataIndexFile]:
     """The current files of ``uuid`` that overlap ``start..end`` and any of ``bboxes``.
 
     A file with no time (or no bbox, when an area is given) cannot be matched,
@@ -151,4 +151,4 @@ def find_original_netcdfs(
             skipped,
         )
 
-    return [OriginalNetcdf(*row) for row in rows]
+    return [DataIndexFile(*row) for row in rows]

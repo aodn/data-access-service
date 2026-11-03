@@ -27,8 +27,8 @@ from data_access_service.batch.subsetting.tasks.parquet_processor import (
     process_parquet_files,
 )
 from data_access_service.batch.subsetting.tasks.zarr_processor import ZarrProcessor
-from data_access_service.batch.subsetting.tasks.original_netcdf_processor import (
-    OriginalNetcdfProcessor,
+from data_access_service.batch.subsetting.tasks.data_index_processor import (
+    DataIndexProcessor,
 )
 from data_access_service.batch.subsetting.helpers.parquet_polygon_ranges import (
     list_polygon_values,
@@ -57,10 +57,10 @@ def init(api: API, job_id_of_init, parameters, share_identifier: str | None = No
     parsed_subset_request = get_subset_request(parameters)
 
     # Step 2: A collection with no cloud-optimised data gets the list of its
-    # original NetCDF files instead. The steps below read the cloud-optimised
+    # data-index files instead. The steps below read the cloud-optimised
     # catalog, so this path stops here.
     if not has_cloud_optimised_data(api, parsed_subset_request.uuid):
-        run_original_netcdf_download(job_id_of_init, parsed_subset_request)
+        run_data_index_download(job_id_of_init, parsed_subset_request)
         return
 
     # Step 3: Normalize the request which downstream jobs and result emails read these fields:
@@ -298,7 +298,7 @@ def run_zarr_subset(
     ).process()
 
 
-def run_original_netcdf_download(job_id: str, request: SubsetRequest) -> None:
-    """Email the list of the collection's original NetCDF files that match
+def run_data_index_download(job_id: str, request: SubsetRequest) -> None:
+    """Email the list of the collection's data-index files that match
     the request. For a collection with no cloud-optimised data."""
-    OriginalNetcdfProcessor(job_id=job_id, subset_request=request).process()
+    DataIndexProcessor(job_id=job_id, subset_request=request).process()

@@ -1,4 +1,4 @@
-"""find_original_netcdfs on local tables shaped like the data-index S3 Tables."""
+"""find_data_index_files on local tables shaped like the data-index S3 Tables."""
 
 import logging
 
@@ -9,9 +9,10 @@ from data_access_service.config.config import Config
 from data_access_service.core.duckdbclients.dataindexclients import (
     DataIndexDuckDBClient,
 )
-from data_access_service.core.original_netcdf_index import (
-    find_original_netcdfs,
-    has_original_netcdfs,
+from data_access_service.core import data_index
+from data_access_service.core.data_index_files import (
+    find_data_index_files,
+    list_data_index_uuids,
 )
 from data_access_service.models.bounding_box import BoundingBox
 
@@ -87,7 +88,7 @@ def test_picks_files_that_overlap_time_and_area(client):
     _insert(client, "other_uuid.nc", uuid="uuid-2")
     _insert(client, "not_netcdf.csv", file_format="csv")
 
-    files = find_original_netcdfs(client, UUID, START, END, AREA)
+    files = find_data_index_files(client, UUID, START, END, AREA)
 
     assert _keys(files) == ["inside.nc"]
     assert files[0].bucket == "imos-data"
@@ -99,7 +100,7 @@ def test_reads_every_parseable_time_format(client):
     _insert(client, "compact.nc", start="20200115T000000Z", end="20200116T000000Z")
     _insert(client, "space.nc", start="2020-01-15 01:00:00+00:00", end="2020-01-16")
 
-    files = find_original_netcdfs(client, UUID, START, END, AREA)
+    files = find_data_index_files(client, UUID, START, END, AREA)
 
     assert _keys(files) == ["compact.nc", "iso.nc", "space.nc"]
 
@@ -109,7 +110,7 @@ def test_file_stored_in_0_360_matches_request_in_minus_180_180(client):
     _insert(client, "lon_0_360.nc", lon=(200.0, 250.0))
     area = [BoundingBox(min_lon=-150, min_lat=-35, max_lon=-140, max_lat=-25)]
 
-    files = find_original_netcdfs(client, UUID, START, END, area)
+    files = find_data_index_files(client, UUID, START, END, area)
 
     assert _keys(files) == ["lon_0_360.nc"]
 
@@ -120,7 +121,7 @@ def test_any_of_several_areas(client):
     _insert(client, "neither.nc", lon=(60.0, 70.0))
     areas = AREA + [BoundingBox(min_lon=15, min_lat=-35, max_lon=25, max_lat=-25)]
 
-    files = find_original_netcdfs(client, UUID, START, END, areas)
+    files = find_data_index_files(client, UUID, START, END, areas)
 
     assert _keys(files) == ["east.nc", "west.nc"]
 
@@ -128,8 +129,8 @@ def test_any_of_several_areas(client):
 def test_no_area_keeps_files_without_bbox(client):
     _insert(client, "no_bbox.nc", lat=(None, None), lon=(None, None))
 
-    assert _keys(find_original_netcdfs(client, UUID, START, END)) == ["no_bbox.nc"]
-    assert find_original_netcdfs(client, UUID, START, END, AREA) == []
+    assert _keys(find_data_index_files(client, UUID, START, END)) == ["no_bbox.nc"]
+    assert find_data_index_files(client, UUID, START, END, AREA) == []
 
 
 def test_files_without_time_are_left_out_and_counted(client, caplog):
@@ -139,7 +140,7 @@ def test_files_without_time_are_left_out_and_counted(client, caplog):
     _insert(client, "number_time.nc", start="23456.789", end="23457.789")
 
     with caplog.at_level(logging.WARNING):
-        files = find_original_netcdfs(client, UUID, START, END, AREA)
+        files = find_data_index_files(client, UUID, START, END, AREA)
 
     assert _keys(files) == ["inside.nc"]
     assert "2 rows skipped" in caplog.text
@@ -151,16 +152,30 @@ def test_leaves_out_old_versions_and_deleted_files(client):
     _insert(client, "updated.nc", version="v2")
     _insert(client, "deleted.nc", live=False)
 
-    files = find_original_netcdfs(client, UUID, START, END, AREA)
+    files = find_data_index_files(client, UUID, START, END, AREA)
 
     # One row per current file, so no link twice.
     assert _keys(files) == ["updated.nc"]
 
 
-def test_has_original_netcdfs(client):
-    _insert(client, "a.nc")
+def test_lists_uuids_with_netcdf_files(client):
+    _insert(client, "a1.nc")
+    _insert(client, "a2.nc")
     _insert(client, "b.csv", uuid="uuid-2", file_format="csv")
+    _insert(client, "c.nc", uuid="uuid-3")
 
-    assert has_original_netcdfs(client, UUID)
-    assert not has_original_netcdfs(client, "uuid-2")
-    assert not has_original_netcdfs(client, "unknown")
+    assert list_data_index_uuids(client) == {UUID, "uuid-3"}
+
+
+def test_is_data_index_uuid_reads_the_loaded_uuids(client, monkeypatch):
+    monkeypatch.setattr(data_index, "_get_client", lambda: client)
+    monkeypatch.setattr(data_index, "_data_index_uuids", None)
+    _insert(client, "a.nc")
+
+    # Not loaded yet: False, with no S3 read on the request path.
+    assert not data_index.is_data_index_uuid(UUID)
+
+    data_index.load_data_index_uuids()
+
+    assert data_index.is_data_index_uuid(UUID)
+    assert not data_index.is_data_index_uuid("unknown")

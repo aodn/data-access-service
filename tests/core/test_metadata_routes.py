@@ -12,7 +12,7 @@ from data_access_service.core.routes.auth import api_key_auth
 from data_access_service.server import app
 
 URL = f"{Config.BASE_URL}/metadata/uuid-1"
-CO_ONLY = {"include_original_netcdf": "false"}
+CO_ONLY = {"include_data_index": "false"}
 NOT_EXIST = {"not_exist": Descriptor(uuid="uuid-1")}
 
 
@@ -33,10 +33,10 @@ def client(api):
         yield c
 
 
-def _in_index(monkeypatch, found=True, error=None):
+def _in_index(monkeypatch, found=True):
     """Whether the data index has NetCDF files for the uuid."""
-    lookup = MagicMock(return_value=found, side_effect=error)
-    monkeypatch.setattr(metadata_routes, "has_original_netcdfs", lookup)
+    lookup = MagicMock(return_value=found)
+    monkeypatch.setattr(metadata_routes, "is_data_index_uuid", lookup)
     return lookup
 
 
@@ -65,8 +65,7 @@ def test_cloud_optimised_keys_are_flagged(monkeypatch, api, client):
 
 
 def test_no_cloud_optimised_data_is_not_found_when_turned_off(monkeypatch, api, client):
-    # es-indexer turns it off: every key it gets becomes a cloud-optimised
-    # asset, so it must still get a 404 here.
+    # A caller that wants cloud-optimised keys only gets the 404 as before.
     api.get_mapped_meta_data.return_value = NOT_EXIST
     lookup = _in_index(monkeypatch)
 
@@ -74,7 +73,7 @@ def test_no_cloud_optimised_data_is_not_found_when_turned_off(monkeypatch, api, 
     lookup.assert_not_called()
 
 
-def test_no_cloud_optimised_data_returns_the_original_netcdf_key(
+def test_no_cloud_optimised_data_returns_the_original_netcdfs_key(
     monkeypatch, api, client
 ):
     api.get_mapped_meta_data.return_value = NOT_EXIST
@@ -84,9 +83,9 @@ def test_no_cloud_optimised_data_returns_the_original_netcdf_key(
 
     assert response.status_code == 200
     assert response.json() == {
-        "original_netcdf": {
+        "original_netcdfs": {
             "uuid": "uuid-1",
-            "dname": "original_netcdf",
+            "dname": "original_netcdfs",
             "lat": None,
             "lng": None,
             "depth": None,
@@ -98,12 +97,5 @@ def test_no_cloud_optimised_data_returns_the_original_netcdf_key(
 def test_uuid_not_in_the_index_is_not_found(monkeypatch, api, client):
     api.get_mapped_meta_data.return_value = NOT_EXIST
     _in_index(monkeypatch, found=False)
-
-    assert client.get(URL).status_code == 404
-
-
-def test_index_error_is_not_found_as_before(monkeypatch, api, client):
-    api.get_mapped_meta_data.return_value = NOT_EXIST
-    _in_index(monkeypatch, error=RuntimeError("no access"))
 
     assert client.get(URL).status_code == 404
