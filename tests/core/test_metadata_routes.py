@@ -40,7 +40,7 @@ def _in_index(monkeypatch, found=True):
     return lookup
 
 
-def test_cloud_optimised_keys_are_flagged(monkeypatch, api, client):
+def test_cloud_optimised_keys_have_their_type(monkeypatch, api, client):
     api.get_mapped_meta_data.return_value = {
         "a.parquet": Descriptor(uuid="uuid-1", dname="a.parquet")
     }
@@ -49,7 +49,7 @@ def test_cloud_optimised_keys_are_flagged(monkeypatch, api, client):
     response = client.get(URL)
 
     assert response.status_code == 200
-    # Same shape as before, plus the new flag.
+    # Same shape as before, plus the new type.
     assert response.json() == {
         "a.parquet": {
             "uuid": "uuid-1",
@@ -57,7 +57,7 @@ def test_cloud_optimised_keys_are_flagged(monkeypatch, api, client):
             "lat": None,
             "lng": None,
             "depth": None,
-            "cloud_optimised": True,
+            "type": "cloud_optimised",
         }
     }
     # A collection with cloud-optimised data uses those keys only.
@@ -89,7 +89,7 @@ def test_no_cloud_optimised_data_returns_the_original_netcdfs_key(
             "lat": None,
             "lng": None,
             "depth": None,
-            "cloud_optimised": False,
+            "type": "data_index",
         }
     }
 

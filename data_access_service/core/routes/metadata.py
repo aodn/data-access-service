@@ -4,7 +4,7 @@ from typing import Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from data_access_service.core.data_index import is_data_index_uuid
-from data_access_service.core.descriptor import Descriptor
+from data_access_service.core.descriptor import Descriptor, KeyType
 from data_access_service.core.data_index_files import ORIGINAL_NETCDF_KEY
 from data_access_service.core.routes.auth import api_key_auth
 from data_access_service.core.routes.helpers import get_api_instance
@@ -22,7 +22,7 @@ def _data_index_metadata(uuid: str) -> Dict[str, Descriptor]:
         return {}
     return {
         ORIGINAL_NETCDF_KEY: Descriptor(
-            uuid=uuid, dname=ORIGINAL_NETCDF_KEY, cloud_optimised=False
+            uuid=uuid, dname=ORIGINAL_NETCDF_KEY, type=KeyType.DATA_INDEX
         )
     }
 
@@ -39,12 +39,11 @@ async def get_mapped_metadata(
         "Set to false to get cloud-optimised keys only",
     ),
 ):
-    """The keys of a collection, each with ``cloud_optimised`` true or false.
+    """The keys of a collection, each with a ``type``.
 
-    A collection with cloud-optimised data returns only those keys. One with
-    none returns one key for its data-index files, unless
-    ``include_data_index`` is false. Callers tell the two kinds apart
-    by ``cloud_optimised``.
+    A collection with cloud-optimised data returns only those keys
+    (``cloud_optimised``). One with none returns one key for its data-index
+    files (``data_index``), unless ``include_data_index`` is false.
     """
     api_instance = get_api_instance(request)
     # Check API initialization status first

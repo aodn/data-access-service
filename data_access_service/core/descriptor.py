@@ -1,5 +1,6 @@
 from decimal import Decimal
 from dataclasses import dataclass
+from enum import Enum
 from typing import Final
 
 
@@ -16,6 +17,13 @@ class Coordinate:
     max: Final[Decimal]
 
 
+class KeyType(str, Enum):
+    """The kind of data behind a key."""
+
+    CLOUD_OPTIMISED = "cloud_optimised"
+    DATA_INDEX = "data_index"
+
+
 @dataclass
 class Descriptor:
     uuid: Final[str]
@@ -23,7 +31,7 @@ class Descriptor:
     lat: Final[Coordinate]
     lng: Final[Coordinate]
     depth: Final[Depth]
-    cloud_optimised: Final[bool]
+    type: Final[KeyType]
 
     def __init__(
         self,
@@ -32,11 +40,11 @@ class Descriptor:
         lat: Coordinate = None,
         lng: Coordinate = None,
         depth: Depth = None,
-        cloud_optimised: bool = True,
+        type: KeyType = KeyType.CLOUD_OPTIMISED,
     ):
         self.uuid = uuid
         self.dname = dname
         self.depth = depth
         self.lat = lat
         self.lng = lng
-        self.cloud_optimised = cloud_optimised
+        self.type = type
