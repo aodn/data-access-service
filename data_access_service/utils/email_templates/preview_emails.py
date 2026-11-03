@@ -2,7 +2,7 @@
 browser. No AWS/SES needed - it just calls the template functions directly.
 
 Run:  poetry run python data_access_service/utils/email_templates/preview_emails.py
-      (writes preview_email.html / preview_no_data_email.html to the current directory)
+      (writes success, no-data and error preview HTML to the current directory)
 Edit the SubsetRequest below to try different areas / dates / metadata.
 """
 
