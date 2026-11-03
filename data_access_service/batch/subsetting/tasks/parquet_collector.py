@@ -1,6 +1,9 @@
 from typing import List
 
 from data_access_service import Config, init_log
+from data_access_service.batch.subsetting.helpers.preparation_failure import (
+    raise_if_preparation_failed,
+)
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.email_templates.download_email import (
@@ -15,6 +18,11 @@ def collect_parquet_files(master_job_id: str, subset_request: SubsetRequest):
     config = Config.get_config()
     log = init_log(config)
     bucket_name = config.get_subsetting_bucket_name()
+
+    # A partial result would look complete to the user, so any failed
+    # preparation child fails the whole request.
+    raise_if_preparation_failed(aws, bucket_name, master_job_id)
+
     dataset: list[str] = aws.list_s3_folders(
         bucket_name=bucket_name, prefix=config.get_s3_temp_folder_name(master_job_id)
     )

@@ -45,16 +45,53 @@ from data_access_service.utils.email_templates.no_data_email import (
     NO_DATA_EMAIL_SUBJECT,
     get_no_data_email_html_body,
 )
+from data_access_service.utils.email_templates.error_email import (
+    ERROR_EMAIL_SUBJECT,
+    get_error_email_html_body,
+)
+from data_access_service.batch.subsetting.helpers.preparation_failure import (
+    record_preparation_failure,
+)
+
+
+def _notify_download_error(request: SubsetRequest) -> None:
+    """Send a processing failure notification without masking the original error."""
+    try:
+        AWSHelper().send_email(
+            recipient=request.recipient,
+            subject=ERROR_EMAIL_SUBJECT,
+            html_body=get_error_email_html_body(request),
+        )
+    except Exception:
+        logger = init_log(Config.get_config())
+        logger.exception("Failed to send download error email")
 
 
 # The only purpose is to create suitable number of child job, we can fine tune the value
 # on what is optimal value later
 def init(api: API, job_id_of_init, parameters, share_identifier: str | None = None):
+    # Step 1: Parse the raw parameters to SubsetRequest object. Without it
+    # there is no recipient, so a parsing failure sends no error email.
+    parsed_subset_request = get_subset_request(parameters)
+
+    # init runs once per request, so it emails directly; re-raise so Batch
+    # still marks the job FAILED.
+    try:
+        _init(api, job_id_of_init, parameters, parsed_subset_request, share_identifier)
+    except Exception:
+        _notify_download_error(parsed_subset_request)
+        raise
+
+
+def _init(
+    api: API,
+    job_id_of_init,
+    parameters,
+    parsed_subset_request: SubsetRequest,
+    share_identifier: str | None,
+):
     # Must be here, this give change for test to init properly before calling get_config()
     config = Config.get_config()
-
-    # Step 1: Parse the raw parameters to SubsetRequest object
-    parsed_subset_request = get_subset_request(parameters)
 
     # Step 2: A collection with no cloud-optimised data gets the list of its
     # original NetCDF files instead. The steps below read the cloud-optimised
@@ -194,10 +231,35 @@ def prepare_data(api: API, job_index: str | None, parameters) -> str | None:
     # get params
     request = get_subset_request(parameters)
     master_job_id = parameters[Parameters.MASTER_JOB_ID.value]
-    intermediate_output_folder = parameters[Parameters.INTERMEDIATE_OUTPUT_FOLDER.value]
 
     if job_index is None:
         job_index = "0"
+
+    # One request runs many of these children, so a child never emails. It
+    # records the failure and exits successfully, which lets the collection
+    # job run and send a single error email (see preparation_failure).
+    try:
+        return _prepare_data(api, logger, job_index, parameters, request, master_job_id)
+    except Exception as error:
+        logger.exception(
+            "Data preparation failed for child %s of job %s", job_index, master_job_id
+        )
+        if not record_preparation_failure(master_job_id, job_index, error):
+            # Without a marker the collection job cannot tell, so fail the
+            # child the usual way.
+            raise
+        return None
+
+
+def _prepare_data(
+    api: API,
+    logger,
+    job_index: str,
+    parameters,
+    request: SubsetRequest,
+    master_job_id: str,
+) -> str | None:
+    intermediate_output_folder = parameters[Parameters.INTERMEDIATE_OUTPUT_FOLDER.value]
 
     if Parameters.POLYGON_RANGES.value in parameters:
         return _prepare_polygon_range_data(
@@ -285,7 +347,14 @@ def _prepare_polygon_range_data(
 def collect_data(parameters):
     master_job_id = parameters[Parameters.MASTER_JOB_ID.value]
     request = get_subset_request(parameters)
-    collect_parquet_files(master_job_id=master_job_id, subset_request=request)
+    # Runs once per parquet request and also reports preparation failures
+    # (collect_parquet_files raises PreparationFailedError), so this is the
+    # single error email for the parquet path.
+    try:
+        collect_parquet_files(master_job_id=master_job_id, subset_request=request)
+    except Exception:
+        _notify_download_error(request)
+        raise
 
 
 def run_zarr_subset(
