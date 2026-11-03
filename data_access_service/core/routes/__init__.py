@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from data_access_service.config.config import Config
 from data_access_service.core.routes.data import router as data_router
+from data_access_service.core.routes.data_index import router as data_index_router
 from data_access_service.core.routes.estimation_index import (
     router as estimation_index_router,
 )
@@ -13,3 +14,4 @@ router.include_router(info_router)
 router.include_router(metadata_router)
 router.include_router(data_router)
 router.include_router(estimation_index_router)
+router.include_router(data_index_router)

@@ -24,12 +24,6 @@ USAGE_CONSTRAINTS_P1 = (
     "credit other organisations involved in collection of this particular "
     "datastream (as listed in 'credit' in the metadata record)."
 )
-USAGE_CONSTRAINTS_P2 = (
-    "If using data from the Ningaloo (TAN100) mooring, please add to the citation "
-    '- "Department of Jobs, Tourism, Science and Innovation (DJTSI), Western '
-    'Australian Government". If using data from the Ocean Reference Station 65m '
-    '(ORS065) mooring, please add to the citation - "Sydney Water Corporation".'
-)
 USAGE_CONSTRAINTS_P3 = (
     'Data, products and services from IMOS are provided "as is" without any '
     "warranty as to fitness for a particular purpose. By using this data you are "
@@ -155,9 +149,7 @@ def form_email_html(
     usage_constraints_section = (
         form_heading_div("Usage Constraints")
         + form_text_div(form_paragraph(USAGE_CONSTRAINTS_P1))
-        + form_text_div(
-            form_paragraph(USAGE_CONSTRAINTS_P2) + form_paragraph(USAGE_CONSTRAINTS_P3)
-        )
+        + form_text_div(form_paragraph(USAGE_CONSTRAINTS_P3))
     )
 
     return "\n".join(

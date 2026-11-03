@@ -20,15 +20,15 @@ def test_committed_config_loads():
 
 
 def test_seed_has_the_expected_specification_shape():
-    """19 specifications: 18 scalars plus one ordered pair. The pair is the one
+    """32 specifications: 31 scalars plus one ordered pair. The pair is the one
     that fans out across 19 differently-gridded stores, so its arity is what the
     per-product override in the products_customisation section exists to work around."""
     specs = _load_gridded_variable_specs()
     pairs = [s for s in specs if isinstance(s, list)]
     scalars = [s for s in specs if isinstance(s, str)]
 
-    assert len(specs) == 19
-    assert len(scalars) == 18
+    assert len(specs) == 32
+    assert len(scalars) == 31
     assert pairs == [["UCUR", "VCUR"]]
 
 

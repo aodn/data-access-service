@@ -10,6 +10,12 @@ from fastapi import FastAPI
 from data_access_service import Config
 from data_access_service.config.config import IntTestConfig
 from data_access_service.core.api import API
+from data_access_service.core.data_index import (
+    close_client as close_data_index_client,
+)
+from data_access_service.core.data_index import (
+    init_client as init_data_index_client,
+)
 from data_access_service.core.duckdbclients.sitedbclient import SitesDuckDBClient
 from data_access_service.core.estimation_index import (
     close_client as close_estimation_client,
@@ -94,6 +100,7 @@ async def lifespan(application: FastAPI):
             # instead of failing every parquet estimate at request time.
             init_estimation_client()
             init_tiler_duckdb_client()
+            init_data_index_client()
             application.state.sites_repositories = build_repositories(
                 sites_duckdb_session
             )
@@ -123,6 +130,7 @@ async def lifespan(application: FastAPI):
             scheduler.shutdown()
         close_estimation_client()
         close_tiler_duckdb_client()
+        close_data_index_client()
         if sites_duckdb_session:
             sites_duckdb_session.close()
         api.destroy()

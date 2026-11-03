@@ -8,6 +8,7 @@ from data_access_service.batch.subsetting.helpers.request_helper import (
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.utils.subset_request_resolver import (
     ResolvedSubsetRequest,
+    has_cloud_optimised_data,
     normalize_request,
     resolve_subset_request,
 )
@@ -26,6 +27,9 @@ from data_access_service.batch.subsetting.tasks.parquet_processor import (
     process_parquet_files,
 )
 from data_access_service.batch.subsetting.tasks.zarr_processor import ZarrProcessor
+from data_access_service.batch.subsetting.tasks.original_netcdf_processor import (
+    OriginalNetcdfProcessor,
+)
 from data_access_service.batch.subsetting.helpers.parquet_polygon_ranges import (
     list_polygon_values,
     split_polygon_ranges,
@@ -52,12 +56,19 @@ def init(api: API, job_id_of_init, parameters, share_identifier: str | None = No
     # Step 1: Parse the raw parameters to SubsetRequest object
     parsed_subset_request = get_subset_request(parameters)
 
-    # Step 2: Normalize the request which downstream jobs and result emails read these fields:
+    # Step 2: A collection with no cloud-optimised data gets the list of its
+    # original NetCDF files instead. The steps below read the cloud-optimised
+    # catalog, so this path stops here.
+    if not has_cloud_optimised_data(api, parsed_subset_request.uuid):
+        run_original_netcdf_download(job_id_of_init, parsed_subset_request)
+        return
+
+    # Step 3: Normalize the request which downstream jobs and result emails read these fields:
     #  1. Expand "*" keys
     #  2. Resolve "non-specified" dates to defaults
     subset_request = normalize_request(api, parsed_subset_request)
 
-    # Step 3: Resolve the normalized request into what will actually be
+    # Step 4: Resolve the normalized request into what will actually be
     # executed:
     #  1. Trim the date range to the dataset's temporal extent
     #  2. Parse the GeoJSON multi_polygon into bboxes
@@ -71,7 +82,7 @@ def init(api: API, job_id_of_init, parameters, share_identifier: str | None = No
         bboxes=subset_request.bboxes,
     )
 
-    # Step 4: If the requested data not available, email the user and stop here.
+    # Step 5: If the requested data not available, email the user and stop here.
     if not resolved_subset_request.has_data:
         AWSHelper().send_email(
             recipient=subset_request.recipient,
@@ -80,17 +91,17 @@ def init(api: API, job_id_of_init, parameters, share_identifier: str | None = No
         )
         return
 
-    # Step 5: Reject a key whose storage type cannot produce the requested
+    # Step 6: Reject a key whose storage type cannot produce the requested
     # format. For example, a .parquet key cannot produce a netcdf output.
     for key in resolved_subset_request.keys:
         check_key_supports_format(key, subset_request.output_format)
 
-    # Step 6: Process zarr sub-setting workflow, for zarr keys.
+    # Step 7: Process zarr sub-setting workflow, for zarr keys.
     if all(key.endswith(KEY_SUFFIX_ZARR) for key in resolved_subset_request.keys):
         run_zarr_subset(api, job_id_of_init, subset_request, resolved_subset_request)
         return
 
-    # Step 7: Process legacy sub-setting workflow, for parquet keys.
+    # Step 8: Process legacy sub-setting workflow, for parquet keys.
     #  1. Split the date range into chunks, or the polygon partitions when the
     #     dataset has no time column to split on
     #  2. Submit the data preparation job
@@ -285,3 +296,9 @@ def run_zarr_subset(
     ZarrProcessor(
         api=api, job_id=job_id, subset_request=request, resolved=resolved
     ).process()
+
+
+def run_original_netcdf_download(job_id: str, request: SubsetRequest) -> None:
+    """Email the list of the collection's original NetCDF files that match
+    the request. For a collection with no cloud-optimised data."""
+    OriginalNetcdfProcessor(job_id=job_id, subset_request=request).process()

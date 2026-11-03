@@ -35,6 +35,54 @@ TIMELESS_DATE_PERIOD = 19700101  # → c tree 1970/01/01
 TIMELESS_MONTH_PERIOD = 197001  # → c tree 1970/01
 TIMELESS_YEAR_PERIOD = 1970  # → c tree 1970
 
+
+@dataclass(frozen=True)
+class TimeExtent:
+    """The temporal cover of a dataset as the UI consumes it.
+
+    This is the slice of metadata the PMTiles sidecar, the estimation sidecar,
+    and the data-index time-extent API all share: a ``min_date`` / ``max_date``
+    pair of ``YYYYMMDD`` integer day keys plus ``has_time``.
+
+    ``has_time`` is False when the source has no usable time (no TIME column, or
+    every ``time_coverage_*`` value was null). ``min_date`` and ``max_date`` are
+    still integers in that case - ``TIMELESS_DATE_PERIOD`` (19700101), never null -
+    so a consumer can read them without a None check but must not filter on them.
+    A real single-day archive keeps ``has_time=True`` even when
+    ``min_date == max_date``.
+    """
+
+    min_date: int
+    max_date: int
+    has_time: bool = True
+
+    @classmethod
+    def timeless(cls) -> "TimeExtent":
+        """No filterable time: both bounds are the synthetic stand-in day."""
+        return cls(TIMELESS_DATE_PERIOD, TIMELESS_DATE_PERIOD, False)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "min_date": self.min_date,
+            "max_date": self.max_date,
+            "has_time": self.has_time,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TimeExtent":
+        # Older artefacts may omit has_time; treat as timed (true).
+        has_time_raw = data.get("has_time", True)
+        if isinstance(has_time_raw, str):
+            has_time = has_time_raw.strip().lower() in ("1", "true", "yes")
+        else:
+            has_time = bool(has_time_raw)
+        return cls(
+            min_date=int(data["min_date"]),
+            max_date=int(data["max_date"]),
+            has_time=has_time,
+        )
+
+
 # Feature property holding the nested counts tree (JSON string for MVT).
 COUNTS_PROPERTY = "c"
 # Year/month total key inside the nested tree (not a calendar key).
@@ -62,30 +110,32 @@ class PmtilesSidecarMetadata:
     # the None and UI need to aware that the date value is created not real.
     has_time: bool = True
 
+    @property
+    def time_extent(self) -> TimeExtent:
+        """The shared (min_date, max_date, has_time) view of this sidecar."""
+        return TimeExtent(
+            min_date=self.min_date, max_date=self.max_date, has_time=self.has_time
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """JSON-serialisable dict (``time_group_by`` as its string value)."""
         return {
-            "min_date": self.min_date,
-            "max_date": self.max_date,
+            **self.time_extent.to_dict(),
             "time_group_by": self.time_group_by.value,
-            "has_time": self.has_time,
             "last_updated": self.last_updated,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PmtilesSidecarMetadata":
-        # Older sidecars omit has_time; treat as timed (true).
-        has_time_raw = data.get("has_time", True)
-        if isinstance(has_time_raw, str):
-            has_time = has_time_raw.strip().lower() in ("1", "true", "yes")
-        else:
-            has_time = bool(has_time_raw)
+        # Older sidecars omit has_time; TimeExtent treats that as timed (true)
+        # and owns the string/bool coercion so every artefact reads it the same.
+        extent = TimeExtent.from_dict(data)
         return cls(
-            min_date=int(data["min_date"]),
-            max_date=int(data["max_date"]),
+            min_date=extent.min_date,
+            max_date=extent.max_date,
             time_group_by=TimeGroupBy(data["time_group_by"]),
             last_updated=str(data["last_updated"]),
-            has_time=has_time,
+            has_time=extent.has_time,
         )
 
 
