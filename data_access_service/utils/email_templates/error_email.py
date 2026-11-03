@@ -6,7 +6,6 @@ ERROR_EMAIL_SUBJECT = "Error Processing Your Download Request"
 
 
 def get_error_email_html_body(subset_request: SubsetRequest) -> str:
-    """The download error email: the shared body with its own intro."""
     intro = (
         form_paragraph("Hi,")
         + form_paragraph("&nbsp;")

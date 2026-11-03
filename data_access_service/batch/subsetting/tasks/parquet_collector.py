@@ -19,8 +19,6 @@ def collect_parquet_files(master_job_id: str, subset_request: SubsetRequest):
     log = init_log(config)
     bucket_name = config.get_subsetting_bucket_name()
 
-    # A partial result would look complete to the user, so any failed
-    # preparation child fails the whole request.
     raise_if_preparation_failed(aws, bucket_name, master_job_id)
 
     dataset: list[str] = aws.list_s3_folders(
