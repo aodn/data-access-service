@@ -10,7 +10,6 @@ The table's physical_dataset_id is not used: the data team says it is a
 system placeholder (always __DEFAULT__), not meant for users.
 """
 
-import logging
 from typing import Any, List, Optional
 
 import pandas as pd
@@ -20,8 +19,6 @@ from data_access_service.core.duckdbclients.dataindexclients import (
 )
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.models.data_index_types import DataIndexFile
-
-logger = logging.getLogger(__name__)
 
 # Value of the table's ``format`` column for a NetCDF file.
 NETCDF_FORMAT = "nc"
@@ -116,9 +113,10 @@ def find_data_index_files(
 ) -> List[DataIndexFile]:
     """The current files of ``uuid`` that overlap ``start..end`` and any of ``bboxes``.
 
-    A file with no time (when a time is given) or no bbox (when an area is
-    given) cannot be matched, so it is left out. The count of those rows is
-    logged. With no filter, every file is listed, even one with no time or bbox.
+    A file with no time in the index skips the time filter, and a file with no
+    bbox skips the area filter, so it is always listed. For now the portal
+    shows the time and area selectors even when a collection has no time or
+    bbox; the request range is ignored for those files.
 
     :param start: the request start; None means no lower time bound
     :param end: the request end; None means no upper time bound
@@ -127,41 +125,23 @@ def find_data_index_files(
     params: List[Any] = [uuid, NETCDF_FORMAT]
     # TRUE keeps the WHERE valid when there is no filter.
     where = ["TRUE"]
-    missing: List[str] = []
     if start is not None:
-        where.append("t_end >= ?")
+        where.append("(t_end IS NULL OR t_end >= ?)")
         params.append(start)
-        missing.append("t_end IS NULL")
     if end is not None:
-        where.append("t_start <= ?")
+        where.append("(t_start IS NULL OR t_start <= ?)")
         params.append(end)
-        missing.append("t_start IS NULL")
     if bboxes:
-        where.append(_bbox_sql(bboxes, params))
-        missing += [
+        no_bbox = " OR ".join(
             f"{column} IS NULL"
             for column in ("lat_min", "lat_max", "lon_min", "lon_max")
-        ]
+        )
+        where.append(f"({no_bbox} OR {_bbox_sql(bboxes, params)})")
 
     files_sql = _files_sql(client.qualified_table, client.qualified_s3_metadata_table)
     rows = client.execute(
         f"{files_sql} SELECT * FROM f WHERE {' AND '.join(where)} ORDER BY key",
         params,
     ).fetchall()
-
-    # Only for the log, so no join: it scans the whole live inventory again.
-    # Old versions are counted too. Nothing is left out with no filter.
-    if missing:
-        skipped = client.execute(
-            f"{_files_sql(client.qualified_table)} SELECT count(*) FROM f"
-            f" WHERE {' OR '.join(missing)}",
-            [uuid, NETCDF_FORMAT],
-        ).fetchone()[0]
-        if skipped:
-            logger.warning(
-                "uuid=%s: %d rows skipped, no time or bbox in the data index",
-                uuid,
-                skipped,
-            )
 
     return [DataIndexFile(*row) for row in rows]

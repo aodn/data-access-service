@@ -118,15 +118,19 @@ class DataIndexProcessor:
     def __time_range(
         self,
     ) -> Tuple[Optional[pd.Timestamp], Optional[pd.Timestamp]]:
-        """The request's UTC bounds; (None, None) when the user set no time.
+        """The request's UTC bounds; None for a side left "non-specified".
 
-        No time filter then, so files with no time in the index are listed too.
+        No bound on that side, so no file is dropped there: the default
+        1970..today would drop older files (e.g. NRS data from 1944).
         """
         start_date = self.subset_request.start_date
         end_date = self.subset_request.end_date
-        if start_date == NON_SPECIFIED and end_date == NON_SPECIFIED:
-            return None, None
-        return to_utc_bounds(*resolve_non_specified_dates(start_date, end_date))
+        # to_utc_bounds needs both sides, so an open side is filled, then dropped.
+        start, end = to_utc_bounds(*resolve_non_specified_dates(start_date, end_date))
+        return (
+            None if start_date == NON_SPECIFIED else start,
+            None if end_date == NON_SPECIFIED else end,
+        )
 
     def __find_files(self) -> List[DataIndexFile]:
         start, end = self.__time_range()

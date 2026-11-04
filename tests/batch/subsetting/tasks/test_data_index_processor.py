@@ -124,9 +124,36 @@ def test_no_time_set_means_no_time_filter(monkeypatch, aws):
 
     DataIndexProcessor(job_id="job-1", subset_request=request).process()
 
-    # Not 1970..today, which would drop the files with no time in the index.
+    # Not 1970..today, which would drop files from before 1970.
     assert find.call_args.kwargs["start"] is None
     assert find.call_args.kwargs["end"] is None
+
+
+@pytest.mark.parametrize(
+    "start_date, end_date, expected_start, expected_end",
+    [
+        # Only an end: no lower bound, so files from 1944 are still listed.
+        (
+            NON_SPECIFIED,
+            "2020-01-31",
+            None,
+            pd.Timestamp("2020-01-31 23:59:59.999999999", tz="UTC"),
+        ),
+        # Only a start: no upper bound.
+        ("2020-01-01", NON_SPECIFIED, pd.Timestamp("2020-01-01", tz="UTC"), None),
+    ],
+)
+def test_open_side_has_no_bound(
+    monkeypatch, aws, start_date, end_date, expected_start, expected_end
+):
+    find = _found(monkeypatch, [FILE])
+    aws.upload_file_to_s3.return_value = LIST_URL
+    request = replace(_request(), start_date=start_date, end_date=end_date)
+
+    DataIndexProcessor(job_id="job-1", subset_request=request).process()
+
+    assert find.call_args.kwargs["start"] == expected_start
+    assert find.call_args.kwargs["end"] == expected_end
 
 
 def test_file_with_no_time_or_bbox_has_empty_cells(monkeypatch, aws):
