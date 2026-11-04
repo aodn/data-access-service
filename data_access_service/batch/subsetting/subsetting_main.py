@@ -59,7 +59,7 @@ def _notify_download_error(request: SubsetRequest) -> None:
     try:
         AWSHelper().send_email(
             recipient=request.recipient,
-            subject=ERROR_EMAIL_SUBJECT,
+            subject=ERROR_EMAIL_SUBJECT.format(uuid=request.uuid),
             html_body=get_error_email_html_body(request),
         )
     except Exception:

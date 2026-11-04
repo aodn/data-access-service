@@ -2,7 +2,7 @@ from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.email_templates.form_email_body import form_email_html
 from data_access_service.utils.email_templates.form_section_divs import form_paragraph
 
-ERROR_EMAIL_SUBJECT = "Error Processing Your Download Request"
+ERROR_EMAIL_SUBJECT = "Error processing data file whose uuid is: {uuid}"
 
 
 def get_error_email_html_body(subset_request: SubsetRequest) -> str:

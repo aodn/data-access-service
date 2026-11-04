@@ -5,6 +5,9 @@ from data_access_service.utils.date_time_utils import ensure_timezone, to_utc_bo
 from data_access_service.utils.email_templates.subsetting_geometry import (
     split_bboxes_and_polygons,
 )
+from data_access_service.utils.email_templates.form_section_divs import (
+    SECTION_HEADING_STYLE,
+)
 
 logger = logging.getLogger(__name__)
 from data_access_service.utils.email_templates.form_bbox_divs import form_bbox_divs
@@ -214,8 +217,8 @@ def form_subsetting_divs(start_date, end_date, multi_polygon):
                                                 <table border="0" cellpadding="0" cellspacing="0" width="100%">
                                                     <tr>
                                                         <td align="left" width="100%">
-                                                            <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 17px; font-weight: 500; line-height: 141%; text-align: left; color: #090c02">
-                                                                <p style="Margin:0;mso-line-height-alt:24px;font-size:17px;line-height:141%;">Subsetting for this collection</p>
+                                                            <div style="{SECTION_HEADING_STYLE}text-align:left;">
+                                                                <p style="Margin:0;mso-line-height-alt:24px;{SECTION_HEADING_STYLE}">Subsetting for this collection:</p>
                                                             </div>
                                                         </td>
                                                     </tr>

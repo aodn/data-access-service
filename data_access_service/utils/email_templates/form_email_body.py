@@ -1,7 +1,10 @@
 """The shared email body: every email type looks the same; only the intro
 under "Hi," (and the optional download button) differs."""
 
+from html import escape
+
 from data_access_service.models.subset_request import SubsetRequest
+from data_access_service.utils.file_naming import dataset_base_name
 from data_access_service.utils.email_templates.email_layout import (
     EMAIL_HEAD,
     EMAIL_HEADER,
@@ -118,16 +121,24 @@ def form_email_html(
     """Assemble a full email around the per-email intro (and optional
     download button)."""
 
-    collection_section = form_heading_div("Collection", top_padding=4) + form_text_div(
-        form_paragraph(subset_request.collection_title or "")
-        + form_paragraph(f"UUID:&nbsp; {subset_request.uuid}", margin="8px 0 0 0")
+    collection_title = escape(subset_request.collection_title or "")
+    metadata_link = subset_request.full_metadata_link
+    if metadata_link:
+        collection_title = (
+            f'<a href="{escape(metadata_link, quote=True)}" '
+            f'style="color:#2571e9;text-decoration:underline;">{collection_title}</a>'
+        )
+    collection_section = form_heading_div("Dataset:", top_padding=4) + form_text_div(
+        form_paragraph(collection_title)
     )
 
-    data_selection_section = form_heading_div("Data Selection") + form_text_div(
-        form_paragraph("<br>".join(subset_request.keys))
+    data_selection_section = form_heading_div("Data Selection:") + form_text_div(
+        form_paragraph(
+            "<br>".join(escape(dataset_base_name(key)) for key in subset_request.keys)
+        )
     )
 
-    format_section = form_heading_div("Format") + form_text_div(
+    format_section = form_heading_div("Format:") + form_text_div(
         form_paragraph((subset_request.output_format or "").upper())
     )
 
@@ -135,19 +146,12 @@ def form_email_html(
         subset_request.start_date, subset_request.end_date, subset_request.multi_polygon
     )
 
-    metadata_link = subset_request.full_metadata_link or ""
-    metadata_section = form_heading_div("Metadata") + form_text_div(
-        form_paragraph(
-            f'<a href="{metadata_link}" style="color:#2571e9;text-decoration:underline;">{metadata_link}</a>'
-        )
-    )
-
-    citation_section = form_heading_div("Suggested Citation") + form_text_div(
+    citation_section = form_heading_div("Suggested Citation:") + form_text_div(
         form_paragraph(subset_request.suggested_citation or "")
     )
 
     usage_constraints_section = (
-        form_heading_div("Usage Constraints")
+        form_heading_div("Usage Constraints:")
         + form_text_div(form_paragraph(USAGE_CONSTRAINTS_P1))
         + form_text_div(form_paragraph(USAGE_CONSTRAINTS_P3))
     )
@@ -162,7 +166,6 @@ def form_email_html(
             data_selection_section,
             format_section,
             subsetting_section,
-            metadata_section,
             citation_section,
             usage_constraints_section,
             form_sign_off_div(),

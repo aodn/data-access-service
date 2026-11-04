@@ -123,6 +123,28 @@ EMAIL_HEAD = """<!doctype html>
     <meta name="x-apple-disable-message-reformatting">
     <meta name="color-scheme" content="light dark">
     <meta name="supported-color-schemes" content="light dark">
+    <style type="text/css">
+        @media (prefers-color-scheme: dark) {
+            .c.contact-button {
+                background:#fff !important;
+                background-color:#fff !important;
+                border-radius:8px !important;
+            }
+            .contact-button, .contact-button-label {
+                color:#090C02 !important;
+            }
+        }
+        /* Outlook clients expose these attributes when applying dark mode. */
+        [data-ogsc] .c.contact-button, [data-ogsb] .c.contact-button {
+            background:#fff !important;
+            background-color:#fff !important;
+            border-radius:8px !important;
+        }
+        [data-ogsc] .contact-button, [data-ogsb] .contact-button,
+        [data-ogsc] .contact-button-label, [data-ogsb] .contact-button-label {
+            color:#090C02 !important;
+        }
+    </style>
     <!--[if gte mso 9]>
     <style>
         a:link {
@@ -158,11 +180,11 @@ EMAIL_HEADER = f"""<body lang="en" link="#DD0000" vlink="#DD0000" class="emailif
         <tr>
             <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
     <![endif]-->
-    <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:600px;">
-        <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#fffffe;background-color:#fffffe;width:100%;">
+    <div class="r e y" style="background:#ffffff;background-color:#ffffff;margin:0px auto;max-width:600px;">
+        <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" bgcolor="#ffffff" style="background:#ffffff;background-color:#ffffff;width:100%;">
             <tbody>
             <tr>
-                <td style="border-bottom:1px solid #bfbfbf;border-left:none;border-right:none;border-top:none;direction:ltr;font-size:0;padding:24px 16px 24px 16px;text-align:center;">
+                <td bgcolor="#ffffff" style="background-color:#ffffff;border-bottom:1px solid #bfbfbf;border-left:none;border-right:none;border-top:none;direction:ltr;font-size:0;padding:24px 16px 24px 16px;text-align:center;">
                     <!--[if mso | IE]>
                     <table role="presentation" border="0" cellpadding="0" cellspacing="0">
                         <tr>
@@ -176,7 +198,7 @@ EMAIL_HEADER = f"""<body lang="en" link="#DD0000" vlink="#DD0000" class="emailif
                                     <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;border-spacing:0;" class="mq">
                                         <tbody>
                                         <tr>
-                                            <td style="width:344px;" class="mq">
+                                            <td bgcolor="#ffffff" style="width:344px;background-color:#ffffff;" class="mq">
                                                 <img alt src="data:image/png;base64,{HEADER_IMG}" style="border:0;display:block;outline:none;text-decoration:none;height:auto;width:100%;font-size:13px;" width="344">
                                             </td>
                                         </tr>
@@ -330,7 +352,7 @@ EMAIL_FOOTER = f"""                    <!--[if mso | IE]>
                                     <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:separate;width:117px;line-height:100%;">
                                         <tbody>
                                         <tr>
-                                            <td align="center" bgcolor="#595959" class="c" role="presentation" style="background:#595959;border:none;border-radius:8px 8px 8px 8px;cursor:auto;mso-padding-alt:8px 0px 8px 0px;vertical-align:middle;" valign="middle">
+                                            <td align="center" bgcolor="#595959" class="c contact-button" role="presentation" style="background:#595959;border:none;border-radius:8px 8px 8px 8px;cursor:auto;mso-padding-alt:8px 0px 8px 0px;vertical-align:middle;" valign="middle">
                                                 <!--[if mso]>
                                                 <v:roundrect style="width:115px;height:38px;v-text-anchor:middle;" arcsize="42%" fill="t" stroke="f" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word">
                                                     <w:anchorlock/>
@@ -338,8 +360,8 @@ EMAIL_FOOTER = f"""                    <!--[if mso | IE]>
                                                     <v:textbox inset="0,0,0,0">
                                                         <center>
                                                 <![endif]-->
-                                                <a href="mailto:info@aodn.org.au" class="c" style="display:inline-block;width:117px;background-color:#595959;color:#ffffff;font-family:'Open Sans', 'Arial', sans-serif;font-size:13px;font-weight:normal;line-height:100%;margin:0;text-decoration:none;text-transform:none;padding:8px 0px 8px 0px;mso-padding-alt:0;border-radius:8px 8px 8px 8px;" target="_blank">
-                                                    <span style="font-size:14px;font-family:'Open Sans', 'Arial', sans-serif;font-weight:500;color:#ffffff;line-height:157%;mso-line-height-alt:22px;">Contact Us</span>
+                                                <a href="mailto:info@aodn.org.au" class="c contact-button" style="display:inline-block;width:117px;background-color:#595959;color:#ffffff;font-family:'Open Sans', 'Arial', sans-serif;font-size:13px;font-weight:normal;line-height:100%;margin:0;text-decoration:none;text-transform:none;padding:8px 0px 8px 0px;mso-padding-alt:0;border-radius:8px 8px 8px 8px;" target="_blank">
+                                                    <span class="contact-button-label" style="font-size:14px;font-family:'Open Sans', 'Arial', sans-serif;font-weight:500;color:#ffffff;line-height:157%;mso-line-height-alt:22px;">Contact Us</span>
                                                 </a>
                                                 <!--[if mso]>
                                                 </center>
