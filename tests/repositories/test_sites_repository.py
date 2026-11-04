@@ -30,7 +30,7 @@ class _GroupedRepo(ParquetRepository):
     latitude_column = "LATITUDE"
     longitude_column = "LONGITUDE"
     value_columns = ("TEMP", "PSAL")
-    group_column = "NOMINAL_DEPTH"
+    group_columns = ("NOMINAL_DEPTH",)
 
 
 class _UngroupedRepo(ParquetRepository):
@@ -60,7 +60,7 @@ class _QcRepo(ParquetRepository):
     site_column = "site_code"
     latitude_column = "LATITUDE"
     longitude_column = "LONGITUDE"
-    group_column = "NOMINAL_DEPTH"
+    group_columns = ("NOMINAL_DEPTH",)
     value_columns = ("TEMP", "PSAL")
     value_columns_quality_control_columns = (
         "TEMP_quality_control",
@@ -125,9 +125,9 @@ def test_subclass_missing_required_attr_raises_typeerror():
     assert "must define class attributes" in str(excinfo.value)
 
 
-def test_group_column_is_optional():
-    # _UngroupedRepo never sets group_column; it should default to None, not raise.
-    assert _UngroupedRepo.group_column is None
+def test_group_columns_is_optional():
+    # _UngroupedRepo never sets group_columns; it should default to (), not raise.
+    assert _UngroupedRepo.group_columns == ()
 
 
 def test_abstract_base_cannot_be_instantiated(session):
@@ -268,6 +268,25 @@ def test_qc_columns_length_must_match_value_columns_or_be_empty():
             value_columns_quality_control_columns = ("TEMP_quality_control",)
 
     assert "value_columns_quality_control_columns" in str(excinfo.value)
+
+
+def test_group_columns_over_limit_raises_typeerror():
+    with pytest.raises(TypeError) as excinfo:
+
+        class _TooManyGroupsRepo(ParquetRepository):
+            table = "x"
+            bucket = "test-bucket"
+            snapshot_bucket = "test-snapshot"
+            dataset = "s3://test-bucket/x.parquet"
+            snapshot_dataset = "s3://test-snapshot/x.parquet"
+            time_column = "TIME"
+            site_column = "site_code"
+            latitude_column = "LATITUDE"
+            longitude_column = "LONGITUDE"
+            value_columns = ("TEMP",)
+            group_columns = ("a", "b", "c")
+
+    assert "group_columns allows at most 2" in str(excinfo.value)
 
 
 def test_load_columns_includes_qc_columns(session):

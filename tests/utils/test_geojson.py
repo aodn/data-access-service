@@ -134,7 +134,7 @@ def test_details_grouped_nests_series_per_group():
         longitude_column="LONGITUDE",
         latitude_column="LATITUDE",
         value_columns=["TEMP"],
-        group_column="NOMINAL_DEPTH",
+        group_columns=("NOMINAL_DEPTH",),
     )
     assert feature["type"] == "Feature"
     assert feature["geometry"]["coordinates"] == [150.0, -30.0]
@@ -153,7 +153,7 @@ def test_details_grouped_float32_key_is_rounded():
         longitude_column="LONGITUDE",
         latitude_column="LATITUDE",
         value_columns=["TEMP"],
-        group_column="NOMINAL_DEPTH",
+        group_columns=("NOMINAL_DEPTH",),
     )
     assert set(feature["properties"]) == {"NOMINAL_DEPTH_0.9", "NOMINAL_DEPTH_0.5"}
 
@@ -173,14 +173,14 @@ def test_details_ungrouped_series_directly_in_properties():
         longitude_column="LONGITUDE",
         latitude_column="LATITUDE",
         value_columns=["WHTH"],
-        group_column=None,
+        group_columns=(),
     )
     # series sit directly under properties (no depth nesting)
     assert "WHTH" in feature["properties"]
     assert len(feature["properties"]["WHTH"]) == 2
 
 
-def test_details_excludes_group_column_from_values():
+def test_details_excludes_group_columns_from_values():
     feature = site_details_feature_collection(
         _details_rows(),
         time_column="TIME",
@@ -188,7 +188,7 @@ def test_details_excludes_group_column_from_values():
         latitude_column="LATITUDE",
         # group column passed in value_columns must be dropped, not emitted as a series
         value_columns=["TEMP", "NOMINAL_DEPTH"],
-        group_column="NOMINAL_DEPTH",
+        group_columns=("NOMINAL_DEPTH",),
     )
     one_group = feature["properties"]["NOMINAL_DEPTH_10"]
     assert "NOMINAL_DEPTH" not in one_group
@@ -211,6 +211,6 @@ def test_details_empty_frame_has_null_geometry():
         longitude_column="LONGITUDE",
         latitude_column="LATITUDE",
         value_columns=["TEMP"],
-        group_column="NOMINAL_DEPTH",
+        group_columns=("NOMINAL_DEPTH",),
     )
     assert feature == {"type": "Feature", "properties": {}, "geometry": None}
