@@ -72,7 +72,7 @@ def run_stage(monkeypatch, workflow, stage, process):
             "normalize": "normalize_request",
             "resolve": "resolve_subset_request",
             "zarr": "run_zarr_subset",
-            "original": "run_original_netcdf_download",
+            "original": "run_data_index_download",
         }
         if stage == "original":
             monkeypatch.setattr(
