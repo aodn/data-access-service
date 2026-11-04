@@ -9,6 +9,9 @@ from data_access_service.utils.email_templates.download_email import (
 from data_access_service.utils.email_templates.no_data_email import (
     get_no_data_email_html_body,
 )
+from data_access_service.utils.email_templates.error_email import (
+    get_error_email_html_body,
+)
 
 
 def write_email_previews(
@@ -18,6 +21,7 @@ def write_email_previews(
     previews = {
         "preview_email.html": get_download_email_html_body(subset_request, object_urls),
         "preview_no_data_email.html": get_no_data_email_html_body(subset_request),
+        "preview_error_email.html": get_error_email_html_body(subset_request),
     }
 
     paths = []
