@@ -146,6 +146,39 @@ def test_files_without_time_are_left_out_and_counted(client, caplog):
     assert "2 rows skipped" in caplog.text
 
 
+def test_no_time_keeps_files_without_time(client, caplog):
+    _insert(client, "inside.nc")
+    _insert(client, "no_time.nc", start=None, end=None)
+    _insert(client, "number_time.nc", start="23456.789", end="23457.789")
+    _insert(client, "no_time_no_bbox.nc", start=None, end=None, lat=(None, None))
+
+    with caplog.at_level(logging.WARNING):
+        files = find_data_index_files(client, UUID)
+
+    # No filter: every file, like Argo, whose files have no time or bbox.
+    assert _keys(files) == [
+        "inside.nc",
+        "no_time.nc",
+        "no_time_no_bbox.nc",
+        "number_time.nc",
+    ]
+    assert files[1].time_coverage_start is None
+    assert "skipped" not in caplog.text
+
+
+def test_open_time_bound_only_filters_the_given_side(client):
+    _insert(
+        client, "before.nc", start="2019-01-01T00:00:00Z", end="2019-12-31T00:00:00Z"
+    )
+    _insert(client, "inside.nc")
+
+    assert _keys(find_data_index_files(client, UUID, start=START)) == ["inside.nc"]
+    assert _keys(find_data_index_files(client, UUID, end=END)) == [
+        "before.nc",
+        "inside.nc",
+    ]
+
+
 def test_leaves_out_old_versions_and_deleted_files(client):
     # The mapping table keeps them; the live inventory does not.
     _insert(client, "updated.nc", version="v1", live=False)

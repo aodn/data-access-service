@@ -110,20 +110,32 @@ def list_data_index_uuids(client: DataIndexDuckDBClient) -> frozenset[str]:
 def find_data_index_files(
     client: DataIndexDuckDBClient,
     uuid: str,
-    start: pd.Timestamp,
-    end: pd.Timestamp,
+    start: Optional[pd.Timestamp] = None,
+    end: Optional[pd.Timestamp] = None,
     bboxes: Optional[List[BoundingBox]] = None,
 ) -> List[DataIndexFile]:
     """The current files of ``uuid`` that overlap ``start..end`` and any of ``bboxes``.
 
-    A file with no time (or no bbox, when an area is given) cannot be matched,
-    so it is left out. The count of those rows is logged.
+    A file with no time (when a time is given) or no bbox (when an area is
+    given) cannot be matched, so it is left out. The count of those rows is
+    logged. With no filter, every file is listed, even one with no time or bbox.
 
+    :param start: the request start; None means no lower time bound
+    :param end: the request end; None means no upper time bound
     :param bboxes: the request area; empty or None means no area filter
     """
-    params: List[Any] = [uuid, NETCDF_FORMAT, end, start]
-    where = ["t_start <= ?", "t_end >= ?"]
-    missing = ["t_start IS NULL", "t_end IS NULL"]
+    params: List[Any] = [uuid, NETCDF_FORMAT]
+    # TRUE keeps the WHERE valid when there is no filter.
+    where = ["TRUE"]
+    missing: List[str] = []
+    if start is not None:
+        where.append("t_end >= ?")
+        params.append(start)
+        missing.append("t_end IS NULL")
+    if end is not None:
+        where.append("t_start <= ?")
+        params.append(end)
+        missing.append("t_start IS NULL")
     if bboxes:
         where.append(_bbox_sql(bboxes, params))
         missing += [
@@ -138,17 +150,18 @@ def find_data_index_files(
     ).fetchall()
 
     # Only for the log, so no join: it scans the whole live inventory again.
-    # Old versions are counted too.
-    skipped = client.execute(
-        f"{_files_sql(client.qualified_table)} SELECT count(*) FROM f"
-        f" WHERE {' OR '.join(missing)}",
-        [uuid, NETCDF_FORMAT],
-    ).fetchone()[0]
-    if skipped:
-        logger.warning(
-            "uuid=%s: %d rows skipped, no time or bbox in the data index",
-            uuid,
-            skipped,
-        )
+    # Old versions are counted too. Nothing is left out with no filter.
+    if missing:
+        skipped = client.execute(
+            f"{_files_sql(client.qualified_table)} SELECT count(*) FROM f"
+            f" WHERE {' OR '.join(missing)}",
+            [uuid, NETCDF_FORMAT],
+        ).fetchone()[0]
+        if skipped:
+            logger.warning(
+                "uuid=%s: %d rows skipped, no time or bbox in the data index",
+                uuid,
+                skipped,
+            )
 
     return [DataIndexFile(*row) for row in rows]

@@ -16,7 +16,7 @@ from data_access_service.batch.subsetting.tasks.data_index_processor import (
 )
 from data_access_service.core.data_index_files import ORIGINAL_NETCDF_KEY
 from data_access_service.models.data_index_types import DataIndexFile
-from data_access_service.models.subset_request import SubsetRequest
+from data_access_service.models.subset_request import NON_SPECIFIED, SubsetRequest
 from data_access_service.utils.email_templates.no_data_email import (
     NO_DATA_EMAIL_SUBJECT,
 )
@@ -115,6 +115,46 @@ def test_files_are_uploaded_as_zipped_csv_and_emailed(monkeypatch, aws):
     assert LIST_URL in aws.send_email.call_args.kwargs["html_body"]
     # The email shows the actual key, not "*".
     assert ORIGINAL_NETCDF_KEY in aws.send_email.call_args.kwargs["html_body"]
+
+
+def test_no_time_set_means_no_time_filter(monkeypatch, aws):
+    find = _found(monkeypatch, [FILE])
+    aws.upload_file_to_s3.return_value = LIST_URL
+    request = replace(_request(), start_date=NON_SPECIFIED, end_date=NON_SPECIFIED)
+
+    DataIndexProcessor(job_id="job-1", subset_request=request).process()
+
+    # Not 1970..today, which would drop the files with no time in the index.
+    assert find.call_args.kwargs["start"] is None
+    assert find.call_args.kwargs["end"] is None
+
+
+def test_file_with_no_time_or_bbox_has_empty_cells(monkeypatch, aws):
+    no_time = replace(
+        FILE,
+        time_coverage_start=None,
+        time_coverage_end=None,
+        lat_min=None,
+        lat_max=None,
+        lon_min=None,
+        lon_max=None,
+    )
+    _found(monkeypatch, [no_time])
+    rows = {}
+
+    def upload(path, bucket, key):
+        with zipfile.ZipFile(path) as zf:
+            rows["all"] = list(
+                csv.reader(io.TextIOWrapper(zf.open(zf.namelist()[0]), "utf-8"))
+            )
+        return LIST_URL
+
+    aws.upload_file_to_s3.side_effect = upload
+
+    DataIndexProcessor(job_id="job-1", subset_request=_request()).process()
+
+    _, row = rows["all"]
+    assert row[2:] == ["", "", "", "", "", ""]
 
 
 def test_the_original_netcdfs_key_is_listed(monkeypatch, aws):

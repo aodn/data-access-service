@@ -10,9 +10,12 @@ import io
 import tempfile
 import zipfile
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple
 from urllib.parse import quote
+
+import pandas as pd
 
 from data_access_service import init_log, Config
 from data_access_service.core.AWSHelper import AWSHelper
@@ -24,7 +27,7 @@ from data_access_service.core.data_index_files import (
     find_data_index_files,
 )
 from data_access_service.models.data_index_types import DataIndexFile
-from data_access_service.models.subset_request import SubsetRequest
+from data_access_service.models.subset_request import NON_SPECIFIED, SubsetRequest
 from data_access_service.utils.date_time_utils import (
     resolve_non_specified_dates,
     to_utc_bounds,
@@ -47,6 +50,11 @@ FILE_LIST_COLUMNS = [
     "geospatial_lon_min",
     "geospatial_lon_max",
 ]
+
+
+def _iso(value: Optional[datetime]) -> str:
+    """A CSV cell for a time; empty when the index has no time for the file."""
+    return value.isoformat() if value is not None else ""
 
 
 class DataIndexProcessor:
@@ -107,12 +115,21 @@ class DataIndexProcessor:
             ),
         )
 
+    def __time_range(
+        self,
+    ) -> Tuple[Optional[pd.Timestamp], Optional[pd.Timestamp]]:
+        """The request's UTC bounds; (None, None) when the user set no time.
+
+        No time filter then, so files with no time in the index are listed too.
+        """
+        start_date = self.subset_request.start_date
+        end_date = self.subset_request.end_date
+        if start_date == NON_SPECIFIED and end_date == NON_SPECIFIED:
+            return None, None
+        return to_utc_bounds(*resolve_non_specified_dates(start_date, end_date))
+
     def __find_files(self) -> List[DataIndexFile]:
-        start, end = to_utc_bounds(
-            *resolve_non_specified_dates(
-                self.subset_request.start_date, self.subset_request.end_date
-            )
-        )
+        start, end = self.__time_range()
         with DataIndexDuckDBClient() as client:
             files = find_data_index_files(
                 client,
@@ -149,8 +166,8 @@ class DataIndexProcessor:
                             [
                                 self.__file_url(file),
                                 file.key,
-                                file.time_coverage_start.isoformat(),
-                                file.time_coverage_end.isoformat(),
+                                _iso(file.time_coverage_start),
+                                _iso(file.time_coverage_end),
                                 file.lat_min,
                                 file.lat_max,
                                 file.lon_min,
