@@ -6,7 +6,6 @@ from data_access_service.utils.email_templates.email_images import (
     INSTAGRAM_IMG,
     BLUESKY_IMG,
     LINKEDIN_IMG,
-    CONTACT_US_IMG,
 )
 
 # footer links
@@ -293,21 +292,32 @@ EMAIL_FOOTER = f"""                    <!--[if mso | IE]>
                     </div>
                     <!--[if mso | IE]>
                     </td>
-                    <td style="vertical-align:middle;width:148px;">
+                    <td style="vertical-align:middle;width:117px;">
                     <![endif]-->
                     <div class="f h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:middle;width:100%;">
                         <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border:none;vertical-align:middle;" width="100%">
                             <tbody>
                             <tr>
                                 <td align="left" class="b x" style="font-size:0;padding:0;word-break:break-word;">
-                                    <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:separate;width:148px;line-height:100%;">
+                                    <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:separate;width:117px;line-height:100%;">
                                         <tbody>
                                         <tr>
-                                            <td align="center" style="border:none;vertical-align:middle;" valign="middle">
-                                                <!-- An image, so no mail client recolors the white button in dark mode. -->
-                                                <a href="{CONTACT_US_URL}" style="display:block;text-decoration:none;" target="_blank">
-                                                    <img alt="Contact Us" src="data:image/png;base64,{CONTACT_US_IMG}" width="148" height="39" style="border:0;display:block;outline:none;text-decoration:none;width:148px;height:39px;font-size:14px;">
+                                            <td align="center" bgcolor="#595959" class="c" role="presentation" style="background:#595959;border:none;border-radius:8px 8px 8px 8px;cursor:auto;mso-padding-alt:8px 0px 8px 0px;vertical-align:middle;" valign="middle">
+                                                <!--[if mso]>
+                                                <v:roundrect style="width:115px;height:38px;v-text-anchor:middle;" arcsize="42%" fill="t" stroke="f" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word">
+                                                    <w:anchorlock/>
+                                                    <v:fill type="solid" color="#595959" />
+                                                    <v:textbox inset="0,0,0,0">
+                                                        <center>
+                                                <![endif]-->
+                                                <a href="mailto:info@aodn.org.au" class="c" style="display:inline-block;width:117px;background-color:#595959;color:#ffffff;font-family:'Open Sans', 'Arial', sans-serif;font-size:13px;font-weight:normal;line-height:100%;margin:0;text-decoration:none;text-transform:none;padding:8px 0px 8px 0px;mso-padding-alt:0;border-radius:8px 8px 8px 8px;" target="_blank">
+                                                    <span style="font-size:14px;font-family:'Open Sans', 'Arial', sans-serif;font-weight:500;color:#ffffff;line-height:157%;mso-line-height-alt:22px;">Contact Us</span>
                                                 </a>
+                                                <!--[if mso]>
+                                                </center>
+                                                </v:textbox>
+                                                </v:roundrect>
+                                                <![endif]-->
                                             </td>
                                         </tr>
                                         </tbody>

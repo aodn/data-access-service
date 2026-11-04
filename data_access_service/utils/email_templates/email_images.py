@@ -15,7 +15,6 @@ _IMAGE_FILES = {
     "INSTAGRAM_IMG": "instagram.png",
     "BLUESKY_IMG": "bluesky.png",
     "LINKEDIN_IMG": "linkedin.png",
-    "CONTACT_US_IMG": "contact-us.png",
 }
 
 
@@ -49,7 +48,6 @@ FACEBOOK_IMG = _results["FACEBOOK_IMG"]
 INSTAGRAM_IMG = _results["INSTAGRAM_IMG"]
 BLUESKY_IMG = _results["BLUESKY_IMG"]
 LINKEDIN_IMG = _results["LINKEDIN_IMG"]
-CONTACT_US_IMG = _results["CONTACT_US_IMG"]
 
 # For convenience, export all as a dict too
 EMAIL_IMAGES = _results
@@ -64,5 +62,4 @@ __all__ = [
     "INSTAGRAM_IMG",
     "BLUESKY_IMG",
     "LINKEDIN_IMG",
-    "CONTACT_US_IMG",
 ]

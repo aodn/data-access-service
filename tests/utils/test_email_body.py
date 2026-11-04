@@ -5,7 +5,6 @@ only the intro under "Hi," and the download button differ."""
 import re
 import unittest
 from html import unescape
-from html.parser import HTMLParser
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -37,49 +36,6 @@ def visible_to_email_clients(html: str) -> str:
 
 
 class TestEmailBodies(unittest.TestCase):
-
-    def test_contact_button_is_a_linked_image_in_every_email(self):
-        """An image keeps the button white in dark mode, where mail clients
-        recolor HTML backgrounds but not images."""
-
-        class ContactParser(HTMLParser):
-            def __init__(self):
-                super().__init__()
-                self.href = None
-                self.images = []
-
-            def handle_starttag(self, tag, attrs):
-                attributes = dict(attrs)
-                if tag == "a":
-                    self.href = attributes.get("href")
-                elif tag == "img" and attributes.get("alt") == "Contact Us":
-                    self.images.append((self.href, attributes))
-
-            def handle_endtag(self, tag):
-                if tag == "a":
-                    self.href = None
-
-        request = SubsetRequest(
-            uuid="test-uuid",
-            keys=["dataset.parquet"],
-            start_date="2024-01-01",
-            end_date="2024-01-31",
-            recipient="test@example.com",
-            output_format="csv",
-        )
-        for html in (
-            get_error_email_html_body(request),
-            get_no_data_email_html_body(request),
-            get_download_email_html_body(request, ["https://example.com/a.zip"]),
-        ):
-            parser = ContactParser()
-            parser.feed(visible_to_email_clients(html))
-            self.assertEqual(len(parser.images), 1)
-            href, attributes = parser.images[0]
-            self.assertEqual(href, "mailto:info@aodn.org.au")
-            self.assertTrue(attributes["src"].startswith("data:image/png;base64,"))
-            self.assertEqual((attributes["width"], attributes["height"]), ("148", "39"))
-            self.assertNotIn("contact-button", html)
 
     def test_error_email_has_requested_intro_and_shared_sections(self):
         request = SubsetRequest(
