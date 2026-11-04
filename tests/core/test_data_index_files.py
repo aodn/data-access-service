@@ -1,7 +1,5 @@
 """find_data_index_files on local tables shaped like the data-index S3 Tables."""
 
-import logging
-
 import pandas as pd
 import pytest
 
@@ -126,24 +124,63 @@ def test_any_of_several_areas(client):
     assert _keys(files) == ["east.nc", "west.nc"]
 
 
-def test_no_area_keeps_files_without_bbox(client):
+def test_files_without_bbox_skip_the_area_filter(client):
+    _insert(client, "inside.nc")
+    _insert(client, "outside_area.nc", lon=(10.0, 20.0))
     _insert(client, "no_bbox.nc", lat=(None, None), lon=(None, None))
 
-    assert _keys(find_data_index_files(client, UUID, START, END)) == ["no_bbox.nc"]
-    assert find_data_index_files(client, UUID, START, END, AREA) == []
+    files = find_data_index_files(client, UUID, START, END, AREA)
+
+    # Like GHRSST L3: no bbox, so the area cannot rule the file out.
+    assert _keys(files) == ["inside.nc", "no_bbox.nc"]
 
 
-def test_files_without_time_are_left_out_and_counted(client, caplog):
+def test_files_without_time_skip_the_time_filter(client):
     _insert(client, "inside.nc")
+    _insert(
+        client, "before.nc", start="2019-01-01T00:00:00Z", end="2019-12-31T00:00:00Z"
+    )
     _insert(client, "no_time.nc", start=None, end=None)
-    # Days since some epoch: cannot be parsed safely.
+    # Days since some epoch: cannot be parsed safely, so no time either.
     _insert(client, "number_time.nc", start="23456.789", end="23457.789")
 
-    with caplog.at_level(logging.WARNING):
-        files = find_data_index_files(client, UUID, START, END, AREA)
+    files = find_data_index_files(client, UUID, START, END, AREA)
 
-    assert _keys(files) == ["inside.nc"]
-    assert "2 rows skipped" in caplog.text
+    # Like Argo: no time, so the time range cannot rule the file out.
+    assert _keys(files) == ["inside.nc", "no_time.nc", "number_time.nc"]
+    assert files[1].time_coverage_start is None
+
+
+def test_no_filter_lists_every_file(client):
+    _insert(client, "inside.nc")
+    _insert(client, "old.nc", start="1944-01-01T00:00:00Z", end="1950-01-01T00:00:00Z")
+    _insert(
+        client,
+        "no_time_no_bbox.nc",
+        start=None,
+        end=None,
+        lat=(None, None),
+        lon=(None, None),
+    )
+
+    assert _keys(find_data_index_files(client, UUID)) == [
+        "inside.nc",
+        "no_time_no_bbox.nc",
+        "old.nc",
+    ]
+
+
+def test_open_time_bound_only_filters_the_given_side(client):
+    _insert(
+        client, "before.nc", start="2019-01-01T00:00:00Z", end="2019-12-31T00:00:00Z"
+    )
+    _insert(client, "inside.nc")
+
+    assert _keys(find_data_index_files(client, UUID, start=START)) == ["inside.nc"]
+    assert _keys(find_data_index_files(client, UUID, end=END)) == [
+        "before.nc",
+        "inside.nc",
+    ]
 
 
 def test_leaves_out_old_versions_and_deleted_files(client):

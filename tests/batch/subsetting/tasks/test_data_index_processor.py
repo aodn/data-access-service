@@ -16,7 +16,7 @@ from data_access_service.batch.subsetting.tasks.data_index_processor import (
 )
 from data_access_service.core.data_index_files import ORIGINAL_NETCDF_KEY
 from data_access_service.models.data_index_types import DataIndexFile
-from data_access_service.models.subset_request import SubsetRequest
+from data_access_service.models.subset_request import NON_SPECIFIED, SubsetRequest
 from data_access_service.utils.email_templates.no_data_email import (
     NO_DATA_EMAIL_SUBJECT,
 )
@@ -115,6 +115,73 @@ def test_files_are_uploaded_as_zipped_csv_and_emailed(monkeypatch, aws):
     assert LIST_URL in aws.send_email.call_args.kwargs["html_body"]
     # The email shows the actual key, not "*".
     assert ORIGINAL_NETCDF_KEY in aws.send_email.call_args.kwargs["html_body"]
+
+
+def test_no_time_set_means_no_time_filter(monkeypatch, aws):
+    find = _found(monkeypatch, [FILE])
+    aws.upload_file_to_s3.return_value = LIST_URL
+    request = replace(_request(), start_date=NON_SPECIFIED, end_date=NON_SPECIFIED)
+
+    DataIndexProcessor(job_id="job-1", subset_request=request).process()
+
+    # Not 1970..today, which would drop files from before 1970.
+    assert find.call_args.kwargs["start"] is None
+    assert find.call_args.kwargs["end"] is None
+
+
+@pytest.mark.parametrize(
+    "start_date, end_date, expected_start, expected_end",
+    [
+        # Only an end: no lower bound, so files from 1944 are still listed.
+        (
+            NON_SPECIFIED,
+            "2020-01-31",
+            None,
+            pd.Timestamp("2020-01-31 23:59:59.999999999", tz="UTC"),
+        ),
+        # Only a start: no upper bound.
+        ("2020-01-01", NON_SPECIFIED, pd.Timestamp("2020-01-01", tz="UTC"), None),
+    ],
+)
+def test_open_side_has_no_bound(
+    monkeypatch, aws, start_date, end_date, expected_start, expected_end
+):
+    find = _found(monkeypatch, [FILE])
+    aws.upload_file_to_s3.return_value = LIST_URL
+    request = replace(_request(), start_date=start_date, end_date=end_date)
+
+    DataIndexProcessor(job_id="job-1", subset_request=request).process()
+
+    assert find.call_args.kwargs["start"] == expected_start
+    assert find.call_args.kwargs["end"] == expected_end
+
+
+def test_file_with_no_time_or_bbox_has_empty_cells(monkeypatch, aws):
+    no_time = replace(
+        FILE,
+        time_coverage_start=None,
+        time_coverage_end=None,
+        lat_min=None,
+        lat_max=None,
+        lon_min=None,
+        lon_max=None,
+    )
+    _found(monkeypatch, [no_time])
+    rows = {}
+
+    def upload(path, bucket, key):
+        with zipfile.ZipFile(path) as zf:
+            rows["all"] = list(
+                csv.reader(io.TextIOWrapper(zf.open(zf.namelist()[0]), "utf-8"))
+            )
+        return LIST_URL
+
+    aws.upload_file_to_s3.side_effect = upload
+
+    DataIndexProcessor(job_id="job-1", subset_request=_request()).process()
+
+    _, row = rows["all"]
+    assert row[2:] == ["", "", "", "", "", ""]
 
 
 def test_the_original_netcdfs_key_is_listed(monkeypatch, aws):

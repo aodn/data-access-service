@@ -8,8 +8,8 @@ class DataIndexFile:
 
     bucket: str
     key: str
-    time_coverage_start: datetime
-    time_coverage_end: datetime
+    time_coverage_start: datetime | None
+    time_coverage_end: datetime | None
     lat_min: float | None
     lat_max: float | None
     lon_min: float | None
