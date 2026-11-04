@@ -286,7 +286,7 @@ class TestCollectionDatasetCount:
 
 class TestHasCloudOptimisedData:
     """Decides if a download uses the cloud-optimised data or the list of the
-    original NetCDF files"""
+    data-index files"""
 
     def test_known_dataset(self):
         assert has_cloud_optimised_data(_mock_api(["a.zarr"]), UUID) is True

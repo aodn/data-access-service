@@ -421,6 +421,8 @@ class Config:
             table_bucket=section["table_bucket"],
             namespace=section["namespace"],
             table_name=section["table_name"],
+            s3_metadata_namespace=section.get("s3_metadata_namespace", "s3_metadata"),
+            s3_metadata_table_name=section.get("s3_metadata_table_name", "live"),
             table_bucket_arn=section["table_bucket_arn"],
             catalog_name=section.get("catalog_name", "data_index"),
             memory_limit=section.get("memory_limit", "256MB"),

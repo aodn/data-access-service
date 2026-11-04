@@ -59,6 +59,8 @@ data_index:
     table_bucket: "data-index"
     namespace: "collection_mapping"
     table_name: "live"
+    s3_metadata_namespace: "s3_metadata"
+    s3_metadata_table_name: "live"
     table_bucket_arn: "arn:aws:s3tables:ap-southeast-2:704910415367:bucket/data-index"
     catalog_name: "data_index"
     memory_limit: "256MB"
@@ -220,6 +222,21 @@ tiler:
       - radar_RottnestShelf_velocity_hourly_averaged_realtime_nonqc
       - radar_SouthAustraliaGulfs_velocity_hourly_averaged_delayed_qc
       - radar_SouthAustraliaGulfs_velocity_hourly_averaged_realtime_nonqc
+      # non-gridded datasets, not suitable for tiling.
+      - mooring_wave_timeseries_delayed_qc
+      - vessel_satellite_radiance_delayed_qc
+      - vessel_satellite_radiance_derived_product
+      # noaa20 and snpp satellites, not tiled for now.
+      - satellite_chlorophylla_gsm_1day_noaa20
+      - satellite_chlorophylla_gsm_1day_snpp
+      - satellite_chlorophylla_oc3_1day_noaa20
+      - satellite_chlorophylla_oc3_1day_snpp
+      - satellite_chlorophylla_oci_1day_noaa20
+      - satellite_chlorophylla_oci_1day_snpp
+      - satellite_diffuse_attenuation_coefficent_1day_noaa20
+      - satellite_diffuse_attenuation_coefficent_1day_snpp
+      - satellite_optical_water_type_1day_noaa20
+      - satellite_optical_water_type_1day_snpp
     gridded_variables:
       - GSLA
       - [UCUR, VCUR]
@@ -240,6 +257,19 @@ tiler:
       - MCS_category
       - MCS_category_mosaic
       - MHW_category_mosaic
+      - VAVH
+      - WPPE
+      - WPFM
+      - chl_carder
+      - chl_gsm
+      - chl_oc3
+      - chl_oci
+      - K_490
+      - nanop_brewin2012in
+      - npp_vgpm_eppley_gsm
+      - npp_vgpm_eppley_oc3
+      - owtd_csiro
+      - picop_brewin2012in
   # Per-product tuning, keyed by product id and applied by the API only
   products_customisation:
     - id: model_sea_level_anomaly_gridded_realtime:gsla

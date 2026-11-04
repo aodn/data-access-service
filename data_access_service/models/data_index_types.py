@@ -3,8 +3,8 @@ from datetime import datetime
 
 
 @dataclass(frozen=True)
-class OriginalNetcdf:
-    """One original NetCDF file that matches the user's request."""
+class DataIndexFile:
+    """One data-index file that matches the user's request."""
 
     bucket: str
     key: str
@@ -29,6 +29,9 @@ class DataIndexConfig:
     table_bucket: str
     namespace: str
     table_name: str
+    # The live inventory of the files (one row per current file version).
+    s3_metadata_namespace: str
+    s3_metadata_table_name: str
     table_bucket_arn: str
     catalog_name: str
     memory_limit: str
