@@ -9,7 +9,6 @@ import pytest
 from data_access_service.batch.subsetting import subsetting_main
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.email_templates.error_email import (
-    ERROR_EMAIL_SUBJECT,
     get_error_email_html_body,
 )
 from data_access_service.utils.email_templates.no_data_email import (
@@ -132,7 +131,7 @@ def test_processing_failure_notifies_and_preserves_original_error(
     assert caught.value is error
     workflow.aws.send_email.assert_called_once_with(
         recipient=workflow.request.recipient,
-        subject=ERROR_EMAIL_SUBJECT,
+        subject="Error processing data file whose uuid is: test-uuid",
         html_body=get_error_email_html_body(workflow.request),
     )
     if notification_fails:
