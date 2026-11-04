@@ -38,24 +38,26 @@ def visible_to_email_clients(html: str) -> str:
 
 class TestEmailBodies(unittest.TestCase):
 
-    def test_contact_button_fallback_is_white_without_dark_mode_css(self):
-        """Outlook may ignore theme rules, so the inline button must stand alone."""
+    def test_contact_button_is_a_linked_image_in_every_email(self):
+        """An image keeps the button white in dark mode, where mail clients
+        recolor HTML backgrounds but not images."""
 
-        class ButtonParser(HTMLParser):
+        class ContactParser(HTMLParser):
             def __init__(self):
                 super().__init__()
-                self.elements = []
+                self.href = None
+                self.images = []
 
             def handle_starttag(self, tag, attrs):
                 attributes = dict(attrs)
-                classes = attributes.get("class", "").split()
-                if "contact-button" in classes or "contact-button-label" in classes:
-                    styles = dict(
-                        declaration.split(":", 1)
-                        for declaration in attributes["style"].split(";")
-                        if ":" in declaration
-                    )
-                    self.elements.append((tag, attributes, styles))
+                if tag == "a":
+                    self.href = attributes.get("href")
+                elif tag == "img" and attributes.get("alt") == "Contact Us":
+                    self.images.append((self.href, attributes))
+
+            def handle_endtag(self, tag):
+                if tag == "a":
+                    self.href = None
 
         request = SubsetRequest(
             uuid="test-uuid",
@@ -65,17 +67,19 @@ class TestEmailBodies(unittest.TestCase):
             recipient="test@example.com",
             output_format="csv",
         )
-        parser = ButtonParser()
-        parser.feed(get_error_email_html_body(request))
-        self.assertEqual([tag for tag, _, _ in parser.elements], ["td", "a", "span"])
-        for tag, attributes, styles in parser.elements:
-            if tag in ("td", "a"):
-                self.assertEqual(
-                    styles.get("background-color", styles.get("background")), "#fff"
-                )
-                self.assertEqual(styles["border-radius"], "8px")
-            if tag in ("a", "span"):
-                self.assertEqual(styles["color"].lower(), "#090c02")
+        for html in (
+            get_error_email_html_body(request),
+            get_no_data_email_html_body(request),
+            get_download_email_html_body(request, ["https://example.com/a.zip"]),
+        ):
+            parser = ContactParser()
+            parser.feed(visible_to_email_clients(html))
+            self.assertEqual(len(parser.images), 1)
+            href, attributes = parser.images[0]
+            self.assertEqual(href, "mailto:info@aodn.org.au")
+            self.assertTrue(attributes["src"].startswith("data:image/png;base64,"))
+            self.assertEqual((attributes["width"], attributes["height"]), ("148", "39"))
+            self.assertNotIn("contact-button", html)
 
     def test_error_email_has_requested_intro_and_shared_sections(self):
         request = SubsetRequest(

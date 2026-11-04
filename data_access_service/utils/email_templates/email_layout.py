@@ -6,6 +6,7 @@ from data_access_service.utils.email_templates.email_images import (
     INSTAGRAM_IMG,
     BLUESKY_IMG,
     LINKEDIN_IMG,
+    CONTACT_US_IMG,
 )
 
 # footer links
@@ -123,49 +124,6 @@ EMAIL_HEAD = """<!doctype html>
     <meta name="x-apple-disable-message-reformatting">
     <meta name="color-scheme" content="light dark">
     <meta name="supported-color-schemes" content="light dark">
-    <style type="text/css">
-        /* White is the fallback when a mail client ignores theme rules. */
-        .c.contact-button {
-            background:#fff !important;
-            background-color:#fff !important;
-            border-radius:8px !important;
-        }
-        .contact-button, .contact-button-label {
-            color:#090C02 !important;
-        }
-        @media (prefers-color-scheme: light) {
-            /* Outlook prefixes classes with x_; its message theme can differ
-               from the system preference used by this media query. */
-            .c.contact-button:not([class^="x_"]) {
-                background:#595959 !important;
-                background-color:#595959 !important;
-                color:#fff !important;
-            }
-            .contact-button-label:not([class^="x_"]) {
-                color:#fff !important;
-            }
-        }
-        @media (prefers-color-scheme: dark) {
-            .c.contact-button {
-                background:#fff !important;
-                background-color:#fff !important;
-                border-radius:8px !important;
-            }
-            .contact-button, .contact-button-label {
-                color:#090C02 !important;
-            }
-        }
-        /* Outlook clients expose these attributes when applying dark mode. */
-        [data-ogsc] .c.contact-button, [data-ogsb] .c.contact-button {
-            background:#fff !important;
-            background-color:#fff !important;
-            border-radius:8px !important;
-        }
-        [data-ogsc] .contact-button, [data-ogsb] .contact-button,
-        [data-ogsc] .contact-button-label, [data-ogsb] .contact-button-label {
-            color:#090C02 !important;
-        }
-    </style>
     <!--[if gte mso 9]>
     <style>
         a:link {
@@ -201,12 +159,12 @@ EMAIL_HEADER = f"""<body lang="en" link="#DD0000" vlink="#DD0000" class="emailif
         <tr>
             <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
     <![endif]-->
-    <div style="background:#ffffff;background-color:#ffffff;margin:0px auto;max-width:600px;">
-        <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" bgcolor="#ffffff" style="background:#ffffff;background-color:#ffffff;table-layout:fixed;width:100%;">
+    <div style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:600px;">
+        <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" bgcolor="#fffffe" style="background:#fffffe;background-color:#fffffe;table-layout:fixed;width:100%;">
             <tbody>
             <tr>
-                <td align="left" bgcolor="#ffffff" style="background-color:#ffffff;border-bottom:1px solid #bfbfbf;border-left:none;border-right:none;border-top:none;direction:ltr;font-size:0;padding:11px 203.5px 13px 23.5px;text-align:left;">
-                    <img alt="IMOS logo" src="data:image/png;base64,{HEADER_IMG}" style="border:0;display:block;outline:none;text-decoration:none;height:auto;width:100%;max-width:373px;font-size:13px;" width="373">
+                <td align="center" bgcolor="#fffffe" style="background-color:#fffffe;border-bottom:1px solid #bfbfbf;border-left:none;border-right:none;border-top:none;direction:ltr;font-size:0;padding:11px 116px 13px 116px;text-align:center;">
+                    <img alt="IMOS logo" src="data:image/png;base64,{HEADER_IMG}" style="border:0;display:block;margin:0 auto;outline:none;text-decoration:none;height:auto;width:100%;max-width:368px;font-size:13px;" width="368">
                 </td>
             </tr>
             </tbody>
@@ -335,32 +293,21 @@ EMAIL_FOOTER = f"""                    <!--[if mso | IE]>
                     </div>
                     <!--[if mso | IE]>
                     </td>
-                    <td style="vertical-align:middle;width:117px;">
+                    <td style="vertical-align:middle;width:148px;">
                     <![endif]-->
                     <div class="f h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:middle;width:100%;">
                         <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border:none;vertical-align:middle;" width="100%">
                             <tbody>
                             <tr>
                                 <td align="left" class="b x" style="font-size:0;padding:0;word-break:break-word;">
-                                    <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:separate;width:117px;line-height:100%;">
+                                    <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:separate;width:148px;line-height:100%;">
                                         <tbody>
                                         <tr>
-                                            <td align="center" bgcolor="#fff" class="c contact-button" role="presentation" style="background:#fff;border:none;border-radius:8px;cursor:auto;mso-padding-alt:8px 0px 8px 0px;vertical-align:middle;" valign="middle">
-                                                <!--[if mso]>
-                                                <v:roundrect style="width:115px;height:38px;v-text-anchor:middle;" arcsize="42%" fill="t" stroke="f" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word">
-                                                    <w:anchorlock/>
-                                                    <v:fill type="solid" color="#fff" />
-                                                    <v:textbox inset="0,0,0,0">
-                                                        <center>
-                                                <![endif]-->
-                                                <a href="mailto:info@aodn.org.au" class="c contact-button" style="display:inline-block;width:117px;background-color:#fff;color:#090C02;font-family:'Open Sans', 'Arial', sans-serif;font-size:13px;font-weight:normal;line-height:100%;margin:0;text-decoration:none;text-transform:none;padding:8px 0px 8px 0px;mso-padding-alt:0;border-radius:8px;" target="_blank">
-                                                    <span class="contact-button-label" style="font-size:14px;font-family:'Open Sans', 'Arial', sans-serif;font-weight:500;color:#090C02;line-height:157%;mso-line-height-alt:22px;">Contact Us</span>
+                                            <td align="center" style="border:none;vertical-align:middle;" valign="middle">
+                                                <!-- An image, so no mail client recolors the white button in dark mode. -->
+                                                <a href="{CONTACT_US_URL}" style="display:block;text-decoration:none;" target="_blank">
+                                                    <img alt="Contact Us" src="data:image/png;base64,{CONTACT_US_IMG}" width="148" height="39" style="border:0;display:block;outline:none;text-decoration:none;width:148px;height:39px;font-size:14px;">
                                                 </a>
-                                                <!--[if mso]>
-                                                </center>
-                                                </v:textbox>
-                                                </v:roundrect>
-                                                <![endif]-->
                                             </td>
                                         </tr>
                                         </tbody>

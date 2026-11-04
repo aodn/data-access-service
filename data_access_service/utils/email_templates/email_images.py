@@ -15,6 +15,7 @@ _IMAGE_FILES = {
     "INSTAGRAM_IMG": "instagram.png",
     "BLUESKY_IMG": "bluesky.png",
     "LINKEDIN_IMG": "linkedin.png",
+    "CONTACT_US_IMG": "contact-us.png",
 }
 
 
@@ -27,8 +28,11 @@ def _load_image(item):
     name, filename = item
     # Keep the logo's backdrop white even when the email client recolors HTML.
     # Other icons retain their transparency.
-    background_color = "#ffffff" if name == "HEADER_IMG" else None
-    return name, png_to_base64(IMG_DIR / filename, background_color=background_color)
+    if name == "HEADER_IMG":
+        return name, png_to_base64(
+            IMG_DIR / filename, background_color="#ffffff", padding=24
+        )
+    return name, png_to_base64(IMG_DIR / filename)
 
 
 # Load all images in parallel at module import time
@@ -45,6 +49,7 @@ FACEBOOK_IMG = _results["FACEBOOK_IMG"]
 INSTAGRAM_IMG = _results["INSTAGRAM_IMG"]
 BLUESKY_IMG = _results["BLUESKY_IMG"]
 LINKEDIN_IMG = _results["LINKEDIN_IMG"]
+CONTACT_US_IMG = _results["CONTACT_US_IMG"]
 
 # For convenience, export all as a dict too
 EMAIL_IMAGES = _results
@@ -59,4 +64,5 @@ __all__ = [
     "INSTAGRAM_IMG",
     "BLUESKY_IMG",
     "LINKEDIN_IMG",
+    "CONTACT_US_IMG",
 ]
