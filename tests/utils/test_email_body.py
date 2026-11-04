@@ -5,6 +5,7 @@ only the intro under "Hi," and the download button differ."""
 import re
 import unittest
 from html import unescape
+from html.parser import HTMLParser
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -36,6 +37,45 @@ def visible_to_email_clients(html: str) -> str:
 
 
 class TestEmailBodies(unittest.TestCase):
+
+    def test_contact_button_fallback_is_white_without_dark_mode_css(self):
+        """Outlook may ignore theme rules, so the inline button must stand alone."""
+
+        class ButtonParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.elements = []
+
+            def handle_starttag(self, tag, attrs):
+                attributes = dict(attrs)
+                classes = attributes.get("class", "").split()
+                if "contact-button" in classes or "contact-button-label" in classes:
+                    styles = dict(
+                        declaration.split(":", 1)
+                        for declaration in attributes["style"].split(";")
+                        if ":" in declaration
+                    )
+                    self.elements.append((tag, attributes, styles))
+
+        request = SubsetRequest(
+            uuid="test-uuid",
+            keys=["dataset.parquet"],
+            start_date="2024-01-01",
+            end_date="2024-01-31",
+            recipient="test@example.com",
+            output_format="csv",
+        )
+        parser = ButtonParser()
+        parser.feed(get_error_email_html_body(request))
+        self.assertEqual([tag for tag, _, _ in parser.elements], ["td", "a", "span"])
+        for tag, attributes, styles in parser.elements:
+            if tag in ("td", "a"):
+                self.assertEqual(
+                    styles.get("background-color", styles.get("background")), "#fff"
+                )
+                self.assertEqual(styles["border-radius"], "8px")
+            if tag in ("a", "span"):
+                self.assertEqual(styles["color"].lower(), "#090c02")
 
     def test_error_email_has_requested_intro_and_shared_sections(self):
         request = SubsetRequest(

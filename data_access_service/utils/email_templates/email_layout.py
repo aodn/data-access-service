@@ -124,6 +124,27 @@ EMAIL_HEAD = """<!doctype html>
     <meta name="color-scheme" content="light dark">
     <meta name="supported-color-schemes" content="light dark">
     <style type="text/css">
+        /* White is the fallback when a mail client ignores theme rules. */
+        .c.contact-button {
+            background:#fff !important;
+            background-color:#fff !important;
+            border-radius:8px !important;
+        }
+        .contact-button, .contact-button-label {
+            color:#090C02 !important;
+        }
+        @media (prefers-color-scheme: light) {
+            /* Outlook prefixes classes with x_; its message theme can differ
+               from the system preference used by this media query. */
+            .c.contact-button:not([class^="x_"]) {
+                background:#595959 !important;
+                background-color:#595959 !important;
+                color:#fff !important;
+            }
+            .contact-button-label:not([class^="x_"]) {
+                color:#fff !important;
+            }
+        }
         @media (prefers-color-scheme: dark) {
             .c.contact-button {
                 background:#fff !important;
@@ -352,16 +373,16 @@ EMAIL_FOOTER = f"""                    <!--[if mso | IE]>
                                     <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:separate;width:117px;line-height:100%;">
                                         <tbody>
                                         <tr>
-                                            <td align="center" bgcolor="#595959" class="c contact-button" role="presentation" style="background:#595959;border:none;border-radius:8px 8px 8px 8px;cursor:auto;mso-padding-alt:8px 0px 8px 0px;vertical-align:middle;" valign="middle">
+                                            <td align="center" bgcolor="#fff" class="c contact-button" role="presentation" style="background:#fff;border:none;border-radius:8px;cursor:auto;mso-padding-alt:8px 0px 8px 0px;vertical-align:middle;" valign="middle">
                                                 <!--[if mso]>
                                                 <v:roundrect style="width:115px;height:38px;v-text-anchor:middle;" arcsize="42%" fill="t" stroke="f" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word">
                                                     <w:anchorlock/>
-                                                    <v:fill type="solid" color="#595959" />
+                                                    <v:fill type="solid" color="#fff" />
                                                     <v:textbox inset="0,0,0,0">
                                                         <center>
                                                 <![endif]-->
-                                                <a href="mailto:info@aodn.org.au" class="c contact-button" style="display:inline-block;width:117px;background-color:#595959;color:#ffffff;font-family:'Open Sans', 'Arial', sans-serif;font-size:13px;font-weight:normal;line-height:100%;margin:0;text-decoration:none;text-transform:none;padding:8px 0px 8px 0px;mso-padding-alt:0;border-radius:8px 8px 8px 8px;" target="_blank">
-                                                    <span class="contact-button-label" style="font-size:14px;font-family:'Open Sans', 'Arial', sans-serif;font-weight:500;color:#ffffff;line-height:157%;mso-line-height-alt:22px;">Contact Us</span>
+                                                <a href="mailto:info@aodn.org.au" class="c contact-button" style="display:inline-block;width:117px;background-color:#fff;color:#090C02;font-family:'Open Sans', 'Arial', sans-serif;font-size:13px;font-weight:normal;line-height:100%;margin:0;text-decoration:none;text-transform:none;padding:8px 0px 8px 0px;mso-padding-alt:0;border-radius:8px;" target="_blank">
+                                                    <span class="contact-button-label" style="font-size:14px;font-family:'Open Sans', 'Arial', sans-serif;font-weight:500;color:#090C02;line-height:157%;mso-line-height-alt:22px;">Contact Us</span>
                                                 </a>
                                                 <!--[if mso]>
                                                 </center>
