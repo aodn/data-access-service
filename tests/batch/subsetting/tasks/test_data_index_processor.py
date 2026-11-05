@@ -14,6 +14,7 @@ from data_access_service.batch.subsetting.tasks.data_index_processor import (
     FILE_LIST_COLUMNS,
     DataIndexProcessor,
 )
+from data_access_service.config.config import Config
 from data_access_service.core.data_index_files import ORIGINAL_NETCDF_KEY
 from data_access_service.models.data_index_types import DataIndexFile
 from data_access_service.models.subset_request import NON_SPECIFIED, SubsetRequest
@@ -115,6 +116,19 @@ def test_files_are_uploaded_as_zipped_csv_and_emailed(monkeypatch, aws):
     assert LIST_URL in aws.send_email.call_args.kwargs["html_body"]
     # The email shows the actual key, not "*".
     assert ORIGINAL_NETCDF_KEY in aws.send_email.call_args.kwargs["html_body"]
+
+
+def test_query_gets_the_batch_memory_limit(monkeypatch, aws):
+    _found(monkeypatch, [FILE])
+    aws.upload_file_to_s3.return_value = LIST_URL
+    client_class = MagicMock()
+    monkeypatch.setattr(data_index_processor, "DataIndexDuckDBClient", client_class)
+
+    DataIndexProcessor(job_id="job-1", subset_request=_request()).process()
+
+    # Not the server's small limit: Argo's file list runs out of memory there.
+    expected = Config.get_config().get_data_index_config().batch_memory_limit
+    client_class.assert_called_once_with(memory_limit=expected)
 
 
 def test_no_time_set_means_no_time_filter(monkeypatch, aws):

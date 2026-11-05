@@ -134,7 +134,8 @@ class DataIndexProcessor:
 
     def __find_files(self) -> List[DataIndexFile]:
         start, end = self.__time_range()
-        with DataIndexDuckDBClient() as client:
+        memory_limit = self.config.get_data_index_config().batch_memory_limit
+        with DataIndexDuckDBClient(memory_limit=memory_limit) as client:
             files = find_data_index_files(
                 client,
                 uuid=self.uuid,

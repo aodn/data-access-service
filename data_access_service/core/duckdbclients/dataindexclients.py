@@ -26,9 +26,13 @@ class DataIndexDuckDBClient(DuckDBClient):
 
     _SECRET_NAME = "data_index_s3"
 
-    def __init__(self) -> None:
+    def __init__(self, memory_limit: str | None = None) -> None:
+        """:param memory_limit: DuckDB memory limit; None uses the config's
+        ``memory_limit``.
+        """
         super().__init__()
         self._config: DataIndexConfig = Config.get_config().get_data_index_config()
+        self._memory_limit = memory_limit or self._config.memory_limit
         self._duckdb_client: duckdb.DuckDBPyConnection | None = None
         self._active_cursors: set[Any] = set()
         self._cursors_lock = threading.Lock()
@@ -43,7 +47,7 @@ class DataIndexDuckDBClient(DuckDBClient):
                     db = self._connect(
                         database=":memory:",
                         config={
-                            "memory_limit": self._config.memory_limit,
+                            "memory_limit": self._memory_limit,
                             "threads": str(int(self._config.threads)),
                         },
                     )

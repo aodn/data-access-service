@@ -35,4 +35,5 @@ class DataIndexConfig:
     table_bucket_arn: str
     catalog_name: str
     memory_limit: str
+    batch_memory_limit: str
     threads: int
