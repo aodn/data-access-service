@@ -25,6 +25,12 @@ def _load_image(item):
     )  # Import here to avoid circular imports
 
     name, filename = item
+    # Keep the logo's backdrop white even when the email client recolors HTML.
+    # Other icons retain their transparency.
+    if name == "HEADER_IMG":
+        return name, png_to_base64(
+            IMG_DIR / filename, background_color="#ffffff", padding=24
+        )
     return name, png_to_base64(IMG_DIR / filename)
 
 

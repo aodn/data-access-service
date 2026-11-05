@@ -1,5 +1,5 @@
 """Tests for the shared email body: every email renders the same sections
-(collection, data selection, format, metadata, citation, usage constraints);
+(dataset, data selection, format, citation, usage constraints);
 only the intro under "Hi," and the download button differ."""
 
 import re
@@ -40,7 +40,7 @@ class TestEmailBodies(unittest.TestCase):
     def test_error_email_has_requested_intro_and_shared_sections(self):
         request = SubsetRequest(
             uuid="test-uuid-1234",
-            keys=["slocum_glider_delayed_qc"],
+            keys=["slocum_glider_delayed_qc.parquet", "ocean_temperature.zarr"],
             start_date="2020-01-01",
             end_date="2020-06-30",
             recipient="test@example.com",
@@ -60,16 +60,15 @@ class TestEmailBodies(unittest.TestCase):
         )
         self.assertIn('href="mailto:info@aodn.org.au"', html)
         for content in (
-            "Collection",
+            "Dataset:",
             "Test Collection Title",
-            "test-uuid-1234",
             "Data Selection",
             "slocum_glider_delayed_qc",
+            "ocean_temperature",
             "Format",
             "CSV",
             "Bounding Box Selection",
             "01 Jan 2020 00:00:00 UTC - 30 Jun 2020 23:59:59 UTC",
-            "Metadata",
             "https://example.com/metadata",
             "Suggested Citation",
             "Suggested citation goes here.",
@@ -78,6 +77,14 @@ class TestEmailBodies(unittest.TestCase):
         ):
             self.assertIn(content, html)
         self.assertNotIn("Download</span>", html)
+        self.assertIn(
+            'href="https://example.com/metadata" style="color:#2571e9;'
+            'text-decoration:underline;">Test Collection Title</a>',
+            html,
+        )
+        self.assertNotIn(">Metadata:</p>", html)
+        self.assertNotIn("slocum_glider_delayed_qc.parquet", html)
+        self.assertNotIn("ocean_temperature.zarr", html)
         self.assertNotIn("download request has been completed", html)
         self.assertNotIn("The download will be available for 7 days.", html)
         self.assertNotIn("No data available", html)
@@ -177,16 +184,15 @@ class TestEmailBodies(unittest.TestCase):
             "No data available for the requested subset of the dataset collection.",
             html,
         )
-        self.assertIn("Collection", html)
+        self.assertIn("Dataset:", html)
         self.assertIn("Test Collection Title", html)
-        self.assertIn("test-uuid-1234", html)
         self.assertIn("Data Selection", html)
         self.assertIn("slocum_glider_delayed_qc", html)
         self.assertIn("Format", html)
         self.assertIn("CSV", html)
         self.assertIn("Bounding Box Selection", html)
         self.assertIn("01 Jan 2020 00:00:00 UTC - 30 Jun 2020 23:59:59 UTC", html)
-        self.assertIn("Metadata", html)
+        self.assertNotIn(">Metadata:</p>", html)
         self.assertIn("https://example.com/metadata", html)
         self.assertIn("Suggested Citation", html)
         self.assertIn("Suggested citation goes here.", html)
@@ -221,7 +227,6 @@ class TestEmailBodies(unittest.TestCase):
         self.assertIn("The download will be available for 7 days.", html)
         # same shared body as the no-data email
         self.assertIn("Test Collection Title", html)
-        self.assertIn("test-uuid-1234", html)
         self.assertIn("Data Selection", html)
         self.assertIn("NETCDF", html)
         self.assertIn("Usage Constraints", html)

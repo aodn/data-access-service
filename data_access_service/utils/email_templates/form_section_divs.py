@@ -1,6 +1,11 @@
 """Reusable email blocks: section headings, body text and paragraphs.
 Each block is self-contained, so they can be stacked in any order."""
 
+SECTION_HEADING_STYLE = (
+    "color:#090C02;font-family:'Open Sans',Arial,sans-serif;"
+    "font-size:18px;font-style:normal;font-weight:500;line-height:24px;"
+)
+
 
 def form_paragraph(text: str, margin: str = "0") -> str:
     """A body paragraph in the email's standard 16px style."""
@@ -8,7 +13,7 @@ def form_paragraph(text: str, margin: str = "0") -> str:
 
 
 def form_heading_div(title: str, top_padding: int = 16) -> str:
-    """A 17px section heading (e.g. "Collection") as a full-width row."""
+    """An 18px section heading (e.g. "Dataset:") as a full-width row."""
     return f"""
     <!--[if mso | IE]><tr><td width="600px"><table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:568px;" width="568"><tr><td style="line-height:0;font-size:0;mso-line-height-rule:exactly;"><![endif]-->
     <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:568px;">
@@ -32,8 +37,8 @@ def form_heading_div(title: str, top_padding: int = 16) -> str:
                                                 <table border="0" cellpadding="0" cellspacing="0" width="100%">
                                                     <tr>
                                                         <td align="left" width="100%">
-                                                            <div style="font-family: 'Open Sans', 'Arial', sans-serif; font-size: 17px; font-weight: 500; line-height: 141%; text-align: left; color: #090c02">
-                                                                <p style="Margin:0;mso-line-height-alt:24px;font-size:17px;line-height:141%;">{title}</p>
+                                                            <div style="{SECTION_HEADING_STYLE}text-align:left;">
+                                                                <p style="Margin:0;mso-line-height-alt:24px;{SECTION_HEADING_STYLE}">{title}</p>
                                                             </div>
                                                         </td>
                                                     </tr>

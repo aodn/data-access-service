@@ -158,40 +158,12 @@ EMAIL_HEADER = f"""<body lang="en" link="#DD0000" vlink="#DD0000" class="emailif
         <tr>
             <td style="line-height:0;font-size:0;mso-line-height-rule:exactly;">
     <![endif]-->
-    <div class="r e y" style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:600px;">
-        <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background:#fffffe;background-color:#fffffe;width:100%;">
+    <div style="background:#fffffe;background-color:#fffffe;margin:0px auto;max-width:600px;">
+        <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" bgcolor="#fffffe" style="background:#fffffe;background-color:#fffffe;table-layout:fixed;width:100%;">
             <tbody>
             <tr>
-                <td style="border-bottom:1px solid #bfbfbf;border-left:none;border-right:none;border-top:none;direction:ltr;font-size:0;padding:24px 16px 24px 16px;text-align:center;">
-                    <!--[if mso | IE]>
-                    <table role="presentation" border="0" cellpadding="0" cellspacing="0">
-                        <tr>
-                            <td style="vertical-align:middle;width:568px;">
-                    <![endif]-->
-                    <div class="p h" style="font-size:0;text-align:left;direction:ltr;display:inline-block;vertical-align:middle;width:100%;">
-                        <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border:none;vertical-align:middle;" width="100%">
-                            <tbody>
-                            <tr>
-                                <td align="center" class="x" style="font-size:0;padding:0;word-break:break-word;">
-                                    <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;border-spacing:0;" class="mq">
-                                        <tbody>
-                                        <tr>
-                                            <td style="width:344px;" class="mq">
-                                                <img alt src="data:image/png;base64,{HEADER_IMG}" style="border:0;display:block;outline:none;text-decoration:none;height:auto;width:100%;font-size:13px;" width="344">
-                                            </td>
-                                        </tr>
-                                        </tbody>
-                                    </table>
-                                </td>
-                            </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <!--[if mso | IE]>
-                    </td>
-                    </tr>
-                    </table>
-                    <![endif]-->
+                <td align="center" bgcolor="#fffffe" style="background-color:#fffffe;border-bottom:1px solid #bfbfbf;border-left:none;border-right:none;border-top:none;direction:ltr;font-size:0;padding:11px 116px 13px 116px;text-align:center;">
+                    <img alt="IMOS logo" src="data:image/png;base64,{HEADER_IMG}" style="border:0;display:block;margin:0 auto;outline:none;text-decoration:none;height:auto;width:100%;max-width:368px;font-size:13px;" width="368">
                 </td>
             </tr>
             </tbody>
