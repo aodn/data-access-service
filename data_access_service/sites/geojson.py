@@ -1,32 +1,17 @@
-"""Build frontend GeoJSON shapes from query results.
+"""Turn repository DataFrames into the GeoJSON the frontend reads.
 
-No I/O and no DuckDB — every function here takes a pandas ``DataFrame`` (the
-output of a repository read) and returns the GeoJSON ``dict`` the frontend
-expects (Highcharts series + Mapbox GL points), typed by the shapes in
-:mod:`schemas`. Serialization is the caller's job (FastAPI handles it).
+Pure transforms, no I/O. Shapes are typed in :mod:`sites`.
 
-Two shapes, mirroring the two reads every repository exposes:
+  * :func:`site_feature_collection` — ``sites_in_date_range`` rows, one point per site.
+  * :func:`site_details_feature_collection` — ``site_details`` rows, one Feature
+    with a ``[time_ms, value]`` series per value column, nested by any group columns.
 
-  * :func:`site_feature_collection` — for ``sites_in_date_range``. One
-    ``Feature`` per site: a point at its latest LON/LAT, carrying the site id
-    and date. Returns a :class:`~schemas.SiteFeatureCollection`.
-
-  * :func:`site_details_feature_collection` — for ``site_details``. A single
-    ``Feature`` for the site; each ``value_columns`` entry becomes a
-    ``[time_ms, value]`` series. With a ``group_column`` (mooring:
-    ``NOMINAL_DEPTH``) the series are nested per group value under a
-    ``"<group_column>_<value>"`` key; without one (wave buoy: no depth
-    dimension) they sit directly in ``properties``. Returns a single
-    :class:`~schemas.SiteDetailsFeature`.
-
-``time_ms`` is integer milliseconds since the epoch (UTC) — what Highcharts
-wants on a datetime axis. ``coordinates`` are ``[lon, lat]``, per the GeoJSON
-spec and Mapbox GL.
+``time_ms`` is UTC epoch milliseconds (Highcharts); ``coordinates`` are ``[lon, lat]``.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 from data_access_service.sites.sites import (
@@ -41,22 +26,20 @@ from data_access_service.utils.date_time_utils import to_utc_iso_z
 
 
 def _native(value: Any) -> Any:
-    """Convert a numpy/pandas scalar to a plain Python scalar (JSON-safe)."""
+    """numpy/pandas scalar to a plain Python value."""
     return value.item() if hasattr(value, "item") else value
 
 
+def _group_key(value: Any) -> Any:
+    """Group value for a key; floats rounded so float32 0.9 isn't 0.8999999761581421."""
+    value = _native(value)
+    return round(value, 3) if isinstance(value, float) else value
+
+
 def _iso(value: Any) -> str:
-    """Render a timestamp as an ISO 8601 string with an explicit UTC marker.
+    """Timestamp to ISO 8601 UTC, e.g. "2024-01-15T00:00:00Z" (naive is read as UTC).
 
-    A string is passed through untouched. Anything else that is not a timestamp falls back to str().
-
-    :param value: a timestamp (a naive one is read as UTC), or any other value
-    :return: string like "2024-01-15T00:00:00Z"; a non-timestamp is returned
-        as its own string form
-
-    Example:
-        _iso(pd.Timestamp("2024-01-15T10:00:00+10:00")) -> "2024-01-15T00:00:00Z"
-        _iso("2024-01-01") -> "2024-01-01"
+    Strings pass through; other non-timestamps fall back to ``str()``.
     """
     if isinstance(value, str):
         return value
@@ -67,7 +50,7 @@ def _iso(value: Any) -> str:
 
 
 def _point(longitude: Any, latitude: Any) -> SitePoint:
-    """A GeoJSON ``Point`` from a lon/lat pair, both made JSON-safe."""
+    """GeoJSON ``Point`` from lon/lat."""
     return {
         "type": "Point",
         "coordinates": [_native(longitude), _native(latitude)],
@@ -75,13 +58,8 @@ def _point(longitude: Any, latitude: Any) -> SitePoint:
 
 
 def _series(group, value_columns: Iterable[str], time_column: str) -> SeriesByColumn:
-    """One ``{column: [[time_ms, value], ...]}`` dict for a frame.
-
-    ``time_ms`` is integer milliseconds since the epoch (UTC); NULL values are
-    dropped per column.
-    """
-    # Cast to ms resolution first, then to int — DuckDB's ``.df()`` yields
-    # ``datetime64[us]``, so a plain ``astype("int64")`` would be microseconds.
+    """``{column: [[time_ms, value], ...]}`` for a frame, NULLs dropped per column."""
+    # .df() gives datetime64[us]; cast to ms before int64.
     time_ms = group[time_column].astype("datetime64[ms]").astype("int64")
     series: SeriesByColumn = {}
     for col in value_columns:
@@ -101,19 +79,10 @@ def site_feature_collection(
     longitude_column: str = "longitude",
     latitude_column: str = "latitude",
 ) -> SiteFeatureCollection:
-    """Shape ``sites_in_date_range`` rows into a ``SiteFeatureCollection``.
+    """One ``Feature`` per site at its latest location, ``properties = {date, site}``.
 
-    ``rows`` is a DataFrame with one row per site — the output of
-    :meth:`~repository.ParquetRepository.sites_in_date_range`, whose columns are
-    the site identifier plus the aliased ``latitude`` / ``longitude`` /
-    ``time`` of each site's most recent record.
-
-    Produces one ``Feature`` per site: a ``Point`` at its latest LON/LAT with
-    ``properties = {date, site}``. The site id is always exposed under ``site``
-    regardless of which column it came from (``site_column``), since that's the
-    field the frontend ``SiteProperties`` reads for both products. ``_id`` is
-    intentionally omitted — the frontend injects it, it isn't part of the API
-    payload.
+    ``rows`` comes from ``ParquetRepository.sites_in_date_range``. The id is always
+    under ``site`` whatever ``site_column`` is; ``_id`` is left for the frontend.
     """
     features: list[SiteFeature] = []
     for row in rows.itertuples(index=False):
@@ -135,6 +104,22 @@ def site_feature_collection(
     return {"type": "FeatureCollection", "features": features}
 
 
+def _nested_series(
+    rows, group_columns: Sequence[str], value_columns: list[str], time_column: str
+) -> SiteDetailsProperties:
+    """Series for ``rows``, nested one level per group column (none: flat)."""
+    if not group_columns:
+        return _series(rows, value_columns, time_column)
+    column, rest = group_columns[0], group_columns[1:]
+    # rows are sorted by group then time, so each group is already time-sorted.
+    return {
+        f"{column}_{_group_key(key)}": _nested_series(
+            group, rest, value_columns, time_column
+        )
+        for key, group in rows.groupby(column, sort=True)
+    }
+
+
 def site_details_feature_collection(
     rows,
     *,
@@ -142,43 +127,21 @@ def site_details_feature_collection(
     longitude_column: str,
     latitude_column: str,
     value_columns: Iterable[str],
-    group_column: str | None = None,
+    group_columns: Sequence[str] = (),
 ) -> SiteDetailsFeature:
-    """Shape ``site_observations`` rows into a single details ``Feature``.
+    """One site's ``site_details`` rows as a single ``Feature``.
 
-    A pure data transform — no I/O. ``rows`` is a DataFrame holding the time,
-    location, the requested ``value_columns`` and (for mooring) the
-    ``group_column``, ordered by group then time.
-
-    The site is a single ``Feature`` (a ``Point`` at its LON/LAT). Each
-    ``value_columns`` entry becomes a ``[time_ms, value]`` series — NULLs
-    dropped — where ``time_ms`` is integer milliseconds since epoch (UTC,
-    Highcharts-ready).
-
-    * With ``group_column`` (mooring ``NOMINAL_DEPTH``): ``properties`` nest one
-      series object per distinct group value, keyed ``"<group_column>_<value>"``
-      (e.g. ``"NOMINAL_DEPTH_10"``).
-    * Without ``group_column`` (wave buoy, no depth dimension): the series sit
-      directly in ``properties``.
-
-    An empty frame yields a ``Feature`` with empty ``properties`` and ``null``
-    geometry (there is no location to place it).
+    ``properties`` nest one level per group column, keyed ``"<column>_<value>"``
+    (mooring: ``NOMINAL_DEPTH_10``; estuarine: ``instrument_EXO2-SONDE`` ->
+    ``NOMINAL_DEPTH_0.9``). With no group columns (wave buoy) the series sit
+    directly in ``properties``. No rows gives empty ``properties`` and null geometry.
     """
-    value_columns = [c for c in value_columns if c != group_column]
+    value_columns = [c for c in value_columns if c not in group_columns]
 
     if len(rows) == 0:
         return {"type": "Feature", "properties": {}, "geometry": None}
 
-    properties: SiteDetailsProperties
-    if group_column is not None:
-        # rows arrive ordered by group then time, so each group is already
-        # time-sorted.
-        properties = {
-            f"{group_column}_{_native(key)}": _series(group, value_columns, time_column)
-            for key, group in rows.groupby(group_column, sort=True)
-        }
-    else:
-        properties = _series(rows, value_columns, time_column)
+    properties = _nested_series(rows, group_columns, value_columns, time_column)
 
     feature: SiteDetailsFeature = {
         "type": "Feature",

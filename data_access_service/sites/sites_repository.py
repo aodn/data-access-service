@@ -1,16 +1,14 @@
-"""A base Parquet repository over a DuckDB client.
+"""Site timeseries repositories: one :class:`ParquetRepository` subclass per Parquet dataset.
 
-``ParquetRepository`` binds one :class:`SitesDuckDBClient` to one Parquet
-dataset — each dataset gets its own subclass below (:class:`MooringRepository`,
-:class:`WaveBuoyRepository`) that declares where it lives and adds
-dataset-specific reads.
+Subclasses only declare config (location, columns, grouping). Register them in
+:data:`REPOSITORY_CLASSES` to get the API endpoints and the Batch refresh.
 """
 
 from __future__ import annotations
 
 import logging
 from abc import ABC
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import timedelta
 from typing import ClassVar
 
@@ -35,24 +33,23 @@ _LOAD_RETRY_MIN_WAIT = timedelta(seconds=30)
 _LOAD_RETRY_MAX_WAIT = timedelta(minutes=1)
 _LOAD_RETRY_MAX_ATTEMPTS = 3
 
+MAX_GROUP_COLUMNS = 2
+
 
 class ParquetRepository(ABC):
-    """Abstract base for one timeseries Parquet dataset: where it lives plus its reads.
+    """Abstract base for one timeseries Parquet dataset; subclasses set the attributes below.
 
-    Abstract: this class can't be instantiated directly — use a dataset subclass
-    (:class:`MooringRepository`, :class:`WaveBuoyRepository`, below). Subclasses
-    set the location/schema attributes below; any subclass that omits a
-    required one fails at import (see :meth:`__init_subclass__`). Because a
-    repository is bound to a single table, none of the read methods take a
-    table name.
+    Required (missing ones raise ``TypeError`` at import):
+      ``bucket`` / ``dataset``                   — primary source, read by :meth:`load` (Batch).
+      ``snapshot_bucket`` / ``snapshot_dataset``  — single-file snapshot the API reads.
+      ``table``                                   — DuckDB table/view name.
+      ``time_column``, ``site_column``, ``latitude_column``, ``longitude_column``,
+      ``value_columns``.
 
-    Location (set per dataset):
-      ``bucket`` / ``dataset``                   — S3 bucket / Hive-partitioned prefix for the primary source (read only by the Batch job's :meth:`load`).
-      ``snapshot_bucket`` / ``snapshot_dataset``  — S3 bucket / flat-file path for the snapshot the always-on service actually reads.
-      ``table``                                   — name of the in-memory table the dataset is loaded into.
-
-    Schema (default to the common IMOS timeseries names; override as needed):
-      ``time_column``, ``site_column``, ``latitude_column``, ``longitude_column``.
+    Optional:
+      ``value_columns_quality_control_columns`` — QC column per value column, same order.
+      ``group_columns``   — columns the details series nest by, outermost first.
+      ``derived_columns`` — columns :meth:`load` computes, as ``{name: SQL expression}``.
     """
 
     table: ClassVar[str]
@@ -65,18 +62,16 @@ class ParquetRepository(ABC):
     latitude_column: ClassVar[str]
     longitude_column: ClassVar[str]
     value_columns: ClassVar[Sequence[str]]
-    group_column: ClassVar[str | None] = None
+    group_columns: ClassVar[Sequence[str]] = ()
+    # TEMPORARY: the dataset has no instrument column yet. Once it does, drop this
+    # derived_columns entry and group by that column directly.
+    derived_columns: ClassVar[Mapping[str, str]] = {}
     value_columns_quality_control_columns: ClassVar[Sequence[str]] = ()
 
     def __init_subclass__(cls, **kwargs) -> None:
-        """Require every subclass to define the no-default class attributes.
-
-        The required set is derived automatically: each name annotated on this
-        base without a default value (so ``group_column``, which defaults to
-        ``None``, is exempt). A subclass missing any of them raises ``TypeError``
-        at import — naming exactly what's absent — rather than failing lazily on
-        first access.
-        """
+        """Fail at import if a required attribute (annotated here with no default) is missing,
+        the QC columns don't line up with ``value_columns``, or there are too many
+        ``group_columns``."""
         super().__init_subclass__(**kwargs)
         required = [
             n
@@ -94,6 +89,11 @@ class ParquetRepository(ABC):
                 f"{cls.__name__}.value_columns_quality_control_columns must be "
                 "empty or the same length as value_columns"
             )
+        if len(cls.group_columns) > MAX_GROUP_COLUMNS:
+            raise TypeError(
+                f"{cls.__name__}.group_columns allows at most {MAX_GROUP_COLUMNS} "
+                f"columns, got {len(cls.group_columns)}"
+            )
 
     def __init__(self, session: SitesDuckDBClient) -> None:
         if type(self) is ParquetRepository:
@@ -107,23 +107,16 @@ class ParquetRepository(ABC):
 
     @property
     def value_quality_control_map(self) -> dict[str, str]:
-        """Map each ``value_columns`` entry to its QC column, for those that have one.
-
-        Built by pairing ``value_columns`` and ``value_columns_quality_control_columns``
-        index-for-index. Empty when the dataset declares no QC columns.
-        """
+        """``{value column: QC column}``, paired by position; empty without QC columns."""
         if not self.value_columns_quality_control_columns:
             return {}
         return dict(zip(self.value_columns, self.value_columns_quality_control_columns))
 
     @property
     def load_columns(self) -> list[str]:
-        """The column subset to materialize on :meth:`load`.
+        """Columns :meth:`load` keeps: time, site, location, group, value and QC, deduplicated.
 
-        Derived from the schema columns (time, site, location, plus
-        ``group_column`` when set), the dataset's ``value_columns``, and any
-        ``value_columns_quality_control_columns`` — the union of everything
-        any read needs, with no duplicates.
+        Any of these named in ``derived_columns`` is computed instead of read.
         """
         cols = [
             self.time_column,
@@ -131,8 +124,7 @@ class ParquetRepository(ABC):
             self.latitude_column,
             self.longitude_column,
         ]
-        if self.group_column is not None:
-            cols.append(self.group_column)
+        cols += [c for c in self.group_columns if c not in cols]
         cols += [c for c in self.value_columns if c not in cols]
         cols += [c for c in self.value_columns_quality_control_columns if c not in cols]
         return cols
@@ -152,17 +144,19 @@ class ParquetRepository(ABC):
     )
     # wait = multiplier * exp_base**(attempt_number - 1), clamped to [min, max].
     def load(self) -> ParquetRepository:
-        """Materialize the PRIMARY dataset into this dataset's ``table``.
+        """Read the primary ``dataset`` into ``table`` (Batch job only). Returns ``self``.
 
-        Reads the Hive-partitioned ``dataset`` directory and replaces the table.
-        Retries a few times (see ``_LOAD_RETRY_*``) on ``duckdb.IOException`` or
-        ``UnicodeDecodeError`` — both can happen when this read races an
-        in-progress rewrite of the primary dataset by its external producer.
-        Raises if every attempt fails; because ``CREATE OR REPLACE TABLE`` is
-        atomic, a failed read rolls back and leaves any existing table intact.
-        Returns ``self`` so callers can chain ``Repo(session).load()``.
+        Retries on ``IOException`` / ``UnicodeDecodeError``, which happen when the
+        producer is rewriting the source. A failed load leaves the old table intact.
         """
-        cols = ", ".join(quote_ident(c) for c in self.load_columns)
+        cols = ", ".join(
+            (
+                f"{self.derived_columns[c]} AS {quote_ident(c)}"
+                if c in self.derived_columns
+                else quote_ident(c)
+            )
+            for c in self.load_columns
+        )
         self.session.execute(
             f"""
             CREATE OR REPLACE TABLE {quote_ident(self.table)} AS
@@ -176,18 +170,10 @@ class ParquetRepository(ABC):
         return self
 
     def load_snapshot(self) -> ParquetRepository:
-        """Point the table name at ``snapshot_dataset`` (a single flat Parquet file) as a VIEW.
+        """Point ``table`` at ``snapshot_dataset`` as a VIEW (API service).
 
-        The Batch job writes ``snapshot_dataset`` via :meth:`write_snapshot`;
-        this reads it directly (it's one flat file, not a partitioned
-        directory). Called by :meth:`reload_if_changed`, which only calls this
-        once it has confirmed the snapshot exists.
-
-        A VIEW rather than a materialized TABLE: this runs in the always-on
-        API service, so a reload should not copy the whole snapshot into the
-        service's memory — it's just a catalog-level pointer swap onto the new
-        file, and DuckDB pushes filter/projection pushdown through the view
-        into the underlying ``read_parquet`` scan for the read methods below.
+        A view, not a table, so the API doesn't copy the snapshot into memory;
+        filters and projections push down into the Parquet scan.
         """
         self.session.execute(
             f"""
@@ -198,11 +184,7 @@ class ParquetRepository(ABC):
         return self
 
     def snapshot_etag(self) -> str | None:
-        """Current S3 ETag of ``snapshot_dataset``, or ``None`` if it doesn't exist yet.
-
-        A single S3 HEAD — no data transfer — used by :meth:`reload_if_changed`
-        to detect a new snapshot before paying for a table rebuild.
-        """
+        """S3 ETag of ``snapshot_dataset`` (one HEAD), or ``None`` if it doesn't exist."""
         key = self.snapshot_dataset.removeprefix(f"s3://{self.snapshot_bucket}/")
         aws = AWSHelper()
         try:
@@ -212,12 +194,9 @@ class ParquetRepository(ABC):
         return response["ETag"]
 
     def reload_if_changed(self) -> bool:
-        """Reload the table from ``snapshot_dataset`` if its S3 ETag has changed.
+        """Call :meth:`load_snapshot` if the snapshot's ETag changed; return whether it did.
 
-        The always-on service's only way of picking up new data — called both
-        at startup and on every recurring reload tick. Cheap either way: one
-        HEAD, plus — only when changed — the lightweight :meth:`load_snapshot`
-        read. Returns whether a reload happened.
+        How the API picks up new data, at startup and on each scheduler tick.
         """
         etag = self.snapshot_etag()
         if etag is None or etag == self._loaded_snapshot_etag:
@@ -227,26 +206,12 @@ class ParquetRepository(ABC):
         return True
 
     def write_snapshot(self) -> None:
-        """Write the current table to ``snapshot_dataset`` as one Parquet file.
+        """Write ``table`` to ``snapshot_dataset`` as one Parquet file, after :meth:`load`.
 
-        Called after a successful primary :meth:`load` so the snapshot always
-        mirrors the latest good data.
-
-        Rows are written sorted by (``site_column`` [, ``group_column``],
-        ``time_column``) rather than in their incoming order. The API service
-        reads this file through a VIEW (see :meth:`load_snapshot`), so every
-        :meth:`site_details` call rescans it directly — sorting clusters each
-        site's rows into a small, contiguous set of row groups, so Parquet's
-        per-row-group min/max stats let DuckDB skip row groups outside the
-        requested ``site_code`` (and, secondarily, time range) instead of
-        scanning the whole file. ``sites_in_date_range``/:meth:`latest_time`
-        touch every site regardless, so this ordering doesn't help or hurt
-        them.
+        Sorted by site, group columns, then time, so each site sits in a few row
+        groups and :meth:`site_details` can skip the rest of the file.
         """
-        order_columns = [self.site_column]
-        if self.group_column is not None:
-            order_columns.append(self.group_column)
-        order_columns.append(self.time_column)
+        order_columns = [self.site_column, *self.group_columns, self.time_column]
         order_by = ", ".join(quote_ident(c) for c in order_columns)
 
         self.session.execute(
@@ -257,12 +222,7 @@ class ParquetRepository(ABC):
         )
 
     def is_loaded(self) -> bool:
-        """Whether this dataset's table exists yet (a load has committed).
-
-        On an on-disk database the table survives restarts, so this is true
-        immediately on startup once any prior run loaded it — it only returns
-        false on the very first run, before the first background load commits.
-        """
+        """Whether ``table`` exists yet (table or snapshot view); routes return 503 until then."""
         row = self.session.execute(
             "SELECT 1 FROM information_schema.tables WHERE table_name = ?",
             [self.table],
@@ -270,16 +230,9 @@ class ParquetRepository(ABC):
         return row is not None
 
     def sites_in_date_range(self, start: str | None = None, end: str | None = None):
-        """One row per site with the lat/lon and TIME of its latest record.
+        """One row per site: location and time of its latest record within ``[start, end]``.
 
-        Uses ``arg_max`` to pick the LAT/LON belonging to each site's most
-        recent record. ``start`` / ``end`` (inclusive ISO 8601 strings) bound
-        the records considered, and either may be given alone:
-
-          * neither       — all sites.
-          * ``start`` only — records at or after ``start`` (i.e. up to now).
-          * ``end`` only   — records at or before ``end``.
-          * both          — records within ``[start, end]``.
+        ``start`` / ``end`` are optional and inclusive.
         """
         site = quote_ident(self.site_column)
         time = quote_ident(self.time_column)
@@ -308,7 +261,7 @@ class ParquetRepository(ABC):
         return self.session.execute(sql, params or None).df()
 
     def latest_time(self):
-        """Return the single most recent TIME across all rows."""
+        """Most recent time across all rows."""
         (value,) = self.session.execute(
             f"SELECT max({quote_ident(self.time_column)}) "
             f"FROM {quote_ident(self.table)}"
@@ -316,29 +269,13 @@ class ParquetRepository(ABC):
         return value
 
     def site_details(self, site: str, start: str | None = None, end: str | None = None):
-        """Return observation rows for one site, optionally within a time range.
+        """One site's rows in ``[start, end]`` (optional, inclusive), sorted by group then time.
 
-        Selects this dataset's ``value_columns`` alongside the required columns
-        (time, location, plus ``group_column`` when this dataset groups by one).
-        ``start`` / ``end`` (inclusive ISO 8601 strings) bound the rows and
-        either may be given alone:
-
-          * neither       — every record for the site.
-          * ``start`` only — records at or after ``start`` (i.e. up to now).
-          * ``end`` only   — records at or before ``end``.
-          * both          — records within ``[start, end]``.
-
-        Rows are ordered by ``group_column`` then time for a grouped dataset
-        (mooring, by sensor depth) and by time alone otherwise (wave buoy).
-
-        Any ``value_columns`` entry paired with a QC column (via
-        ``value_columns_quality_control_columns``) is nulled out row-by-row
-        wherever its QC value isn't ``1`` — the rest of that row, including
-        other value columns, is left untouched.
+        Returns time, location, group and value columns. A value whose QC flag
+        isn't 1 is set to NULL; the rest of the row is kept.
         """
         required = [self.time_column, self.latitude_column, self.longitude_column]
-        if self.group_column is not None:
-            required.append(self.group_column)
+        required += [c for c in self.group_columns if c not in required]
         qc_map = self.value_quality_control_map
         value_exprs = []
         for c in self.value_columns:
@@ -354,9 +291,9 @@ class ParquetRepository(ABC):
         cols = ", ".join([quote_ident(c) for c in required] + value_exprs)
 
         time = quote_ident(self.time_column)
-        order = time
-        if self.group_column is not None:
-            order = f"{quote_ident(self.group_column)}, {time}"
+        order = ", ".join(
+            quote_ident(c) for c in [*self.group_columns, self.time_column]
+        )
 
         conditions = [f"{quote_ident(self.site_column)} = ?"]
         params = [site]
@@ -377,7 +314,7 @@ class ParquetRepository(ABC):
 
 
 class MooringRepository(ParquetRepository):
-    """Reads over the mooring-timeseries realtime-QC dataset."""
+    """Mooring timeseries (realtime QC), grouped by depth."""
 
     config: Config = Config.get_config()
 
@@ -394,7 +331,7 @@ class MooringRepository(ParquetRepository):
         "PSAL_quality_control",
         "DOX1_quality_control",
     )
-    group_column: ClassVar[str] = "NOMINAL_DEPTH"
+    group_columns: ClassVar[tuple[str, ...]] = ("NOMINAL_DEPTH",)
     time_column: ClassVar[str] = "TIME"
     site_column: ClassVar[str] = "site_code"
     latitude_column: ClassVar[str] = "LATITUDE"
@@ -402,7 +339,7 @@ class MooringRepository(ParquetRepository):
 
 
 class WaveBuoyRepository(ParquetRepository):
-    """Reads over the realtime (non-QC) wave-buoy dataset."""
+    """Wave buoy (realtime, no QC), ungrouped."""
 
     config: Config = Config.get_config()
 
@@ -420,13 +357,66 @@ class WaveBuoyRepository(ParquetRepository):
     longitude_column: ClassVar[str] = "LONGITUDE"
 
 
-# Instantiated once at startup in data_access_service.server
+class MooringEstuarineWaterQualityRepository(ParquetRepository):
+    """Estuarine/coastal water-quality moorings (realtime QC), grouped by instrument then depth."""
+
+    config: Config = Config.get_config()
+
+    table: ClassVar[str] = (
+        "mooring_estuarine_coastal_water_quality_monitoring_realtime_qc"
+    )
+    bucket: ClassVar[str] = config.get_sites_config().co_bucket
+    snapshot_bucket: ClassVar[str] = config.get_datavis_data_bucket_name()
+    dataset: ClassVar[str] = f"s3://{bucket}/{table}.parquet"
+    snapshot_dataset: ClassVar[str] = (
+        f"s3://{snapshot_bucket}/imoslive/MOORING_ESTUARINE_WATER_QUALITY/{table}.parquet"
+    )
+    value_columns: ClassVar[tuple[str, ...]] = (
+        "TEMP",
+        "PSAL",
+        "CPHL",
+        "DOXS",
+        "FDOM",
+        "PHYCO",
+        "TURB",
+        "FLUSI",
+    )
+    # QARTOD flags: 1 pass, 2 not evaluated, 3 questionable, 4 bad, 9 missing
+    value_columns_quality_control_columns: ClassVar[tuple[str, ...]] = (
+        "TEMP_quality_control",
+        "PSAL_quality_control",
+        "CPHL_quality_control",
+        "DOXS_quality_control",
+        "FDOM_quality_control",
+        "PHYCO_quality_control",
+        "TURB_quality_control",
+        "FLUSI_quality_control",
+    )
+    # SA sites have two instruments at one depth; the instrument is only in the filename,
+    # e.g. "..._FV00_SACM-BOS-20260220_EXO2-SONDE.nc" -> "EXO2-SONDE".
+    # TEMPORARY: the dataset has no instrument column yet. Once it does, drop this
+    # derived_columns entry and group by that column directly.
+    derived_columns: ClassVar[dict[str, str]] = {
+        "instrument": (
+            "coalesce(nullif(regexp_extract(filename, '_FV0[0-9]_[^_]+_(.+)\\.nc$', 1), ''), "
+            "'unknown')"
+        )
+    }
+    group_columns: ClassVar[tuple[str, ...]] = ("instrument", "NOMINAL_DEPTH")
+    time_column: ClassVar[str] = "TIME"
+    site_column: ClassVar[str] = "site_code"
+    latitude_column: ClassVar[str] = "LATITUDE"
+    longitude_column: ClassVar[str] = "LONGITUDE"
+
+
+# Product key -> repository. Used by the API routes and the Batch refresh.
 REPOSITORY_CLASSES: dict[str, type[ParquetRepository]] = {
     "mooring": MooringRepository,
     "wave-buoy": WaveBuoyRepository,
+    "mooring-estuarine-water-quality": MooringEstuarineWaterQualityRepository,
 }
 
 
 def build_repositories(session: SitesDuckDBClient) -> dict[str, ParquetRepository]:
-    """Instantiate one repository per product, all sharing one ``SitesDuckDBClient``."""
+    """One repository per product, sharing ``session``."""
     return {name: cls(session) for name, cls in REPOSITORY_CLASSES.items()}

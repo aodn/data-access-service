@@ -1,6 +1,6 @@
 """Unit tests for ParquetRepository.write_snapshot()'s row ordering.
 
-write_snapshot() sorts by (site_column [, group_column], time_column) before
+write_snapshot() sorts by (site_column, group_columns..., time_column) before
 writing so the snapshot's Parquet row-group min/max stats prune well for
 site_details()'s per-site queries (see the docstring on write_snapshot()).
 These tests exercise the real method end to end against a local Parquet file.
@@ -23,7 +23,7 @@ def session(monkeypatch):
     s.close()
 
 
-def _make_repo(session, tmp_path, *, table_name, group_column=None):
+def _make_repo(session, tmp_path, *, table_name, group_columns=()):
     attrs = {
         "table": table_name,
         "bucket": "test-bucket",
@@ -36,8 +36,8 @@ def _make_repo(session, tmp_path, *, table_name, group_column=None):
         "longitude_column": "LONGITUDE",
         "value_columns": ("TEMP",),
     }
-    if group_column is not None:
-        attrs["group_column"] = group_column
+    if group_columns:
+        attrs["group_columns"] = group_columns
     cls = type("_WriteSnapshotRepo", (ParquetRepository,), attrs)
     return cls(session)
 
@@ -82,7 +82,7 @@ def test_write_snapshot_sorts_by_site_then_group_then_time(session, tmp_path):
         session,
         tmp_path,
         table_name="test_write_snapshot_grouped",
-        group_column="NOMINAL_DEPTH",
+        group_columns=("NOMINAL_DEPTH",),
     )
     df = pd.DataFrame(
         {

@@ -24,7 +24,7 @@ class _FakeRepo:
     latitude_column = "LATITUDE"
     longitude_column = "LONGITUDE"
     value_columns = ("TEMP", "PSAL")
-    group_column = None
+    group_columns = ()
 
     def __init__(self, *, sites=None, latest=None, details=None):
         self._sites = sites

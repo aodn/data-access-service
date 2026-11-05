@@ -1,13 +1,9 @@
-"""Service layer over a :class:`ParquetRepository` for the site feature-collection endpoints.
+"""Service for the ``/data/feature-collection`` routes.
 
-Sits between the HTTP routes and the repository: routes own only request/response
-concerns, this owns the orchestration each endpoint needs — parsing the ISO date
-params and shaping repository rows into the GeoJSON payloads the frontend reads.
-The repository stays a pure data-access object; the column-metadata-to-GeoJSON
-plumbing lives here rather than leaking into the handlers.
+Parses dates, calls the repository and builds the GeoJSON.
 
-One instance wraps one repository (i.e. one product); construct it per request from
-the resolved repo (see ``get_site_service`` in :mod:`data_access_service.core.routes.helpers`).
+One instance per request, wrapping one product's repository (see ``get_site_service``
+in ``core/routes/helpers.py``).
 """
 
 from __future__ import annotations
@@ -35,12 +31,7 @@ class SiteFeatureService:
     def sites_with_data_between(
         self, start_date: str | None, end_date: str | None
     ) -> SiteFeatureCollection:
-        """Sites with data in ``[start_date, end_date]`` as a ``SiteFeatureCollection``.
-
-        ``start_date`` / ``end_date`` are optional ISO 8601; either may be omitted
-        (omitting both returns all sites). They are normalized to naive UTC to match
-        the dataset's ``TIMESTAMP_NS`` time column.
-        """
+        """Sites with data in ``[start_date, end_date]``; both optional ISO 8601, read as UTC."""
         start = parse_utc_datetime("start_date", start_date)
         end = parse_utc_datetime("end_date", end_date)
         return site_feature_collection(
@@ -56,13 +47,9 @@ class SiteFeatureService:
     def site_details(
         self, site: str, start_date: str | None, end_date: str | None
     ) -> SiteDetailsFeature:
-        """One site's observation timeseries as a single details ``Feature``.
+        """One site's series as a details ``Feature``, nested by the repo's ``group_columns``.
 
-        ``start_date`` / ``end_date`` are optional ISO 8601; either may be omitted
-        (omitting both returns the full series). They are normalized to naive UTC to
-        match the dataset's ``TIMESTAMP_NS`` time column. Each ``value_columns``
-        entry becomes a ``[time_ms, value]`` series; for a grouped dataset (mooring)
-        the series are nested per depth under a ``"NOMINAL_DEPTH_<value>"`` key.
+        ``start_date`` / ``end_date`` are optional ISO 8601, read as UTC.
         """
         start = parse_utc_datetime("start_date", start_date)
         end = parse_utc_datetime("end_date", end_date)
@@ -72,5 +59,5 @@ class SiteFeatureService:
             longitude_column=self._repo.longitude_column,
             latitude_column=self._repo.latitude_column,
             value_columns=list(self._repo.value_columns),
-            group_column=self._repo.group_column,
+            group_columns=self._repo.group_columns,
         )
