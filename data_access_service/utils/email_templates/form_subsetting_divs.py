@@ -218,7 +218,7 @@ def form_subsetting_divs(start_date, end_date, multi_polygon):
                                                     <tr>
                                                         <td align="left" width="100%">
                                                             <div style="{SECTION_HEADING_STYLE}text-align:left;">
-                                                                <p style="Margin:0;mso-line-height-alt:24px;{SECTION_HEADING_STYLE}">Subsetting for this collection:</p>
+                                                                <p style="Margin:0;mso-line-height-alt:24px;{SECTION_HEADING_STYLE}">Subsetting:</p>
                                                             </div>
                                                         </td>
                                                     </tr>
