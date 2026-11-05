@@ -1,5 +1,6 @@
 """find_data_index_files on local tables shaped like the data-index S3 Tables."""
 
+import duckdb
 import pandas as pd
 import pytest
 
@@ -216,3 +217,22 @@ def test_is_data_index_uuid_reads_the_loaded_uuids(client, monkeypatch):
 
     assert data_index.is_data_index_uuid(UUID)
     assert not data_index.is_data_index_uuid("unknown")
+
+
+def _memory_limit(con):
+    return con.execute("SELECT current_setting('memory_limit')").fetchone()[0]
+
+
+def test_memory_limit_comes_from_the_config_unless_given():
+    cfg = Config.get_config().get_data_index_config()
+    # A plain connection shows each limit in DuckDB's own format (e.g. "1.8 GiB").
+    with duckdb.connect(config={"memory_limit": cfg.memory_limit}) as plain:
+        server_limit = _memory_limit(plain)
+    with duckdb.connect(config={"memory_limit": cfg.batch_memory_limit}) as plain:
+        batch_limit = _memory_limit(plain)
+
+    with DataIndexDuckDBClient() as c:
+        assert _memory_limit(c) == server_limit
+    with DataIndexDuckDBClient(memory_limit=cfg.batch_memory_limit) as c:
+        assert _memory_limit(c) == batch_limit
+    assert server_limit != batch_limit

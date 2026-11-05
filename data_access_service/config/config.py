@@ -426,6 +426,7 @@ class Config:
             table_bucket_arn=section["table_bucket_arn"],
             catalog_name=section.get("catalog_name", "data_index"),
             memory_limit=section.get("memory_limit", "256MB"),
+            batch_memory_limit=section.get("batch_memory_limit", "2GB"),
             threads=int(section.get("threads", 2)),
         )
 

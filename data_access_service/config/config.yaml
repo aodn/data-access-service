@@ -64,6 +64,8 @@ data_index:
     table_bucket_arn: "arn:aws:s3tables:ap-southeast-2:704910415367:bucket/data-index"
     catalog_name: "data_index"
     memory_limit: "256MB"
+    # Batch job needs larger memory: Argo (~4.35M files) OOM at 256MB
+    batch_memory_limit: "2GB"
     threads: 2
 subsetting:
   config:
