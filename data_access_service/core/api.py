@@ -713,7 +713,7 @@ class API(BaseAPI):
                     if uuid not in self._partition_keys:
                         self._partition_keys[uuid] = dict()
                     self._partition_keys[uuid][key] = self._intern_partition_keys(
-                        API._extract_partition_keys(data)
+                        API._extract_partition_keys_from_schema(data)
                     )
 
                     if uuid not in self._cached_metadata:
@@ -871,8 +871,8 @@ class API(BaseAPI):
             return None, None
 
     @staticmethod
-    def _extract_partition_keys(data: dict) -> frozenset[str]:
-        """Names in a dataset's schema that are hive partition keys.
+    def _extract_partition_keys_from_schema(data: dict) -> frozenset[str]:
+        """Names in a dataset's **schema** that are hive partition keys. NOT the one in the dataframe of parquet
 
         Identified by long_name, the only partition marker the cloud-optimised
         catalog keeps (the ``@partitioning:`` source tag is stripped upstream).
