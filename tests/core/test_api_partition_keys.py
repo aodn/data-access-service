@@ -15,6 +15,7 @@ _NO_REAL_TIME_COLUMN = {
     "ssm_lon": {"type": "double"},
     "timestamp": {"type": "int64", "units": "1", "long_name": "Partition timestamp"},
     "polygon": {"type": "string", "long_name": "Spatial partition polygon"},
+    "filename": {"type": "string", "long_name": "Filename of the source file"},
 }
 
 # Same shape, but written before the long_name marker existed.
@@ -22,6 +23,7 @@ _OLD_METADATA = {
     "ssm_lat": {"type": "double"},
     "timestamp": {"type": "int64"},
     "polygon": {"type": "string"},
+    "filename": {"type": "string"},
 }
 
 _REAL_TIME_COLUMN = {

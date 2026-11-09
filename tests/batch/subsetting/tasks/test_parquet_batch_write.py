@@ -13,6 +13,7 @@ from data_access_service.utils.parquet_filter import scan_parquet_batches
 from data_access_service.core.constants import PARTITION_KEY
 from data_access_service.batch.subsetting.tasks.parquet_processor import (
     _stream_window_to_parquet,
+    _without_partition_keys,
     _write_batches,
 )
 
@@ -151,6 +152,9 @@ class _FakeApi:
         self.error = error
         self.calls = []
 
+    def get_partition_keys(self, uuid, key):
+        return frozenset()
+
     def iter_parquet_batches(self, **kwargs):
         self.calls.append(kwargs)
         if self.error is not None:
@@ -179,6 +183,37 @@ def test_stream_window_writes_without_get_dataset(tmp_path):
     assert not hasattr(api, "get_dataset") or "get_dataset" not in api.calls[0]
     frame = pd.read_parquet(output)
     assert len(frame) == 3
+
+
+def test_write_batches_drops_partition_columns(tmp_path):
+    batch = pa.record_batch(
+        {
+            "TIME": pa.array(pd.date_range("2013-07-01", periods=2, freq="h")),
+            "value": pa.array([1, 2]),
+            "polygon": pa.array(["p1", "p2"]),
+            "filename": pa.array(["a.nc", "b.nc"]),
+        }
+    )
+    output = tmp_path / "out"
+    assert _write_batches(
+        [batch],
+        str(output),
+        None,
+        "TIME",
+        None,
+        None,
+        None,
+        drop_columns=frozenset({"polygon", "filename"}),
+    )
+    frame = pd.read_parquet(output)
+    assert set(frame.columns) - {PARTITION_KEY} == {"TIME", "value"}
+
+
+def test_without_partition_keys():
+    schema = {"id": {"type": "int64"}, "polygon": {}, "timestamp": {}}
+    assert _without_partition_keys(schema, frozenset({"polygon", "timestamp"})) == {
+        "id": {"type": "int64"}
+    }
 
 
 def test_stream_window_skips_a_date_outside_the_dataset(tmp_path):

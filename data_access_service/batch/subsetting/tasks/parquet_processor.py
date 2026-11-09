@@ -11,7 +11,7 @@ from shapely.geometry import Polygon as ShapelyPolygon
 
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource
 from geojson import MultiPolygon
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional
 
 from data_access_service.core.constants import STR_LONGITUDE_UPPER_CASE
 from data_access_service.core.constants import STR_LATITUDE_UPPER_CASE
@@ -200,6 +200,11 @@ def _timestamp_write_schema(
     return arrow_schema.set(index, field.with_type(pa.timestamp("ns")))
 
 
+def _without_partition_keys(table_schema: dict, partition_keys) -> dict:
+    """The dataset schema minus its hive partition keys, for dataschema.json."""
+    return {k: v for k, v in table_schema.items() if k not in partition_keys}
+
+
 def _write_batches(
     batches,
     output_dir: str,
@@ -208,13 +213,18 @@ def _write_batches(
     polygon: Optional[ShapelyPolygon],
     lat_key: Optional[str],
     lon_key: Optional[str],
+    drop_columns: Iterable[str] = (),
 ) -> bool:
     """Write each batch to its hive partition and drop it before the next.
+
+    `drop_columns` (the dataset's hive partition keys) are left out of the
+    output, so they reach neither the csv nor the parquet it is built from.
 
     `partition_label` pins every row (polygon partitions have no time column).
     Otherwise the month comes from `time_key`, because a window that starts on
     the last day of a month also contains the next month.
     """
+    drop_set = frozenset(drop_columns)
     writers: dict[str, pq.ParquetWriter] = {}
     schema = None
     wrote = False
@@ -222,8 +232,13 @@ def _write_batches(
         for batch in batches:
             if batch.num_rows == 0:
                 continue
-            batch_schema = schema if schema is not None else batch.schema
-            frame = batch.to_pandas()
+            if schema is not None:
+                batch_schema = schema
+            else:
+                batch_schema = pa.schema(
+                    [f for f in batch.schema if f.name not in drop_set]
+                )
+            frame = batch.to_pandas().drop(columns=list(drop_set), errors="ignore")
             del batch
             if polygon is not None and lat_key is not None and lon_key is not None:
                 frame = _filter_partition_by_polygon(frame, polygon, lat_key, lon_key)
@@ -319,6 +334,7 @@ def _stream_window_to_parquet(
             polygon,
             lat_key,
             lon_key,
+            drop_columns=api.get_partition_keys(uuid, key),
         )
     except ValueError as error:
         if _is_empty_window_error(error):
@@ -370,7 +386,9 @@ def _generate_partition_output(
             # save to the root_folder/dataschema.json
             schema_path = f"{root_folder_path}/dataschema.json"
             if not Path(schema_path).exists():
-                table_schema = datasource.get_metadata()
+                table_schema = _without_partition_keys(
+                    datasource.get_metadata(), api.get_partition_keys(uuid, key)
+                )
                 os.makedirs(os.path.dirname(schema_path), exist_ok=True)
                 with open(schema_path, "w") as f:
                     json.dump(table_schema, f, indent=2)
@@ -478,7 +496,9 @@ def _generate_polygon_partition_output(
 
     schema_path = f"{root_folder_path}/dataschema.json"
     if not Path(schema_path).exists():
-        table_schema = datasource.get_metadata()
+        table_schema = _without_partition_keys(
+            datasource.get_metadata(), api.get_partition_keys(uuid, key)
+        )
         os.makedirs(os.path.dirname(schema_path), exist_ok=True)
         with open(schema_path, "w") as f:
             json.dump(table_schema, f, indent=2)
