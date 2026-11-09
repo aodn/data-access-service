@@ -42,6 +42,23 @@ class TestParquetProcessorWithS3(TestWithS3):
             _canned_s3_sample2(),
         )
 
+    @staticmethod
+    def _assert_partition_keys_removed(
+        api, uuid, key, subset, s3_client, bucket_name, master_job_id
+    ):
+        """Neither the subset parquet (-> csv) nor dataschema.json keep the hive partition keys."""
+        partition_keys = api.get_partition_keys(uuid, key)
+        assert partition_keys, f"{key} should have hive partition keys"
+
+        leaked = partition_keys & set(subset.columns)
+        assert not leaked, f"partition keys in subset output: {leaked}"
+
+        body = s3_client.get_object(
+            Bucket=bucket_name, Key=f"{master_job_id}/temp/dataschema.json"
+        )["Body"].read()
+        leaked = partition_keys & set(json.loads(body))
+        assert not leaked, f"partition keys in dataschema.json: {leaked}"
+
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
     def test_parquet_processor_seagrass_with_s3(
         self,
@@ -140,6 +157,15 @@ class TestParquetProcessorWithS3(TestWithS3):
                 )
                 subset = helper.read_parquet_from_s3(subset_path)
                 assert len(subset) > 0, "subset parquet is empty"
+                self._assert_partition_keys_removed(
+                    api,
+                    SEAGRASS_UUID,
+                    SEAGRASS_KEY,
+                    subset,
+                    s3_client,
+                    bucket_name,
+                    MASTER_JOB_ID,
+                )
 
                 time_key = api.map_column_names(
                     uuid=SEAGRASS_UUID,
@@ -276,6 +302,15 @@ class TestParquetProcessorWithS3(TestWithS3):
                 )
                 subset = helper.read_parquet_from_s3(subset_path)
                 assert len(subset) > 0, "subset parquet is empty"
+                self._assert_partition_keys_removed(
+                    api,
+                    ANIMAL_METADATA_UUID,
+                    ANIMAL_METADATA_KEY,
+                    subset,
+                    s3_client,
+                    bucket_name,
+                    MASTER_JOB_ID,
+                )
 
                 time_key = api.map_column_names(
                     uuid=ANIMAL_METADATA_UUID,
