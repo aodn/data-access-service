@@ -272,6 +272,7 @@ tiler:
       - npp_vgpm_eppley_oc3
       - owtd_csiro
       - picop_brewin2012in
+      - WDIR
   # Per-product tuning, keyed by product id and applied by the API only
   products_customisation:
     - id: model_sea_level_anomaly_gridded_realtime:gsla
