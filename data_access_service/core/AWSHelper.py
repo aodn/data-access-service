@@ -39,6 +39,22 @@ class AWSHelper:
         else:
             return None
 
+    @staticmethod
+    def _excluded_internal_columns(data) -> list[str]:
+        """Columns that must not appear in the CSV output.
+
+        Always: our own PARTITION_KEY, the parquet index column, the hive
+        `polygon` partition and `filename`. `timestamp` is dropped only when it
+        is the partition column (non-temporal dtype); a real datetime
+        `timestamp` column is data and is kept.
+        """
+        excluded = [PARTITION_KEY, "__index_level_0__", "polygon", "filename"]
+        if "timestamp" in data.columns and not pd.api.types.is_datetime64_any_dtype(
+            data["timestamp"].dtype
+        ):
+            excluded.append("timestamp")
+        return [c for c in excluded if c in data.columns]
+
     def write_csv_to_s3(
         self,
         data: dask.dataframe.DataFrame,
@@ -53,7 +69,9 @@ class AWSHelper:
         collection while the csv files stay named after the dataset; when it is
         not given, both come from `key` as they always did.
         """
-        target = data.drop(PARTITION_KEY, axis=1).reset_index(drop=True)
+        target = data.drop(
+            columns=self._excluded_internal_columns(data), errors="ignore"
+        ).reset_index(drop=True)
         # the max row should be the max excel row limit exclude the header row
         max_excel_row = MAX_CSV_ROW - 1
 

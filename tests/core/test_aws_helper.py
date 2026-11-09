@@ -182,6 +182,37 @@ class TestAWSHelper(TestWithS3):
                 written = pd.read_csv(io.StringIO(zf.read(namelist[0]).decode()))
                 pd.testing.assert_frame_equal(written, mock_df)
 
+    def test_excluded_internal_columns(self):
+        pdf = pd.DataFrame(
+            {
+                "id": [1],
+                "__index_level_0__": [0],
+                "polygon": ["p1"],
+                "filename": ["a.nc"],
+                "timestamp": [202001],  # partition column, non-temporal
+                PARTITION_KEY: ["2020-01"],
+            }
+        )
+        excluded = AWSHelper._excluded_internal_columns(
+            dd.from_pandas(pdf, npartitions=1)
+        )
+        assert set(excluded) == {
+            "__index_level_0__",
+            "polygon",
+            "filename",
+            "timestamp",
+            PARTITION_KEY,
+        }
+
+    def test_excluded_internal_columns_keeps_real_timestamp(self):
+        pdf = pd.DataFrame(
+            {"id": [1], "timestamp": pd.to_datetime(["2020-01-01"]), "polygon": ["p"]}
+        )
+        excluded = AWSHelper._excluded_internal_columns(
+            dd.from_pandas(pdf, npartitions=1)
+        )
+        assert excluded == ["polygon"]
+
     def test_write_csv_to_s3(self, setup, aws_clients, localstack, mock_boto3_client):
         helper = AWSHelper()
         helper.s3 = MagicMock()
