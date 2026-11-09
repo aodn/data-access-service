@@ -36,14 +36,14 @@ PARTITION_KEY = sys.intern("PARTITION_KEY")
 # marker surviving into the catalog is long_name; the declared type is not
 # usable (_common_metadata says int64, pyarrow infers int32 from the directory).
 PARTITION_KEY_LONG_NAMES = frozenset(
-    {"Partition timestamp", "Spatial partition polygon"}
+    {"Partition timestamp", "Spatial partition polygon", "Filename of the source file"}
 )
 
 # Names the cloud-optimised pipeline always uses for its hive partitions. Older
 # datasets predate the long_name marker above, so the name is the only clue left.
 # Matched by name ONLY when the declared type is not temporal, so a dataset that
 # genuinely has a "timestamp" column of type timestamp[ns] is still usable.
-PARTITION_KEY_NAMES = frozenset({"timestamp", "polygon"})
+PARTITION_KEY_NAMES = frozenset({"timestamp", "polygon", "filename"})
 
 PARQUET_SUBSET_ROW_NUMBER: int = 200000
 MAX_PARQUET_SPLIT: int = 30

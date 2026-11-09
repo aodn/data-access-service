@@ -33,14 +33,14 @@ _REAL_TIME_COLUMN = {
 class TestExtractPartitionKeys(unittest.TestCase):
     def test_detected_by_long_name(self):
         self.assertEqual(
-            API._extract_partition_keys(_NO_REAL_TIME_COLUMN),
-            frozenset({"timestamp", "polygon"}),
+            API._extract_partition_keys_from_schema(_NO_REAL_TIME_COLUMN),
+            frozenset({"timestamp", "polygon", "filename"}),
         )
 
     def test_detected_by_name_when_long_name_is_missing(self):
         self.assertEqual(
-            API._extract_partition_keys(_OLD_METADATA),
-            frozenset({"timestamp", "polygon"}),
+            API._extract_partition_keys_from_schema(_OLD_METADATA),
+            frozenset({"timestamp", "polygon", "filename"}),
         )
 
     def test_real_timestamp_column_is_not_a_partition_key(self):
@@ -48,19 +48,21 @@ class TestExtractPartitionKeys(unittest.TestCase):
         # dataset that genuinely stores a datetime in "timestamp" still works.
         data = {"timestamp": {"type": "timestamp[ns]"}}
 
-        self.assertEqual(API._extract_partition_keys(data), frozenset())
+        self.assertEqual(API._extract_partition_keys_from_schema(data), frozenset())
 
     def test_ordinary_columns_are_untouched(self):
         data = {"s_date": {"type": "timestamp[ns]"}, "cnt": {"type": "int64"}}
 
-        self.assertEqual(API._extract_partition_keys(data), frozenset())
+        self.assertEqual(API._extract_partition_keys_from_schema(data), frozenset())
 
 
 class TestMapColumnNamesSkipsPartitionKeys(unittest.TestCase):
     def _api(self, schema: dict) -> API:
         api = API()
         api._schema_keys = {_UUID: {_KEY: frozenset(schema.keys())}}
-        api._partition_keys = {_UUID: {_KEY: API._extract_partition_keys(schema)}}
+        api._partition_keys = {
+            _UUID: {_KEY: API._extract_partition_keys_from_schema(schema)}
+        }
         return api
 
     def test_time_does_not_fall_back_to_the_partition_key(self):
