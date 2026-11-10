@@ -64,19 +64,24 @@ def generate_estimation_index_for_all_parquets(api: BaseAPI, uuid: str | None = 
     )
 
     for k, dataset_name in work:
-        if use_fork:
-            ok = _build_in_subprocess(api, k, dataset_name)
-            after_label = f"after child for {dataset_name}"
-        else:
-            ok = build_and_upload_estimation_index(api, k, dataset_name)
-            after_label = f"after in-process run for {dataset_name}"
-        if not ok:
-            logger.error(
-                "Estimation index worker failed for uuid=%s dataset=%s",
-                k,
-                dataset_name,
-            )
-        log_memory_usage(logger, after_label)
+        generate_estimation_index_for_dataset(api, k, dataset_name)
+
+
+def generate_estimation_index_for_dataset(api: BaseAPI, uuid: str, dname: str) -> bool:
+    """Build the index for one dataset, in a forked child when
+    ``estimation.config.use_fork_process`` is on. Returns False if it failed."""
+    if config.get_estimation_config().use_fork_process:
+        ok = _build_in_subprocess(api, uuid, dname)
+        after_label = f"after child for {dname}"
+    else:
+        ok = build_and_upload_estimation_index(api, uuid, dname)
+        after_label = f"after in-process run for {dname}"
+    if not ok:
+        logger.error(
+            "Estimation index worker failed for uuid=%s dataset=%s", uuid, dname
+        )
+    log_memory_usage(logger, after_label)
+    return ok
 
 
 def _build_in_subprocess(api: BaseAPI, uuid: str, dname: str) -> bool:
@@ -145,9 +150,9 @@ def generate_estimation_index_for_parquets(api: BaseAPI, uuid: str, dname: str) 
 def build_and_upload_estimation_index(api: BaseAPI, uuid: str, dname: str) -> bool:
     """Build both files in a temp dir and upload them to the portal-data bucket.
 
-    Also reached from the pmtiles job (its Phase 2 calls
-    :func:`generate_estimation_index_for_all_parquets` once all pmtiles are
-    done), so it never raises: a failed index must not fail the pmtiles run.
+    Also reached from the pmtiles job (each dataset's index is built right
+    after its pmtiles), so it never raises: a failed index must not fail the
+    pmtiles run.
     """
     try:
         logger.info(

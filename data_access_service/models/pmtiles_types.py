@@ -155,13 +155,14 @@ class PmtilesGenerationConfig:
     # "month" (YYYYMM), "date" (YYYYMMDD), "year" (YYYY), or "all" (nested tree);
     # default month.
     time_group_by: TimeGroupBy = TimeGroupBy.MONTH
-    # When True (default), batch generation forks one short-lived child per
-    # parquet dataset so DuckDB/tippecanoe memory returns to the OS on exit.
-    # When False, each dataset runs in the main process (useful for local
-    # debug or agents that do not tolerate os.fork, e.g. some APM agents).
+    # When True (default), batch generation makes each dataset's pmtiles in a
+    # short-lived forked child so DuckDB/tippecanoe memory returns to the OS on
+    # exit. When False, it runs in the main process (useful for local debug or
+    # agents that do not tolerate os.fork, e.g. some APM agents).
     use_fork_process: bool = True
-    # When True (default), the pmtiles batch also run the second phase: builds the
-    # estimation index for all after every dataset's pmtiles are done. When False, the pmtiles batch only builds the pmtiles and skips the estimation index.
+    # When True (default), the pmtiles batch also builds each dataset's
+    # estimation index, right after that dataset's pmtiles. When False, it
+    # only builds the pmtiles.
     build_estimation_index: bool = True
 
 

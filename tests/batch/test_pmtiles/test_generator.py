@@ -1,3 +1,4 @@
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -6,7 +7,10 @@ from data_access_service.batch.pmtiles import generator
 from data_access_service.batch.pmtiles.generator import (
     _generate_pmtiles_for_parquets,
     _generate_pmtiles_for_parquets_in_subprocess,
-    generate_pmtiles_for_all_parquets,
+    generate_pmtiles_for_child,
+    generate_pmtiles_for_dataset,
+    list_parquet_datasets,
+    submit_pmtiles_array_job,
 )
 from data_access_service.models.pmtiles_types import PmtilesVisualizationStyle
 
@@ -25,114 +29,50 @@ def _enable_fork(
 
 
 @pytest.fixture(autouse=True)
-def estimation_phase(monkeypatch):
-    """Phase 2 runs for real otherwise: it would fork index workers onto S3."""
-    stub = MagicMock()
-    monkeypatch.setattr(generator, "generate_estimation_index_for_all_parquets", stub)
+def estimation_index(monkeypatch):
+    """The index runs for real otherwise: it would fork index workers onto S3."""
+    stub = MagicMock(return_value=True)
+    monkeypatch.setattr(generator, "generate_estimation_index_for_dataset", stub)
     return stub
 
 
+@pytest.fixture
+def no_memory_log(monkeypatch):
+    monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+
+
 class TestBatchProcessIsolation:
-    def test_all_parquets_forks_one_child_per_parquet(self, monkeypatch):
+    def test_dataset_forks_when_enabled(self, monkeypatch, no_memory_log):
         _enable_fork(monkeypatch, True)
         api = MagicMock()
-        api.get_mapped_meta_data.return_value = {
-            "uuid-a": {
-                "a.parquet": {},
-                "notes.txt": {},
-            },
-            "uuid-b": {
-                "b.parquet": {},
-            },
-        }
-
-        calls = []
-
-        def fake_run(passed_api, uuid, dname):
-            calls.append((passed_api, uuid, dname))
-            return True
-
+        fork_run = MagicMock(return_value=True)
+        in_process = MagicMock(return_value=True)
         monkeypatch.setattr(
-            generator, "_generate_pmtiles_for_parquets_in_subprocess", fake_run
+            generator, "_generate_pmtiles_for_parquets_in_subprocess", fork_run
         )
-        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+        monkeypatch.setattr(generator, "_generate_pmtiles_for_parquets", in_process)
 
-        generate_pmtiles_for_all_parquets(api)
+        generate_pmtiles_for_dataset(api, "uuid-a", "a.parquet")
 
-        assert calls == [
-            (api, "uuid-a", "a.parquet"),
-            (api, "uuid-b", "b.parquet"),
-        ]
+        fork_run.assert_called_once_with(api, "uuid-a", "a.parquet")
+        in_process.assert_not_called()
 
-    def test_all_parquets_runs_in_process_when_fork_disabled(self, monkeypatch):
+    def test_dataset_runs_in_process_when_fork_disabled(
+        self, monkeypatch, no_memory_log
+    ):
         _enable_fork(monkeypatch, False)
         api = MagicMock()
-        api.get_mapped_meta_data.return_value = {
-            "uuid-a": {"a.parquet": {}, "notes.txt": {}},
-            "uuid-b": {"b.parquet": {}},
-        }
-        calls = []
-        fork_spy = MagicMock(return_value=True)
-
-        def fake_in_process(passed_api, uuid, dname):
-            calls.append((uuid, dname))
-            return True
-
+        fork_run = MagicMock(return_value=True)
+        in_process = MagicMock(return_value=True)
         monkeypatch.setattr(
-            generator, "_generate_pmtiles_for_parquets", fake_in_process
+            generator, "_generate_pmtiles_for_parquets_in_subprocess", fork_run
         )
-        monkeypatch.setattr(
-            generator, "_generate_pmtiles_for_parquets_in_subprocess", fork_spy
-        )
-        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
+        monkeypatch.setattr(generator, "_generate_pmtiles_for_parquets", in_process)
 
-        generate_pmtiles_for_all_parquets(api)
+        generate_pmtiles_for_dataset(api, "uuid-a", "a.parquet")
 
-        assert calls == [("uuid-a", "a.parquet"), ("uuid-b", "b.parquet")]
-        fork_spy.assert_not_called()
-
-    def test_all_parquets_can_filter_to_single_uuid(self, monkeypatch):
-        _enable_fork(monkeypatch, True)
-        api = MagicMock()
-        api.get_mapped_meta_data.return_value = {
-            "uuid-a": {"a.parquet": {}, "notes.txt": {}},
-            "uuid-b": {"b.parquet": {}},
-        }
-        calls = []
-
-        def fake_run(passed_api, uuid, dname):
-            calls.append((uuid, dname))
-            return True
-
-        monkeypatch.setattr(
-            generator, "_generate_pmtiles_for_parquets_in_subprocess", fake_run
-        )
-        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
-
-        generate_pmtiles_for_all_parquets(api, uuid="uuid-b")
-
-        assert calls == [("uuid-b", "b.parquet")]
-        api.release_memory_for_batch.assert_called_once_with(
-            keep_suffix=".parquet", drop_instance=True
-        )
-
-    def test_all_parquets_uuid_filter_no_match_skips_workers(self, monkeypatch):
-        _enable_fork(monkeypatch, True)
-        api = MagicMock()
-        api.get_mapped_meta_data.return_value = {
-            "uuid-a": {"a.parquet": {}},
-        }
-        fake_run = MagicMock(return_value=True)
-        monkeypatch.setattr(
-            generator, "_generate_pmtiles_for_parquets_in_subprocess", fake_run
-        )
-        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
-
-        generate_pmtiles_for_all_parquets(api, uuid="missing-uuid")
-
-        fake_run.assert_not_called()
-        # No work: still avoid trimming? Current code returns before trim when empty.
-        api.release_memory_for_batch.assert_not_called()
+        in_process.assert_called_once_with(api, "uuid-a", "a.parquet")
+        fork_run.assert_not_called()
 
     def test_fork_helper_success_exit(self, monkeypatch):
         api = MagicMock()
@@ -199,111 +139,168 @@ class TestBatchProcessIsolation:
             is False
         )
 
-    def test_batch_continues_after_failed_child(self, monkeypatch):
+
+@pytest.mark.usefixtures("no_memory_log")
+class TestEstimationIndex:
+    """Each dataset's index is built right after its own pmtiles."""
+
+    def test_runs_after_the_pmtiles(self, monkeypatch, estimation_index):
         _enable_fork(monkeypatch, True)
-        api = MagicMock()
-        api.get_mapped_meta_data.return_value = {
-            "uuid-a": {"a.parquet": {}, "b.parquet": {}},
-        }
-        results = iter([False, True])
-        calls = []
+        order = []
 
         def fake_run(passed_api, uuid, dname):
-            calls.append(dname)
-            return next(results)
+            order.append(f"pmtiles {dname}")
+            return True
 
+        estimation_index.side_effect = lambda a, u, d: order.append(f"index {d}")
         monkeypatch.setattr(
             generator, "_generate_pmtiles_for_parquets_in_subprocess", fake_run
         )
-        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
 
-        generate_pmtiles_for_all_parquets(api)
-        assert calls == ["a.parquet", "b.parquet"]
+        generate_pmtiles_for_dataset(MagicMock(), "uuid-a", "a.parquet")
+
+        assert order == ["pmtiles a.parquet", "index a.parquet"]
+
+    def test_skipped_when_flag_off(self, monkeypatch, estimation_index):
+        _enable_fork(monkeypatch, True, build_estimation_index=False)
+        monkeypatch.setattr(
+            generator, "_generate_pmtiles_for_parquets_in_subprocess", lambda *a: True
+        )
+
+        generate_pmtiles_for_dataset(MagicMock(), "uuid-a", "a.parquet")
+
+        estimation_index.assert_not_called()
+
+    def test_failure_does_not_fail_the_dataset(self, monkeypatch, estimation_index):
+        _enable_fork(monkeypatch, True)
+        estimation_index.side_effect = RuntimeError("index boom")
+        monkeypatch.setattr(
+            generator, "_generate_pmtiles_for_parquets_in_subprocess", lambda *a: True
+        )
+
+        generate_pmtiles_for_dataset(MagicMock(), "uuid-a", "a.parquet")
+
+        estimation_index.assert_called_once()
+
+    def test_still_runs_when_pmtiles_fails(self, monkeypatch, estimation_index):
+        _enable_fork(monkeypatch, True)
+        api = MagicMock()
+        monkeypatch.setattr(
+            generator, "_generate_pmtiles_for_parquets_in_subprocess", lambda *a: False
+        )
+
+        # Raising is what makes Batch mark the child FAILED and retry it.
+        with pytest.raises(RuntimeError, match="PMTiles failed"):
+            generate_pmtiles_for_dataset(api, "uuid-a", "a.parquet")
+
+        estimation_index.assert_called_once_with(api, "uuid-a", "a.parquet")
 
 
-class TestEstimationIndexPhase:
-    """Phase 2: the index build starts only after every pmtiles child is done."""
-
+class TestListParquetDatasets:
     @staticmethod
     def _api():
         api = MagicMock()
         api.get_mapped_meta_data.return_value = {
-            "uuid-a": {"a.parquet": {}, "notes.txt": {}},
             "uuid-b": {"b.parquet": {}},
+            "uuid-a": {"a.zarr": {}, "a.parquet": {}},
         }
         return api
 
-    def test_runs_once_after_all_pmtiles(self, monkeypatch, estimation_phase):
-        _enable_fork(monkeypatch, True)
-        api = self._api()
-        order = []
+    def test_only_parquet_sorted_by_uuid(self):
+        assert list_parquet_datasets(self._api()) == [
+            ("uuid-a", "a.parquet"),
+            ("uuid-b", "b.parquet"),
+        ]
 
-        def fake_run(passed_api, uuid, dname):
-            order.append(dname)
-            return True
+    def test_uuid_filter(self):
+        assert list_parquet_datasets(self._api(), uuid="uuid-b") == [
+            ("uuid-b", "b.parquet")
+        ]
 
-        estimation_phase.side_effect = lambda **kwargs: order.append("estimation")
-        monkeypatch.setattr(
-            generator, "_generate_pmtiles_for_parquets_in_subprocess", fake_run
+
+class TestSubmitArrayJob:
+    def test_one_array_child_per_dataset(self, monkeypatch):
+        api = MagicMock()
+        api.get_mapped_meta_data.return_value = {
+            "uuid-a": {"a1.parquet": {}, "a2.parquet": {}},
+            "uuid-b": {"b.parquet": {}},
+        }
+        submit = MagicMock(return_value="array-job-id")
+        monkeypatch.setattr(generator.aws, "submit_a_job", submit)
+
+        job_id = submit_pmtiles_array_job(
+            api, job_queue="queue-arn", job_definition="definition-arn"
         )
-        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
 
-        generate_pmtiles_for_all_parquets(api)
+        assert job_id == "array-job-id"
+        kwargs = submit.call_args.kwargs
+        assert kwargs["job_queue"] == "queue-arn"
+        assert kwargs["job_definition"] == "definition-arn"
+        assert kwargs["array_size"] == 3
+        parameters = kwargs["parameters"]
+        assert parameters["type"] == "generate-pmtiles-for-parquet-dataset"
+        assert json.loads(parameters["datasets"]) == [
+            ["uuid-a", "a1.parquet"],
+            ["uuid-a", "a2.parquet"],
+            ["uuid-b", "b.parquet"],
+        ]
+        # Batch only takes string parameter values.
+        assert all(isinstance(v, str) for v in parameters.values())
 
-        assert order == ["a.parquet", "b.parquet", "estimation"]
-        estimation_phase.assert_called_once_with(api=api, uuid=None)
+    def test_no_dataset_submits_nothing(self, monkeypatch):
+        api = MagicMock()
+        api.get_mapped_meta_data.return_value = {"uuid-a": {"a.zarr": {}}}
+        submit = MagicMock()
+        monkeypatch.setattr(generator.aws, "submit_a_job", submit)
 
-    def test_passes_the_uuid_filter_through(self, monkeypatch, estimation_phase):
-        _enable_fork(monkeypatch, True)
-        api = self._api()
-        monkeypatch.setattr(
-            generator,
-            "_generate_pmtiles_for_parquets_in_subprocess",
-            lambda *a: True,
+        assert submit_pmtiles_array_job(api, job_queue="q", job_definition="d") is None
+        submit.assert_not_called()
+
+
+class TestArrayChild:
+    DATASETS = json.dumps([["uuid-a", "a.parquet"], ["uuid-b", "b.parquet"]])
+
+    @pytest.fixture
+    def run(self, monkeypatch):
+        stub = MagicMock()
+        monkeypatch.setattr(generator, "generate_pmtiles_for_dataset", stub)
+        return stub
+
+    def test_runs_the_dataset_at_its_index(self, run):
+        api = MagicMock()
+
+        generate_pmtiles_for_child(api, {"datasets": self.DATASETS}, job_index="1")
+
+        run.assert_called_once_with(api, "uuid-b", "b.parquet")
+        api.release_memory_for_batch.assert_called_once_with(
+            keep_uuid="uuid-b", keep_suffix=".parquet", drop_instance=True
         )
-        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
 
-        generate_pmtiles_for_all_parquets(api, uuid="uuid-b")
+    def test_no_index_runs_the_first(self, run):
+        # A one-item list is sent as a plain job, which has no array index.
+        api = MagicMock()
+        datasets = json.dumps([["uuid-a", "a.parquet"]])
 
-        estimation_phase.assert_called_once_with(api=api, uuid="uuid-b")
+        generate_pmtiles_for_child(api, {"datasets": datasets}, job_index=None)
 
-    def test_skipped_when_flag_off(self, monkeypatch, estimation_phase):
-        _enable_fork(monkeypatch, True, build_estimation_index=False)
-        api = self._api()
-        monkeypatch.setattr(
-            generator,
-            "_generate_pmtiles_for_parquets_in_subprocess",
-            lambda *a: True,
+        run.assert_called_once_with(api, "uuid-a", "a.parquet")
+
+    def test_uuid_and_key_run_that_dataset(self, run):
+        api = MagicMock()
+
+        generate_pmtiles_for_child(
+            api, {"uuid": "uuid-x", "key": "x.parquet"}, job_index="1"
         )
-        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
 
-        generate_pmtiles_for_all_parquets(api)
+        run.assert_called_once_with(api, "uuid-x", "x.parquet")
 
-        estimation_phase.assert_not_called()
-
-    def test_skipped_when_no_parquet_datasets(self, monkeypatch, estimation_phase):
-        _enable_fork(monkeypatch, True)
-        api = self._api()
-        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
-
-        generate_pmtiles_for_all_parquets(api, uuid="missing-uuid")
-
-        estimation_phase.assert_not_called()
-
-    def test_failure_does_not_fail_the_pmtiles_run(self, monkeypatch, estimation_phase):
-        _enable_fork(monkeypatch, True)
-        api = self._api()
-        estimation_phase.side_effect = RuntimeError("index boom")
-        monkeypatch.setattr(
-            generator,
-            "_generate_pmtiles_for_parquets_in_subprocess",
-            lambda *a: True,
-        )
-        monkeypatch.setattr(generator, "log_memory_usage", lambda *a, **k: None)
-
-        generate_pmtiles_for_all_parquets(api)
-
-        estimation_phase.assert_called_once()
+    @pytest.mark.parametrize("job_index", ["2", "-1"])
+    def test_index_out_of_range_fails(self, run, job_index):
+        with pytest.raises(ValueError, match="out of range"):
+            generate_pmtiles_for_child(
+                MagicMock(), {"datasets": self.DATASETS}, job_index=job_index
+            )
+        run.assert_not_called()
 
 
 class TestUploadMetadata:

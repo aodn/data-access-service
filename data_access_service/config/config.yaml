@@ -138,12 +138,12 @@ pmtiles:
     show_progress: True
     # Temporal bucket for hexbin counts: "month" (YYYYMM) or "date" (YYYYMMDD).
     time_group_by: all
-    # True: batch PMTiles generation forks one child process per parquet
-    # dataset (reclaims DuckDB/tippecanoe memory on exit). False: run each
-    # dataset in the main app process.
+    # True: batch PMTiles generation makes each dataset's pmtiles in a forked
+    # child process (reclaims DuckDB/tippecanoe memory on exit). False: run it
+    # in the main app process.
     use_fork_process: True
-    # True: after all pmtiles are generated, the same job builds the estimation
-    # index for the same datasets (one uuid only, when the run is filtered).
+    # True: the same job builds each dataset's estimation index right after
+    # its pmtiles.
     build_estimation_index: True
   layers:
     hex_z0:
