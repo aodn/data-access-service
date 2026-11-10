@@ -7446,6 +7446,18 @@ reference = "2025.06.01.dev2"
 resolved_reference = "2c873ac4ed5b5cb4266e5718fbcfa2f72ecab773"
 
 [[package]]
+name = "xlsxwriter"
+version = "3.3.1"
+description = "A Python module for creating Excel XLSX files."
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "xlsxwriter-3.3.1-py3-none-any.whl", hash = "sha256:8e2c89e59d733fe59e112317218c64fbbc276d90a8c144ebd6f7fa15e7ab184a"},
+    {file = "xlsxwriter-3.3.1.tar.gz", hash = "sha256:0867761912cceac76f97ffa76eeda18c623ae9217f601be8512f55b1af4bdb6e"},
+]
+
+[[package]]
 name = "xmltodict"
 version = "0.13.0"
 description = "Makes working with XML feel like you are working with JSON"
@@ -7712,4 +7724,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11.0, < 3.13"
-content-hash = "ab58f6251b43d882023046ed0eedfed0f7c8526d9d63681e29452c464e1b6676"
+content-hash = "6aaea383a1176bb4d2f66bb0df8af4770f7f5a54d821f9af1e4d2e6d58a30b87"

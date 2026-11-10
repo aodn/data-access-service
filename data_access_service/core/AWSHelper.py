@@ -1,5 +1,7 @@
 import csv
+import datetime
 import json
+import xlsxwriter
 import pandas as pd
 import os
 import shutil
@@ -202,6 +204,173 @@ class AWSHelper:
 
             region = self.s3.meta.region_name
             return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
+
+    def write_xlsx_to_s3(
+        self,
+        data: dask.dataframe.DataFrame,
+        bucket_name: str,
+        key: str,
+        base_name: str | None = None,
+    ) -> str:
+        """Write `data` as a single xlsx workbook at `key`.
+
+        Same arguments as `write_csv_to_s3`, but instead of a zip of csv files
+        the output is one workbook:
+          * first tab `dataschema`: one row per entry of dataschema.json, one
+            column per attribute of that entry (header in the first row).
+          * following tabs: the data, header in the first row of every tab. A tab
+            never exceeds the excel limit (MAX_CSV_ROW rows, header included),
+            extra rows spill into the next tab.
+        `base_name` is used to name the data tabs, it defaults to the stem of `key`.
+        """
+        target = data.drop(PARTITION_KEY, axis=1).reset_index(drop=True)
+        # the max data rows per tab is the excel row limit excluding the header row
+        max_data_row = MAX_CSV_ROW - 1
+
+        if base_name is None:
+            base_name = Path(key).stem
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xlsx_path = Path(temp_dir) / "output.xlsx"
+
+            try:
+                # constant_memory flushes every row to disk as it is written, rows of
+                # a tab must therefore be written in order, which is what we do.
+                workbook = xlsxwriter.Workbook(
+                    str(xlsx_path),
+                    {
+                        "constant_memory": True,
+                        "remove_timezone": True,
+                        "strings_to_formulas": False,
+                        "strings_to_urls": False,
+                        "nan_inf_to_errors": True,
+                        "default_date_format": "yyyy-mm-dd hh:mm:ss",
+                        "tmpdir": temp_dir,
+                    },
+                )
+                try:
+                    # the schema must be the first tab
+                    schema_sheet = workbook.add_worksheet("dataschema")
+                    self._write_schema_sheet(schema_sheet, bucket_name, key)
+
+                    sheet = None
+                    sheet_index = 0
+                    sheet_rows = 0  # data rows written in the current tab
+
+                    for i, partition in enumerate(target.to_delayed()):
+                        try:
+                            partition_df = partition.compute()
+                        except Exception as e:
+                            self.log.error(f"Error processing partition {i}: {e}")
+                            raise
+
+                        columns = [str(c) for c in partition_df.columns]
+                        start = 0
+                        total = len(partition_df)
+                        while start < total:
+                            if sheet is None or sheet_rows >= max_data_row:
+                                sheet_index += 1
+                                sheet = workbook.add_worksheet(
+                                    self._sheet_name(base_name, sheet_index)
+                                )
+                                sheet.write_row(0, 0, columns)
+                                sheet_rows = 0
+
+                            end = min(start + (max_data_row - sheet_rows), total)
+                            chunk = partition_df.iloc[start:end]
+                            # row 0 is the header
+                            row_num = sheet_rows + 1
+                            for values in chunk.itertuples(index=False, name=None):
+                                sheet.write_row(
+                                    row_num,
+                                    0,
+                                    [self._to_excel_cell(v) for v in values],
+                                )
+                                row_num += 1
+                            sheet_rows += end - start
+                            start = end
+
+                        del partition_df
+
+                    # no data at all, still give a tab with the header
+                    if sheet is None:
+                        sheet = workbook.add_worksheet(self._sheet_name(base_name, 1))
+                        sheet.write_row(0, 0, [str(c) for c in target.columns])
+                finally:
+                    workbook.close()
+
+                xlsx_size = os.path.getsize(xlsx_path)
+                self.log.info(
+                    f"Created {key} with {max(sheet_index, 1)} data tab(s) ({xlsx_size:,} bytes)"
+                )
+
+                self.upload_file_to_s3(str(xlsx_path), bucket_name, key)
+
+            except Exception as e:
+                self.log.error(f"Error creating XLSX: {e}")
+                raise
+
+            region = self.s3.meta.region_name
+            return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
+
+    def _write_schema_sheet(self, sheet, bucket_name: str, key: str) -> None:
+        """Fill `sheet` with dataschema.json, one row per entry. Header only if no schema found."""
+        parts = key.split("/")
+        schema_rows = None
+        if len(parts) >= 2:
+            schema_key = f"{parts[0]}/temp/dataschema.json"
+            try:
+                response = self.s3.get_object(Bucket=bucket_name, Key=schema_key)
+                schema_json = json.loads(response["Body"].read().decode("utf-8"))
+                # each key of dataschema.json is a row, each attribute of the key a column
+                schema_df = pd.DataFrame(schema_json).T
+                schema_rows = schema_df
+                self.log.info(f"Added dataschema tab from {schema_key}")
+            except self.s3.exceptions.NoSuchKey:
+                self.log.warning(f"Schema file not found: {schema_key}")
+            except Exception as e:
+                self.log.warning(f"Failed to read/convert schema file: {e}")
+
+        if schema_rows is None:
+            sheet.write_row(0, 0, ["name"])
+            return
+
+        sheet.write_row(0, 0, ["name"] + [str(c) for c in schema_rows.columns])
+        for row_num, (name, values) in enumerate(schema_rows.iterrows(), start=1):
+            sheet.write_row(
+                row_num,
+                0,
+                [str(name)] + [self._to_excel_cell(v, stringify=True) for v in values],
+            )
+
+    @staticmethod
+    def _sheet_name(base_name: str, index: int) -> str:
+        """Excel tab names: max 31 chars and none of []:*?/\\ ."""
+        suffix = f"_{index}"
+        cleaned = "".join("_" if c in "[]:*?/\\" else c for c in base_name).strip("'")
+        return f"{cleaned[: 31 - len(suffix)]}{suffix}"
+
+    @staticmethod
+    def _to_excel_cell(value, stringify: bool = False):
+        """Convert a pandas value to something xlsxwriter can write."""
+        if value is None or value is pd.NaT:
+            return None
+        if isinstance(value, (dict, list, tuple, set)):
+            return json.dumps(value, default=str)
+        if isinstance(value, float) and value != value:
+            return None
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        if isinstance(value, (bool, int, float, str, datetime.datetime, datetime.date)):
+            return str(value) if stringify and not isinstance(value, str) else value
+        try:
+            if pd.isna(value):
+                return None
+        except (TypeError, ValueError):
+            pass
+        if hasattr(value, "item"):  # numpy scalar
+            return AWSHelper._to_excel_cell(value.item(), stringify)
+        return str(value)
 
     def write_zarr_to_s3(self, data: xarray.Dataset, bucket_name: str, key: str):
         # Save to temporary local file
