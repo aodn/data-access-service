@@ -47,7 +47,7 @@ def collect_parquet_files(master_job_id: str, subset_request: SubsetRequest):
                     p,
                     bucket_name,
                     f"{master_job_id}/{zip_name}.zip",
-                    csv_base_name=dataset_base_name(d),
+                    base_name=dataset_base_name(d),
                 )
             )
         else:
