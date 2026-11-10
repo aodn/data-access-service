@@ -18,6 +18,9 @@ from data_access_service.tiler.schemas.products import (
     ProductConfig,
     VariableValue,
 )
+from data_access_service.tiler.services.colormap.categorical import (
+    is_categorical_variable,
+)
 from data_access_service.tiler.services.product.product import Product
 from data_access_service.tiler.services.product.registry import (
     iter_product_items,
@@ -25,6 +28,7 @@ from data_access_service.tiler.services.product.registry import (
 )
 from data_access_service.tiler.services.store.registry import (
     get_available_dates,
+    get_loaded_store_metadata,
     is_store_available,
 )
 from data_access_service.tiler.services.store.sparse_grid import SparseSlice
@@ -58,6 +62,16 @@ def _require_point_in_bounds(sparse: SparseSlice, lat: float, lon: float) -> Non
         )
 
 
+def _is_categorical(product: Product) -> bool | None:
+    """Whether the product's variable has CF flag_values. A variable pair is
+    never categorical. None if the store didn't load."""
+    if isinstance(product.variable, list):
+        return False
+    meta = get_loaded_store_metadata(product.store)
+    var = meta.variables.get(product.variable) if meta is not None else None
+    return None if var is None else is_categorical_variable(var.attrs)
+
+
 @router.get(
     "/products",
     summary="List products",
@@ -65,7 +79,10 @@ def _require_point_in_bounds(sparse: SparseSlice, lat: float, lon: float) -> Non
 )
 async def get_products(response: Response):
     response.headers.update(REVALIDATE_CACHE_HEADERS)
-    return [ProductConfig.from_product(p) for p in iter_products()]
+    return [
+        ProductConfig.from_product(p, categorical=_is_categorical(p))
+        for p in iter_products()
+    ]
 
 
 @router.get(

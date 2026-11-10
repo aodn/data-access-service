@@ -81,6 +81,11 @@ class StoreRegistry:
     def get_metadata(self, store: str) -> TilerParquetMetadata:
         return self._ensure_loaded(store)
 
+    def loaded_metadata(self, store: str) -> TilerParquetMetadata | None:
+        """``store``'s metadata if already loaded, else None. Never loads."""
+        with self._lock:
+            return self._metadata.get(store)
+
     def time_index(self, store: str) -> dict[str, dict[pd.Timestamp, str]]:
         with self._lock:
             return self._time_index.get(store, {})
@@ -147,6 +152,10 @@ store_registry = StoreRegistry()
 
 def get_store_metadata(store: str) -> TilerParquetMetadata:
     return store_registry.get_metadata(store)
+
+
+def get_loaded_store_metadata(store: str) -> TilerParquetMetadata | None:
+    return store_registry.loaded_metadata(store)
 
 
 def is_store_available(store: str) -> bool:

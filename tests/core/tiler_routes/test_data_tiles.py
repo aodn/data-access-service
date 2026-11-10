@@ -97,6 +97,41 @@ def test_list_products_metadata_uuid_null_when_absent(client, monkeypatch):
     assert by_id["plain"]["metadata_uuid"] is None
 
 
+def test_list_products_categorical_flag(client, monkeypatch):
+    """categorical comes from the variable's flag_values in the store
+    metadata; a pair is never categorical; an unloaded store gives null."""
+    from types import SimpleNamespace
+
+    import data_access_service.core.tiler_routes.products as products_route
+
+    metas = {
+        "cat_store": SimpleNamespace(
+            variables={"mcs": SimpleNamespace(attrs={"flag_values": [0, 1, 2]})}
+        ),
+        "cont_store": SimpleNamespace(
+            variables={"sst": SimpleNamespace(attrs={"units": "K"})}
+        ),
+    }
+    monkeypatch.setattr(products_route, "get_loaded_store_metadata", metas.get)
+    for pid, store, var in [
+        ("cat", "cat_store", "mcs"),
+        ("cont", "cont_store", "sst"),
+        ("pair", "cont_store", ["U", "V"]),
+        ("missing", "gone_store", "sst"),
+    ]:
+        monkeypatch.setitem(
+            registry.PRODUCTS, pid, Product(id=pid, store=store, variable=var)
+        )
+
+    r = client.get("/api/v1/das/tiler/data_tiles/products")
+    assert r.status_code == 200
+    by_id = {p["id"]: p for p in r.json()}
+    assert by_id["cat"]["categorical"] is True
+    assert by_id["cont"]["categorical"] is False
+    assert by_id["pair"]["categorical"] is False
+    assert by_id["missing"]["categorical"] is None
+
+
 _FAKE_PRODUCTS = {
     "product_a": Product(id="product_a", store="a", variable="VAR"),
 }
