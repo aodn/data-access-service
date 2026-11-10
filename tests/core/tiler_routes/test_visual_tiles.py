@@ -557,6 +557,22 @@ def test_categorical_legend_rejects_rescale(client):
     assert "rescale" in response.json()["detail"].lower()
 
 
+def test_legend_labels_without_rescale_rejected(client):
+    response = client.get(
+        "/api/v1/das/tiler/visual_tiles/colormaps/viridis/legend?labels=true"
+    )
+    assert response.status_code == 400
+    assert "rescale" in response.json()["detail"].lower()
+
+
+def test_legend_labels_with_rescale_ok(client):
+    response = client.get(
+        "/api/v1/das/tiler/visual_tiles/colormaps/viridis/legend?labels=true&rescale=0,1"
+    )
+    assert response.status_code == 200
+    assert response.content.startswith(_PNG)
+
+
 def test_categorical_colormap_on_continuous_variable_rejected(client):
     # A categorical colormap may only be applied to a categorical variable;
     # sea_level_anomaly (GSLA) is continuous.

@@ -34,7 +34,7 @@ def test_vertical_no_rescale_returns_correct_size():
 def test_horizontal_with_rescale_reserves_label_strip():
     """With labels, the bottom 20px must contain text (dark pixels on white bg)."""
     png = legend_renderer.render_legend(
-        "viridis", rescale=(0.0, 1.0), width=256, height=60
+        "viridis", rescale=(0.0, 1.0), width=256, height=60, labels=True
     )
     img = _decode(png)
     assert img.shape == (60, 256, 4)
@@ -46,7 +46,12 @@ def test_horizontal_with_rescale_reserves_label_strip():
 
 def test_vertical_with_rescale_reserves_right_strip():
     png = legend_renderer.render_legend(
-        "viridis", rescale=(0.0, 1.0), width=60, height=256, orientation="vertical"
+        "viridis",
+        rescale=(0.0, 1.0),
+        width=60,
+        height=256,
+        orientation="vertical",
+        labels=True,
     )
     img = _decode(png)
     assert img.shape == (256, 60, 4)
@@ -68,10 +73,10 @@ def test_colorbar_top_strip_varies_across_width():
 
 def test_different_rescale_produces_different_legend():
     a = legend_renderer.render_legend(
-        "viridis", rescale=(0.0, 1.0), width=128, height=40
+        "viridis", rescale=(0.0, 1.0), width=128, height=40, labels=True
     )
     b = legend_renderer.render_legend(
-        "viridis", rescale=(0.0, 100.0), width=128, height=40
+        "viridis", rescale=(0.0, 100.0), width=128, height=40, labels=True
     )
     assert (
         a != b
@@ -124,7 +129,21 @@ def test_categorical_legend_rejects_rescale(monkeypatch):
 def test_horizontal_height_too_small_for_labels_does_not_crash():
     """Edge case: height < _LABEL_PX (20) leaves bar_h=1 — should still render."""
     png = legend_renderer.render_legend(
-        "viridis", rescale=(0.0, 1.0), width=100, height=10
+        "viridis", rescale=(0.0, 1.0), width=100, height=10, labels=True
     )
     img = _decode(png)
     assert img.shape == (10, 100, 4)
+
+
+def test_rescale_without_labels_draws_no_labels():
+    """Labels are opt-in: rescale alone renders the same bar-only legend."""
+    with_rescale = legend_renderer.render_legend(
+        "viridis", rescale=(0.0, 1.0), width=256, height=40
+    )
+    plain = legend_renderer.render_legend("viridis", width=256, height=40)
+    assert with_rescale == plain
+
+
+def test_labels_without_rescale_rejected():
+    with pytest.raises(ValueError, match="(?i)rescale"):
+        legend_renderer.render_legend("viridis", width=256, height=40, labels=True)

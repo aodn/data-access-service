@@ -18,18 +18,22 @@ def render_legend(
     width: int = 256,
     height: int = 40,
     orientation: str = "horizontal",
+    labels: bool = False,
 ) -> bytes:
-    """A legend PNG for ``colormap_name``. Raises ValueError if ``rescale`` is
-    given for a categorical colormap."""
+    """A legend PNG for ``colormap_name``, with lo/mid/hi labels from
+    ``rescale`` if ``labels``. Raises ValueError if ``rescale`` is given for a
+    categorical colormap, or ``labels`` without ``rescale``."""
     categorical = is_categorical(colormap_name)
     if categorical and rescale is not None:
         raise ValueError(
             f"Colormap '{colormap_name}' is categorical; rescale does not apply "
             f"(discrete categories have no continuous scale to label). Omit rescale."
         )
+    if labels and rescale is None:
+        raise ValueError("labels needs rescale=min,max for the label values.")
     cm = resolve_colormap(colormap_name)
     lut = np.array([cm[i] for i in range(256)], dtype=np.uint8)
-    has_labels = rescale is not None
+    has_labels = labels
 
     if orientation == "horizontal":
         bar_h = max(1, height - _LABEL_PX) if has_labels else height

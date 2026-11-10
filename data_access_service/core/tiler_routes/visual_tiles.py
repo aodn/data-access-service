@@ -89,8 +89,8 @@ async def get_colormaps(response: Response):
     description=(
         "Returns a PNG color legend for the named colormap. "
         "The name must be one returned by GET /visual_tiles/colormaps. "
-        "If rescale=min,max is provided, tick labels at lo, mid, and hi are drawn alongside the bar. "
-        "Without rescale, only the color bar is rendered (no labels). "
+        "With labels=true and rescale=min,max, tick labels at lo, mid, and hi are drawn alongside the bar. "
+        "By default only the color bar is rendered (no labels). "
         "Categorical colormaps render discrete equal-width color blocks instead of a smooth gradient."
     ),
 )
@@ -99,9 +99,13 @@ async def get_legend(
     rescale: str | None = Query(
         None,
         description=(
-            "Value range as 'min,max'. When provided, tick labels are drawn at lo, mid, and hi. "
+            "Value range as 'min,max', used for the tick labels at lo, mid, and hi. "
             "Rejected for categorical colormaps, whose discrete blocks have no scale to label."
         ),
+    ),
+    labels: bool = Query(
+        False,
+        description="Draw tick labels alongside the bar. Requires rescale.",
     ),
     width: int = Query(256, ge=10, le=2048, description="Image width in pixels."),
     height: int = Query(40, ge=10, le=2048, description="Image height in pixels."),
@@ -116,7 +120,13 @@ async def get_legend(
     try:
         png = await run_sync(
             functools.partial(
-                render_legend, name, rescale_range, width, height, orientation
+                render_legend,
+                name,
+                rescale_range,
+                width,
+                height,
+                orientation,
+                labels,
             ),
             limiter=TILE_THREAD_LIMITER,
         )
