@@ -1,9 +1,23 @@
+"""The pmtiles batch job: map tiles for every parquet dataset.
+
+How a Batch run goes:
+
+1. The scheduled ``generate-pmtiles-for-parquet`` job (init) generates
+   nothing itself: it submits one array job with a child per
+   ``(uuid, key)``. The list goes to the children as the ``datasets``
+   parameter.
+2. Each ``generate-pmtiles-for-parquet-dataset`` child takes
+   ``datasets[AWS_BATCH_JOB_ARRAY_INDEX]`` and makes its pmtiles, then its
+   estimation index. Children run in parallel; Batch retries a failed one.
+"""
+
+import json
 import os
 import tempfile
 
 from data_access_service import Config, init_log
 from data_access_service.batch.estimation.generator import (
-    generate_estimation_index_for_all_parquets,
+    generate_estimation_index_for_dataset,
 )
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.api import BaseAPI
@@ -18,105 +32,126 @@ config = Config.get_config()
 logger = init_log(config)
 aws = AWSHelper()
 
+# Job type of an array child, and the parameter holding its dataset list.
+DATASET_JOB_TYPE = "generate-pmtiles-for-parquet-dataset"
+DATASETS_PARAM = "datasets"
 
-def generate_pmtiles_for_all_parquets(api: BaseAPI, uuid: str | None = None):
-    """Generate PMTiles for every parquet dataset in the catalog.
 
-    Runs in two phases inside the one batch job:
-
-    * **Phase 1:** pmtiles, one dataset at a time.
-    * **Phase 2:** the estimation index for the same datasets, once *all*
-      pmtiles are done (``pmtiles.config.build_estimation_index``). It is a
-      separate phase, not part of each pmtiles child, so the index scan does
-      not start on top of the memory tippecanoe/DuckDB just used.
-
-    Process isolation is controlled by ``pmtiles.config.use_fork_process``:
-
-    * **True (default):** each dataset runs in a forked child so DuckDB /
-      tippecanoe allocations are returned to the OS when the child exits.
-      Fork (not re-exec) reuses the already-initialized ``api`` via
-      copy-on-write — no metadata reload per dataset. Invariant: the parent
-      must not open ``PmTileDuckDBClient`` before forking; the child creates
-      its own process-global DuckDB connection. Phase 2 relies on the same
-      invariant — it forks from this still-clean parent.
-    * **False:** each dataset runs in the main app process (no ``os.fork``).
-      Useful for local debug or when an APM agent cannot tolerate forking.
-
-    Datasets always run sequentially so only one heavy worker is live at a
-    time.
-
-    Args:
-        api: Initialized API with metadata loaded.
-        uuid: Optional catalog UUID. When set, only parquet datasets for that
-            UUID are processed (useful for local/debug runs of a single product).
-    """
+def list_parquet_datasets(
+    api: BaseAPI, uuid: str | None = None
+) -> list[tuple[str, str]]:
+    """Every parquet ``(uuid, key)`` in the catalog, or only those of ``uuid``."""
     metadata_list = api.get_mapped_meta_data(uuid=None)
-
-    # Materialise the work list before trimming so we do not depend on the
-    # full cached map (zarr entries etc.) remaining in the parent.
-    work: list[tuple[str, str]] = []
-    for k, v in sorted(metadata_list.items()):
-        if uuid is not None and k != uuid:
-            continue
-        for dataset_name in v.keys():
-            if dataset_name.endswith(".parquet"):
-                work.append((k, dataset_name))
-
-    if uuid is not None:
-        logger.info(
-            "PMTiles batch restricted to uuid=%s (%s parquet dataset(s))",
-            uuid,
-            len(work),
-        )
-        if not work:
-            logger.warning(
-                "No parquet datasets found for uuid=%s; nothing to generate",
-                uuid,
-            )
-            return
-    else:
-        logger.info(
-            "PMTiles batch for all UUIDs (%s parquet dataset(s))",
-            len(work),
-        )
-
-    use_fork = config.get_pmtiles_config().use_fork_process
+    datasets = [
+        (k, dataset_name)
+        for k, v in sorted(metadata_list.items())
+        if uuid is None or k == uuid
+        for dataset_name in v.keys()
+        if dataset_name.endswith(".parquet")
+    ]
     logger.info(
-        "PMTiles batch process isolation: use_fork_process=%s",
-        use_fork,
+        "PMTiles: %s parquet dataset(s) for %s",
+        len(datasets),
+        f"uuid={uuid}" if uuid else "all UUIDs",
+    )
+    if not datasets:
+        logger.warning("No parquet datasets found; nothing to generate")
+    return datasets
+
+
+def submit_pmtiles_array_job(
+    api: BaseAPI,
+    job_queue: str,
+    job_definition: str,
+    uuid: str | None = None,
+) -> str | None:
+    """Submit one array job with a child per parquet dataset.
+
+    The children go to this init job's own queue and job definition.
+    Returns the array job id, or None when there is no dataset.
+    """
+    datasets = list_parquet_datasets(api, uuid)
+    if not datasets:
+        return None
+
+    # A child's log only shows its index; this maps it back to the dataset.
+    for index, (k, dataset_name) in enumerate(datasets):
+        logger.info("PMTiles child %d: uuid=%s dataset=%s", index, k, dataset_name)
+
+    return aws.submit_a_job(
+        job_name="generate-pmtiles-datasets",
+        job_queue=job_queue,
+        job_definition=job_definition,
+        parameters={
+            "type": DATASET_JOB_TYPE,
+            DATASETS_PARAM: json.dumps(datasets),
+        },
+        array_size=len(datasets),
     )
 
-    # Drop full raw schemas / non-parquet metadata so the parent (and COW
-    # fork children) start each dataset with a smaller baseline RSS.
-    api.release_memory_for_batch(keep_suffix=".parquet", drop_instance=True)
 
-    for k, dataset_name in work:
-        if use_fork:
-            ok = _generate_pmtiles_for_parquets_in_subprocess(api, k, dataset_name)
-            after_label = f"after child for {dataset_name}"
-        else:
-            ok = _generate_pmtiles_for_parquets(api, k, dataset_name)
-            after_label = f"after in-process run for {dataset_name}"
-        if not ok:
-            logger.error(
-                "PMTiles worker failed for uuid=%s dataset=%s",
-                k,
-                dataset_name,
-            )
-        log_memory_usage(logger, after_label)
+def generate_pmtiles_for_child(
+    api: BaseAPI, parameters: dict, job_index: str | None
+) -> None:
+    """Run one array child: the dataset at ``job_index`` in ``datasets``.
 
-    # Phase 2: every pmtiles child has exited, so the parent is back to its
-    # startup baseline before the index scans start. Same job, same loaded
-    # metadata (inherited copy-on-write), but no tippecanoe/DuckDB memory left
-    # over from Phase 1. ``uuid`` carries through, so a single-dataset pmtiles
-    # run refreshes that uuid's index too. Never fails the pmtiles run.
-    if config.get_pmtiles_config().build_estimation_index:
-        logger.info("PMTiles done; starting estimation index phase")
+    ``uuid`` + ``key`` parameters run that dataset instead, for a run by hand.
+    """
+    uuid, dname = _pick_dataset(parameters, job_index)
+    # This child only needs its own uuid; a smaller catalog is a smaller
+    # baseline for the forked workers.
+    api.release_memory_for_batch(
+        keep_uuid=uuid, keep_suffix=".parquet", drop_instance=True
+    )
+    generate_pmtiles_for_dataset(api, uuid, dname)
+
+
+def _pick_dataset(parameters: dict, job_index: str | None) -> tuple[str, str]:
+    if parameters.get("key"):
+        return parameters["uuid"], parameters["key"]
+
+    datasets = json.loads(parameters[DATASETS_PARAM])
+    # No index for a one-item list: Batch sends a plain job then, not an array.
+    index = int(job_index) if job_index is not None else 0
+    if not 0 <= index < len(datasets):
+        raise ValueError(
+            f"Array index {index} is out of range for {len(datasets)} dataset(s)"
+        )
+    uuid, dname = datasets[index]
+    return uuid, dname
+
+
+def generate_pmtiles_for_dataset(api: BaseAPI, uuid: str, dname: str) -> None:
+    """PMTiles, then the estimation index, for one dataset.
+
+    With ``pmtiles.config.use_fork_process`` each step runs in its own
+    forked child, so its DuckDB / tippecanoe memory goes back to the OS when
+    the child exits, and the index does not start on top of the memory the
+    pmtiles step used. Fork reuses the loaded ``api`` (copy-on-write).
+    Invariant: this parent only forks and waits; it must not open
+    ``PmTileDuckDBClient`` itself.
+
+    Raises when pmtiles fails, so Batch marks the child FAILED and retries
+    it. A failed index only logs. The index still runs when pmtiles fails,
+    as it did before.
+    """
+    pmtiles_config = config.get_pmtiles_config()
+    if pmtiles_config.use_fork_process:
+        ok = _generate_pmtiles_for_parquets_in_subprocess(api, uuid, dname)
+    else:
+        ok = _generate_pmtiles_for_parquets(api, uuid, dname)
+    log_memory_usage(logger, f"after pmtiles for {dname}")
+
+    if pmtiles_config.build_estimation_index:
         try:
-            generate_estimation_index_for_all_parquets(api=api, uuid=uuid)
+            generate_estimation_index_for_dataset(api, uuid, dname)
         except Exception as e:
-            logger.error("Estimation index phase failed: %s", e)
-        log_memory_usage(logger, "after estimation index phase")
+            logger.error(
+                "Estimation index failed for uuid=%s dataset=%s: %s", uuid, dname, e
+            )
+
+    if not ok:
+        raise RuntimeError(f"PMTiles failed for uuid={uuid} dataset={dname}")
 
 
 def _generate_pmtiles_for_parquets_in_subprocess(

@@ -10,7 +10,9 @@ from data_access_service.batch.estimation.generator import (
     generate_estimation_index_for_all_parquets,
 )
 from data_access_service.batch.pmtiles.generator import (
-    generate_pmtiles_for_all_parquets,
+    DATASETS_PARAM,
+    generate_pmtiles_for_child,
+    submit_pmtiles_array_job,
 )
 from data_access_service.batch.sites_parquet.refresher import (
     refresh_sites_parquet_snapshots,
@@ -37,8 +39,8 @@ def _parse_local_job_parameters(raw: str | None) -> dict:
     """Turn LOCAL_JOBS_PARAM into the same dict Batch puts on the job.
 
     Accepts the parameters object, a describe_jobs job, or {\"jobs\": [...]}.
-    Nested multi_polygon / date_ranges / polygon_ranges objects are
-    JSON-stringified like Batch.
+    Nested multi_polygon / date_ranges / polygon_ranges / datasets objects
+    are JSON-stringified like Batch.
     """
     if not raw or not raw.strip():
         return {}
@@ -61,6 +63,7 @@ def _parse_local_job_parameters(raw: str | None) -> dict:
         Parameters.MULTI_POLYGON.value,
         Parameters.DATE_RANGES.value,
         Parameters.POLYGON_RANGES.value,
+        DATASETS_PARAM,
     ):
         if key in loaded and not isinstance(loaded[key], str):
             loaded[key] = json.dumps(loaded[key])
@@ -188,7 +191,21 @@ def run_job() -> None:
             target_uuid = parameters.get("uuid") or os.getenv("PMTILES_TARGET_UUID")
             if target_uuid:
                 logger.info("PMTiles generation restricted to uuid=%s", target_uuid)
-            generate_pmtiles_for_all_parquets(api=api, uuid=target_uuid or None)
+            # One array child per dataset, on this job's queue and definition.
+            # A local run has no Batch job, so run
+            # generate-pmtiles-for-parquet-dataset instead.
+            submit_pmtiles_array_job(
+                api=api,
+                job_queue=job["jobQueue"],
+                job_definition=job["jobDefinition"],
+                uuid=target_uuid or None,
+            )
+        case "generate-pmtiles-for-parquet-dataset":
+            api = API()
+            api.initialize_metadata()
+            generate_pmtiles_for_child(
+                api=api, parameters=parameters, job_index=job_index
+            )
         case "generate-estimation-index-for-parquet":
             api = API()
             api.initialize_metadata()
