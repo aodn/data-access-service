@@ -38,7 +38,7 @@ def parse_usage_constraints(value: Optional[str]) -> list[str]:
     """Read the JSON list ogcapi sends, e.g. '["A", "B"]' or '[]'.
 
     [] when it is missing or not a JSON list of strings, so the email says
-    "not available" instead of failing the job.
+    "unavailable" instead of failing the job.
     """
     if value is None:
         return []

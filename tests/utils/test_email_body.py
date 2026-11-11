@@ -191,7 +191,7 @@ class TestEmailBodies(unittest.TestCase):
         self.assertIn("Suggested Citation", html)
         self.assertIn("Suggested citation goes here.", html)
         self.assertIn("Usage Constraints", html)
-        self.assertIn("Usage Constraints not available", html)
+        self.assertIn("unavailable", html[html.index("Usage Constraints:") :])
         self.assertIn("Kind regards,", html)
         # no download parts in the no-data email
         self.assertNotIn("Download</span>", html)
@@ -272,12 +272,14 @@ class TestEmailBodies(unittest.TestCase):
             ["Credit CSIRO &amp; partners", "Use &lt;b&gt;with&lt;/b&gt; care"],
         )
         self.assertNotIn("IMOS", section)
-        self.assertNotIn("Usage Constraints not available", section)
+        self.assertNotIn("unavailable", section)
 
-    def test_empty_usage_constraints_says_not_available(self):
+    def test_empty_usage_constraints_says_unavailable(self):
+        """Same text as an empty Suggested Citation."""
         section = self._usage_constraints_html([])
 
-        self.assertIn("Usage Constraints not available", section)
+        paragraphs = re.findall(r"<p[^>]*>(.*?)</p>", section, flags=re.S)
+        self.assertEqual(paragraphs, ["unavailable"])
         self.assertNotIn("IMOS", section)
 
     def test_download_email_without_urls_falls_back_to_no_data_email(self):

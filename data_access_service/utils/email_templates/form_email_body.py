@@ -19,14 +19,13 @@ from data_access_service.utils.email_templates.form_subsetting_divs import (
     form_subsetting_divs,
 )
 
-USAGE_CONSTRAINTS_NOT_AVAILABLE = "Usage Constraints not available"
+USAGE_CONSTRAINTS_NOT_AVAILABLE = "unavailable"
 
 
 def usage_constraint_paragraphs(usage_constraints: list[str]) -> list[str]:
     """The Usage Constraints paragraphs, as escaped HTML.
 
-    Same as the portal dialog: an empty list shows "not available", never
-    fixed IMOS text.
+    An empty list shows "unavailable"
     """
     if not usage_constraints:
         return [USAGE_CONSTRAINTS_NOT_AVAILABLE]

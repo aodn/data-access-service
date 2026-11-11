@@ -80,14 +80,14 @@ class TestGetSubsetRequest:
         assert req.usage_constraints == expected
 
     def test_missing_usage_constraints_is_empty(self):
-        """An older portal or job: the email says "not available"."""
+        """An older portal or job: the email says "unavailable"."""
         assert get_subset_request(_VALID_PARAMETERS).usage_constraints == []
 
     @pytest.mark.parametrize(
         "sent", ["not json", "", '"a string"', '{"a": 1}', '["ok", 1]', "null"]
     )
     def test_invalid_usage_constraints_is_empty(self, sent):
-        """Bad input says "not available", never fails the job."""
+        """Bad input says "unavailable", never fails the job."""
         req = get_subset_request({**_VALID_PARAMETERS, "usage_constraints": sent})
         assert req.usage_constraints == []
 
