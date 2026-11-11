@@ -26,10 +26,7 @@ from data_access_service.utils.email_templates.no_data_email import (
     NO_DATA_EMAIL_SUBJECT,
 )
 from data_access_service.models.subset_request import SubsetRequest
-from data_access_service.utils.format_utils import (
-    OUTPUT_FORMAT_GEOTIFF,
-    OUTPUT_FORMAT_NETCDF,
-)
+from data_access_service.utils.format_utils import OutputFormat
 from data_access_service.utils import geotiff_export
 from data_access_service.utils.process_logger import ProcessLogger
 from data_access_service.batch.subsetting.helpers.zarr_chunking import (
@@ -155,11 +152,11 @@ class ZarrProcessor:
         Add a new format by adding one entry here - no other code changes.
         """
         handlers = {
-            OUTPUT_FORMAT_NETCDF: (
+            OutputFormat.NETCDF: (
                 self.__prepare_netcdf,
                 self.__write_to_s3_as_netcdf,
             ),
-            OUTPUT_FORMAT_GEOTIFF: (
+            OutputFormat.GEOTIFF: (
                 self.__prepare_geotiff,
                 self.__write_to_s3_as_geotiff,
             ),

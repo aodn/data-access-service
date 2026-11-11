@@ -7,7 +7,10 @@ from data_access_service.core.constants import NON_SPECIFIED
 from data_access_service.models.bounding_box import BoundingBox
 from data_access_service.utils.date_time_utils import parse_date
 from data_access_service.utils.file_naming import build_download_base_name
-from data_access_service.utils.format_utils import SUPPORTED_OUTPUT_FORMATS
+from data_access_service.utils.format_utils import (
+    SUPPORTED_OUTPUT_FORMATS,
+    OutputFormat,
+)
 
 # Re-exported: NON_SPECIFIED lives in core.constants so date_time_utils can read
 # it without importing this module back (that would be a circular import).
@@ -34,7 +37,7 @@ class SubsetRequest:
     recipient: str  # email address
 
     # --- output preferences ---
-    output_format: str  # one of SUPPORTED_OUTPUT_FORMATS
+    output_format: OutputFormat  # one of SUPPORTED_OUTPUT_FORMATS
 
     # --- spatial filter (optional) ---
     multi_polygon: Optional[str] = (
