@@ -1,7 +1,13 @@
+import json
+import logging
+from typing import Optional
+
 from data_access_service.batch.subsetting.enums import Parameters
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.multi_polygon_helper import MultiPolygonHelper
 from data_access_service.utils.subset_request_resolver import parse_keys
+
+logger = logging.getLogger(__name__)
 
 
 def get_subset_request(parameters: dict) -> SubsetRequest:
@@ -21,5 +27,28 @@ def get_subset_request(parameters: dict) -> SubsetRequest:
         ),
         full_metadata_link=parameters.get(Parameters.FULL_METADATA_LINK.value),
         suggested_citation=parameters.get(Parameters.SUGGESTED_CITATION.value),
+        usage_constraints=parse_usage_constraints(
+            parameters.get(Parameters.USAGE_CONSTRAINTS.value)
+        ),
         output_format=parameters.get(Parameters.OUTPUT_FORMAT.value),
     )
+
+
+def parse_usage_constraints(value: Optional[str]) -> list[str]:
+    """Read the JSON list ogcapi sends, e.g. '["A", "B"]' or '[]'.
+
+    [] when it is missing or not a JSON list of strings, so the email says
+    "not available" instead of failing the job.
+    """
+    if value is None:
+        return []
+    try:
+        constraints = json.loads(value)
+    except (TypeError, ValueError):
+        constraints = None
+    if not isinstance(constraints, list) or not all(
+        isinstance(item, str) for item in constraints
+    ):
+        logger.warning("Ignoring invalid usage_constraints: %r", value)
+        return []
+    return constraints

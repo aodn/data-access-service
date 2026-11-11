@@ -18,6 +18,7 @@ class Parameters(Enum):
     COLLECTION_HAS_MULTI_DATASETS = "collection_has_multi_datasets"
     FULL_METADATA_LINK = "full_metadata_link"
     SUGGESTED_CITATION = "suggested_citation"
+    USAGE_CONSTRAINTS = "usage_constraints"
     OUTPUT_FORMAT = "output_format"
     # Temporary plain-text Batch handoff until Secrets Manager replaces it (#9423).
     CSIRO_KEYS = "csiro_keys"

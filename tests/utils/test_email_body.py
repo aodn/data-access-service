@@ -148,17 +148,11 @@ class TestEmailBodies(unittest.TestCase):
                         "Ningaloo",
                         "Sydney Water Corporation",
                         "If using data from",
+                        # #9680: the IMOS text is no longer fixed either.
+                        "Any users of IMOS data",
+                        "Data, products and services from IMOS",
                     ):
                         self.assertNotIn(marker, html)
-                    self.assertIn(
-                        "Any users of IMOS data are required to clearly acknowledge",
-                        html,
-                    )
-                    self.assertIn(
-                        'Data, products and services from IMOS are provided "as is" '
-                        "without any warranty",
-                        html,
-                    )
                     self.assertIn("Cite this dataset as X.", html)
                     self.assertIn("https://example.com/metadata", html)
                     if kind == "completed":
@@ -197,7 +191,7 @@ class TestEmailBodies(unittest.TestCase):
         self.assertIn("Suggested Citation", html)
         self.assertIn("Suggested citation goes here.", html)
         self.assertIn("Usage Constraints", html)
-        self.assertIn("Any users of IMOS data", html)
+        self.assertIn("Usage Constraints not available", html)
         self.assertIn("Kind regards,", html)
         # no download parts in the no-data email
         self.assertNotIn("Download</span>", html)
@@ -251,6 +245,40 @@ class TestEmailBodies(unittest.TestCase):
         self.assertIn("https://test/a.zip", html)
         self.assertIn("https://test/b.zip", html)
         self.assertNotIn("Download</span>", html)
+
+    def _usage_constraints_html(self, usage_constraints):
+        """The Usage Constraints section of the error email, for the given list."""
+        request = SubsetRequest(
+            uuid="test-uuid",
+            keys=["a.parquet"],
+            start_date="2020-01-01",
+            end_date="2020-06-30",
+            recipient="test@example.com",
+            output_format="csv",
+            usage_constraints=usage_constraints,
+        )
+        html = visible_to_email_clients(get_error_email_html_body(request))
+        start = html.index("Usage Constraints:")
+        return html[start : html.index("If you require assistance", start)]
+
+    def test_usage_constraints_list_gives_one_escaped_paragraph_per_item(self):
+        section = self._usage_constraints_html(
+            ["Credit CSIRO & partners", "Use <b>with</b> care"]
+        )
+
+        paragraphs = re.findall(r"<p[^>]*>(.*?)</p>", section, flags=re.S)
+        self.assertEqual(
+            paragraphs,
+            ["Credit CSIRO &amp; partners", "Use &lt;b&gt;with&lt;/b&gt; care"],
+        )
+        self.assertNotIn("IMOS", section)
+        self.assertNotIn("Usage Constraints not available", section)
+
+    def test_empty_usage_constraints_says_not_available(self):
+        section = self._usage_constraints_html([])
+
+        self.assertIn("Usage Constraints not available", section)
+        self.assertNotIn("IMOS", section)
 
     def test_download_email_without_urls_falls_back_to_no_data_email(self):
         request = SubsetRequest(
