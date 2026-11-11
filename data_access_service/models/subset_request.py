@@ -54,6 +54,8 @@ class SubsetRequest:
     collection_has_multi_datasets: bool = False
     full_metadata_link: Optional[str] = None
     suggested_citation: Optional[str] = None
+    # [] = none to show.
+    usage_constraints: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self._validate()

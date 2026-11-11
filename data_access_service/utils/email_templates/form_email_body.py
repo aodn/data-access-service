@@ -19,22 +19,18 @@ from data_access_service.utils.email_templates.form_subsetting_divs import (
     form_subsetting_divs,
 )
 
-USAGE_CONSTRAINTS_P1 = (
-    "Any users of IMOS data are required to clearly acknowledge the source of the "
-    "material derived from IMOS in the format: \"Data was sourced from Australia's "
-    "Integrated Marine Observing System (IMOS) - IMOS is enabled by the National "
-    'Collaborative Research Infrastructure strategy (NCRIS)." If relevant, also '
-    "credit other organisations involved in collection of this particular "
-    "datastream (as listed in 'credit' in the metadata record)."
-)
-USAGE_CONSTRAINTS_P3 = (
-    'Data, products and services from IMOS are provided "as is" without any '
-    "warranty as to fitness for a particular purpose. By using this data you are "
-    "accepting the license agreement and terms specified above. You accept all "
-    "risks and responsibility for losses, damages, costs and other consequences "
-    "resulting directly or indirectly from using this site and any information or "
-    "material available from it."
-)
+USAGE_CONSTRAINTS_NOT_AVAILABLE = "Usage Constraints not available"
+
+
+def usage_constraint_paragraphs(usage_constraints: list[str]) -> list[str]:
+    """The Usage Constraints paragraphs, as escaped HTML.
+
+    Same as the portal dialog: an empty list shows "not available", never
+    fixed IMOS text.
+    """
+    if not usage_constraints:
+        return [USAGE_CONSTRAINTS_NOT_AVAILABLE]
+    return [escape(item) for item in usage_constraints]
 
 
 def form_intro_div(content_html: str) -> str:
@@ -150,10 +146,9 @@ def form_email_html(
         form_paragraph(subset_request.suggested_citation or "")
     )
 
-    usage_constraints_section = (
-        form_heading_div("Usage Constraints:")
-        + form_text_div(form_paragraph(USAGE_CONSTRAINTS_P1))
-        + form_text_div(form_paragraph(USAGE_CONSTRAINTS_P3))
+    usage_constraints_section = form_heading_div("Usage Constraints:") + "".join(
+        form_text_div(form_paragraph(text))
+        for text in usage_constraint_paragraphs(subset_request.usage_constraints)
     )
 
     return "\n".join(

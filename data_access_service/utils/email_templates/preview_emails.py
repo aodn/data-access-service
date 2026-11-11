@@ -36,6 +36,10 @@ request = SubsetRequest(
     collection_title="Test Collection Title",
     full_metadata_link="https://example.com/metadata",
     suggested_citation="Suggested citation goes here.",
+    usage_constraints=[
+        "First usage constraint goes here.",
+        "Second usage constraint goes here.",
+    ],
 )
 
 for path in write_email_previews(

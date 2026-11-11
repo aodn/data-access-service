@@ -69,6 +69,29 @@ class TestGetSubsetRequest:
         assert req.suggested_citation is None
 
     @pytest.mark.parametrize(
+        "sent, expected",
+        [
+            ('["Credit CSIRO", "Use with care"]', ["Credit CSIRO", "Use with care"]),
+            ("[]", []),
+        ],
+    )
+    def test_usage_constraints_json_is_parsed(self, sent, expected):
+        req = get_subset_request({**_VALID_PARAMETERS, "usage_constraints": sent})
+        assert req.usage_constraints == expected
+
+    def test_missing_usage_constraints_is_empty(self):
+        """An older portal or job: the email says "not available"."""
+        assert get_subset_request(_VALID_PARAMETERS).usage_constraints == []
+
+    @pytest.mark.parametrize(
+        "sent", ["not json", "", '"a string"', '{"a": 1}', '["ok", 1]', "null"]
+    )
+    def test_invalid_usage_constraints_is_empty(self, sent):
+        """Bad input says "not available", never fails the job."""
+        req = get_subset_request({**_VALID_PARAMETERS, "usage_constraints": sent})
+        assert req.usage_constraints == []
+
+    @pytest.mark.parametrize(
         "sent, expected", [("true", True), ("false", False), (None, False)]
     )
     def test_collection_has_multi_datasets_is_read_back(self, sent, expected):
