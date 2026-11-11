@@ -1,4 +1,6 @@
+import json
 from contextlib import contextmanager
+from urllib.parse import quote
 from unittest.mock import AsyncMock, patch
 
 import numpy as np
@@ -551,7 +553,7 @@ def test_categorical_legend_rejects_rescale(client):
     # meaningless — the legend endpoint rejects the combination with 400.
     with _registered_categorical("legend_cat", [0, 1, 2, 3, 4]):
         response = client.get(
-            "/api/v1/das/tiler/visual_tiles/colormaps/legend_cat/legend?rescale=0,4"
+            "/api/v1/das/tiler/visual_tiles/colormaps/legend?colormap=legend_cat&rescale=0,4"
         )
     assert response.status_code == 400
     assert "rescale" in response.json()["detail"].lower()
@@ -559,7 +561,7 @@ def test_categorical_legend_rejects_rescale(client):
 
 def test_legend_labels_without_rescale_rejected(client):
     response = client.get(
-        "/api/v1/das/tiler/visual_tiles/colormaps/viridis/legend?labels=true"
+        "/api/v1/das/tiler/visual_tiles/colormaps/legend?colormap=viridis&labels=true"
     )
     assert response.status_code == 400
     assert "rescale" in response.json()["detail"].lower()
@@ -567,7 +569,7 @@ def test_legend_labels_without_rescale_rejected(client):
 
 def test_legend_labels_with_rescale_ok(client):
     response = client.get(
-        "/api/v1/das/tiler/visual_tiles/colormaps/viridis/legend?labels=true&rescale=0,1"
+        "/api/v1/das/tiler/visual_tiles/colormaps/legend?colormap=viridis&labels=true&rescale=0,1"
     )
     assert response.status_code == 200
     assert response.content.startswith(_PNG)
@@ -894,3 +896,113 @@ def test_animation_derived_dimension_clamped_to_max(client):
         )
     assert response.status_code == 200
     assert captured["wh"] == (2048, 2000)
+
+
+# --- inline colormaps -------------------------------------------------------
+
+
+def _inline(cmap: dict) -> str:
+    return quote(json.dumps(cmap))
+
+
+_INLINE_RAMP = {"mode": "ramp", "colors": ["#000000", "#ff0000", "#ffff00"]}
+_INLINE_MCS = {
+    "mode": "categorical",
+    "values": [0, 1, 2, 3, 4],
+    "colors": ["#8c0000", "#ff9701", "#67ff96", "#007bff", "#00078f"],
+}
+
+
+def test_tile_inline_ramp_ok(client):
+    # render_tile is NOT mocked, so the inline LUT really drives the render.
+    with patch(
+        "data_access_service.core.tiler_routes.shared.load_slice",
+        return_value=sparse_of(_make_ds()),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/0/0/0.png"
+            f"?date=2024-01-01T00:00:00Z&colormap={_inline(_INLINE_RAMP)}"
+        )
+    assert response.status_code == 200
+    assert response.content.startswith(_PNG)
+
+
+def test_tile_invalid_inline_colormap_rejected(client):
+    response = client.get(
+        "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/0/0/0.png"
+        f"?date=2024-01-01T00:00:00Z&colormap={quote('{not json')}"
+    )
+    assert response.status_code == 400
+    assert "inline colormap" in response.json()["detail"].lower()
+
+
+def test_categorical_tile_inline_categorical_ok(client, mcs_product):
+    with patch(
+        "data_access_service.core.tiler_routes.shared.load_slice",
+        return_value=sparse_of(_make_categorical_ds()),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/visual_tiles/mcs/0/0/0.png"
+            f"?date=2024-01-01T00:00:00Z&colormap={_inline(_INLINE_MCS)}"
+        )
+    assert response.status_code == 200
+
+
+def test_categorical_tile_inline_mismatched_values_rejected(client, mcs_product):
+    bad = {"mode": "categorical", "values": [1, 2], "colors": ["#ff0000", "#00ff00"]}
+    with patch(
+        "data_access_service.core.tiler_routes.shared.load_slice",
+        return_value=sparse_of(_make_categorical_ds()),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/visual_tiles/mcs/0/0/0.png"
+            f"?date=2024-01-01T00:00:00Z&colormap={_inline(bad)}"
+        )
+    assert response.status_code == 400
+    assert "flag_values" in response.json()["detail"]
+
+
+def test_categorical_tile_inline_ramp_rejected(client, mcs_product):
+    with patch(
+        "data_access_service.core.tiler_routes.shared.load_slice",
+        return_value=sparse_of(_make_categorical_ds()),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/visual_tiles/mcs/0/0/0.png"
+            f"?date=2024-01-01T00:00:00Z&colormap={_inline(_INLINE_RAMP)}"
+        )
+    assert response.status_code == 400
+
+
+def test_legend_query_named_ok(client):
+    response = client.get(
+        "/api/v1/das/tiler/visual_tiles/colormaps/legend?colormap=viridis"
+    )
+    assert response.status_code == 200
+    assert response.content.startswith(_PNG)
+
+
+def test_legend_query_inline_ok(client):
+    for cmap in (_INLINE_RAMP, _INLINE_MCS):
+        response = client.get(
+            f"/api/v1/das/tiler/visual_tiles/colormaps/legend?colormap={_inline(cmap)}"
+        )
+        assert response.status_code == 200
+        assert response.content.startswith(_PNG)
+
+
+def test_legend_query_unknown_is_400(client):
+    response = client.get(
+        "/api/v1/das/tiler/visual_tiles/colormaps/legend?colormap=not_a_real_colormap"
+    )
+    assert response.status_code == 400
+
+
+def test_legend_query_requires_colormap(client):
+    response = client.get("/api/v1/das/tiler/visual_tiles/colormaps/legend")
+    assert response.status_code == 422
+
+
+def test_legend_path_route_removed(client):
+    response = client.get("/api/v1/das/tiler/visual_tiles/colormaps/viridis/legend")
+    assert response.status_code == 404

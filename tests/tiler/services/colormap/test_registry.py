@@ -37,8 +37,8 @@ def isolated_config(tmp_path, monkeypatch):
 
 
 def _entries():
-    """A trivial 2-stop LUT — content doesn't matter, only round-trip."""
-    return [[i, 0, 0, 255] for i in range(256)]
+    """A trivial ramp — content doesn't matter, only round-trip."""
+    return {"mode": "ramp", "colors": [[0, 0, 0, 255], [255, 0, 0, 255]]}
 
 
 def test_load_colormaps_no_file_is_noop(isolated_config):
@@ -84,12 +84,13 @@ def test_get_category_values_none_for_ramp(isolated_config):
     assert colormap_config.get_category_values("never_registered") is None
 
 
-def test_load_handles_legacy_list_format(isolated_config):
-    """Pre-mode format: bare list entries default to ramp mode."""
-    isolated_config.write_text(json.dumps({"legacy": _entries()}))
+def test_bare_list_format_rejected(isolated_config, caplog):
+    isolated_config.write_text(
+        json.dumps({"legacy": [[i, 0, 0, 255] for i in range(256)]})
+    )
     colormap_config.load_colormaps()
-    assert colormap_config.get_colormap("legacy") is not None
-    assert not colormap_config.is_categorical("legacy")
+    assert colormap_config.get_colormap("legacy") is None
+    assert "must be an object" in caplog.text
 
 
 def test_load_handles_new_dict_format(isolated_config):
@@ -154,3 +155,84 @@ def test_get_colormap_returns_none_for_unknown(isolated_config):
 
 def test_path_is_pathlib_path(isolated_config):
     assert isinstance(colormap_config._config_path, Path)
+
+
+def test_ramp_colors_stops_interpolated_to_256(isolated_config):
+    isolated_config.write_text(
+        json.dumps(
+            {"two_stop": {"mode": "ramp", "colors": ["#000000", [255, 0, 0, 255]]}}
+        )
+    )
+    colormap_config.load_colormaps()
+    lut = colormap_config.get_colormap("two_stop")
+    assert len(lut) == 256
+    assert lut[0] == (0, 0, 0, 255)
+    assert lut[255] == (255, 0, 0, 255)
+
+
+def test_ramp_colors_needs_two_stops(isolated_config, caplog):
+    isolated_config.write_text(
+        json.dumps({"one": {"mode": "ramp", "colors": ["#000000"]}})
+    )
+    colormap_config.load_colormaps()
+    assert colormap_config.get_colormap("one") is None
+    assert "2-256" in caplog.text
+
+
+def test_inline_ramp():
+    name = json.dumps({"mode": "ramp", "colors": ["#000000", "#ffffff"]})
+    assert colormap_config.is_inline(name)
+    lut = colormap_config.get_colormap(name)
+    assert len(lut) == 256 and lut[255] == (255, 255, 255, 255)
+    assert colormap_config.is_categorical(name) is False
+    assert colormap_config.get_category_values(name) is None
+
+
+def test_inline_categorical():
+    name = json.dumps(
+        {"mode": "categorical", "values": [3, 1], "colors": ["#ff0000", "#00ff00"]}
+    )
+    assert colormap_config.is_categorical(name) is True
+    assert colormap_config.get_category_values(name) == [3, 1]
+    lut = colormap_config.get_colormap(name)
+    assert lut[3] == (255, 0, 0, 255)
+    assert lut[1] == (0, 255, 0, 255)
+    assert lut[0] == (0, 0, 0, 0)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "{not json",
+        '{"mode": "ramp"}',
+        '{"mode": "weird", "colors": ["#000000", "#ffffff"]}',
+        '{"mode": "categorical", "values": [1], "colors": ["#000000", "#ffffff"]}',
+        '{"mode": "categorical", "values": [300], "colors": ["#000000"]}',
+    ],
+)
+def test_inline_invalid_raises(name):
+    with pytest.raises(ValueError):
+        colormap_config.get_colormap(name)
+    assert colormap_config.is_categorical(name) is False
+    assert colormap_config.get_category_values(name) is None
+
+
+def test_names_are_not_inline():
+    assert not colormap_config.is_inline("viridis")
+    assert colormap_config.get_colormap("viridis") is None
+
+
+def test_ramp_entries_key_rejected(isolated_config, caplog):
+    isolated_config.write_text(
+        json.dumps({"old": {"mode": "ramp", "entries": [[0, 0, 0, 255]] * 256}})
+    )
+    colormap_config.load_colormaps()
+    assert colormap_config.get_colormap("old") is None
+    assert "requires 'colors'" in caplog.text
+
+
+def test_ramp_256_colors_kept_exactly(isolated_config):
+    colors = [[i, 255 - i, (i * 7) % 256, 255] for i in range(256)]
+    isolated_config.write_text(json.dumps({"full": {"mode": "ramp", "colors": colors}}))
+    colormap_config.load_colormaps()
+    assert colormap_config.get_colormap("full") == [tuple(c) for c in colors]

@@ -1,14 +1,21 @@
+import functools
 import json
 import logging
 from pathlib import Path
 from typing import Literal
 
 from data_access_service.config.tiler.paths import COLORMAPS_CONFIG_PATH
-from data_access_service.tiler.utils.colors import categorical_lut, parse_color
+from data_access_service.tiler.utils.colors import (
+    categorical_lut,
+    interpolate_colormap,
+    parse_color,
+)
 
 logger = logging.getLogger(__name__)
 
 ColormapMode = Literal["ramp", "categorical"]
+
+DEFAULT_CATEGORICAL_COLORMAP = "default_categorical"
 
 _config_path = Path(COLORMAPS_CONFIG_PATH)
 _custom_colormaps: dict[str, list[tuple[int, int, int, int]]] = {}
@@ -18,26 +25,65 @@ _custom_colormap_modes: dict[str, ColormapMode] = {}
 _custom_colormap_values: dict[str, list[int]] = {}
 
 
+def is_inline(name: str) -> bool:
+    """True if ``name`` is an inline JSON colormap, not a name."""
+    return name.lstrip().startswith("{")
+
+
+@functools.lru_cache(maxsize=256)
+def _parse_inline(
+    name: str,
+) -> tuple[tuple[tuple[int, int, int, int], ...], ColormapMode, tuple[int, ...]]:
+    """An inline colormap, in the same format as a colormaps.json entry, as
+    ``(lut, mode, values)``. Raises ValueError if invalid."""
+    try:
+        value = json.loads(name)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Inline colormap is not valid JSON: {e.msg}") from e
+    if not isinstance(value, dict):
+        raise ValueError("Inline colormap must be a JSON object")
+    mode = _validate_mode("inline", value)
+    if mode == "categorical":
+        lut, values = _load_categorical_entry("inline", value)
+    else:
+        lut, values = _load_ramp_entry("inline", value)
+    return tuple(lut), mode, tuple(values)
+
+
 def get_colormap(name: str) -> list[tuple[int, int, int, int]] | None:
-    """A custom colormap's 256-entry LUT, or None."""
+    """A custom or inline colormap's 256-entry LUT, or None. Raises
+    ValueError for an invalid inline colormap."""
+    if is_inline(name):
+        return list(_parse_inline(name)[0])
     return _custom_colormaps.get(name)
 
 
 def is_categorical(name: str) -> bool:
-    """True for a categorical custom colormap."""
+    """True for a categorical custom or inline colormap."""
+    if is_inline(name):
+        try:
+            return _parse_inline(name)[1] == "categorical"
+        except ValueError:
+            return False
     return _custom_colormap_modes.get(name) == "categorical"
 
 
 def get_category_values(name: str) -> list[int] | None:
     """A categorical colormap's category values, or None."""
+    if is_inline(name):
+        try:
+            _, mode, values = _parse_inline(name)
+        except ValueError:
+            return None
+        return list(values) if mode == "categorical" else None
     return _custom_colormap_values.get(name)
 
 
 def load_colormaps() -> None:
     """Load colormaps.json at startup.
 
-    Ramp colormaps have 256 ``entries``; categorical ones have ``values`` and
-    ``colors``, expanded to a 256-entry LUT. A bad file is logged and skipped;
+    Ramp colormaps have ``colors`` stops interpolated to 256; categorical
+    ones have ``values`` and ``colors``, expanded to a 256-entry LUT. A bad file is logged and skipped;
     the built-in colormaps still work.
     """
     if not _config_path.exists():
@@ -46,7 +92,7 @@ def load_colormaps() -> None:
         )
         return
     try:
-        data: dict[str, list | dict] = json.loads(_config_path.read_text())
+        data: dict[str, dict] = json.loads(_config_path.read_text())
         _reload(data)
     except (json.JSONDecodeError, ValueError) as e:
         logger.error(
@@ -79,26 +125,25 @@ def list_colormaps() -> dict[str, list]:
     return {"custom": custom, "rio_tiler": rio_names, "matplotlib": mpl_names}
 
 
-def _reload(data: dict[str, list | dict]) -> None:
+def _reload(data: dict[str, dict]) -> None:
     """Validate every colormap, then replace the registry. Raises ValueError
     on the first bad one, leaving the registry unchanged."""
     colormaps: dict[str, list[tuple[int, int, int, int]]] = {}
     modes: dict[str, ColormapMode] = {}
     category_values: dict[str, list[int]] = {}
     for name, value in data.items():
-        if isinstance(value, dict):
-            mode = _validate_mode(name, value)
-            modes[name] = mode
-            if mode == "categorical":
-                colormaps[name], category_values[name] = _load_categorical_entry(
-                    name, value
-                )
-            else:
-                colormaps[name], category_values[name] = _load_ramp_entry(name, value)
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"colormap {name!r}: must be an object with 'mode' and 'colors'"
+            )
+        mode = _validate_mode(name, value)
+        modes[name] = mode
+        if mode == "categorical":
+            colormaps[name], category_values[name] = _load_categorical_entry(
+                name, value
+            )
         else:
-            colormaps[name] = [
-                tuple(_parse_rgba(name, c, i)) for i, c in enumerate(value)
-            ]
+            colormaps[name], _ = _load_ramp_entry(name, value)
     _custom_colormaps.clear()
     _custom_colormap_modes.clear()
     _custom_colormap_values.clear()
@@ -149,17 +194,13 @@ def _load_categorical_entry(
 def _load_ramp_entry(
     name: str, value: dict
 ) -> tuple[list[tuple[int, int, int, int]], list[int]]:
-    if "entries" not in value:
-        raise ValueError(f"colormap {name!r}: ramp mode requires 'entries'")
-    entries = value["entries"]
-    if len(entries) != 256:
+    stops = value.get("colors")
+    if not isinstance(stops, list) or not 2 <= len(stops) <= 256:
         raise ValueError(
-            f"colormap {name!r}: ramp 'entries' must have exactly 256 entries, "
-            f"got {len(entries)}"
+            f"colormap {name!r}: ramp mode requires 'colors', a list of 2-256 colours"
         )
-    lut = [
-        tuple(_parse_rgba(name, c, i)) for i, c in enumerate(entries)
-    ]  # type: ignore[misc]
+    parsed = [_parse_rgba(name, c, i) for i, c in enumerate(stops)]
+    lut = [tuple(c) for c in interpolate_colormap(parsed)]  # type: ignore[misc]
     return lut, list(value.get("values", []))
 
 

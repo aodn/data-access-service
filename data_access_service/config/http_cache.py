@@ -7,7 +7,7 @@ IMMUTABLE_CACHE_HEADERS — 1 year at the CDN, no browser caching.
     GET /{product_id}/{date}/{z}/{x}/{y}.{ext}         visual tile
     GET /{product_id}/{date}/bbox.{ext}                visual bbox render
     GET /{product_id}/{from_date}/{to_date}/animation.{ext}  animation
-    GET /colormaps/{name}/legend                       colormap legend
+    GET /colormaps/legend?colormap=                    colormap legend
 
 REVALIDATE_CACHE_HEADERS — 5 minutes, must-revalidate, no ETag.
   Response can change without the URL changing.

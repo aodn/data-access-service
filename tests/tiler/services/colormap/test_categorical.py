@@ -12,7 +12,6 @@ import xarray as xr
 from PIL import Image
 
 from data_access_service.tiler.services.colormap.categorical import (
-    DEFAULT_CATEGORICAL_PALETTE,
     is_categorical_variable,
     resolve_scheme,
 )
@@ -23,7 +22,13 @@ from data_access_service.tiler.services.rendering.visual_tiles import (
 from data_access_service.tiler.utils.colors import categorical_lut
 from tests.tiler.sparse_helpers import sparse_of
 
-_MCS_COLORS = DEFAULT_CATEGORICAL_PALETTE
+_MCS_COLORS = [
+    (140, 0, 0, 255),
+    (255, 151, 1, 255),
+    (103, 255, 150, 255),
+    (0, 123, 255, 255),
+    (0, 7, 143, 255),
+]
 
 
 def _make_categorical_ds() -> xr.Dataset:
@@ -68,8 +73,6 @@ def test_mcs_default_scheme():
     assert scheme.values == (0, 1, 2, 3, 4)
     assert scheme.labels == ("none", "moderate", "strong", "severe", "extreme")
     assert scheme.colors == tuple(_MCS_COLORS)
-    # "none" is transparent so the basemap shows through.
-    assert scheme.colors[0][3] == 0
 
 
 def test_scheme_lut_is_value_indexed():
@@ -78,7 +81,7 @@ def test_scheme_lut_is_value_indexed():
     lut = scheme.lut()
     assert lut[1] == _MCS_COLORS[1]  # value 1 → moderate, not a rescaled slot
     assert lut[4] == _MCS_COLORS[4]
-    assert lut[0] == (0, 0, 0, 0)
+    assert lut[0] == _MCS_COLORS[0]
     assert lut[200] == (0, 0, 0, 0)  # unmapped codes transparent
 
 
@@ -115,6 +118,34 @@ def test_explicit_categorical_colormap_beats_flag_colors(monkeypatch):
     # rule 1 wins over flag_colors, mapped per value (incl. value 0).
     assert scheme.colors[0] == (10, 20, 30, 255)
     assert scheme.colors[4] == (14, 15, 16, 255)
+
+
+def test_default_colormap_matched_by_value_not_position():
+    """flag_values without 0: each value keeps its own colour, nothing shifts."""
+    ds = _make_categorical_ds()
+    ds["MCS_category"].attrs["flag_values"] = [1, 2, 3, 4]
+    ds["MCS_category"].attrs.pop("flag_meanings")
+    scheme = resolve_scheme(ds["MCS_category"].attrs, None)
+    assert scheme.colors == tuple(_MCS_COLORS[1:])
+
+
+def test_default_colormap_value_it_lacks_is_transparent():
+    ds = _make_categorical_ds()
+    ds["MCS_category"].attrs["flag_values"] = [0, 2, 7]
+    ds["MCS_category"].attrs.pop("flag_meanings")
+    scheme = resolve_scheme(ds["MCS_category"].attrs, None)
+    assert scheme.colors == (_MCS_COLORS[0], _MCS_COLORS[2], (0, 0, 0, 0))
+
+
+def test_default_colormap_missing_raises(monkeypatch):
+    import pytest
+
+    import data_access_service.tiler.services.colormap.registry as reg
+
+    monkeypatch.setattr(reg, "_custom_colormaps", {})
+    monkeypatch.setattr(reg, "_custom_colormap_modes", {})
+    with pytest.raises(RuntimeError, match="default_categorical"):
+        resolve_scheme(_make_categorical_ds()["MCS_category"].attrs, None)
 
 
 def test_misaligned_flag_meanings_dropped():
