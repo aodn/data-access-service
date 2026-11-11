@@ -6,6 +6,7 @@ from data_access_service.batch.subsetting.helpers.preparation_failure import (
 )
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.models.subset_request import SubsetRequest
+from data_access_service.utils.format_utils import OutputFormat
 from data_access_service.utils.email_templates.download_email import (
     get_download_email_html_body,
 )
@@ -34,22 +35,33 @@ def collect_parquet_files(master_job_id: str, subset_request: SubsetRequest):
             p = aws.read_parquet_from_s3(
                 f"s3://{bucket_name}/{config.get_s3_temp_folder_name(master_job_id)}{d}"
             )
-            # The zip is named after the collection, the csv files inside it
-            # stay named after the dataset.
+            # The zip/xlsx is named after the collection, the csv files (or tabs)
+            # inside it stay named after the dataset.
             zip_name = subset_request.download_base_name(d)
             if zip_name in used_zip_names:
                 # The collection was flagged single-dataset but produced more
                 # than one folder; name them apart rather than overwrite.
                 zip_name = f"{zip_name}-{dataset_base_name(d)}"
             used_zip_names.add(zip_name)
-            download_urls.append(
-                aws.write_csv_to_s3(
-                    p,
-                    bucket_name,
-                    f"{master_job_id}/{zip_name}.zip",
-                    base_name=dataset_base_name(d),
+            if subset_request.output_format == OutputFormat.EXCEL:
+                # One workbook, the data in tabs, instead of a zip of csv files.
+                download_urls.append(
+                    aws.write_xlsx_to_s3(
+                        p,
+                        bucket_name,
+                        f"{master_job_id}/{zip_name}.xlsx",
+                        base_name=dataset_base_name(d),
+                    )
                 )
-            )
+            else:
+                download_urls.append(
+                    aws.write_csv_to_s3(
+                        p,
+                        bucket_name,
+                        f"{master_job_id}/{zip_name}.zip",
+                        base_name=dataset_base_name(d),
+                    )
+                )
         else:
             log.warning("Skipping unrecognised output folder %s", d)
 

@@ -1,18 +1,30 @@
 import json
 import shutil
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
 import pytest
+from openpyxl import load_workbook
 from aodn_cloud_optimised.lib import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import Metadata
 
 from data_access_service import API
 from data_access_service.batch.subsetting import prepare_data
+from data_access_service.batch.subsetting.helpers.request_helper import (
+    get_subset_request,
+)
+from data_access_service.batch.subsetting.tasks.parquet_collector import (
+    collect_parquet_files,
+)
 from data_access_service.config.config import Config
 from data_access_service.core.AWSHelper import AWSHelper
-from data_access_service.core.constants import STR_TIME_UPPER_CASE
+from data_access_service.core.constants import (
+    MAX_CSV_ROW,
+    PARTITION_KEY,
+    STR_TIME_UPPER_CASE,
+)
 from data_access_service.utils.date_time_utils import parse_date
 from tests.core.result_check import (
     assert_same_rows,
@@ -508,4 +520,117 @@ class TestParquetProcessorWithS3(TestWithS3):
                 shutil.rmtree(
                     HAULOUT_PREPARATION_PARAMETERS["intermediate_output_folder"],
                     ignore_errors=True,
+                )
+
+    @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    def test_parquet_processor_animal_metadata_excel_output_with_s3(
+        self,
+        aws_clients,
+        setup_resources,
+        upload_test_case_to_s3,
+    ):
+        """output_format=excel: the collector writes one xlsx workbook, not a zip.
+
+        Tab 1 is the data schema (one row per schema entry), the following tabs
+        hold the data with the header in the first row.
+        """
+        s3_client, _, _ = aws_clients
+        config = Config.get_config()
+        config.set_s3_client(s3_client)
+
+        KEY: Final = (
+            "animal_metadata_satellite_relay_tagging_location_qc_realtime_qc.parquet"
+        )
+        UUID: Final = "b2548767-514f-4a31-b65e-36bb894382d5"
+        MASTER_JOB_ID: Final = "excel-animal-metadata-subset"
+
+        api = API()
+        api.initialize_metadata()
+
+        PARAMETERS: Final = {
+            "end_date": "non-specified",
+            "date_ranges": json.dumps(
+                {
+                    "0": [
+                        "2025-12-01 00:00:00.000000000",
+                        "2025-12-31 23:59:59.999999999",
+                    ]
+                }
+            ),
+            "master_job_id": MASTER_JOB_ID,
+            "full_metadata_link": f"https://portal.aodn.org.au/details/{UUID}",
+            "type": "sub-setting-data-preparation",
+            "uuid": UUID,
+            "intermediate_output_folder": f"/tmp/tmpanimalmetaexcel{MASTER_JOB_ID}",
+            "collection_title": (
+                "Animal satellite relay tagging metadata (location QC, realtime)"
+            ),
+            "suggested_citation": "",
+            "output_format": "excel",
+            "multi_polygon": None,
+            "recipient": "someone@utas.edu.au",
+            "key": KEY,
+            "start_date": "non-specified",
+        }
+
+        with patch.object(AWSHelper, "send_email"):
+            try:
+                prepare_data(api, job_index="0", parameters=PARAMETERS)
+
+                bucket_name = config.get_subsetting_bucket_name()
+                helper = AWSHelper()
+                subset = helper.read_parquet_from_s3(
+                    f"s3://{bucket_name}/"
+                    f"{config.get_s3_temp_folder_name(MASTER_JOB_ID)}{KEY}"
+                )
+                assert len(subset) > 0, "subset parquet is empty"
+                expected_header = list(subset.drop(PARTITION_KEY, axis=1).columns)
+
+                collect_parquet_files(
+                    master_job_id=MASTER_JOB_ID,
+                    subset_request=get_subset_request(PARAMETERS),
+                )
+
+                response = s3_client.list_objects_v2(
+                    Bucket=bucket_name, Prefix=f"{MASTER_JOB_ID}/"
+                )
+
+                keys = [o["Key"] for o in response.get("Contents", [])]
+                xlsx_keys = [k for k in keys if k.endswith(".xlsx")]
+                assert len(xlsx_keys) == 1, f"expected one xlsx, got {keys}"
+                assert not [k for k in keys if k.endswith(".zip")], keys
+
+                body = s3_client.get_object(Bucket=bucket_name, Key=xlsx_keys[0])[
+                    "Body"
+                ].read()
+                Path("/tmp/excel_output_check.xlsx").write_bytes(
+                    body
+                )  # to inspect locally for debug
+                workbook = load_workbook(BytesIO(body), read_only=True)
+                sheets = workbook.worksheets
+                assert len(sheets) >= 2, workbook.sheetnames
+
+                # Tab 1: the schema, one row per entry, header first.
+                schema = json.loads(
+                    s3_client.get_object(
+                        Bucket=bucket_name, Key=f"{MASTER_JOB_ID}/temp/dataschema.json"
+                    )["Body"].read()
+                )
+                assert sheets[0].title == "dataschema"
+                schema_rows = list(sheets[0].iter_rows(values_only=True))
+                assert schema_rows[0][0] == "name"
+                assert sorted(r[0] for r in schema_rows[1:]) == sorted(schema)
+
+                # Other tabs: the data, header in the first row of every tab.
+                data_rows = 0
+                for sheet in sheets[1:]:
+                    rows = list(sheet.iter_rows(values_only=True))
+                    assert list(rows[0]) == expected_header
+                    assert len(rows) <= MAX_CSV_ROW, f"{sheet.title} too long"
+                    data_rows += len(rows) - 1
+                assert data_rows == len(subset)
+            finally:
+                shutil.rmtree(config.get_temp_folder(MASTER_JOB_ID), ignore_errors=True)
+                shutil.rmtree(
+                    PARAMETERS["intermediate_output_folder"], ignore_errors=True
                 )
