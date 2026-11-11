@@ -46,6 +46,7 @@ class TestDataGeneration(TestWithS3):
         )
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    @patch.object(Config, "get_max_excel_row", lambda self: 1000000)
     def test_parquet_preparation_and_collection(
         self,
         aws_clients,
@@ -211,6 +212,7 @@ class TestDataGeneration(TestWithS3):
                 shutil.rmtree(config.get_temp_folder(INIT_JOB_ID), ignore_errors=True)
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    @patch.object(Config, "get_max_excel_row", lambda self: 1000000)
     def test_parquet_with_date32_type(
         self,
         aws_clients,
@@ -377,6 +379,7 @@ class TestDataGeneration(TestWithS3):
                 shutil.rmtree(config.get_temp_folder("994"), ignore_errors=True)
 
     @patch("aodn_cloud_optimised.lib.DataQuery.REGION", REGION)
+    @patch.object(Config, "get_max_excel_row", lambda self: 1000000)
     def test_parquet_with_date32_type_with_multipolygon(
         self,
         aws_clients,
