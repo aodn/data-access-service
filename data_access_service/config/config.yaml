@@ -79,6 +79,8 @@ subsetting:
     # Hard ceiling on process RSS while a time block is loaded. The block is
     # sized from the room left under this ceiling, not added on top of it.
     max_chunk_gb: 6
+    # Max rows per excel tab, header row included (excel's hard limit is 1048576).
+    max_excel_row: 1048576
 estimation:
   config:
     s3_prefix: "portal/estimation"

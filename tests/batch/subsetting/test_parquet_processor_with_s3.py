@@ -10,7 +10,7 @@ from openpyxl import load_workbook
 from aodn_cloud_optimised.lib import DataQuery
 from aodn_cloud_optimised.lib.DataQuery import Metadata
 
-from data_access_service import API
+from data_access_service import API, Config
 from data_access_service.batch.subsetting import prepare_data
 from data_access_service.batch.subsetting.helpers.request_helper import (
     get_subset_request,
@@ -21,7 +21,6 @@ from data_access_service.batch.subsetting.tasks.parquet_collector import (
 from data_access_service.config.config import Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.constants import (
-    MAX_CSV_ROW,
     PARTITION_KEY,
     STR_TIME_UPPER_CASE,
 )
@@ -608,7 +607,9 @@ class TestParquetProcessorWithS3(TestWithS3):
                 )  # to inspect locally for debug
                 workbook = load_workbook(BytesIO(body), read_only=True)
                 sheets = workbook.worksheets
-                assert len(sheets) >= 2, workbook.sheetnames
+                # max_excel_row is small in config-test.yaml, so the data must be
+                # split into two data tabs, plus the schema tab.
+                assert len(sheets) == 3, workbook.sheetnames
 
                 # Tab 1: the schema, one row per entry, header first.
                 schema = json.loads(
@@ -623,10 +624,13 @@ class TestParquetProcessorWithS3(TestWithS3):
 
                 # Other tabs: the data, header in the first row of every tab.
                 data_rows = 0
+                assert len(sheets[1:]) == 2, "expected two data tabs"
                 for sheet in sheets[1:]:
                     rows = list(sheet.iter_rows(values_only=True))
                     assert list(rows[0]) == expected_header
-                    assert len(rows) <= MAX_CSV_ROW, f"{sheet.title} too long"
+                    assert (
+                        len(rows) <= config.get_max_excel_row()
+                    ), f"{sheet.title} too long"
                     data_rows += len(rows) - 1
                 assert data_rows == len(subset)
             finally:

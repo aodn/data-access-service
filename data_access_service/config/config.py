@@ -202,6 +202,14 @@ class Config:
         """
         return 12
 
+    def get_max_excel_row(self) -> int:
+        """
+        Returns the max rows per excel tab, header row included.
+        Read from subsetting.config.max_excel_row, defaults to 1000000.
+        """
+        sconfig = (self.config or {}).get("subsetting", {}).get("config", {})
+        return int(sconfig.get("max_excel_row", 1000000))
+
     @staticmethod
     def get_polygon_count_per_job():
         """
