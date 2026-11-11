@@ -30,7 +30,7 @@ from data_access_service.models.estimation_types import (
     schema_fingerprint,
 )
 from data_access_service.utils.date_time_utils import ensure_timezone
-from data_access_service.utils.format_utils import OUTPUT_FORMAT_CSV
+from data_access_service.utils.format_utils import OutputFormat
 
 log = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ def read_index_estimate(
     :raises EstimationIndexUnavailableError: if the index is missing, stale or
         cannot be read
     """
-    if output_format != OUTPUT_FORMAT_CSV:
+    if output_format != OutputFormat.CSV:
         raise ValueError(
             f"'{output_format}' size estimate not possible for {key}: the "
             "estimation index only models the zipped-CSV download"
@@ -208,7 +208,7 @@ def sidecar_extent_provider(api, output_format: str) -> ExtentProvider:
     def provider(
         uuid: str, key: str
     ) -> Tuple[Optional[pd.Timestamp], Optional[pd.Timestamp]]:
-        if not key.endswith(".parquet") or output_format != OUTPUT_FORMAT_CSV:
+        if not key.endswith(".parquet") or output_format != OutputFormat.CSV:
             return api.get_temporal_extent(uuid, key)
         meta = require_sidecar(api, uuid, key)
         # A timeless dataset stores a synthetic day key, which says nothing

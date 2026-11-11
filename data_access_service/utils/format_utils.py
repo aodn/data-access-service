@@ -6,25 +6,33 @@ netcdf and geotiff from a zarr key. Any other pairing is a malformed request.
 `api` stays a parameter, never an import, so utils does not depend on core.API.
 """
 
+from enum import StrEnum
 from typing import Optional
 
 from aodn_cloud_optimised.lib.DataQuery import ParquetDataSource, ZarrDataSource
 
 from data_access_service.utils.geotiff_export import geotiff_eligible_vars
 
-OUTPUT_FORMAT_CSV = "csv"
-OUTPUT_FORMAT_NETCDF = "netcdf"
-OUTPUT_FORMAT_GEOTIFF = "geotiff"
-SUPPORTED_OUTPUT_FORMATS = frozenset(
-    {OUTPUT_FORMAT_NETCDF, OUTPUT_FORMAT_GEOTIFF, OUTPUT_FORMAT_CSV}
-)
+
+class OutputFormat(StrEnum):
+    """A StrEnum, so members still compare, hash and format like the plain strings."""
+
+    CSV = "csv"
+    EXCEL = "excel"
+    NETCDF = "netcdf"
+    GEOTIFF = "geotiff"
+
+
+# Plain strings on purpose, so error messages listing it keep the same text.
+SUPPORTED_OUTPUT_FORMATS = frozenset(f.value for f in OutputFormat)
 
 KEY_SUFFIX_PARQUET = ".parquet"
 KEY_SUFFIX_ZARR = ".zarr"
 KEY_SUFFIX_FOR_FORMAT = {
-    OUTPUT_FORMAT_CSV: KEY_SUFFIX_PARQUET,
-    OUTPUT_FORMAT_NETCDF: KEY_SUFFIX_ZARR,
-    OUTPUT_FORMAT_GEOTIFF: KEY_SUFFIX_ZARR,
+    OutputFormat.CSV: KEY_SUFFIX_PARQUET,
+    OutputFormat.EXCEL: KEY_SUFFIX_PARQUET,
+    OutputFormat.NETCDF: KEY_SUFFIX_ZARR,
+    OutputFormat.GEOTIFF: KEY_SUFFIX_ZARR,
 }
 KNOWN_KEY_SUFFIXES = (KEY_SUFFIX_PARQUET, KEY_SUFFIX_ZARR)
 
@@ -74,7 +82,7 @@ def check_datasource_supports_format(
         key_suffix = None
     check_storage_supports_format(key, key_suffix, output_format)
 
-    if isinstance(ds, ZarrDataSource) and output_format == OUTPUT_FORMAT_GEOTIFF:
+    if isinstance(ds, ZarrDataSource) and output_format == OutputFormat.GEOTIFF:
         lat_name, lon_name, _ = api.resolve_dim_names(uuid, key)
         # Dims and dtypes never change under slicing, so the raw store answers
         # this without any subsetting work.
