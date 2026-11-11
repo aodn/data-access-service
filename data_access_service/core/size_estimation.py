@@ -36,7 +36,7 @@ from data_access_service.core.estimation_index import (
 )
 from data_access_service.utils.cancellation import Cancellation, raise_if_client_gone
 from data_access_service.utils.format_utils import (
-    OUTPUT_FORMAT_GEOTIFF,
+    OutputFormat,
     check_datasource_supports_format,
 )
 from data_access_service.utils.geotiff_export import geotiff_eligible_vars, has_ij_dims
@@ -226,7 +226,7 @@ def _estimate_zarr_size(
 
     # Measure the uncompressed and output sizes of the union grid, per format.
     # csv cannot reach here - check_datasource_supports_format rejects it first.
-    if output_format == OUTPUT_FORMAT_GEOTIFF:
+    if output_format == OutputFormat.GEOTIFF:
         total_uncompressed, total_output = _measure_geotiff(
             api, dataset, uuid, key, notes
         )
