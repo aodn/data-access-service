@@ -47,7 +47,6 @@ PARTITION_KEY_NAMES = frozenset({"timestamp", "polygon", "filename"})
 
 PARQUET_SUBSET_ROW_NUMBER: int = 200000
 MAX_PARQUET_SPLIT: int = 30
-MAX_CSV_ROW: int = 1048576
 
 COMPRESSION_RATIO_NETCDF: float = 0.2
 OUTPUT_FORMAT_COMPRESSION_RATIO: dict[str, float] = {

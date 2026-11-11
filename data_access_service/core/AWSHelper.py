@@ -14,7 +14,7 @@ from pathlib import Path
 from data_access_service import init_log
 from data_access_service.config.config import Config, IntTestConfig, DevConfig
 from io import BytesIO
-from data_access_service.core.constants import PARTITION_KEY, MAX_CSV_ROW
+from data_access_service.core.constants import PARTITION_KEY
 
 
 class AWSHelper:
@@ -57,7 +57,7 @@ class AWSHelper:
         """
         target = data.drop(PARTITION_KEY, axis=1).reset_index(drop=True)
         # the max row should be the max excel row limit exclude the header row
-        max_excel_row = MAX_CSV_ROW - 1
+        max_excel_row = self.config.get_max_excel_row() - 1
 
         if base_name is None:
             base_name = Path(key).stem
@@ -219,13 +219,13 @@ class AWSHelper:
           * first tab `dataschema`: one row per entry of dataschema.json, one
             column per attribute of that entry (header in the first row).
           * following tabs: the data, header in the first row of every tab. A tab
-            never exceeds the excel limit (MAX_CSV_ROW rows, header included),
+            never exceeds the excel limit (max_excel_row from config, header included, header included),
             extra rows spill into the next tab.
         `base_name` is used to name the data tabs, it defaults to the stem of `key`.
         """
         target = data.drop(PARTITION_KEY, axis=1).reset_index(drop=True)
         # the max data rows per tab is the excel row limit excluding the header row
-        max_data_row = MAX_CSV_ROW - 1
+        max_data_row = self.config.get_max_excel_row() - 1
 
         if base_name is None:
             base_name = Path(key).stem

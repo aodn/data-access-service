@@ -182,6 +182,7 @@ class TestAWSHelper(TestWithS3):
                 written = pd.read_csv(io.StringIO(zf.read(namelist[0]).decode()))
                 pd.testing.assert_frame_equal(written, mock_df)
 
+    @patch.object(Config, "get_max_excel_row", lambda self: 1000000)
     def test_write_csv_to_s3(self, setup, aws_clients, localstack, mock_boto3_client):
         helper = AWSHelper()
         helper.s3 = MagicMock()
@@ -275,7 +276,7 @@ class TestAWSHelper(TestWithS3):
             expected_url = f"https://{bucket}.s3.us-east-1.amazonaws.com/{key}"
             assert url == expected_url
 
-    @patch("data_access_service.core.AWSHelper.MAX_CSV_ROW", 10)
+    @patch.object(Config, "get_max_excel_row", lambda self: 10)
     def test_write_csv_to_s3_edge_case(
         self, setup, aws_clients, localstack, mock_boto3_client
     ):
