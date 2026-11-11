@@ -1,5 +1,6 @@
 import json
-from unittest.mock import MagicMock
+import time
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -12,7 +13,14 @@ from data_access_service.batch.pmtiles.generator import (
     list_parquet_datasets,
     submit_pmtiles_array_job,
 )
+from data_access_service.models.co_datasource.csiro import csiro_data_src
+from data_access_service.models.co_datasource.csiro.csiro_data_src import (
+    CsiroS3Access,
+    accept_csiro_keys,
+    request_csiro_s3_access,
+)
 from data_access_service.models.pmtiles_types import PmtilesVisualizationStyle
+from tests.models.co_datasource.test_dataset_location import CSIRO_DATASET
 
 
 def _enable_fork(
@@ -246,6 +254,44 @@ class TestSubmitArrayJob:
         ]
         # Batch only takes string parameter values.
         assert all(isinstance(v, str) for v in parameters.values())
+        # This init fetched no CSIRO key, so there is nothing to pass down.
+        assert "csiro_keys" not in parameters
+
+    def test_csiro_key_is_passed_to_children(self, monkeypatch):
+        api = MagicMock()
+        api.get_mapped_meta_data.return_value = {"uuid-a": {"a.parquet": {}}}
+        submit = MagicMock(return_value="array-job-id")
+        monkeypatch.setattr(generator.aws, "submit_a_job", submit)
+        # As if API() in this init job had just fetched the key from CSIRO.
+        csiro_data_src._fetched_here[(CSIRO_DATASET, "csiro:72626")] = (
+            CsiroS3Access(
+                bucket="dapprd-mnf",
+                prefix="000072626v004/data/",
+                endpoint_url="https://s3.data.csiro.au",
+                access_key="csiro-key",
+                secret_access_key="csiro-secret",
+            ),
+            time.time(),
+        )
+
+        submit_pmtiles_array_job(api, job_queue="q", job_definition="d")
+
+        parameters = submit.call_args.kwargs["parameters"]
+        assert isinstance(parameters["csiro_keys"], str)
+        handed_down = json.loads(parameters["csiro_keys"])
+        assert handed_down[0]["dataset_name"] == CSIRO_DATASET
+        assert handed_down[0]["access_key"] == "csiro-key"
+
+        # A child takes the parameter (as entry_point does) and gets the key
+        # without calling the CSIRO API.
+        csiro_data_src._fetched_here.clear()
+        accept_csiro_keys(parameters["csiro_keys"])
+        with patch(
+            "data_access_service.models.co_datasource.csiro.csiro_data_src.requests.get"
+        ) as csiro_api:
+            access = request_csiro_s3_access(CSIRO_DATASET, "csiro:72626")
+        csiro_api.assert_not_called()
+        assert access.access_key == "csiro-key"
 
     def test_no_dataset_submits_nothing(self, monkeypatch):
         api = MagicMock()

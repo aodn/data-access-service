@@ -13,6 +13,7 @@ from data_access_service.models.co_datasource.co_data_registory import (
 )
 from data_access_service.models.co_datasource.csiro import csiro_data_src
 from data_access_service.models.co_datasource.csiro.csiro_data_src import (
+    CsiroDataSrc,
     accept_csiro_keys,
     export_csiro_keys,
     redact_job_parameters,
@@ -57,6 +58,32 @@ def test_parent_key_is_exported_and_used_without_a_child_request():
 
     child_request.assert_not_called()
     assert child_location == parent_location
+
+
+def test_child_startup_uses_parent_key_without_asking_csiro():
+    """API() in a child builds CsiroDataSrc; the parent's key must be enough."""
+    accept_csiro_keys(json.dumps([_handoff_entry()]))
+
+    with patch(
+        "data_access_service.models.co_datasource.csiro.csiro_data_src.requests.get"
+    ) as csiro_api, patch(
+        "data_access_service.models.co_datasource.csiro.csiro_data_src.GetAodn"
+    ) as get_aodn:
+        get_aodn.return_value.get_dataset.return_value.get_metadata.return_value = {
+            "global_attributes": {}
+        }
+        CsiroDataSrc()
+
+    csiro_api.assert_not_called()
+    get_aodn.assert_called_once_with(
+        bucket_name="dapprd-mnf",
+        prefix="000072626v004/data/",
+        s3_fs_opts={
+            "key": "csiro-key",
+            "secret": "csiro-secret",
+            "client_kwargs": {"endpoint_url": "https://s3.data.csiro.au"},
+        },
+    )
 
 
 def test_expired_parent_key_makes_the_child_fetch():
