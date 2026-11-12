@@ -85,7 +85,7 @@ class AWSHelper:
                             schema_json = json.loads(schema_content)
 
                             # the row of a csv is a key in dataschema.json, while each column is an attribute of this key
-                            schema_df = pd.DataFrame(schema_json).T
+                            schema_df = self._schema_to_df(schema_json)
                             schema_csv = schema_df.to_csv(index=True)
                             # save parquet metadate in dataschema.csv file
                             zf.writestr("dataschema.csv", schema_csv)
@@ -313,6 +313,24 @@ class AWSHelper:
             region = self.s3.meta.region_name
             return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
 
+    @staticmethod
+    def _schema_cell(value):
+        """A list (bboxes) is stored as JSON so the csv cell stays valid JSON."""
+        if isinstance(value, (list, tuple)):
+            return json.dumps(value)
+        return value
+
+    @staticmethod
+    def _schema_to_df(schema_json: dict) -> pd.DataFrame:
+        """One row per key; a scalar entry (e.g. uuid) becomes a single `value` cell."""
+        return pd.DataFrame.from_dict(
+            {
+                k: (v if isinstance(v, dict) else {"value": AWSHelper._schema_cell(v)})
+                for k, v in schema_json.items()
+            },
+            orient="index",
+        )
+
     def _write_schema_sheet(self, sheet, bucket_name: str, key: str) -> None:
         """Fill `sheet` with dataschema.json, one row per entry. Header only if no schema found."""
         parts = key.split("/")
@@ -323,7 +341,7 @@ class AWSHelper:
                 response = self.s3.get_object(Bucket=bucket_name, Key=schema_key)
                 schema_json = json.loads(response["Body"].read().decode("utf-8"))
                 # each key of dataschema.json is a row, each attribute of the key a column
-                schema_df = pd.DataFrame(schema_json).T
+                schema_df = self._schema_to_df(schema_json)
                 schema_rows = schema_df
                 self.log.info(f"Added dataschema tab from {schema_key}")
             except self.s3.exceptions.NoSuchKey:
