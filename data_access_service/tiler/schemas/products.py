@@ -58,9 +58,14 @@ class ProductConfig(BaseModel):
     visual: bool
     data_tile: DataTileConfig = Field(default_factory=DataTileConfig)
     visual_tile: VisualTileConfig = Field(default_factory=VisualTileConfig)
+    # Whether the variable has CF flag_values; None if its store didn't load.
+    # Read from the store, not a Product field.
+    categorical: bool | None = None
 
     @classmethod
-    def from_product(cls, product: "Product") -> "ProductConfig":
+    def from_product(
+        cls, product: "Product", categorical: bool | None = None
+    ) -> "ProductConfig":
         return cls(
             id=product.id,
             store=product.store,
@@ -76,6 +81,7 @@ class ProductConfig(BaseModel):
             visual_tile=VisualTileConfig(
                 coastal_fill=_coastal_fill_config(product.visual_tile.coastal_fill),
             ),
+            categorical=categorical,
         )
 
 

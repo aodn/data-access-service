@@ -12,6 +12,15 @@ from data_access_service.models.co_datasource.csiro import csiro_data_src
 from data_access_service.utils.caching.memoizer import NullMemoizer
 
 
+@pytest.fixture(autouse=True, scope="session")
+def colormaps_loaded():
+    """Load the real colormaps.json once, as tiler warmup does, so the
+    default categorical colormap is there."""
+    from data_access_service.tiler.services.colormap.registry import load_colormaps
+
+    load_colormaps()
+
+
 @pytest.fixture(autouse=True)
 def no_csiro_key_cache(monkeypatch):
     """Never share CSIRO keys between tests.

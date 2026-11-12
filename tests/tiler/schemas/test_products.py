@@ -33,10 +33,13 @@ from data_access_service.tiler.services.product.product import (
 # config, and is already served per-date via /manifest.json instead.
 _COMPUTED_ONLY_FIELDS = {"lod_grids"}
 
+# Response-only fields read from the store, not carried on Product.
+_STORE_DERIVED_FIELDS = {"categorical"}
+
 
 def test_product_config_fields_match_product():
     product_fields = {f.name for f in dataclasses.fields(Product)}
-    config_fields = set(ProductConfig.model_fields)
+    config_fields = set(ProductConfig.model_fields) - _STORE_DERIVED_FIELDS
     assert product_fields == config_fields
 
 

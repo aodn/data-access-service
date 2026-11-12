@@ -22,6 +22,10 @@ class DataTileManifestResponse(BaseModel):
     valueRange: list[float] | None = None
     uRange: list[float] | None = None
     vRange: list[float] | None = None
+    # The variable's units attr; absent for categorical or unitless variables.
+    valueUnit: str | None = None
+    uUnit: str | None = None
+    vUnit: str | None = None
     # Categorical variables only.
     flagValues: list[int] | None = None
     flagMeanings: list[str] | None = None

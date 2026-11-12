@@ -2,8 +2,8 @@
 to exactly one colour.
 
 Values and labels come from the data. Colours come from, in order: a
-categorical ``colormap=`` param, the variable's ``flag_colors`` attr, or
-``DEFAULT_CATEGORICAL_PALETTE``.
+categorical ``colormap=`` param, the variable's ``flag_colors`` attr, or the
+``default_categorical`` colormap in colormaps.json.
 """
 
 from __future__ import annotations
@@ -13,22 +13,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from data_access_service.tiler.services.colormap.registry import (
+    DEFAULT_CATEGORICAL_COLORMAP,
     get_colormap,
     is_categorical,
 )
 from data_access_service.tiler.utils.colors import parse_color
 
 RGBA = tuple[int, int, int, int]
-
-# Matched to flag_values by position, cycled if there are more categories.
-# Marine cold-spell colours (Hobday et al. 2018); 0 ("none") is transparent.
-DEFAULT_CATEGORICAL_PALETTE: list[RGBA] = [
-    (0, 0, 0, 0),  # 0 none — transparent
-    (199, 236, 242, 255),  # 1 moderate  #C7ECF2
-    (133, 183, 204, 255),  # 2 strong    #85B7CC
-    (74, 111, 167, 255),  # 3 severe    #4A6FA7
-    (17, 30, 108, 255),  # 4 extreme   #111E6C
-]
 
 
 def is_categorical_variable(attrs: Mapping[str, Any]) -> bool:
@@ -93,8 +84,15 @@ def _resolve_colors(
         if parsed:
             return _fit(parsed, n)
 
-    # 3. The default palette.
-    return _fit(DEFAULT_CATEGORICAL_PALETTE, n)
+    # 3. The default colormap, matched by value; values it lacks are
+    # transparent.
+    default = _registered_categorical_colors(DEFAULT_CATEGORICAL_COLORMAP, values)
+    if values and not default:
+        raise RuntimeError(
+            f"Default categorical colormap {DEFAULT_CATEGORICAL_COLORMAP!r} "
+            "is not loaded"
+        )
+    return tuple(default)
 
 
 def _registered_categorical_colors(name: str, values: tuple[int, ...]) -> list[RGBA]:
@@ -126,8 +124,6 @@ def _parse_flag_colors(raw: Any) -> list[RGBA]:
 
 def _fit(colors: Sequence[RGBA], n: int) -> tuple[RGBA, ...]:
     """Exactly n colours, cycling if needed."""
-    if not colors:
-        colors = DEFAULT_CATEGORICAL_PALETTE
     return tuple(colors[i % len(colors)] for i in range(n))
 
 

@@ -83,25 +83,40 @@ async def get_colormaps(response: Response):
     return list_colormaps()
 
 
+_INLINE_COLORMAP_DOC = (
+    "Or an inline colormap: a URL-encoded JSON object in the colormaps.json entry "
+    'format, e.g. {"mode":"ramp","colors":["#000000","#ff0000"]} or '
+    '{"mode":"categorical","values":[0,1],"colors":["#8c0000","#ff9701"]}.'
+)
+
+
 @router.get(
-    "/colormaps/{name}/legend",
+    "/colormaps/legend",
     summary="Color legend",
     description=(
-        "Returns a PNG color legend for the named colormap. "
-        "The name must be one returned by GET /visual_tiles/colormaps. "
-        "If rescale=min,max is provided, tick labels at lo, mid, and hi are drawn alongside the bar. "
-        "Without rescale, only the color bar is rendered (no labels). "
+        "Returns a PNG color legend for a colormap. "
+        "With labels=true and rescale=min,max, tick labels at lo, mid, and hi are drawn alongside the bar. "
+        "By default only the color bar is rendered (no labels). "
         "Categorical colormaps render discrete equal-width color blocks instead of a smooth gradient."
     ),
 )
 async def get_legend(
-    name: str,
+    colormap: str = Query(
+        description=(
+            "Colormap name, as returned by GET /visual_tiles/colormaps. "
+            + _INLINE_COLORMAP_DOC
+        ),
+    ),
     rescale: str | None = Query(
         None,
         description=(
-            "Value range as 'min,max'. When provided, tick labels are drawn at lo, mid, and hi. "
+            "Value range as 'min,max', used for the tick labels at lo, mid, and hi. "
             "Rejected for categorical colormaps, whose discrete blocks have no scale to label."
         ),
+    ),
+    labels: bool = Query(
+        False,
+        description="Draw tick labels alongside the bar. Requires rescale.",
     ),
     width: int = Query(256, ge=10, le=2048, description="Image width in pixels."),
     height: int = Query(40, ge=10, le=2048, description="Image height in pixels."),
@@ -111,12 +126,18 @@ async def get_legend(
         pattern="^(horizontal|vertical)$",
     ),
 ):
-    resolve_colormap_or_error(name, status_code=404)
+    resolve_colormap_or_error(colormap)
     rescale_range = parse_rescale(rescale)
     try:
         png = await run_sync(
             functools.partial(
-                render_legend, name, rescale_range, width, height, orientation
+                render_legend,
+                colormap,
+                rescale_range,
+                width,
+                height,
+                orientation,
+                labels,
             ),
             limiter=TILE_THREAD_LIMITER,
         )
@@ -156,7 +177,7 @@ async def get_tile(
             "Matplotlib or rio-tiler colormap name, e.g. viridis, plasma, RdBu_r. "
             "Omit to use the default (viridis for continuous products, the categorical "
             "palette for flag-valued products). Passing a continuous colormap to a "
-            "categorical product is rejected."
+            "categorical product is rejected. " + _INLINE_COLORMAP_DOC
         ),
     ),
     rescale: str | None = Query(
@@ -375,7 +396,7 @@ async def get_bbox(
         description=(
             "Colormap name. Omit to use the default (viridis for continuous products, the "
             "categorical palette for flag-valued products). A continuous colormap on a "
-            "categorical product is rejected."
+            "categorical product is rejected. " + _INLINE_COLORMAP_DOC
         ),
     ),
     rescale: str | None = Query(
@@ -542,7 +563,7 @@ async def get_animation(
         description=(
             "Colormap name. Omit to use the default (viridis for continuous products, the "
             "categorical palette for flag-valued products). A continuous colormap on a "
-            "categorical product is rejected."
+            "categorical product is rejected. " + _INLINE_COLORMAP_DOC
         ),
     ),
     rescale: str | None = Query(

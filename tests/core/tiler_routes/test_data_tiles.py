@@ -97,6 +97,41 @@ def test_list_products_metadata_uuid_null_when_absent(client, monkeypatch):
     assert by_id["plain"]["metadata_uuid"] is None
 
 
+def test_list_products_categorical_flag(client, monkeypatch):
+    """categorical comes from the variable's flag_values in the store
+    metadata; a pair is never categorical; an unloaded store gives null."""
+    from types import SimpleNamespace
+
+    import data_access_service.core.tiler_routes.products as products_route
+
+    metas = {
+        "cat_store": SimpleNamespace(
+            variables={"mcs": SimpleNamespace(attrs={"flag_values": [0, 1, 2]})}
+        ),
+        "cont_store": SimpleNamespace(
+            variables={"sst": SimpleNamespace(attrs={"units": "K"})}
+        ),
+    }
+    monkeypatch.setattr(products_route, "get_loaded_store_metadata", metas.get)
+    for pid, store, var in [
+        ("cat", "cat_store", "mcs"),
+        ("cont", "cont_store", "sst"),
+        ("pair", "cont_store", ["U", "V"]),
+        ("missing", "gone_store", "sst"),
+    ]:
+        monkeypatch.setitem(
+            registry.PRODUCTS, pid, Product(id=pid, store=store, variable=var)
+        )
+
+    r = client.get("/api/v1/das/tiler/data_tiles/products")
+    assert r.status_code == 200
+    by_id = {p["id"]: p for p in r.json()}
+    assert by_id["cat"]["categorical"] is True
+    assert by_id["cont"]["categorical"] is False
+    assert by_id["pair"]["categorical"] is False
+    assert by_id["missing"]["categorical"] is None
+
+
 _FAKE_PRODUCTS = {
     "product_a": Product(id="product_a", store="a", variable="VAR"),
 }
@@ -321,7 +356,7 @@ def test_manifest_of_a_date_with_no_values(client, product_id, variables, ranges
     the range its tiles are encoded with instead."""
     with (
         patch(
-            "data_access_service.core.tiler_routes.data_tiles.get_lod_grids",
+            "data_access_service.core.tiler_routes.products.get_lod_grids",
             return_value=_LOD_GRIDS,
         ),
         patch(
@@ -359,7 +394,7 @@ def test_manifest_categorical_flag_fields_pass_through(client):
     }
     with (
         patch(
-            "data_access_service.core.tiler_routes.data_tiles.get_lod_grids",
+            "data_access_service.core.tiler_routes.products.get_lod_grids",
             return_value=_LOD_GRIDS,
         ),
         patch(
@@ -367,7 +402,7 @@ def test_manifest_categorical_flag_fields_pass_through(client):
             return_value=_make_sparse(),
         ),
         patch(
-            "data_access_service.core.tiler_routes.data_tiles.render_manifest",
+            "data_access_service.core.tiler_routes.products.render_manifest",
             return_value=payload,
         ),
     ):
@@ -624,3 +659,49 @@ def test_availability_no_dates_in_range(client):
     assert product["available_dates"] == []
     # No dates in range, but the product still has data, so full_date_range is populated.
     assert product["full_date_range"] == {"start": "2020-01-01", "end": "2020-01-01"}
+
+
+def test_manifest_same_under_visual_tiles(client):
+    ds = _make_ds()
+    ds["GSLA"].attrs["flag_values"] = [0, 1]
+    ds["GSLA"].attrs["flag_meanings"] = "low high"
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.products.get_lod_grids",
+            return_value=_LOD_GRIDS,
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.shared.load_slice",
+            return_value=_make_sparse(ds),
+        ),
+    ):
+        data = client.get(
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/manifest.json?date=2024-01-01T00:00:00Z"
+        )
+        visual = client.get(
+            "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/manifest.json?date=2024-01-01T00:00:00Z"
+        )
+    assert data.status_code == visual.status_code == 200
+    assert data.json() == visual.json()
+    assert visual.json()["flagValues"] == [0, 1]
+    assert "valueUnit" not in visual.json()
+
+
+def test_manifest_value_unit(client):
+    ds = _make_ds()
+    ds["GSLA"].attrs["units"] = "m"
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.products.get_lod_grids",
+            return_value=_LOD_GRIDS,
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.shared.load_slice",
+            return_value=_make_sparse(ds),
+        ),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/manifest.json?date=2024-01-01T00:00:00Z"
+        )
+    assert response.status_code == 200
+    assert response.json()["valueUnit"] == "m"

@@ -331,3 +331,29 @@ def test_near_the_source_resolution_nothing_is_averaged():
     assert (
         kernels.aggregate_window(grid, 80, 100, (0, 80), (0, 100), flip=False) is None
     )
+
+
+def test_render_manifest_value_unit():
+    ds = _make_ds(["sst"])
+    ds["sst"].attrs["units"] = "kelvin"
+    assert render_manifest(SCALAR_PRODUCT, sparse_of(ds))["valueUnit"] == "kelvin"
+
+
+def test_render_manifest_value_unit_none_without_units():
+    manifest = render_manifest(SCALAR_PRODUCT, sparse_of(_make_ds(["sst"])))
+    assert manifest["valueUnit"] is None
+
+
+def test_render_manifest_uv_units():
+    ds = _make_ds(["u", "v"])
+    ds["u"].attrs["units"] = "m s-1"
+    ds["v"].attrs["units"] = "m/s"
+    manifest = render_manifest(UV_PRODUCT, sparse_of(ds))
+    assert (manifest["uUnit"], manifest["vUnit"]) == ("m s-1", "m/s")
+    assert "valueUnit" not in manifest
+
+
+def test_render_manifest_categorical_has_no_unit():
+    ds = _make_categorical_ds()
+    ds["cat"].attrs["units"] = "1"
+    assert render_manifest(CATEGORICAL_PRODUCT, sparse_of(ds))["valueUnit"] is None

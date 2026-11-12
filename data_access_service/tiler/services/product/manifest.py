@@ -21,6 +21,12 @@ def _range(sparse: SparseSlice, var: str) -> list[float | None]:
     return [json_safe_float(grid.vmin), json_safe_float(grid.vmax)]
 
 
+def _unit(sparse: SparseSlice, var: str) -> str | None:
+    """The variable's ``units`` attr; None for categorical variables."""
+    attrs = sparse.attrs[var]
+    return None if is_categorical_variable(attrs) else attrs.get("units")
+
+
 def render_manifest(product: Product, sparse: SparseSlice) -> dict[str, Any]:
     lon_min, lon_max, lat_min, lat_max = sparse.bounds()
     bounds = {
@@ -49,11 +55,14 @@ def render_manifest(product: Product, sparse: SparseSlice) -> dict[str, Any]:
             "bounds": bounds,
             "uRange": _range(sparse, u_var),
             "vRange": _range(sparse, v_var),
+            "uUnit": _unit(sparse, u_var),
+            "vUnit": _unit(sparse, v_var),
             "lods": lod_meta,
         }
     manifest: dict[str, Any] = {
         "bounds": bounds,
         "valueRange": _range(sparse, product.variable),
+        "valueUnit": _unit(sparse, product.variable),
         "lods": lod_meta,
     }
     # Categorical variables also get their codes, and labels when available.
