@@ -208,6 +208,27 @@ def _without_partition_keys(table_schema: dict, partition_keys) -> dict:
     return result
 
 
+def _save_dataschema(
+    api: API, root_folder_path: str, uuid: str, key: str, datasource
+) -> None:
+    """Write dataschema.json once, for the collection CSV and xlsx downloads.
+
+    Each subset writer calls this. A job runs only one of them, and a
+    multi-polygon loop calls that writer once per shape, so the file is
+    written on the first call and left alone after that.
+    """
+    schema_path = f"{root_folder_path}/dataschema.json"
+    if Path(schema_path).exists():
+        return
+    table_schema = _without_partition_keys(
+        datasource.get_metadata(), api.get_partition_keys(uuid, key)
+    )
+    os.makedirs(os.path.dirname(schema_path), exist_ok=True)
+    with open(schema_path, "w") as f:
+        json.dump(table_schema, f, indent=2)
+    log.info(f"Saved table schema to {schema_path}")
+
+
 def _write_batches(
     batches,
     output_dir: str,
@@ -384,19 +405,8 @@ def _generate_partition_output(
             start_date=start_date, end_date=end_date
         )
         datasource = api.get_datasource(uuid, key)
-        # extract table schema for parquet dataset
         if datasource is not None and isinstance(datasource, ParquetDataSource):
-            # save to the root_folder/dataschema.json
-            schema_path = f"{root_folder_path}/dataschema.json"
-            if not Path(schema_path).exists():
-                table_schema = _without_partition_keys(
-                    datasource.get_metadata(), api.get_partition_keys(uuid, key)
-                )
-                os.makedirs(os.path.dirname(schema_path), exist_ok=True)
-                with open(schema_path, "w") as f:
-                    json.dump(table_schema, f, indent=2)
-
-                log.info(f"Saved table schema to {schema_path}")
+            _save_dataschema(api, root_folder_path, uuid, key, datasource)
 
             checked_date_ranges = check_rows_with_date_range(
                 api, uuid, key, datasource, date_ranges
@@ -497,16 +507,7 @@ def _generate_polygon_partition_output(
     if datasource is None or not isinstance(datasource, ParquetDataSource):
         return has_data
 
-    schema_path = f"{root_folder_path}/dataschema.json"
-    if not Path(schema_path).exists():
-        table_schema = _without_partition_keys(
-            datasource.get_metadata(), api.get_partition_keys(uuid, key)
-        )
-        os.makedirs(os.path.dirname(schema_path), exist_ok=True)
-        with open(schema_path, "w") as f:
-            json.dump(table_schema, f, indent=2)
-
-        log.info(f"Saved table schema to {schema_path}")
+    _save_dataschema(api, root_folder_path, uuid, key, datasource)
 
     partition_values = select_polygons_in_range(
         list_polygon_values(datasource), polygon_range
