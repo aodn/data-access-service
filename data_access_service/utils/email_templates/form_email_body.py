@@ -19,13 +19,14 @@ from data_access_service.utils.email_templates.form_subsetting_divs import (
     form_subsetting_divs,
 )
 
-USAGE_CONSTRAINTS_NOT_AVAILABLE = "unavailable"
+SUGGESTED_CITATION_NOT_AVAILABLE = "Suggested Citation not available"
+USAGE_CONSTRAINTS_NOT_AVAILABLE = "Usage Constraints not available"
 
 
 def usage_constraint_paragraphs(usage_constraints: list[str]) -> list[str]:
     """The Usage Constraints paragraphs, as escaped HTML.
 
-    An empty list shows "unavailable"
+    An empty list shows "Usage Constraints not available".
     """
     if not usage_constraints:
         return [USAGE_CONSTRAINTS_NOT_AVAILABLE]
@@ -142,7 +143,9 @@ def form_email_html(
     )
 
     citation_section = form_heading_div("Suggested Citation:") + form_text_div(
-        form_paragraph(subset_request.suggested_citation or "")
+        form_paragraph(
+            subset_request.suggested_citation or SUGGESTED_CITATION_NOT_AVAILABLE
+        )
     )
 
     usage_constraints_section = form_heading_div("Usage Constraints:") + "".join(
