@@ -1,3 +1,5 @@
+import io
+import json
 from typing import List
 
 from data_access_service import Config, init_log
@@ -13,6 +15,49 @@ from data_access_service.utils.email_templates.download_email import (
 from data_access_service.utils.file_naming import dataset_base_name
 
 
+def subset_dataschema_entries(subset_request: SubsetRequest) -> dict:
+    """The request fields the CSV and xlsx schema should carry with the columns."""
+    return {
+        "suggested_citation": subset_request.suggested_citation,
+        "start_date": subset_request.start_date,
+        "end_date": subset_request.end_date,
+        "bboxes": [
+            {
+                "min_lon": box.min_lon,
+                "min_lat": box.min_lat,
+                "max_lon": box.max_lon,
+                "max_lat": box.max_lat,
+            }
+            for box in subset_request.bboxes
+        ],
+        "multi_polygon": subset_request.multi_polygon,
+    }
+
+
+def _add_subset_to_dataschema(
+    aws: AWSHelper, bucket_name: str, master_job_id: str, subset_request: SubsetRequest
+) -> None:
+    """Merge the subset request into temp/dataschema.json before the download is built.
+
+    Column metadata is already there from preparation. These fields are only
+    known on the request, which collection holds.
+    """
+    schema_key = f"{master_job_id}/temp/dataschema.json"
+    try:
+        response = aws.s3.get_object(Bucket=bucket_name, Key=schema_key)
+        schema = json.loads(response["Body"].read().decode("utf-8"))
+    except aws.s3.exceptions.NoSuchKey:
+        schema = {}
+    if not isinstance(schema, dict):
+        schema = {}
+    schema.update(subset_dataschema_entries(subset_request))
+    aws.upload_fileobj_to_s3(
+        io.BytesIO(json.dumps(schema, indent=2).encode("utf-8")),
+        bucket_name,
+        schema_key,
+    )
+
+
 def collect_parquet_files(master_job_id: str, subset_request: SubsetRequest):
 
     aws = AWSHelper()
@@ -21,6 +66,8 @@ def collect_parquet_files(master_job_id: str, subset_request: SubsetRequest):
     bucket_name = config.get_subsetting_bucket_name()
 
     raise_if_preparation_failed(aws, bucket_name, master_job_id)
+
+    _add_subset_to_dataschema(aws, bucket_name, master_job_id, subset_request)
 
     dataset: list[str] = aws.list_s3_folders(
         bucket_name=bucket_name, prefix=config.get_s3_temp_folder_name(master_job_id)

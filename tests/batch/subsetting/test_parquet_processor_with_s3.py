@@ -23,6 +23,7 @@ from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.constants import (
     PARTITION_KEY,
     STR_TIME_UPPER_CASE,
+    WHOLE_GLOBE_BBOX,
 )
 from data_access_service.utils.date_time_utils import parse_date
 from tests.core.result_check import (
@@ -30,7 +31,7 @@ from tests.core.result_check import (
     load_canned_parquet,
     rows_between,
 )
-from tests.core.test_with_s3 import TestWithS3, REGION
+from tests.core.test_with_s3 import REGION, WORLD_POLYGON, TestWithS3
 from typing import Final
 
 
@@ -531,7 +532,8 @@ class TestParquetProcessorWithS3(TestWithS3):
         """output_format=excel: the collector writes one xlsx workbook, not a zip.
 
         Tab 1 is the data schema (one row per schema entry), the following tabs
-        hold the data with the header in the first row.
+        hold the data with the header in the first row. The schema also carries
+        the suggested citation and the whole-world bbox from the request.
         """
         s3_client, _, _ = aws_clients
         config = Config.get_config()
@@ -564,8 +566,13 @@ class TestParquetProcessorWithS3(TestWithS3):
             "collection_title": (
                 "Animal satellite relay tagging metadata (location QC, realtime)"
             ),
-            "suggested_citation": "",
+            "suggested_citation": (
+                "Animal satellite relay tagging metadata, Australian Ocean Data Network."
+            ),
             "output_format": "excel",
+            # Left unset for preparation: a MultiPolygon empties this dataset
+            # (see the csv test above). Collection still records the whole-world
+            # bbox on the schema.
             "multi_polygon": None,
             "recipient": "someone@utas.edu.au",
             "key": KEY,
@@ -587,7 +594,9 @@ class TestParquetProcessorWithS3(TestWithS3):
 
                 collect_parquet_files(
                     master_job_id=MASTER_JOB_ID,
-                    subset_request=get_subset_request(PARAMETERS),
+                    subset_request=get_subset_request(
+                        {**PARAMETERS, "multi_polygon": WORLD_POLYGON}
+                    ),
                 )
 
                 response = s3_client.list_objects_v2(
@@ -621,6 +630,21 @@ class TestParquetProcessorWithS3(TestWithS3):
                 schema_rows = list(sheets[0].iter_rows(values_only=True))
                 assert schema_rows[0][0] == "name"
                 assert sorted(r[0] for r in schema_rows[1:]) == sorted(schema)
+                world_bbox = {
+                    "min_lon": WHOLE_GLOBE_BBOX.min_lon,
+                    "min_lat": WHOLE_GLOBE_BBOX.min_lat,
+                    "max_lon": WHOLE_GLOBE_BBOX.max_lon,
+                    "max_lat": WHOLE_GLOBE_BBOX.max_lat,
+                }
+                assert schema["suggested_citation"] == PARAMETERS["suggested_citation"]
+                assert schema["bboxes"] == [world_bbox]
+                value_at = list(schema_rows[0]).index("value")
+                sheet_by_name = {row[0]: row for row in schema_rows[1:]}
+                assert (
+                    sheet_by_name["suggested_citation"][value_at]
+                    == PARAMETERS["suggested_citation"]
+                )
+                assert json.loads(sheet_by_name["bboxes"][value_at]) == [world_bbox]
 
                 # Other tabs: the data, header in the first row of every tab.
                 data_rows = 0

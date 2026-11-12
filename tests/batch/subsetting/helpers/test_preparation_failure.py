@@ -81,6 +81,9 @@ def test_collector_without_markers_sends_success_email(aws):
     aws.get_s3_keys.return_value = []
     aws.list_s3_folders.return_value = ["data.parquet"]
     aws.write_csv_to_s3.return_value = "https://bucket/job/result.zip"
+    no_such_key = type("NoSuchKey", (Exception,), {})
+    aws.s3.exceptions.NoSuchKey = no_such_key
+    aws.s3.get_object.side_effect = no_such_key()
     parquet_collector.collect_parquet_files("job", _request())
     aws.write_csv_to_s3.assert_called_once()
     aws.send_email.assert_called_once()

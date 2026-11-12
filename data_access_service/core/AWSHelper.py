@@ -314,11 +314,18 @@ class AWSHelper:
             return f"https://{bucket_name}.s3.{region}.amazonaws.com/{key}"
 
     @staticmethod
+    def _schema_cell(value):
+        """A list (bboxes) is stored as JSON so the csv cell stays valid JSON."""
+        if isinstance(value, (list, tuple)):
+            return json.dumps(value)
+        return value
+
+    @staticmethod
     def _schema_to_df(schema_json: dict) -> pd.DataFrame:
         """One row per key; a scalar entry (e.g. uuid) becomes a single `value` cell."""
         return pd.DataFrame.from_dict(
             {
-                k: v if isinstance(v, dict) else {"value": v}
+                k: (v if isinstance(v, dict) else {"value": AWSHelper._schema_cell(v)})
                 for k, v in schema_json.items()
             },
             orient="index",
