@@ -9,6 +9,8 @@ How a Batch run goes:
 2. Each ``generate-pmtiles-for-parquet-dataset`` child takes
    ``datasets[AWS_BATCH_JOB_ARRAY_INDEX]`` and makes its pmtiles, then its
    estimation index. Children run in parallel; Batch retries a failed one.
+   Init also passes its CSIRO key down as ``csiro_keys``, so the children
+   do not each ask the CSIRO API again.
 """
 
 import json
@@ -19,8 +21,12 @@ from data_access_service import Config, init_log
 from data_access_service.batch.estimation.generator import (
     generate_estimation_index_for_dataset,
 )
+from data_access_service.batch.subsetting.enums import Parameters
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.api import BaseAPI
+from data_access_service.models.co_datasource.csiro.csiro_data_src import (
+    export_csiro_keys,
+)
 from data_access_service.utils.memory_utils import log_memory_usage
 
 from .processors.hexbin_processor import HexbinProcessor
@@ -78,14 +84,21 @@ def submit_pmtiles_array_job(
     for index, (k, dataset_name) in enumerate(datasets):
         logger.info("PMTiles child %d: uuid=%s dataset=%s", index, k, dataset_name)
 
+    parameters = {
+        "type": DATASET_JOB_TYPE,
+        DATASETS_PARAM: json.dumps(datasets),
+    }
+    # Every child builds the full registry, which asks CSIRO for a key. Pass
+    # this job's key down so a slow CSIRO API cannot fail all the children.
+    csiro_keys = export_csiro_keys()
+    if csiro_keys is not None:
+        parameters[Parameters.CSIRO_KEYS.value] = csiro_keys
+
     return aws.submit_a_job(
         job_name="generate-pmtiles-datasets",
         job_queue=job_queue,
         job_definition=job_definition,
-        parameters={
-            "type": DATASET_JOB_TYPE,
-            DATASETS_PARAM: json.dumps(datasets),
-        },
+        parameters=parameters,
         array_size=len(datasets),
     )
 
