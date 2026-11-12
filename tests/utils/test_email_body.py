@@ -191,7 +191,9 @@ class TestEmailBodies(unittest.TestCase):
         self.assertIn("Suggested Citation", html)
         self.assertIn("Suggested citation goes here.", html)
         self.assertIn("Usage Constraints", html)
-        self.assertIn("unavailable", html[html.index("Usage Constraints:") :])
+        self.assertIn(
+            "Usage Constraints not available", html[html.index("Usage Constraints:") :]
+        )
         self.assertIn("Kind regards,", html)
         # no download parts in the no-data email
         self.assertNotIn("Download</span>", html)
@@ -272,15 +274,30 @@ class TestEmailBodies(unittest.TestCase):
             ["Credit CSIRO &amp; partners", "Use &lt;b&gt;with&lt;/b&gt; care"],
         )
         self.assertNotIn("IMOS", section)
-        self.assertNotIn("unavailable", section)
+        self.assertNotIn("not available", section)
 
-    def test_empty_usage_constraints_says_unavailable(self):
-        """Same text as an empty Suggested Citation."""
+    def test_empty_usage_constraints_says_not_available(self):
         section = self._usage_constraints_html([])
 
         paragraphs = re.findall(r"<p[^>]*>(.*?)</p>", section, flags=re.S)
-        self.assertEqual(paragraphs, ["unavailable"])
+        self.assertEqual(paragraphs, ["Usage Constraints not available"])
         self.assertNotIn("IMOS", section)
+
+    def test_missing_suggested_citation_says_not_available(self):
+        request = SubsetRequest(
+            uuid="test-uuid",
+            keys=["a.parquet"],
+            start_date="2020-01-01",
+            end_date="2020-06-30",
+            recipient="test@example.com",
+            output_format="csv",
+        )
+        html = visible_to_email_clients(get_error_email_html_body(request))
+
+        section = html[
+            html.index("Suggested Citation:") : html.index("Usage Constraints:")
+        ]
+        self.assertIn("Suggested Citation not available", section)
 
     def test_download_email_without_urls_falls_back_to_no_data_email(self):
         request = SubsetRequest(
