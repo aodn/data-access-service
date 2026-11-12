@@ -202,7 +202,10 @@ def _timestamp_write_schema(
 
 def _without_partition_keys(table_schema: dict, partition_keys) -> dict:
     """The dataset schema minus its hive partition keys, for dataschema.json."""
-    return {k: v for k, v in table_schema.items() if k not in partition_keys}
+    result = {k: v for k, v in table_schema.items() if k not in partition_keys}
+    # global attributes (metadata_uuid, title, ...) become one row each, not columns
+    result.update(result.pop("global_attributes", None) or {})
+    return result
 
 
 def _write_batches(
