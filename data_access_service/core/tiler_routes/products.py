@@ -5,13 +5,14 @@ import math
 from anyio.to_thread import run_sync
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Path, Query, Response
+from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from fastapi.openapi.models import Example
 
 from data_access_service.config.http_cache import (
     IMMUTABLE_CACHE_HEADERS,
     REVALIDATE_CACHE_HEADERS,
 )
+from data_access_service.tiler.schemas.data_tiles import DataTileManifestResponse
 from data_access_service.tiler.schemas.products import (
     ManifestResponse,
     PointResponse,
@@ -21,7 +22,9 @@ from data_access_service.tiler.schemas.products import (
 from data_access_service.tiler.services.colormap.categorical import (
     is_categorical_variable,
 )
-from data_access_service.tiler.services.product.product import Product
+from data_access_service.tiler.services.caching.deduper import Deduper
+from data_access_service.tiler.services.product.manifest import render_manifest
+from data_access_service.tiler.services.product.product import Product, get_lod_grids
 from data_access_service.tiler.services.product.registry import (
     iter_product_items,
     iter_products,
@@ -37,16 +40,20 @@ from .shared import (
     DATE_EX,
     PRODUCT_EX,
     TILE_THREAD_LIMITER,
+    ClientDisconnected,
     get_product_or_404,
     is_store_available_or_404,
     load_slice_or_404,
     parse_date_or_422,
     resolve_timestamp_or_404,
+    run_cancellable,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+_manifest_dedup = Deduper()
 
 
 def _require_point_in_bounds(sparse: SparseSlice, lat: float, lon: float) -> None:
@@ -220,3 +227,48 @@ def _load_point(
         lon=float(sparse.lon[j]),
         variables=values,
     )
+
+
+@router.get(
+    "/{product_id}/manifest.json",
+    summary="Tile manifest",
+    description=(
+        "Returns the bounds, LOD grid dimensions and value ranges for a product on a given date. "
+        "Same response under data_tiles and visual_tiles. "
+        "Required for decoding raw data tiles — provides `valueRange` for scalar products and `uRange`/`vRange` for UV vector products. "
+        "For visual tiles, `valueRange` is the range tiles are coloured by when `rescale` is omitted. "
+        "`valueUnit` (`uUnit`/`vUnit` for vector products) is the variable's units; absent for categorical products. "
+        "Categorical products also return `flagValues` and, when available, `flagMeanings`. "
+        "`date` must be one of the exact UTC timestamps returned by `/manifest`'s `available_dates`."
+    ),
+    response_model=DataTileManifestResponse,
+    response_model_exclude_none=True,
+)
+async def get_manifest(
+    request: Request,
+    response: Response,
+    product_id: str = Path(openapi_examples=PRODUCT_EX),
+    date: str = Query(openapi_examples=DATE_EX),
+):
+    product = get_product_or_404(product_id)
+    is_store_available_or_404(product)
+    ts = parse_date_or_422(date)
+    resolve_timestamp_or_404(product, ts)
+    get_lod_grids(product)
+    variables = product.variables
+    key = (product.id, ts)
+
+    def _do_render() -> dict:
+        sparse = load_slice_or_404(
+            product.store, ts, variables, ocean_masked=product.ocean_masked
+        )
+        return render_manifest(product, sparse)
+
+    try:
+        manifest = await run_cancellable(
+            request, functools.partial(_manifest_dedup.dedupe, key, _do_render)
+        )
+    except ClientDisconnected as e:
+        raise HTTPException(status_code=499, detail="Client disconnected") from e
+    response.headers.update(IMMUTABLE_CACHE_HEADERS)
+    return DataTileManifestResponse(**manifest)

@@ -4,9 +4,7 @@ from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from fastapi.openapi.models import Example
 
 from data_access_service.config.http_cache import IMMUTABLE_CACHE_HEADERS
-from data_access_service.tiler.schemas.data_tiles import DataTileManifestResponse
 from data_access_service.tiler.services.caching.deduper import Deduper
-from data_access_service.tiler.services.product.manifest import render_manifest
 from data_access_service.tiler.services.product.product import get_lod_grids
 from data_access_service.tiler.services.rendering.data_tiles import render_tile
 
@@ -27,7 +25,6 @@ router = APIRouter()
 router.include_router(products_router)
 
 _tile_dedup = Deduper()
-_manifest_dedup = Deduper()
 
 
 @router.get(
@@ -84,44 +81,3 @@ async def get_tile(
     return Response(
         content=png_bytes, media_type="image/png", headers=IMMUTABLE_CACHE_HEADERS
     )
-
-
-@router.get(
-    "/{product_id}/manifest.json",
-    summary="Data tile manifest",
-    description=(
-        "Returns the LOD grid dimensions and value normalisation ranges for a product on a given date. "
-        "Required for decoding raw data tiles — provides `valueRange` for scalar products and `uRange`/`vRange` for UV vector products. "
-        "`date` must be one of the exact UTC timestamps returned by `/manifest`'s `available_dates`."
-    ),
-    response_model=DataTileManifestResponse,
-    response_model_exclude_none=True,
-)
-async def get_manifest(
-    request: Request,
-    response: Response,
-    product_id: str = Path(openapi_examples=PRODUCT_EX),
-    date: str = Query(openapi_examples=DATE_EX),
-):
-    product = get_product_or_404(product_id)
-    is_store_available_or_404(product)
-    ts = parse_date_or_422(date)
-    resolve_timestamp_or_404(product, ts)
-    get_lod_grids(product)
-    variables = product.variables
-    key = (product.id, ts)
-
-    def _do_render() -> dict:
-        sparse = load_slice_or_404(
-            product.store, ts, variables, ocean_masked=product.ocean_masked
-        )
-        return render_manifest(product, sparse)
-
-    try:
-        manifest = await run_cancellable(
-            request, functools.partial(_manifest_dedup.dedupe, key, _do_render)
-        )
-    except ClientDisconnected as e:
-        raise HTTPException(status_code=499, detail="Client disconnected") from e
-    response.headers.update(IMMUTABLE_CACHE_HEADERS)
-    return DataTileManifestResponse(**manifest)
