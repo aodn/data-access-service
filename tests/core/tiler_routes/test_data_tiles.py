@@ -488,6 +488,84 @@ def test_point_out_of_bounds(client):
     assert response.status_code == 404
 
 
+def _straddle_sparse() -> SparseSlice:
+    """A 170..185°E grid, crossing 180 like GSLA's."""
+    lat = np.linspace(-40, -30, 8)
+    lon = np.arange(170.0, 185.01, 1.0)
+    data = np.arange(len(lat) * len(lon), dtype=float).reshape(len(lat), len(lon))
+    return sparse_of(
+        xr.Dataset(
+            {
+                "GSLA": xr.DataArray(
+                    data, dims=["lat", "lon"], coords={"lat": lat, "lon": lon}
+                )
+            }
+        )
+    )
+
+
+def test_point_takes_minus_180_to_180_on_a_grid_past_180(client):
+    with patch(
+        "data_access_service.core.tiler_routes.shared.load_slice",
+        return_value=_straddle_sparse(),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/point"
+            "?date=2024-01-01T00:00:00Z&lat=-35&lon=-178"
+        )
+    assert response.status_code == 200
+    # Grid lon 182, returned as -178.
+    assert response.json()["lon"] == -178.0
+
+
+def test_point_rejects_lon_past_180(client):
+    response = client.get(
+        "/api/v1/das/tiler/data_tiles/sea_level_anomaly/point"
+        "?date=2024-01-01T00:00:00Z&lat=-35&lon=182"
+    )
+    assert response.status_code == 422
+
+
+def test_point_west_of_a_grid_past_180_is_out_of_bounds(client):
+    with patch(
+        "data_access_service.core.tiler_routes.shared.load_slice",
+        return_value=_straddle_sparse(),
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/data_tiles/sea_level_anomaly/point"
+            "?date=2024-01-01T00:00:00Z&lat=-35&lon=-100"
+        )
+    assert response.status_code == 404
+
+
+def test_point_on_a_global_minus_180_to_180_grid_is_not_shifted(client):
+    lat = np.linspace(-40, -30, 8)
+    lon = np.arange(-179.875, 180.0, 0.25)
+    sparse = sparse_of(
+        xr.Dataset(
+            {
+                "GSLA": xr.DataArray(
+                    np.ones((len(lat), len(lon))),
+                    dims=["lat", "lon"],
+                    coords={"lat": lat, "lon": lon},
+                )
+            }
+        )
+    )
+    url = (
+        "/api/v1/das/tiler/data_tiles/sea_level_anomaly/point"
+        "?date=2024-01-01T00:00:00Z&lat=-35&lon="
+    )
+    with patch(
+        "data_access_service.core.tiler_routes.shared.load_slice",
+        return_value=sparse,
+    ):
+        lons = {
+            q: client.get(url + q).json()["lon"] for q in ("-100.1", "-179.8", "179.8")
+        }
+    assert lons == {"-100.1": -100.125, "-179.8": -179.875, "179.8": 179.875}
+
+
 # --- /manifest (products availability) ---
 
 

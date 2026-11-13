@@ -232,9 +232,10 @@ def _split_parts(lat: np.ndarray, lon: np.ndarray, variable: str) -> list[_Part]
         order = np.argsort(normalised, kind="stable")
         return [_Part(order, normalised[order])]
 
-    # Crosses 180°E: split in two, leaving out lon=180 exactly.
-    primary = np.nonzero(lon < 180)[0]
-    minor = np.nonzero(lon > 180)[0]
+    # Crosses 180°E: split in two. A column at exactly 180 goes in both (as
+    # 180 and -180), so neither side of the seam is left blank.
+    primary = np.nonzero(lon <= 180)[0]
+    minor = np.nonzero(lon >= 180)[0]
     minor = minor[np.argsort(lon[minor], kind="stable")]
     return [_Part(primary, lon[primary]), _Part(minor, lon[minor] - 360)]
 
@@ -512,6 +513,60 @@ def _bbox_parts_to_rgba(
     return result
 
 
+_Bbox = tuple[float, float, float, float]
+
+
+def _bbox_pieces(bbox_wgs84: _Bbox, width: int) -> list[tuple[_Bbox, int]]:
+    """The bbox and its pixel width, or two of them when it crosses 180°
+    (west > east), split at 180 with ``width`` shared by lon span.
+
+    rio-tiler rejects lons past 180, so each piece is rendered on its own
+    and the images are put side by side. Lon is linear in x in both output
+    CRSs, so sharing the width by lon span keeps the scale even.
+    """
+    w, s, e, n = bbox_wgs84
+    if w <= e:
+        return [(bbox_wgs84, width)]
+    west_piece = (w, s, 180.0, n)
+    if width < 2:
+        return [(west_piece, width)]
+    west_span, east_span = 180.0 - w, e + 180.0
+    west_w = round(width * west_span / (west_span + east_span))
+    west_w = min(max(west_w, 1), width - 1)
+    return [(west_piece, west_w), ((-180.0, s, e, n), width - west_w)]
+
+
+def _side_by_side(
+    images: list[np.ndarray | None], widths: list[int], height: int
+) -> np.ndarray | None:
+    """Join the pieces' images left to right; None if every piece is empty."""
+    if all(img is None for img in images):
+        return None
+    if len(images) == 1:
+        return images[0]
+    return np.hstack(
+        [
+            img if img is not None else np.zeros((height, w, 4), dtype=np.uint8)
+            for img, w in zip(images, widths, strict=True)
+        ]
+    )
+
+
+def _read_part_fn(
+    piece: _Bbox, width: int, height: int, dst_crs: str
+) -> Callable[[XarrayReader], ImageData]:
+    def read(r: XarrayReader) -> ImageData:
+        return r.part(
+            piece,
+            dst_crs=dst_crs,
+            width=width,
+            height=height,
+            reproject_method="nearest",
+        )
+
+    return read
+
+
 def render_bbox(
     sparse: SparseSlice,
     variable: str,
@@ -526,26 +581,23 @@ def render_bbox(
     coastal_fill: CoastalFill | None = None,
 ) -> bytes:
     """An image of ``bbox`` (in ``crs``), rendered in ``dst_crs``;
-    transparent if it misses the data."""
+    transparent if it misses the data. A bbox crossing 180° has west > east."""
     attrs = sparse.attrs[variable]
     _validate_categorical_request(variable, attrs, colormap_name, fmt, rescale=rescale)
-    bbox_wgs84 = bbox_to_wgs84(bbox, crs)
-    parts = _parts_in_bbox(sparse, variable, bbox_wgs84, coastal_fill, width, height)
-    lo, la_min, hi, la_max = bbox_wgs84
+    layout = _bbox_pieces(bbox_to_wgs84(bbox, crs), width)
+    widths = [w for _, w in layout]
+    pieces = [
+        _parts_in_bbox(sparse, variable, piece, coastal_fill, w, height)
+        for piece, w in layout
+    ]
 
     if is_categorical_variable(attrs):
-        scheme = resolve_scheme(attrs, colormap_name)
-        result = _categorical_composite(
-            parts,
-            scheme.lut(),
-            lambda r: r.part(
-                (lo, la_min, hi, la_max),
-                dst_crs=dst_crs,
-                width=width,
-                height=height,
-                reproject_method="nearest",
-            ),
-        )
+        lut = resolve_scheme(attrs, colormap_name).lut()
+        images = [
+            _categorical_composite(parts, lut, _read_part_fn(piece, w, height, dst_crs))
+            for parts, (piece, w) in zip(pieces, layout, strict=True)
+        ]
+        result = _side_by_side(images, widths, height)
         return encode_rgba(result, fmt) if result is not None else empty_tile(fmt)
 
     vrange = rescale or _data_range([_grid_range(sparse, variable)])
@@ -555,18 +607,21 @@ def render_bbox(
     span = vmax - vmin or 1.0
     cm = resolve_colormap(colormap_name or "viridis")
 
-    result = _bbox_parts_to_rgba(
-        parts, bbox_wgs84, width, height, vmin, span, cm, dst_crs=dst_crs
-    )
+    images = [
+        _bbox_parts_to_rgba(parts, piece, w, height, vmin, span, cm, dst_crs=dst_crs)
+        for parts, (piece, w) in zip(pieces, layout, strict=True)
+    ]
+    result = _side_by_side(images, widths, height)
     return encode_rgba(result, fmt) if result is not None else empty_tile(fmt)
 
 
 @dataclass(frozen=True)
 class BboxFrame:
-    """One animation frame: the slice cut to the bbox, and the whole slice's
-    min/max (for one colour range across frames)."""
+    """One animation frame: the slice cut to the bbox (one list of parts per
+    bbox piece), and the whole slice's min/max (for one colour range across
+    frames)."""
 
-    parts: list[xr.DataArray]
+    pieces: list[list[xr.DataArray]]
     vmin: float
     vmax: float
     attrs: dict
@@ -586,11 +641,12 @@ def cut_frame(
     ``out_width``/``out_height`` are the animation's size, so each frame is
     read at the resolution it will be rendered at.
     """
-    parts = _parts_in_bbox(
-        sparse, variable, bbox_to_wgs84(bbox, crs), coastal_fill, out_width, out_height
-    )
+    pieces = [
+        _parts_in_bbox(sparse, variable, piece, coastal_fill, w, out_height)
+        for piece, w in _bbox_pieces(bbox_to_wgs84(bbox, crs), out_width)
+    ]
     vmin, vmax = _grid_range(sparse, variable)
-    return BboxFrame(parts, vmin, vmax, sparse.attrs[variable])
+    return BboxFrame(pieces, vmin, vmax, sparse.attrs[variable])
 
 
 def render_bbox_animation(
@@ -619,25 +675,20 @@ def render_bbox_animation(
         variable, attrs, colormap_name, fmt, rescale=rescale, animated=True
     )
 
-    bbox_wgs84 = bbox_to_wgs84(bbox, crs)
-    parts_per_frame = [frame.parts for frame in frames]
+    layout = _bbox_pieces(bbox_to_wgs84(bbox, crs), width)
+    widths = [w for _, w in layout]
 
     if is_categorical_variable(attrs):
         lut = resolve_scheme(attrs, colormap_name).lut()
-        lo, la_min, hi, la_max = bbox_wgs84
-
-        def _read_part(r: XarrayReader) -> ImageData:
-            return r.part(
-                (lo, la_min, hi, la_max),
-                dst_crs=dst_crs,
-                width=width,
-                height=height,
-                reproject_method="nearest",
-            )
+        reads = [_read_part_fn(piece, w, height, dst_crs) for piece, w in layout]
 
         cat_frames: list[np.ndarray] = []
-        for parts in parts_per_frame:
-            rgba = _categorical_composite(parts, lut, _read_part)
+        for frame in frames:
+            images = [
+                _categorical_composite(parts, lut, read)
+                for parts, read in zip(frame.pieces, reads, strict=True)
+            ]
+            rgba = _side_by_side(images, widths, height)
             if rgba is None:
                 rgba = np.zeros((height, width, 4), dtype=np.uint8)
             cat_frames.append(rgba)
@@ -652,13 +703,17 @@ def render_bbox_animation(
     span = vmax - vmin or 1.0
     cm = resolve_colormap(colormap_name or "viridis")
 
-    images: list[np.ndarray] = []
-    for parts in parts_per_frame:
-        rgba = _bbox_parts_to_rgba(
-            parts, bbox_wgs84, width, height, vmin, span, cm, dst_crs=dst_crs
-        )
+    out_frames: list[np.ndarray] = []
+    for frame in frames:
+        images = [
+            _bbox_parts_to_rgba(
+                parts, piece, w, height, vmin, span, cm, dst_crs=dst_crs
+            )
+            for parts, (piece, w) in zip(frame.pieces, layout, strict=True)
+        ]
+        rgba = _side_by_side(images, widths, height)
         if rgba is None:
             rgba = np.zeros((height, width, 4), dtype=np.uint8)
-        images.append(rgba)
+        out_frames.append(rgba)
 
-    return encode_rgba_animation(images, fmt, duration_ms)
+    return encode_rgba_animation(out_frames, fmt, duration_ms)

@@ -35,6 +35,7 @@ from data_access_service.tiler.services.store.registry import (
     is_store_available,
 )
 from data_access_service.tiler.services.store.sparse_grid import SparseSlice
+from data_access_service.tiler.services.store.spatial import wrap_lon
 
 from .shared import (
     DATE_EX,
@@ -54,6 +55,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _manifest_dedup = Deduper()
+
+
+def _to_grid_lon(sparse: SparseSlice, lon: float) -> float:
+    """A -180..180 ``lon`` on the grid's own lon range, which may run past 180."""
+    return lon + 360.0 if lon < float(sparse.lon.min()) else lon
 
 
 def _require_point_in_bounds(sparse: SparseSlice, lat: float, lon: float) -> None:
@@ -176,6 +182,7 @@ async def get_products_availability(
     summary="Point value lookup",
     description=(
         "Returns the value(s) of all product variables at the nearest grid cell to the given lat/lon. "
+        "`lon` is in -180..180, and so is the returned cell's lon. "
         "`date` must be one of the exact UTC timestamps returned by `/manifest`'s `available_dates`."
     ),
     response_model=PointResponse,
@@ -185,7 +192,9 @@ async def get_point(
     product_id: str = Path(openapi_examples=PRODUCT_EX),
     date: str = Query(openapi_examples=DATE_EX),
     lat: float = Query(..., openapi_examples={"default": Example(value=-33.8)}),
-    lon: float = Query(..., openapi_examples={"default": Example(value=151.2)}),
+    lon: float = Query(
+        ..., ge=-180, le=180, openapi_examples={"default": Example(value=151.2)}
+    ),
 ):
     product = get_product_or_404(product_id)
     is_store_available_or_404(product)
@@ -209,6 +218,7 @@ def _load_point(
         product.store, ts, variables, ocean_masked=product.ocean_masked
     )
 
+    lon = _to_grid_lon(sparse, lon)
     _require_point_in_bounds(sparse, lat, lon)
     # The nearest grid cell.
     i = int(np.abs(sparse.lat - lat).argmin())
@@ -224,7 +234,7 @@ def _load_point(
 
     return PointResponse(
         lat=float(sparse.lat[i]),
-        lon=float(sparse.lon[j]),
+        lon=wrap_lon(float(sparse.lon[j])),
         variables=values,
     )
 
