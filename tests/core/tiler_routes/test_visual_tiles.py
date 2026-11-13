@@ -407,6 +407,34 @@ def test_bbox_degree_scale_bbox_with_explicit_crs_ok(client):
     assert response.status_code == 200
 
 
+def test_bbox_epsg4326_lon_past_180_rejected(client):
+    response = client.get(
+        "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/bbox.png?date=2024-01-01T00:00:00Z"
+        "&bbox=170,-40,185,-30&crs=EPSG:4326"
+    )
+    assert response.status_code == 400
+    assert "minx > maxx" in response.json()["detail"]
+
+
+def test_bbox_epsg4326_across_180_accepted(client):
+    with (
+        patch(
+            "data_access_service.core.tiler_routes.shared.load_slice",
+            return_value=sparse_of(_make_ds()),
+        ),
+        patch(
+            "data_access_service.core.tiler_routes.visual_tiles.render_bbox",
+            return_value=_PNG,
+        ) as render,
+    ):
+        response = client.get(
+            "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/bbox.png?date=2024-01-01T00:00:00Z"
+            "&bbox=170,-40,-175,-30&crs=EPSG:4326"
+        )
+    assert response.status_code == 200
+    assert render.call_args.args[2] == (170.0, -40.0, -175.0, -30.0)
+
+
 def test_bbox_legacy_url_without_extension_returns_404(client):
     response = client.get(
         "/api/v1/das/tiler/visual_tiles/sea_level_anomaly/bbox?date=2024-01-01T00:00:00Z"

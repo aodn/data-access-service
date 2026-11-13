@@ -89,6 +89,12 @@ _INLINE_COLORMAP_DOC = (
     '{"mode":"categorical","values":[0,1],"colors":["#8c0000","#ff9701"]}.'
 )
 
+_LON_DOC = (
+    " Longitudes are -180..180 only; 0..360 values such as 185 are rejected. "
+    "Data past 180°E (e.g. a 57..185°E grid) is served at -180..-175. "
+    "A bbox crossing 180° gives minx > maxx, e.g. 170,-60,-175,10 in EPSG:4326."
+)
+
 
 @router.get(
     "/colormaps/legend",
@@ -156,7 +162,8 @@ async def get_legend(
         "Compatible with MapboxGL `raster` sources and any slippy-map library. "
         "Tiles outside the product extent return transparent images. "
         "WebP is rejected for categorical colormaps because lossy compression corrupts the discrete colour boundaries. "
-        "`date` must be one of the exact UTC timestamps returned by `/manifest`'s `available_dates`."
+        "`date` must be one of the exact UTC timestamps returned by `/manifest`'s `available_dates`. "
+        "Data past 180°E (e.g. a 57..185°E grid) is in the westernmost tiles (x=0)."
     ),
 )
 async def get_tile(
@@ -261,7 +268,10 @@ def _resolve_resolution(
         return native_resolution_in_bbox(store, bbox_wgs84, max_dim)
 
     minx, miny, maxx, maxy = bbox_tuple
-    span_x = (maxx - minx) or 1.0
+    span_x = maxx - minx
+    if span_x < 0:  # crosses 180°
+        span_x += 360.0 if crs == "EPSG:4326" else 2 * _WEB_MERCATOR_EXTENT
+    span_x = span_x or 1.0
     span_y = (maxy - miny) or 1.0
     aspect = span_x / span_y
 
@@ -277,8 +287,8 @@ def _resolve_resolution(
 
 _WEB_MERCATOR_EXTENT = 20_037_508.342789244  # EPSG:3857 half-extent, metres
 
-# Plausible degrees; lon up to 360 for grids past 180°E.
-_DEGREE_LON_RANGE = (-180.0, 360.0)
+# Plausible degrees. A bbox crossing 180° has west > east, never lon > 180.
+_DEGREE_LON_RANGE = (-180.0, 180.0)
 _DEGREE_LAT_RANGE = (-90.0, 90.0)
 
 
@@ -299,6 +309,15 @@ def _validate_bbox_for_crs(bbox: tuple[float, float, float, float], crs: str) ->
     """400 if the bbox numbers don't fit ``crs``'s units (degrees vs metres)."""
     minx, miny, maxx, maxy = bbox
     if crs == "EPSG:4326":
+        if not (-180.0 <= minx <= 180.0 and -180.0 <= maxx <= 180.0):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"bbox longitude out of range for crs=EPSG:4326 (expected -180..180): "
+                    f"minx={minx}, maxx={maxx}. For a bbox crossing 180°, give "
+                    "minx > maxx, e.g. 170,-60,-175,10."
+                ),
+            )
         if not (-90.0 <= miny <= 90.0 and -90.0 <= maxy <= 90.0):
             raise HTTPException(
                 status_code=400,
@@ -369,6 +388,7 @@ def _parse_bbox_and_crs(
         "that want geographic-degree pixel spacing. "
         "WebP is rejected for categorical colormaps because lossy compression corrupts the discrete colour boundaries. "
         "`date` must be one of the exact UTC timestamps returned by `/manifest`'s `available_dates`."
+        + _LON_DOC
     ),
 )
 async def get_bbox(
@@ -384,7 +404,8 @@ async def get_bbox(
         description=(
             "Bounding box as 'minx,miny,maxx,maxy' in the CRS specified by the crs "
             "parameter — Web Mercator meters for 'EPSG:3857' (default), geographic degrees "
-            "for 'EPSG:4326'. Defaults to the dataset's native bounds (interpreted as "
+            "for 'EPSG:4326', lon in -180..180. For a bbox crossing 180°, give minx > maxx. "
+            "Defaults to the dataset's native bounds (interpreted as "
             "EPSG:4326, regardless of crs, when bbox is omitted)."
         ),
     ),
@@ -508,7 +529,7 @@ def _load_frame(
         f"drop-in raster source for Mapbox GL / MapLibre / Leaflet / OpenLayers out of the box. "
         f"Intended for demos and quick visualisations — not optimised for high traffic. "
         f"At most {_MAX_ANIMATION_FRAMES} frames per request; requests beyond that are rejected. "
-        f"If bbox is omitted, the dataset's native bounds are used (clamped to ±180° lon). "
+        f"If bbox is omitted, the dataset's native bounds are used. "
         f"If width and height are both omitted, the frame matches the dataset's native cell count "
         f"inside the bbox (capped at 2048 px per axis). If only one of width/height is given, "
         f"the other is derived from the bbox aspect ratio so the output is not stretched. "
@@ -517,6 +538,7 @@ def _load_frame(
         f"is cached for a year at the CDN since it's fully determined by the URL. "
         f"from_date/to_date are full UTC ISO-8601 timestamps; frames are every "
         f"exact timestamp from `/manifest`'s `available_dates` falling within [from_date, to_date]."
+        + _LON_DOC
     ),
 )
 async def get_animation(
@@ -532,7 +554,8 @@ async def get_animation(
         description=(
             "Bounding box as 'minx,miny,maxx,maxy' in the CRS specified by the crs "
             "parameter — Web Mercator meters for 'EPSG:3857' (default), geographic degrees "
-            "for 'EPSG:4326'. Output frames are reprojected to that same crs. Defaults to "
+            "for 'EPSG:4326', lon in -180..180. For a bbox crossing 180°, give minx > maxx. "
+            "Output frames are reprojected to that same crs. Defaults to "
             "the dataset's native bounds (interpreted as EPSG:4326, regardless of crs, when "
             "bbox is omitted)."
         ),

@@ -96,6 +96,79 @@ def test_parts_antimeridian_straddle_splits_into_two():
     assert parts[1].lon.values.max() < 0
 
 
+def _straddle_ds() -> xr.Dataset:
+    """A 170..185°E grid with a column at exactly 180, like GSLA's."""
+    lon = np.round(np.arange(170.0, 185.01, 0.5), 6)
+    lat = np.arange(10.0, -10.01, -0.5)
+    return xr.Dataset(
+        {
+            "GSLA": xr.DataArray(
+                np.ones((len(lat), len(lon))),
+                dims=["lat", "lon"],
+                coords={"lat": lat, "lon": lon},
+            )
+        }
+    )
+
+
+def test_parts_keep_the_column_at_180_on_both_sides():
+    east, west = _parts(_straddle_ds(), "GSLA")
+    assert float(east.lon.max()) == 180.0
+    assert float(west.lon.min()) == -180.0
+
+
+def test_tiles_either_side_of_180_reach_the_seam():
+    sparse = sparse_of(_straddle_ds())
+    # z=3, y=4 covers lat 0..-41; x=7 ends at 180, x=0 starts at -180.
+    east = _decode_png(visual_renderer.render_tile(sparse, "GSLA", 7, 4, 3))
+    west = _decode_png(visual_renderer.render_tile(sparse, "GSLA", 0, 4, 3))
+    assert (east[:, -1, 3] > 0).any()
+    assert (west[:, 0, 3] > 0).any()
+
+
+def test_bbox_pieces_split_at_180_by_lon_span():
+    assert visual_renderer._bbox_pieces((140.0, -1.0, 150.0, 1.0), 100) == [
+        ((140.0, -1.0, 150.0, 1.0), 100)
+    ]
+    assert visual_renderer._bbox_pieces((170.0, -1.0, -170.0, 1.0), 100) == [
+        ((170.0, -1.0, 180.0, 1.0), 50),
+        ((-180.0, -1.0, -170.0, 1.0), 50),
+    ]
+
+
+@pytest.mark.parametrize("dst_crs", ["EPSG:4326", "EPSG:3857"])
+def test_render_bbox_across_180_covers_both_sides(dst_crs):
+    out = visual_renderer.render_bbox(
+        sparse_of(_straddle_ds()),
+        "GSLA",
+        bbox=(172.0, -8.0, -177.0, 8.0),
+        width=110,
+        height=64,
+        dst_crs=dst_crs,
+    )
+    img = _decode_png(out)
+    assert img.shape == (64, 110, 4)
+    # Data runs 172..183 = 172..-177, so every column has data.
+    assert (img[..., 3] > 0).any(axis=0).all()
+
+
+def test_render_bbox_animation_across_180():
+    ds = _straddle_ds()
+    bbox = (172.0, -8.0, -177.0, 8.0)
+    frames = [
+        visual_renderer.cut_frame(
+            sparse_of(ds), "GSLA", bbox, out_width=110, out_height=64
+        )
+        for _ in range(2)
+    ]
+    out = visual_renderer.render_bbox_animation(
+        frames, "GSLA", bbox, 110, 64, dst_crs="EPSG:4326", fmt="apng"
+    )
+    first = np.array(Image.open(io.BytesIO(out)).convert("RGBA"))
+    assert first.shape == (64, 110, 4)
+    assert (first[..., 3] > 0).any(axis=0).all()
+
+
 def test_parts_rejects_non_geographic_crs():
     """Out-of-range lat/lon should raise — guards against accidentally feeding
     a projected dataset."""
@@ -309,7 +382,7 @@ def test_cut_frame_keeps_the_bbox_and_the_whole_slice_range():
     frame = visual_renderer.cut_frame(
         sparse_of(ds), "GSLA", (140.0, -40.0, 145.0, -35.0)
     )
-    (part,) = frame.parts
+    ((part,),) = frame.pieces
     # Only the bbox (plus the margin), not the whole 64x64 grid.
     assert part.shape[0] < 64 and part.shape[1] < 64
     assert float(part.lon.max()) < 147.0
