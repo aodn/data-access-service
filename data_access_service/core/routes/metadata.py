@@ -15,7 +15,7 @@ router = APIRouter()
 def _data_index_metadata(uuid: str) -> Dict[str, Descriptor]:
     """The one key of the data-index files of ``uuid``.
 
-    Empty when the uuid has none, so the caller gets the same 404 as before.
+    Empty when the uuid has none.
     A lookup in memory, so it answers as fast as the cloud-optimised keys.
     """
     if not is_data_index_uuid(uuid):
@@ -34,16 +34,19 @@ async def get_mapped_metadata(
     request: Request = None,
     include_data_index: bool = Query(
         True,
-        description="For a collection with no cloud-optimised data, return the "
-        f"key of its data-index files ({ORIGINAL_NETCDF_KEY}) instead of 404. "
+        description="Also return the key of the collection's data-index files "
+        f"({ORIGINAL_NETCDF_KEY}), when it has any. "
         "Set to false to get cloud-optimised keys only",
     ),
 ):
     """The keys of a collection, each with a ``type``.
 
-    A collection with cloud-optimised data returns only those keys
-    (``cloud_optimised``). One with none returns one key for its data-index
-    files (``data_index``), unless ``include_data_index`` is false.
+    Returns the cloud-optimised keys (``cloud_optimised``) and, when the
+    collection has data-index files, one more key for them (``data_index``).
+    The caller picks by ``type``. ``include_data_index=false`` leaves the
+    data-index key out. 404 when the collection has no key at all.
+
+    Without a uuid: the cloud-optimised keys of every collection.
     """
     api_instance = get_api_instance(request)
     # Check API initialization status first
@@ -54,16 +57,21 @@ async def get_mapped_metadata(
         )
 
     metadata = api_instance.get_mapped_meta_data(uuid)
+    if uuid is None:
+        return metadata
 
-    if metadata.get("not_exist") is not None:
-        metadata = _data_index_metadata(uuid) if include_data_index else {}
-        if not metadata:
-            raise HTTPException(
-                status_code=HTTPStatus.NOT_FOUND,
-                detail="Dataset not found.",
-            )
+    has_co_keys = metadata.get("not_exist") is None
+    co_keys = metadata if has_co_keys else {}
+    data_index_key = _data_index_metadata(uuid) if include_data_index else {}
 
-    return metadata
+    if not has_co_keys and not data_index_key:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail="Dataset not found.",
+        )
+
+    # A new dict: co_keys is the cached catalogue entry, it must not change.
+    return {**co_keys, **data_index_key}
 
 
 @router.get("/metadata/{uuid}/raw", dependencies=[Depends(api_key_auth)])
