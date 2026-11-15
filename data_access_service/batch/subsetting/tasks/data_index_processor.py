@@ -33,7 +33,7 @@ from data_access_service.utils.date_time_utils import (
     to_utc_bounds,
 )
 from data_access_service.utils.email_templates.download_email import (
-    get_download_email_html_body,
+    get_finish_download_email_html_body,
 )
 from data_access_service.utils.email_templates.no_data_email import (
     NO_DATA_EMAIL_SUBJECT,
@@ -110,7 +110,7 @@ class DataIndexProcessor:
         self.aws.send_email(
             recipient=self.recipient,
             subject=f"Finish processing data file whose uuid is:  {self.uuid}",
-            html_body=get_download_email_html_body(
+            html_body=get_finish_download_email_html_body(
                 subset_request=self.subset_request, object_urls=[url]
             ),
         )

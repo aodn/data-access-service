@@ -20,7 +20,7 @@ from data_access_service.utils.subset_request_resolver import (
 )
 from data_access_service.utils.subset_zarr_helper import selects_no_data, subset_zarr
 from data_access_service.utils.email_templates.download_email import (
-    get_download_email_html_body,
+    get_finish_download_email_html_body,
 )
 from data_access_service.utils.email_templates.no_data_email import (
     NO_DATA_EMAIL_SUBJECT,
@@ -136,7 +136,7 @@ class ZarrProcessor:
             else NO_DATA_EMAIL_SUBJECT
         )
 
-        html_content = get_download_email_html_body(
+        html_content = get_finish_download_email_html_body(
             subset_request=self.subset_request, object_urls=urls
         )
 

@@ -18,7 +18,7 @@ from data_access_service.config.config import Config
 from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.core.constants import PARTITION_KEY
 from data_access_service.utils.email_templates.download_email import (
-    get_download_email_html_body,
+    get_finish_download_email_html_body,
 )
 from tests.core.test_with_s3 import TestWithS3
 
@@ -44,7 +44,7 @@ class TestAWSHelper(TestWithS3):
         subset_request = subset_request_factory()
 
         # Convert download_urls to HTML body using the template function
-        html_body = get_download_email_html_body(
+        html_body = get_finish_download_email_html_body(
             subset_request=subset_request, object_urls=download_urls
         )
 

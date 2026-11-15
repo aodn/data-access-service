@@ -52,6 +52,9 @@ from data_access_service.utils.email_templates.error_email import (
 from data_access_service.batch.subsetting.helpers.preparation_failure import (
     record_preparation_failure,
 )
+from data_access_service.utils.email_templates.download_email import (
+    get_start_download_email_html_body,
+)
 
 
 def _notify_download_error(request: SubsetRequest) -> None:
@@ -90,6 +93,13 @@ def _init(
 ):
     # Must be here, this give change for test to init properly before calling get_config()
     config = Config.get_config()
+
+    # Email to user of start
+    aws.send_email(
+        recipient=subset_request.recipient,
+        subject=f"Start processing data file whose uuid is: {subset_request.uuid}",
+        html_body=get_start_download_email_html_body(subset_request=subset_request),
+    )
 
     # Step 2: A collection with no cloud-optimised data gets the list of its
     # data-index files instead. The steps below read the cloud-optimised

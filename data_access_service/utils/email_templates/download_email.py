@@ -9,7 +9,18 @@ from data_access_service.utils.email_templates.no_data_email import (
 )
 
 
-def get_download_email_html_body(
+def get_start_download_email_html_body(subset_request: SubsetRequest) -> str:
+    intro = (
+        form_paragraph("Hi,")
+        + form_paragraph("&nbsp;")
+        + form_paragraph(
+            "Your AODN data download request has been received. When your data request is ready, an email will be sent with a link for you to download the data."
+        )
+    )
+    return form_email_html(subset_request, intro, None)
+
+
+def get_finish_download_email_html_body(
     subset_request: SubsetRequest, object_urls: [str]
 ) -> str:
     """The "download ready" email: the shared body with its own intro and a
