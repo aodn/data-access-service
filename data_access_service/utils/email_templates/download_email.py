@@ -17,7 +17,7 @@ def get_start_download_email_html_body(subset_request: SubsetRequest) -> str:
             "Your AODN data download request has been received. When your data request is ready, an email will be sent with a link for you to download the data."
         )
     )
-    return form_email_html(subset_request, intro, None)
+    return form_email_html(subset_request, intro, "")
 
 
 def get_finish_download_email_html_body(
