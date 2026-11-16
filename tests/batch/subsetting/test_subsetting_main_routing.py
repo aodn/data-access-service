@@ -135,6 +135,8 @@ def test_collection_without_cloud_optimised_data_gets_data_index_files(monkeypat
     # The steps after the branch read the cloud-optimised catalog.
     normalize_request = MagicMock()
     monkeypatch.setattr(subsetting_main, "normalize_request", normalize_request)
+    # init emails before this branch. There is no Batch job here to send from.
+    monkeypatch.setattr(subsetting_main, "AWSHelper", MagicMock())
 
     subsetting_main.init(api=MagicMock(), job_id_of_init="job-1", parameters={})
 
