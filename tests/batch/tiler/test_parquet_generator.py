@@ -393,6 +393,58 @@ def test_logs_how_long_each_zarr_time_chunk_read_took(monkeypatch, caplog):
     assert len(bands) == 2
 
 
+def test_band_cols_are_all_columns_when_full_rows_fit():
+    ds = _banded_dataset(lon_chunk=2)
+
+    assert gen._band_cols(ds, "v", band_rows=2) == 5
+
+
+def test_band_cols_are_whole_lon_chunks_when_full_rows_are_too_big(monkeypatch):
+    ds = _banded_dataset(lon_chunk=2)
+    # 3 days x 2 rows x 8 bytes = 48 bytes per column.
+    monkeypatch.setattr(gen, "BAND_BYTES", 48 * 4)
+    assert gen._band_cols(ds, "v", band_rows=2) == 4
+
+    monkeypatch.setattr(gen, "BAND_BYTES", 1)
+    assert gen._band_cols(ds, "v", band_rows=2) == 2
+
+
+def test_band_cols_are_all_columns_without_chunk_encoding(monkeypatch):
+    monkeypatch.setattr(gen, "BAND_BYTES", 1)
+
+    assert gen._band_cols(_fake_dataset(DAYS), "v", band_rows=1) == 3
+
+
+def test_each_zarr_chunk_is_read_once_when_split_by_lon(monkeypatch, tmp_path):
+    monkeypatch.setattr(gen, "BAND_BYTES", 1)
+    ds = _banded_dataset(lon_chunk=2)
+    seen = []
+    real_read = gen._read_band
+    monkeypatch.setattr(
+        gen,
+        "_read_band",
+        lambda ds, v, *band: seen.append((v, *band)) or real_read(ds, v, *band),
+    )
+
+    _, _, _, _, split = gen._write_pieces(
+        MagicMock(), ds, ["v"], [0, 1, 2], str(tmp_path)
+    )
+
+    # Lat chunks of 2 rows by lon chunks of 2 columns, the last ones partial.
+    assert seen == [("v", i, 2, j, 2) for i in range(0, 7, 2) for j in range(0, 5, 2)]
+    assert split == {"v"}
+
+
+def test_full_rows_are_not_split_or_sorted(monkeypatch, tmp_path):
+    client = MagicMock()
+
+    _, _, _, _, split = gen._write_pieces(
+        client, _banded_dataset(lon_chunk=2), ["v", "w"], [0], str(tmp_path)
+    )
+
+    assert split == set()
+
+
 def test_time_chunk_size_takes_the_smallest_across_variables():
     ds = _chunked(_fake_dataset(DAYS), 3)
     ds["flag"].encoding["chunks"] = (2, 2, 3)
@@ -576,9 +628,9 @@ def test_whole_blocks_carries_rows_short_of_a_block(monkeypatch):
     assert carry.shape[0] == 0
 
 
-def _banded_dataset() -> xr.Dataset:
+def _banded_dataset(lon_chunk: int = 5) -> xr.Dataset:
     """3 days on a 7x5 grid of two variables with scattered NaNs and one
-    all-NaN day."""
+    all-NaN day, in zarr chunks of 2 lat rows and ``lon_chunk`` lon columns."""
     rng = np.random.default_rng(0)
     v = rng.random((3, 7, 5))
     v[rng.random(v.shape) < 0.3] = np.nan
@@ -597,12 +649,12 @@ def _banded_dataset() -> xr.Dataset:
             "lon": np.arange(5.0),
         },
     )
-    ds["v"].encoding["chunks"] = (3, 2, 5)
-    ds["w"].encoding["chunks"] = (3, 2, 5)
+    ds["v"].encoding["chunks"] = (3, 2, lon_chunk)
+    ds["w"].encoding["chunks"] = (3, 2, lon_chunk)
     return ds
 
 
-def _sync_real_files(monkeypatch) -> dict[str, pd.DataFrame]:
+def _sync_real_files(monkeypatch, lon_chunk: int = 5) -> dict[str, pd.DataFrame]:
     env = _Env(monkeypatch)
     uploaded: dict[str, pd.DataFrame] = {}
     monkeypatch.setattr(
@@ -612,7 +664,7 @@ def _sync_real_files(monkeypatch) -> dict[str, pd.DataFrame]:
     )
     monkeypatch.setattr(gen, "TilerBatchDuckDBClient", TilerBatchDuckDBClient)
     close_all_stores()
-    _patch_source(monkeypatch, _banded_dataset())
+    _patch_source(monkeypatch, _banded_dataset(lon_chunk))
     gen.sync_store(
         "foo",
         "uuid-123",
@@ -627,12 +679,15 @@ def _sync_real_files(monkeypatch) -> dict[str, pd.DataFrame]:
 
 
 @pytest.mark.parametrize("block", [1, 2, 3, 4, 8])
-def test_banded_files_match_reading_the_whole_grid(monkeypatch, block):
+@pytest.mark.parametrize("lon_chunk", [5, 2, 3])
+def test_banded_files_match_reading_the_whole_grid(monkeypatch, block, lon_chunk):
     monkeypatch.setattr(gen, "BLOCK", block)
-    whole = _sync_real_files(monkeypatch)
+    whole = _sync_real_files(monkeypatch, lon_chunk)
 
-    monkeypatch.setattr(gen, "BAND_BYTES", 1)  # one 2-row lat chunk per band
-    banded = _sync_real_files(monkeypatch)
+    # One 2-row lat chunk per band; with lon_chunk < 5, also one lon chunk
+    # (the last one partial), sorted back into block order on merge.
+    monkeypatch.setattr(gen, "BAND_BYTES", 1)
+    banded = _sync_real_files(monkeypatch, lon_chunk)
 
     assert sorted(banded) == sorted(whole) and len(whole) == 4
     for path, frame in whole.items():

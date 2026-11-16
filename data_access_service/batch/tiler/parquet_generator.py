@@ -220,12 +220,37 @@ def _whole_blocks(
     return parts, band[end - band_start :].copy()
 
 
+def _band_cols(ds: xr.Dataset, variable: str, band_rows: int) -> int:
+    """Lon columns read at a time for ``variable``: all of them, unless one
+    band of ``band_rows`` full rows is over ``BAND_BYTES``. Then whole zarr
+    lon chunks, about ``BAND_BYTES``, so each zarr chunk is still read once."""
+    n_j = ds.sizes["lon"]
+    col_bytes = ds.sizes["time"] * band_rows * ds[variable].dtype.itemsize
+    chunks = ds[variable].encoding.get("chunks")
+    if col_bytes * n_j <= BAND_BYTES or not chunks:
+        return n_j
+    lon_chunk = chunks[ds[variable].dims.index("lon")]
+    cols = max(1, BAND_BYTES // (col_bytes * lon_chunk)) * lon_chunk
+    return min(cols, n_j)
+
+
 @time_it
 def _read_band(
-    ds: xr.Dataset, variable: str, band_start: int, band_rows: int
+    ds: xr.Dataset,
+    variable: str,
+    band_start: int,
+    band_rows: int,
+    col_start: int = 0,
+    band_cols: int | None = None,
 ) -> xr.DataArray:
-    """Read one latitude band of ``variable`` from the open zarr time chunk."""
-    return ds[variable].isel(lat=slice(band_start, band_start + band_rows)).compute()
+    """Read one band of ``variable`` from the open zarr time chunk: lat rows
+    from ``band_start``, and lon columns from ``col_start`` (all by default)."""
+    lon = slice(col_start, None if band_cols is None else col_start + band_cols)
+    return (
+        ds[variable]
+        .isel(lat=slice(band_start, band_start + band_rows), lon=lon)
+        .compute()
+    )
 
 
 def _write_pieces(
@@ -239,71 +264,85 @@ def _write_pieces(
     dict[int, int],
     dict[tuple[int, str], int],
     float,
+    set[str],
 ]:
-    """Read ``ds`` one variable and one band of lat rows at a time and write
-    each time step and variable as local parquet pieces, in row order. The
-    next band is read while this one is written, so at most two bands are in
-    memory.
+    """Read ``ds`` one variable and one band at a time and write each time
+    step and variable as local parquet pieces. The next band is read while
+    this one is written, so at most two bands are in memory.
+
+    A band is whole zarr lat chunks of full rows, in row order. When one lat
+    chunk of full rows is over ``BAND_BYTES``, a band is also split into
+    whole zarr lon chunks; those pieces are not in block order and must be
+    sorted when merged.
 
     Returns ``(pieces by (step, variable), rows by step, rows by (step,
-    variable), seconds spent reading bands)``.
+    variable), seconds spent reading bands, variables to sort on merge)``.
     """
     n_i = ds.sizes["lat"]
+    n_j = ds.sizes["lon"]
     pieces: dict[tuple[int, str], list[str]] = {
         (k, v): [] for k in steps for v in variables
     }
     rows = dict.fromkeys(steps, 0)
     var_rows = {(k, v): 0 for k in steps for v in variables}
     carry = {
-        (k, v): np.empty((0, ds.sizes["lon"]), dtype=ds[v].dtype)
-        for k in steps
-        for v in variables
+        (k, v): np.empty((0, n_j), dtype=ds[v].dtype) for k in steps for v in variables
     }
     # One variable at a time: one lat chunk of all variables together can be
     # well over BAND_BYTES (e.g. heatwave, 10 float64 variables).
     reads = [
-        (v, band_start, band_rows)
+        (v, band_start, band_rows, col_start, band_cols)
         for v in variables
         for band_rows in [_band_rows(ds, [v])]
+        for band_cols in [_band_cols(ds, v, band_rows)]
         for band_start in range(0, n_i, band_rows)
+        for col_start in range(0, n_j, band_cols)
     ]
+    split = {v for v, _, _, _, band_cols in reads if band_cols < n_j}
 
     read_seconds = 0.0
 
-    def read(v: str, band_start: int, band_rows: int) -> xr.DataArray:
+    def read(v: str, *band: int) -> xr.DataArray:
         # One reader thread, and the caller waits for it, so this add is safe.
         nonlocal read_seconds
         started = time.perf_counter()
-        band = _read_band(ds, v, band_start, band_rows)
+        values = _read_band(ds, v, *band)
         read_seconds += time.perf_counter() - started
-        return band
+        return values
+
+    def write(k: int, v: str, frame: pd.DataFrame) -> None:
+        path = os.path.join(piece_dir, f"{k}_{v}_{len(pieces[k, v])}.parquet")
+        client.write_parquet(frame, path)
+        pieces[k, v].append(path)
+        rows[k] += len(frame)
+        var_rows[k, v] += len(frame)
 
     if not reads:
-        return pieces, rows, var_rows, read_seconds
+        return pieces, rows, var_rows, read_seconds, split
     with ThreadPoolExecutor(max_workers=1) as reader:
         next_band = reader.submit(read, *reads[0])
-        for n, (v, band_start, band_rows) in enumerate(reads):
+        for n, (v, band_start, band_rows, col_start, _) in enumerate(reads):
             last = band_start + band_rows >= n_i
-            # Drop the last band before taking the next, or three are held.
-            band = None
+            # Drop the last band, and the views of it, before taking the
+            # next, or three are held.
+            band = parts = arr = frame = None
             band = next_band.result()
             if n + 1 < len(reads):
                 next_band = reader.submit(read, *reads[n + 1])
             for k in steps:
-                parts, carry[k, v] = _whole_blocks(
-                    carry[k, v], band.isel(time=k).values, band_start, last
-                )
+                arr = band.isel(time=k).values
+                if v in split:
+                    frame = _sparse_rows_for_slice(arr)
+                    frame["i"] += band_start
+                    frame["j"] += col_start
+                    write(k, v, frame)
+                    continue
+                parts, carry[k, v] = _whole_blocks(carry[k, v], arr, band_start, last)
                 for first_row, arr in parts:
                     frame = _sparse_rows_for_slice(arr)
                     frame["i"] += first_row
-                    path = os.path.join(
-                        piece_dir, f"{k}_{v}_{len(pieces[k, v])}.parquet"
-                    )
-                    client.write_parquet(frame, path)
-                    pieces[k, v].append(path)
-                    rows[k] += len(frame)
-                    var_rows[k, v] += len(frame)
-    return pieces, rows, var_rows, read_seconds
+                    write(k, v, frame)
+    return pieces, rows, var_rows, read_seconds, split
 
 
 # Files uploaded at once, each on one connection (see storage.upload_file).
@@ -421,7 +460,7 @@ def sync_store(
             changed = bool(steps)
 
             with TemporaryDirectory(dir=tmp) as piece_dir:
-                pieces, rows, var_rows, read_seconds = _write_pieces(
+                pieces, rows, var_rows, read_seconds, split = _write_pieces(
                     client, ds, variables, list(steps), piece_dir
                 )
                 logger.info(
@@ -442,7 +481,11 @@ def sync_store(
                         local_path = pieces[k, v][0]
                         if len(pieces[k, v]) > 1:
                             local_path = os.path.join(piece_dir, f"{k}_{v}.parquet")
-                            client.merge_parquet(pieces[k, v], local_path)
+                            client.merge_parquet(
+                                pieces[k, v],
+                                local_path,
+                                block=BLOCK if v in split else None,
+                            )
                         uploads.append(
                             uploader.submit(
                                 _upload_and_remove,
