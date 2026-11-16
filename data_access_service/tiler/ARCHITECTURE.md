@@ -73,7 +73,10 @@ Key properties:
   whole zarr lat chunks (about `BAND_BYTES`, 1 GB), each written as local
   parquet pieces, then joined per timestamp. The next band is read while
   one is written. The largest store's chunk is 5.2 GB, too big to hold whole
-  in an 8 GB job.
+  in an 8 GB job. When one lat chunk of full rows is over `BAND_BYTES`
+  (`satellite_wind_altimeter_delayed_qc`: 5.4 GB), bands are also split into
+  whole zarr lon chunks, so each zarr chunk is still read once; those pieces
+  are sorted back into block order when joined.
 - **Parallel uploads.** `UPLOAD_WORKERS` files upload at once, one S3
   connection each; the sidecar waits for all of a chunk's uploads. Zarr reads
   use up to 64 S3 connections.

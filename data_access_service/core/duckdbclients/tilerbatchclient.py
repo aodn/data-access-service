@@ -57,11 +57,22 @@ class TilerBatchDuckDBClient(DuckDBClient):
         finally:
             con.unregister("_frame")
 
-    def merge_parquet(self, paths: Sequence[str], path: str) -> None:
-        """Join the parquet files ``paths``, rows in order, into one at ``path``."""
+    def merge_parquet(
+        self, paths: Sequence[str], path: str, block: int | None = None
+    ) -> None:
+        """Join the parquet files ``paths``, rows in order, into one at ``path``.
+
+        With ``block``, rows are sorted into ``block`` x ``block`` blocks of
+        ``(i, j)`` instead, block rows first, then by ``(i, j)`` within a
+        block: the order ``_sparse_rows_for_slice`` writes.
+        """
         files = ", ".join(sql_literal(p) for p in paths)
+        order = ""
+        if block is not None:
+            b = int(block)
+            order = f" ORDER BY i // {b}, j // {b}, i, j"
         self.get_instance().execute(
-            f"COPY (SELECT * FROM read_parquet([{files}])) "
+            f"COPY (SELECT * FROM read_parquet([{files}]){order}) "
             f"TO {sql_literal(path)} (FORMAT PARQUET)"
         )
 

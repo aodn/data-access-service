@@ -54,6 +54,40 @@ def test_merge_parquet_keeps_file_and_row_order(tmp_path):
     assert list(pd.read_parquet(out)["a"]) == list(range(900_000))
 
 
+def test_merge_parquet_with_block_sorts_into_block_order(tmp_path):
+    # A 4x4 grid in 2x2 blocks, written as left and right column halves.
+    cells = [(i, j) for i in range(4) for j in range(4)]
+    paths = []
+    with TilerBatchDuckDBClient(CONFIG) as client:
+        for n, cols in enumerate([(0, 1), (2, 3)]):
+            part = [(i, j) for i, j in cells if j in cols]
+            path = str(tmp_path / f"piece_{n}.parquet")
+            client.write_parquet(
+                pd.DataFrame(
+                    {
+                        "i": [i for i, _ in part],
+                        "j": [j for _, j in part],
+                        "value": [10.0 * i + j for i, j in part],
+                    }
+                ),
+                path,
+            )
+            paths.append(path)
+        out = str(tmp_path / "out.parquet")
+        client.merge_parquet(paths, out, block=2)
+
+    frame = pd.read_parquet(out)
+    blocks = [(0, 0), (0, 2), (2, 0), (2, 2)]
+    expected = [
+        (i, j)
+        for bi, bj in blocks
+        for i in range(bi, bi + 2)
+        for j in range(bj, bj + 2)
+    ]
+    assert list(zip(frame["i"], frame["j"])) == expected
+    assert list(frame["value"]) == [10.0 * i + j for i, j in expected]
+
+
 def test_execute_binds_params():
     with TilerBatchDuckDBClient(CONFIG) as client:
         (value,) = client.execute("SELECT ? + ?", [1, 2]).fetchone()
