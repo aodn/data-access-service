@@ -89,10 +89,17 @@ class TestNoTimeColumnDataset(TestWithS3):
                     ) as submit_a_job,
                     patch.object(AWSHelper, "send_email") as send_email,
                 ):
-                    # Job 1: init splits the partitions instead of the dates
+                    # Job 1: init splits the partitions instead of the dates.
+                    # It emails that processing has started, and nothing else.
                     init(api, INIT_JOB_ID, init_parameters)
 
-                    send_email.assert_not_called()
+                    send_email.assert_called_once()
+                    assert (
+                        send_email.call_args.kwargs["recipient"] == "test@example.com"
+                    )
+                    assert send_email.call_args.kwargs["subject"] == (
+                        f"Start processing data file whose uuid is: {DIVER_UUID}"
+                    )
                     preparation = submit_a_job.call_args_list[0].kwargs
                     preparation_parameters = preparation["parameters"]
                     assert Parameters.DATE_RANGES.value not in preparation_parameters

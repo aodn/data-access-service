@@ -52,6 +52,9 @@ from data_access_service.utils.email_templates.error_email import (
 from data_access_service.batch.subsetting.helpers.preparation_failure import (
     record_preparation_failure,
 )
+from data_access_service.utils.email_templates.download_email import (
+    get_start_download_email_html_body,
+)
 
 
 def _notify_download_error(request: SubsetRequest) -> None:
@@ -90,6 +93,15 @@ def _init(
 ):
     # Must be here, this give change for test to init properly before calling get_config()
     config = Config.get_config()
+    aws_client = AWSHelper()
+    # Email to user of start
+    aws_client.send_email(
+        recipient=parsed_subset_request.recipient,
+        subject=f"Start processing data file whose uuid is: {parsed_subset_request.uuid}",
+        html_body=get_start_download_email_html_body(
+            subset_request=parsed_subset_request
+        ),
+    )
 
     # Step 2: A collection with no cloud-optimised data gets the list of its
     # data-index files instead. The steps below read the cloud-optimised
@@ -119,7 +131,7 @@ def _init(
 
     # Step 5: If the requested data not available, email the user and stop here.
     if not resolved_subset_request.has_data:
-        AWSHelper().send_email(
+        aws_client.send_email(
             recipient=subset_request.recipient,
             subject=NO_DATA_EMAIL_SUBJECT,
             html_body=get_no_data_email_html_body(subset_request),
@@ -164,8 +176,6 @@ def _init(
             month_count_per_job=month_count_per_job,
         )
         range_parameter = Parameters.DATE_RANGES.value
-
-    aws_client = AWSHelper()
 
     # submit data preparation job
     preparation_parameters = {

@@ -35,6 +35,13 @@ class TestInit(TestWithS3):
             subsetting_main, "has_cloud_optimised_data", lambda api, uuid: True
         )
 
+    @pytest.fixture(autouse=True)
+    def skip_start_email(self):
+        # init emails before it submits children. These tests cover job
+        # submission, and the test SES client is not wired up.
+        with patch.object(AWSHelper, "send_email"):
+            yield
+
     @pytest.fixture(scope="function")
     def upload_test_case_to_s3(self, aws_clients, setup_resources, mock_boto3_client):
         # Make sure we create the mock s3 to local s3

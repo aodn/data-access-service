@@ -4,7 +4,7 @@ from pathlib import Path
 
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.email_templates.download_email import (
-    get_download_email_html_body,
+    get_finish_download_email_html_body,
 )
 from data_access_service.utils.email_templates.no_data_email import (
     get_no_data_email_html_body,
@@ -19,7 +19,9 @@ def write_email_previews(
 ) -> list[Path]:
     """Write one preview HTML file per email template; returns the file paths."""
     previews = {
-        "preview_email.html": get_download_email_html_body(subset_request, object_urls),
+        "preview_email.html": get_finish_download_email_html_body(
+            subset_request, object_urls
+        ),
         "preview_no_data_email.html": get_no_data_email_html_body(subset_request),
         "preview_error_email.html": get_error_email_html_body(subset_request),
     }

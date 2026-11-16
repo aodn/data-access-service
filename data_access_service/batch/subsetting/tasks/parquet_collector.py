@@ -10,7 +10,7 @@ from data_access_service.core.AWSHelper import AWSHelper
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.format_utils import OutputFormat
 from data_access_service.utils.email_templates.download_email import (
-    get_download_email_html_body,
+    get_finish_download_email_html_body,
 )
 from data_access_service.utils.file_naming import dataset_base_name
 
@@ -114,7 +114,7 @@ def collect_parquet_files(master_job_id: str, subset_request: SubsetRequest):
 
     subject = f"Finish processing data file whose uuid is:  {subset_request.uuid}"
 
-    html_content = get_download_email_html_body(
+    html_content = get_finish_download_email_html_body(
         subset_request=subset_request, object_urls=download_urls
     )
 

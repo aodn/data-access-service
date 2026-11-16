@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.email_templates.download_email import (
-    get_download_email_html_body,
+    get_finish_download_email_html_body,
 )
 from data_access_service.utils.email_templates.no_data_email import (
     get_no_data_email_html_body,
@@ -133,12 +133,12 @@ class TestEmailBodies(unittest.TestCase):
                 suggested_citation="Cite this dataset as X.",
             )
             bodies = {
-                "completed": get_download_email_html_body(
+                "completed": get_finish_download_email_html_body(
                     request, ["https://example.com/result"]
                 ),
                 "no_data": get_no_data_email_html_body(request),
                 "error": get_error_email_html_body(request),
-                "empty_urls": get_download_email_html_body(request, []),
+                "empty_urls": get_finish_download_email_html_body(request, []),
             }
             for kind, html in bodies.items():
                 with self.subTest(output_format=output_format, kind=kind):
@@ -214,7 +214,9 @@ class TestEmailBodies(unittest.TestCase):
         )
 
         html = visible_to_email_clients(
-            get_download_email_html_body(request, ["https://example.com/result.nc"])
+            get_finish_download_email_html_body(
+                request, ["https://example.com/result.nc"]
+            )
         )
 
         self.assertIn("download request has been completed", html)
@@ -239,7 +241,7 @@ class TestEmailBodies(unittest.TestCase):
         )
 
         html = visible_to_email_clients(
-            get_download_email_html_body(
+            get_finish_download_email_html_body(
                 request, ["https://test/a.zip", "https://test/b.zip"]
             )
         )
@@ -311,7 +313,7 @@ class TestEmailBodies(unittest.TestCase):
         )
 
         self.assertEqual(
-            get_download_email_html_body(request, []),
+            get_finish_download_email_html_body(request, []),
             get_no_data_email_html_body(request),
         )
 
