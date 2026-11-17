@@ -230,17 +230,6 @@ tiler:
       - mooring_wave_timeseries_delayed_qc
       - vessel_satellite_radiance_delayed_qc
       - vessel_satellite_radiance_derived_product
-      # noaa20 and snpp satellites, not tiled for now.
-      - satellite_chlorophylla_gsm_1day_noaa20
-      - satellite_chlorophylla_gsm_1day_snpp
-      - satellite_chlorophylla_oc3_1day_noaa20
-      - satellite_chlorophylla_oc3_1day_snpp
-      - satellite_chlorophylla_oci_1day_noaa20
-      - satellite_chlorophylla_oci_1day_snpp
-      - satellite_diffuse_attenuation_coefficent_1day_noaa20
-      - satellite_diffuse_attenuation_coefficent_1day_snpp
-      - satellite_optical_water_type_1day_noaa20
-      - satellite_optical_water_type_1day_snpp
     gridded_variables:
       - GSLA
       - [UCUR, VCUR]
