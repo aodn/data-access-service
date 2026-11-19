@@ -1,12 +1,14 @@
 """Processing failures notify the recipient and still fail the Batch job."""
 
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
 import pytest
 
 from data_access_service.batch.subsetting import subsetting_main
+from data_access_service.core.data_index_files import ORIGINAL_NETCDF_KEY
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.email_templates.download_email import (
     get_start_download_email_html_body,
@@ -42,9 +44,6 @@ def workflow(monkeypatch):
     monkeypatch.setattr(subsetting_main, "AWSHelper", lambda: aws)
     monkeypatch.setattr(
         subsetting_main, "get_subset_request", lambda parameters: request
-    )
-    monkeypatch.setattr(
-        subsetting_main, "has_cloud_optimised_data", lambda api, uuid: True
     )
     monkeypatch.setattr(
         subsetting_main, "normalize_request", lambda api, request: request
@@ -99,8 +98,12 @@ def run_stage(monkeypatch, workflow, stage, process):
             "original": "run_data_index_download",
         }
         if stage == "original":
+            # The data-index key sends init to the data-index download.
+            workflow.request = replace(workflow.request, keys=[ORIGINAL_NETCDF_KEY])
             monkeypatch.setattr(
-                subsetting_main, "has_cloud_optimised_data", lambda api, uuid: False
+                subsetting_main,
+                "get_subset_request",
+                lambda parameters: workflow.request,
             )
         if stage == "submit":
             workflow.resolved.keys = ["data.parquet"]

@@ -1,4 +1,4 @@
-"""Download for a collection with no cloud-optimised data.
+"""Download for the data-index key (ORIGINAL_NETCDF_KEY).
 
 The user gets a list of the collection's data-index files that match the
 request (a zipped CSV, one row and one link per file), not the files themselves.

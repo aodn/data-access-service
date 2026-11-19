@@ -7,8 +7,8 @@ rejected before any child job is submitted, the same pairing the size estimate
 rejects - the legacy workflow's zarr-writing code that used to absorb the
 mismatch has been removed.
 
-A collection with no cloud-optimised data skips all of that and gets the list
-of its data-index files.
+A request with the data-index key skips all of that and gets the list of the
+collection's data-index files.
 """
 
 import pandas as pd
@@ -16,6 +16,7 @@ import pytest
 from unittest.mock import MagicMock
 
 import data_access_service.batch.subsetting.subsetting_main as subsetting_main
+from data_access_service.core.data_index_files import ORIGINAL_NETCDF_KEY
 from data_access_service.models.subset_request import SubsetRequest
 from data_access_service.utils.subset_request_resolver import ResolvedSubsetRequest
 
@@ -52,9 +53,6 @@ def _run_init(monkeypatch, keys: list[str], output_format: str) -> MagicMock:
     request = _subset_request(keys, output_format)
     monkeypatch.setattr(
         subsetting_main, "get_subset_request", MagicMock(return_value=request)
-    )
-    monkeypatch.setattr(
-        subsetting_main, "has_cloud_optimised_data", lambda api, uuid: True
     )
     monkeypatch.setattr(
         subsetting_main, "normalize_request", MagicMock(return_value=request)
@@ -120,13 +118,13 @@ def test_key_of_unknown_storage_type_is_not_rejected(monkeypatch):
     run_zarr_subset.assert_not_called()
 
 
-def test_collection_without_cloud_optimised_data_gets_data_index_files(monkeypatch):
-    request = _subset_request(["*"], "netcdf")
+def test_data_index_key_gets_data_index_files(monkeypatch):
+    # The api is a MagicMock, so the collection looks like it has
+    # cloud-optimised data, like one on es-indexer's skip_co list (issue 9878).
+    # The key decides the path, not that data.
+    request = _subset_request([ORIGINAL_NETCDF_KEY], "netcdf")
     monkeypatch.setattr(
         subsetting_main, "get_subset_request", MagicMock(return_value=request)
-    )
-    monkeypatch.setattr(
-        subsetting_main, "has_cloud_optimised_data", lambda api, uuid: False
     )
     run_data_index_download = MagicMock()
     monkeypatch.setattr(
@@ -142,3 +140,15 @@ def test_collection_without_cloud_optimised_data_gets_data_index_files(monkeypat
 
     run_data_index_download.assert_called_once_with("job-1", request)
     normalize_request.assert_not_called()
+
+
+def test_star_key_uses_cloud_optimised_workflow(monkeypatch):
+    # "*" asks for every cloud-optimised key, so it never gets the file list.
+    run_data_index_download = MagicMock()
+    monkeypatch.setattr(
+        subsetting_main, "run_data_index_download", run_data_index_download
+    )
+
+    _run_init(monkeypatch, ["*"], "csv")
+
+    run_data_index_download.assert_not_called()
