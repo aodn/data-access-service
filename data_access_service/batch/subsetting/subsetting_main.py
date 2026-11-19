@@ -6,9 +6,9 @@ from data_access_service.batch.subsetting.helpers.request_helper import (
     get_subset_request,
 )
 from data_access_service.core.AWSHelper import AWSHelper
+from data_access_service.core.data_index_files import ORIGINAL_NETCDF_KEY
 from data_access_service.utils.subset_request_resolver import (
     ResolvedSubsetRequest,
-    has_cloud_optimised_data,
     normalize_request,
     resolve_subset_request,
 )
@@ -103,10 +103,9 @@ def _init(
         ),
     )
 
-    # Step 2: A collection with no cloud-optimised data gets the list of its
-    # data-index files instead. The steps below read the cloud-optimised
-    # catalog, so this path stops here.
-    if not has_cloud_optimised_data(api, parsed_subset_request.uuid):
+    # Step 2: The data-index key gets the list of data-index files.
+    # Check the key only: a collection on the skip_co list has CO data too.
+    if ORIGINAL_NETCDF_KEY in parsed_subset_request.keys:
         run_data_index_download(job_id_of_init, parsed_subset_request)
         return
 
@@ -369,5 +368,5 @@ def run_zarr_subset(
 
 def run_data_index_download(job_id: str, request: SubsetRequest) -> None:
     """Email the list of the collection's data-index files that match
-    the request. For a collection with no cloud-optimised data."""
+    the request. For a request with the data-index key."""
     DataIndexProcessor(job_id=job_id, subset_request=request).process()
