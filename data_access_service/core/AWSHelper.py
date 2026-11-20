@@ -246,6 +246,8 @@ class AWSHelper:
                         "nan_inf_to_errors": True,
                         "default_date_format": "yyyy-mm-dd hh:mm:ss",
                         "tmpdir": temp_dir,
+                        # a full tab can pass the 2 GB zip limit; small files unchanged
+                        "use_zip64": True,
                     },
                 )
                 try:
