@@ -276,6 +276,39 @@ class TestAWSHelper(TestWithS3):
             expected_url = f"https://{bucket}.s3.us-east-1.amazonaws.com/{key}"
             assert url == expected_url
 
+    @patch.object(Config, "get_max_excel_row", lambda self: 1048576)
+    def test_write_xlsx_to_s3_tab_over_zip_limit(
+        self, setup, aws_clients, localstack, mock_boto3_client
+    ):
+        """A tab over the zip limit (about 2 GB in production) is still written."""
+        helper = AWSHelper()
+        helper.s3 = MagicMock()
+        helper.s3.meta.region_name = "us-east-1"
+        helper.log = MagicMock()
+        helper.s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+        helper.s3.get_object = MagicMock(side_effect=helper.s3.exceptions.NoSuchKey())
+
+        pdf = pd.DataFrame(
+            {"id": range(2000), "value": ["x" * 50] * 2000, PARTITION_KEY: 202001}
+        )
+        ddf = dd.from_pandas(pdf, npartitions=2)
+
+        def fake_upload(file_path, bucket, key):
+            with zipfile.ZipFile(file_path, "r") as zf:
+                tab = zf.getinfo("xl/worksheets/sheet2.xml")
+                assert tab.file_size > zipfile.ZIP64_LIMIT
+                assert zf.testzip() is None
+                # header + all data rows
+                assert zf.read(tab).count(b"<row ") == len(pdf) + 1
+
+        helper.upload_file_to_s3 = fake_upload
+
+        # lower the limit so this small tab crosses it, as a full tab does in prod
+        with patch.object(zipfile, "ZIP64_LIMIT", 50_000):
+            url = helper.write_xlsx_to_s3(ddf, "test-bucket", "123/test.xlsx")
+
+        assert url == "https://test-bucket.s3.us-east-1.amazonaws.com/123/test.xlsx"
+
     @patch.object(Config, "get_max_excel_row", lambda self: 10)
     def test_write_csv_to_s3_edge_case(
         self, setup, aws_clients, localstack, mock_boto3_client
