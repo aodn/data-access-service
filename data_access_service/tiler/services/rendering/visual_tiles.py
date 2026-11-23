@@ -195,9 +195,17 @@ def _validate_categorical_request(
 
 
 def _apply_crs(da: xr.DataArray) -> xr.DataArray:
-    return da.rio.write_crs("EPSG:4326", inplace=True).rio.set_spatial_dims(
+    """Tag the grid for rio-tiler: EPSG:4326, lat/lon dims, and NaN as nodata.
+
+    Without the nodata tag, rio-tiler's bilinear treats NaN as a number, so
+    one missing cell under its kernel blanks the whole output pixel, even
+    where the nearest cell has a value. With it, missing cells are left out
+    of the interpolation.
+    """
+    da = da.rio.write_crs("EPSG:4326", inplace=True).rio.set_spatial_dims(
         x_dim="lon", y_dim="lat", inplace=True
     )
+    return da.rio.write_nodata(np.nan, encoded=False, inplace=True)
 
 
 @dataclass(frozen=True)

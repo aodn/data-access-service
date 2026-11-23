@@ -612,3 +612,50 @@ def test_a_window_of_three_cells_per_pixel_is_averaged():
         TILE_SIZE * visual_renderer._AVG_OVERSAMPLE,
         TILE_SIZE * visual_renderer._AVG_OVERSAMPLE,
     )
+
+
+def _holey_ds(nan_fraction=0.1, res=0.02):
+    """A smooth field over 140-150E, 40-30S with cells missing at random,
+    like a satellite swath under scattered cloud."""
+    lat = np.arange(-30.0, -40.0, -res)
+    lon = np.arange(140.0, 150.0, res)
+    la, lo = np.meshgrid(lat, lon, indexing="ij")
+    field = (np.sin(la / 3) + np.cos(lo / 4)).astype(np.float32)
+    field[np.random.default_rng(0).random(field.shape) < nan_fraction] = np.nan
+    return xr.Dataset({"v": (("lat", "lon"), field)}, coords={"lat": lat, "lon": lon})
+
+
+def _pixel_lonlat(x, y, z):
+    """Each pixel centre's (lat, lon) along the tile's rows and columns."""
+    b = visual_renderer._WEB_MERCATOR.xy_bounds(x, y, z)
+    px = (np.arange(TILE_SIZE) + 0.5) / TILE_SIZE
+    mx = b.left + px * (b.right - b.left)
+    my = b.top - px * (b.top - b.bottom)
+    lons = np.degrees(mx / 6378137.0)
+    lats = np.degrees(2 * np.arctan(np.exp(my / 6378137.0)) - np.pi / 2)
+    return lats, lons
+
+
+@pytest.mark.parametrize("z", [5, 6, 7, 8])
+def test_a_pixel_whose_nearest_cell_has_a_value_is_not_blank(z):
+    """Regression (backlog #9900): /point returns the nearest cell's value,
+    so the tile must be coloured there. Before NaN was tagged as nodata, one
+    missing neighbour blanked the pixel. z5 is averaged (block edges don't
+    sit exactly on cells, so a little slack); z6+ is read cell for cell."""
+    ds = _holey_ds()
+    lat, lon = ds["lat"].values, ds["lon"].values
+    field = ds["v"].values
+    tile = visual_renderer._WEB_MERCATOR.tile(145.0, -35.0, z)
+    png = visual_renderer.render_tile(sparse_of(ds), "v", tile.x, tile.y, z)
+    coloured = np.asarray(Image.open(io.BytesIO(png)).convert("RGBA"))[..., 3] > 0
+
+    lats, lons = _pixel_lonlat(tile.x, tile.y, z)
+    i = np.abs(lat[None, :] - lats[:, None]).argmin(axis=1)
+    j = np.abs(lon[None, :] - lons[:, None]).argmin(axis=1)
+    inside = ((lats >= lat.min()) & (lats <= lat.max()))[:, None] & (
+        (lons >= lon.min()) & (lons <= lon.max())
+    )[None, :]
+    has_value = np.isfinite(field[i][:, j]) & inside
+
+    blank = (has_value & ~coloured).sum() / has_value.sum()
+    assert blank <= 0.05, f"{blank:.1%} of pixels with a value are blank"
