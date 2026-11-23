@@ -267,14 +267,10 @@ def _steps(
     return row_step, col_step
 
 
-def _needs_averaging(
-    n_rows: int, n_cols: int, out_height: int, out_width: int
-) -> bool:
+def _needs_averaging(n_rows: int, n_cols: int, out_height: int, out_width: int) -> bool:
     """Whether an output pixel covers more than ``_AVG_OVERSAMPLE`` cells on
     either axis. Otherwise the window is read cell for cell."""
-    return (
-        n_rows > out_height * _AVG_OVERSAMPLE or n_cols > out_width * _AVG_OVERSAMPLE
-    )
+    return n_rows > out_height * _AVG_OVERSAMPLE or n_cols > out_width * _AVG_OVERSAMPLE
 
 
 def _is_run(idx: np.ndarray) -> bool:
