@@ -544,10 +544,10 @@ def test_aggregated_window_keeps_its_coordinates_lined_up():
 
 
 def test_a_tile_window_never_reaches_the_read_cap():
-    """Tiles keep the steps they had before the cap existed."""
+    """A 256 tile's steps are never raised by ``_MAX_READ_CELLS``."""
     for n in range(1, 40000, 97):
         rs, cs = visual_renderer._steps(n, n, TILE_SIZE, TILE_SIZE)
-        old = max(1, n // (TILE_SIZE * visual_renderer._OVERSAMPLE))
+        old = max(1, n // (TILE_SIZE * visual_renderer._AVG_OVERSAMPLE))
         assert (rs, cs) == (old, old)
 
 
@@ -594,3 +594,21 @@ def test_a_categorical_variable_is_sampled_not_averaged():
     part = _window(ds, "MCS_category")
     present = np.unique(part.values[np.isfinite(part.values)])
     assert set(present) <= {0.0, 1.0, 2.0}, f"averaging invented codes: {present}"
+
+
+def test_averaging_starts_above_two_cells_per_output_pixel():
+    avg = visual_renderer._AVG_OVERSAMPLE
+    n = TILE_SIZE * avg
+    assert not visual_renderer._needs_averaging(n, n, TILE_SIZE, TILE_SIZE)
+    assert visual_renderer._needs_averaging(n + 1, n, TILE_SIZE, TILE_SIZE)
+    assert visual_renderer._needs_averaging(n, n + 1, TILE_SIZE, TILE_SIZE)
+
+
+def test_a_window_of_three_cells_per_pixel_is_averaged():
+    """Below the old 8-cell cut-off, which read this window cell for cell."""
+    ds = _scalar_ds(size=TILE_SIZE * 3)
+    part = _window(ds, "GSLA")
+    assert part.shape == (
+        TILE_SIZE * visual_renderer._AVG_OVERSAMPLE,
+        TILE_SIZE * visual_renderer._AVG_OVERSAMPLE,
+    )
