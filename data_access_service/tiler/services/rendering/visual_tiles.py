@@ -53,13 +53,12 @@ _WEB_MERCATOR = morecantile.tms.get("WebMercatorQuad")
 # would have seen in the whole grid.
 _MARGIN_PX = 3
 
-# Aggregate once an output pixel covers more than this many source cells.
-# Below it, read the cells; above it, reading them all to interpolate between
-# four is wasted.
-_OVERSAMPLE = 4
-
 # Blocks per output pixel when aggregating. Two, not one, so rio-tiler still
-# has neighbours to interpolate between.
+# has neighbours to interpolate between. Also the point where aggregating
+# starts: rio-tiler's bilinear widens its kernel when downsampling, so a
+# window read cell for cell already has every cell averaged in. Past this
+# many cells per output pixel, block means give it the same input without
+# building the window at the grid's own resolution.
 _AVG_OVERSAMPLE = 2
 
 # The most cells one part reads. A 256 tile stays under it; a large bbox or
@@ -251,21 +250,31 @@ def _window(coords: np.ndarray, lo: float, hi: float, pad: float) -> slice | Non
 def _steps(
     n_rows: int, n_cols: int, out_height: int, out_width: int
 ) -> tuple[int, int]:
-    """How many source pixels an output pixel covers, per axis, capped at one.
+    """How many source cells make up one block, per axis, at least one.
 
-    ``(1, 1)`` means the window is already near the output's own resolution,
-    so it is read cell for cell and the tile comes out exactly as it always
-    did. Anything more means there is something to aggregate.
+    Blocks are ``_AVG_OVERSAMPLE`` per output pixel, so this is the cells per
+    output pixel divided by that. ``(1, 1)`` means the blocks are single
+    cells; whether the window is averaged at all is ``_needs_averaging``.
 
     Past ``_MAX_READ_CELLS``, the steps grow to about one cell per output
     pixel.
     """
-    row_step = max(1, n_rows // max(1, out_height * _OVERSAMPLE))
-    col_step = max(1, n_cols // max(1, out_width * _OVERSAMPLE))
+    row_step = max(1, n_rows // max(1, out_height * _AVG_OVERSAMPLE))
+    col_step = max(1, n_cols // max(1, out_width * _AVG_OVERSAMPLE))
     if (n_rows // row_step) * (n_cols // col_step) > _MAX_READ_CELLS:
         row_step = max(row_step, -(-n_rows // max(1, out_height)))
         col_step = max(col_step, -(-n_cols // max(1, out_width)))
     return row_step, col_step
+
+
+def _needs_averaging(
+    n_rows: int, n_cols: int, out_height: int, out_width: int
+) -> bool:
+    """Whether an output pixel covers more than ``_AVG_OVERSAMPLE`` cells on
+    either axis. Otherwise the window is read cell for cell."""
+    return (
+        n_rows > out_height * _AVG_OVERSAMPLE or n_cols > out_width * _AVG_OVERSAMPLE
+    )
 
 
 def _is_run(idx: np.ndarray) -> bool:
@@ -331,9 +340,9 @@ def _parts_in_bbox(
     one per part the bbox touches.
 
     A window whose cells outnumber the ``out_width`` x ``out_height`` output
-    by more than ``_OVERSAMPLE`` on an axis comes back as block means, so a
-    low-zoom tile never materialises the grid at its own resolution. Windows
-    near the output's resolution are read cell for cell, unchanged.
+    by more than ``_AVG_OVERSAMPLE`` on an axis comes back as block means, so
+    a low-zoom tile never materialises the grid at its own resolution.
+    Smaller windows are read cell for cell.
 
     Applies ``coastal_fill`` (and cuts filled values off land), reading that
     many pixels more so the fill sees the same neighbours.
@@ -361,12 +370,10 @@ def _parts_in_bbox(
         # The steps come from the unpadded window; the margin is then widened
         # by them so those extra pixels still land in the result rather than
         # disappearing inside a block.
-        row_step, col_step = _steps(
-            plain_rows.stop - plain_rows.start,
-            plain_cols.stop - plain_cols.start,
-            out_height,
-            out_width,
-        )
+        n_rows = plain_rows.stop - plain_rows.start
+        n_cols = plain_cols.stop - plain_cols.start
+        row_step, col_step = _steps(n_rows, n_cols, out_height, out_width)
+        averaged = _needs_averaging(n_rows, n_cols, out_height, out_width)
         rows = _window(lat, s, n, margin * row_step * lat_res)
         cols = _window(part.lon, w, e, margin * col_step * lon_res)
         if rows is None or cols is None:
@@ -375,7 +382,7 @@ def _parts_in_bbox(
         src_cols = part.cols[cols]
         # Category codes can't be averaged, and a reordered column axis can't
         # be sliced, so either one falls back to sampling every n-th cell.
-        if (row_step > 1 or col_step > 1) and not categorical and _is_run(src_cols):
+        if averaged and not categorical and _is_run(src_cols):
             values, lat_coords, lon_coords = _aggregate_window(
                 grid,
                 lat,

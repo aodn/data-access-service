@@ -45,8 +45,8 @@ T1 = "2024-01-16T00:00:00.000000000Z"
 CAT_ATTRS = {"flag_values": [0, 1, 2], "flag_meanings": "a b c"}
 
 # name -> (lat, lon). All but "global" sit inside the ocean mask (lon
-# 50-190E, lat 60S-10N). A visual tile only averages once its window is at
-# least 2048 cells across (``_steps`` divides by 256 x ``_OVERSAMPLE``), so
+# 50-190E, lat 60S-10N). A visual tile only averages once its window is more
+# than 512 cells across (256 x ``_AVG_OVERSAMPLE``), so
 # "wide" is past that at low zooms; "region" is big enough for data tiles'
 # coarse LODs to. "global" wraps, so its columns are reordered and can't be
 # sliced. "crossing" spans 180E.

@@ -55,10 +55,14 @@ def window_edges(
 
 
 def block_means(total: np.ndarray, count: np.ndarray) -> np.ndarray:
-    """Block sums and counts to float32 means, NaN where a block is empty."""
-    with np.errstate(invalid="ignore", divide="ignore"):
-        mean = np.where(count > 0, total / count, np.nan)
-    return mean.astype(np.float32)
+    """Block sums and counts to float32 means, NaN where a block is empty.
+
+    Divides straight into the float32 result, so no float64 copy of the
+    blocks is made on the way.
+    """
+    mean = np.full(total.shape, np.nan, dtype=np.float32)
+    np.divide(total, count, out=mean, where=count > 0)
+    return mean
 
 
 @dataclass(frozen=True)
@@ -163,7 +167,8 @@ class SparseGrid:
         col_block[inside] = np.searchsorted(col_edges, inside, side="right") - 1
 
         total = np.zeros((out_rows, out_cols), dtype=np.float64)
-        count = np.zeros((out_rows, out_cols), dtype=np.int64)
+        # int32 is plenty: a block would need 2**31 cells to overflow it.
+        count = np.zeros((out_rows, out_cols), dtype=np.int32)
         for k in range(out_rows):
             a = int(self.row_ptr[row_edges[k]])
             b = int(self.row_ptr[row_edges[k + 1]])
