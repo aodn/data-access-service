@@ -1,0 +1,17 @@
+aws:
+  s3:
+    bucket_name:
+      subsetting: aodn-cloud-optimized-subset-dr-production
+      portal_data: aodnportal-dr-production-data
+      datavis_data: datavis-apps-dr-production-data
+  ses:
+    sender_email: no.reply@aodn.org.au
+  batch:
+    job_queue: data-access-service-batch-job-queue
+    job_definition: data-access-service-batch-job-definition
+pmtiles:
+  config:
+    use_fork_process: True
+estimation:
+  config:
+    use_fork_process: True

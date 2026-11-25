@@ -158,6 +158,7 @@ You can use one of the following profiles, set an environment variable call `PRO
 > 2. edge
 > 3. staging
 > 4. prod
+> 5. dr-production
 
 E.g
 

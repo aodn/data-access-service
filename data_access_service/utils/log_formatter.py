@@ -6,7 +6,12 @@ from datetime import datetime, timezone
 
 from data_access_service.config.config import Config, EnvType
 
-JSON_LOG_PROFILES = (EnvType.EDGE, EnvType.STAGING, EnvType.PRODUCTION)
+JSON_LOG_PROFILES = (
+    EnvType.EDGE,
+    EnvType.STAGING,
+    EnvType.PRODUCTION,
+    EnvType.DR_PRODUCTION,
+)
 SERVICE_NAME = "data-access-service"
 
 TEXT_LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

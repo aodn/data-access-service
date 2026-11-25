@@ -202,3 +202,15 @@ def test_get_cache_config_raises_on_missing_yaml_key(monkeypatch, missing):
 
     with pytest.raises(KeyError):
         config.get_cache_config()
+
+
+def test_dr_production_profile_loads_its_own_config(monkeypatch):
+    monkeypatch.setattr(Config, "_instances", {})
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "ap-southeast-2")
+    config = Config.get_config(EnvType("dr-production"))
+    assert type(config).__name__ == "DrProductionConfig"
+    assert config.DEBUG is False
+    assert (
+        config.config["aws"]["s3"]["bucket_name"]["subsetting"]
+        == "aodn-cloud-optimized-subset-dr-production"
+    )

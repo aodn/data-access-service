@@ -62,6 +62,7 @@ class TaskScheduler:
             EnvType.EDGE,
             EnvType.STAGING,
             EnvType.PRODUCTION,
+            EnvType.DR_PRODUCTION,
             EnvType.DEV,
             EnvType.TESTING,
         ):
