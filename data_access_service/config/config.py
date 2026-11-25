@@ -41,6 +41,7 @@ class EnvType(Enum):
     EDGE = "edge"
     STAGING = "staging"
     PRODUCTION = "prod"
+    DR_PRODUCTION = "dr-production"
 
 
 class Config:
@@ -122,6 +123,8 @@ class Config:
                 match profile:
                     case EnvType.PRODUCTION:
                         Config._instances[profile] = ProdConfig()
+                    case EnvType.DR_PRODUCTION:
+                        Config._instances[profile] = DrProductionConfig()
                     case EnvType.EDGE:
                         Config._instances[profile] = EdgeConfig()
                     case EnvType.STAGING:
@@ -638,6 +641,21 @@ class ProdConfig(Config):
         self.config = Config.load_merged_config(
             "data_access_service/config/config.yaml",
             "data_access_service/config/config-prod.yaml",
+        )
+        self.batch = boto3.client("batch")
+        self.s3 = boto3.client("s3")
+        self.ses = boto3.client("ses")
+
+
+class DrProductionConfig(Config):
+    DEBUG = False
+    LOGLEVEL = logging.INFO
+
+    def __init__(self):
+        super().__init__()
+        self.config = Config.load_merged_config(
+            "data_access_service/config/config.yaml",
+            "data_access_service/config/config-dr-production.yaml",
         )
         self.batch = boto3.client("batch")
         self.s3 = boto3.client("s3")
